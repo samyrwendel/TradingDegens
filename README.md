@@ -106,8 +106,46 @@ derived figures (annualized %, USD notional) are approximations, marked `~`/`≈
 signal the node appends it deterministically. (`tradingagents/dataflows/crypto.py`,
 `tradingagents/agents/utils/crypto_coverage.py`.)
 
-> Not in this fork yet (separate tasks): community interface, exchange-native crypto OHLCV as the price
-> path (derivatives are covered above; spot/perp candles still come from yfinance for crypto).
+### 7. Web UI — the screen you actually open
+`tradingagents/webui/` is a dependency-free (stdlib `http.server`, no FastAPI) web front end that
+**drives** the engine — it never reimplements analysis; it constructs a `TradingAgentsGraph` and calls
+`propagate()`. It exists because a CLI-only tool nobody opens is worth nothing to the community.
+
+**Open it.** The service listens on `0.0.0.0:8781`, so from any machine on the Tailscale network:
+
+```
+http://100.66.236.96:8781      # clawd's Tailscale IP  →  works from phone or laptop
+```
+
+Run it locally instead with:
+
+```bash
+python -m tradingagents.webui                       # binds 0.0.0.0:8781
+TRADINGDEGENS_WEB_HOST=127.0.0.1 TRADINGDEGENS_WEB_PORT=9000 python -m tradingagents.webui
+```
+
+On the clawd server it runs as a **systemd user service** (`tradingdegens-web.service`, enabled at boot,
+survives reboot via linger). Manage it with `systemctl --user {status,restart,stop} tradingdegens-web`.
+
+What the screen does:
+- **One field, one button**: ticker + date (defaults to today) → *Analisar*. Crypto (`BTC-USD`) is
+  auto-detected and its pipeline drops the fundamentals analyst.
+- **Live progress**: the pipeline takes ~100s across four analysts → debate → trader → risk → judge; a
+  stage bar advances in real time (read from LangGraph's `langgraph_node`) so the screen is never a frozen
+  100-second wait.
+- **Result, in order of usefulness**: the verdict (Buy/Overweight/Hold/Underweight/Sell) up top, then the
+  **bull and bear theses side by side** — the debate text is the point (the verdict alone hits ~6/12; the
+  research is the value), then the research-manager decision, market report (multi-timeframe), news
+  (prediction markets), and for crypto a dedicated **funding / open interest / liquidations** panel that
+  names its source (Hyperliquid / Binance / OKX) and shows *"unavailable"* rather than a fabricated number.
+- **Cost per analysis** is always visible (~US$0.026 on the current config) — hidden cost is debt.
+- **History**: past analyses, each with its cost and wall-clock time, re-openable in place.
+
+> ⚠️ **No authentication in this phase** — the Tailscale network is the boundary. Keep it on Tailscale;
+> **never expose port 8781 to the public internet.**
+
+> Not in this fork yet (separate tasks): exchange-native crypto OHLCV as the price path (derivatives are
+> covered above; spot/perp candles still come from yfinance for crypto); user auth for a public launch.
 
 ---
 

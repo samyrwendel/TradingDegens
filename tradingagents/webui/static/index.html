@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>TradingDegens</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◪</span>
+      <div>
+        <h1>TradingDegens</h1>
+        <p class="tagline">Multi-agente • debate bull × bear • veredito com custo</p>
+      </div>
+    </div>
+    <div class="net-note" id="netNote">rede Tailscale</div>
+  </header>
+
+  <main>
+    <section class="panel launcher">
+      <form id="analyzeForm" autocomplete="off">
+        <div class="field">
+          <label for="ticker">Ticker</label>
+          <input id="ticker" name="ticker" placeholder="AAPL · BTC-USD · 0700.HK" required />
+        </div>
+        <div class="field">
+          <label for="date">Data</label>
+          <input id="date" name="date" type="date" />
+        </div>
+        <button type="submit" id="runBtn">Analisar</button>
+      </form>
+      <p class="hint" id="assetHint"></p>
+      <p class="error" id="formError"></p>
+    </section>
+
+    <section class="panel progress-panel hidden" id="progressPanel">
+      <div class="progress-head">
+        <div>
+          <span class="chip" id="progressPhase">Inicializando</span>
+          <span class="progress-label" id="progressLabel">…</span>
+        </div>
+        <div class="progress-meta">
+          <span id="progressElapsed">0s</span>
+          <span class="dot">•</span>
+          <span id="progressCost">$0.0000</span>
+        </div>
+      </div>
+      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+      <ol class="steps" id="steps"></ol>
+    </section>
+
+    <section class="panel result-panel hidden" id="resultPanel">
+      <div class="result-head">
+        <div class="verdict" id="verdictBadge">—</div>
+        <div class="result-meta" id="resultMeta"></div>
+      </div>
+
+      <h2 class="section-title">Teses em confronto</h2>
+      <div class="theses">
+        <article class="thesis bull">
+          <h3>🟢 Tese de Alta (Bull)</h3>
+          <div class="md" id="bull"></div>
+        </article>
+        <article class="thesis bear">
+          <h3>🔴 Tese de Baixa (Bear)</h3>
+          <div class="md" id="bear"></div>
+        </article>
+      </div>
+
+      <div id="sections"></div>
+    </section>
+
+    <section class="panel history-panel">
+      <h2 class="section-title">Histórico</h2>
+      <ul class="history" id="history"></ul>
+    </section>
+  </main>
+
+  <footer>
+    <span>Sem autenticação — mantenha só na Tailscale, nunca exponha na internet.</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
