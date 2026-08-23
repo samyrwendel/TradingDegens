@@ -27,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_verified_market_snapshot,
     resolve_instrument_identity,
 )
+from tradingagents.agents.utils.date_guard import base_date
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
@@ -437,27 +438,32 @@ class TradingAgentsGraph:
             tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        if self.debug:
-            trace = []
-            last_printed = None
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if chunk["messages"]:
-                    msg = chunk["messages"][-1]
-                    # Nodes after the trader don't append to messages, so the
-                    # same trailing message repeats across chunks. Print it only
-                    # when it changes (#1027); the trace/state merge is unchanged.
-                    signature = (type(msg).__name__, getattr(msg, "content", None))
-                    if signature != last_printed:
-                        msg.pretty_print()
-                        last_printed = signature
-                    trace.append(chunk)
-            # Streamed chunks are per-node deltas. Merge them so the returned
-            # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
-            for chunk in trace:
-                final_state.update(chunk)
-        else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+        # Pin the analysis date as the run's base date so every data tool clamps
+        # look-ahead: a backtest at a past date can never fetch data dated after
+        # it (see agents/utils/date_guard.py). The whole graph runs synchronously
+        # inside this block, so the ContextVar covers all in-run tool calls.
+        with base_date(str(trade_date)):
+            if self.debug:
+                trace = []
+                last_printed = None
+                for chunk in self.graph.stream(init_agent_state, **args):
+                    if chunk["messages"]:
+                        msg = chunk["messages"][-1]
+                        # Nodes after the trader don't append to messages, so the
+                        # same trailing message repeats across chunks. Print it only
+                        # when it changes (#1027); the trace/state merge is unchanged.
+                        signature = (type(msg).__name__, getattr(msg, "content", None))
+                        if signature != last_printed:
+                            msg.pretty_print()
+                            last_printed = signature
+                        trace.append(chunk)
+                # Streamed chunks are per-node deltas. Merge them so the returned
+                # state matches what graph.invoke() yields in the non-debug path.
+                final_state = {}
+                for chunk in trace:
+                    final_state.update(chunk)
+            else:
+                final_state = self.graph.invoke(init_agent_state, **args)
 
         # Store current state for reflection.
         self.curr_state = final_state

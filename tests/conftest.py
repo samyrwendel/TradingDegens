@@ -56,6 +56,22 @@ def _isolate_config():
     config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
 
+@pytest.fixture(autouse=True)
+def _disable_datacache(monkeypatch):
+    """Keep the in-repo data-governance cache inert during unit tests.
+
+    The cache monkeypatches the social fetchers and the vendor funnel and keys
+    social fetches by calendar day, so leaving it active lets one test's fetch
+    satisfy another's same-ticker call (cross-test pollution — a cached NVDA
+    result would skip the mocked ``_fetch_subreddit`` entirely). Tests that
+    exercise the cache itself re-enable it via their own fixture, which runs
+    after this autouse one and wins.
+    """
+    import tradingagents.datacache.cache as _cache
+
+    monkeypatch.setattr(_cache, "DISABLED", True)
+
+
 @pytest.fixture()
 def mock_llm_client():
     client = MagicMock()

@@ -2,10 +2,12 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.agents.utils.date_guard import guard_dates
 from tradingagents.dataflows.interface import route_to_vendor
 
 
 @tool
+@guard_dates("start_date", "end_date")
 def get_stock_data(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],

@@ -29,6 +29,54 @@
 
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
+---
+
+## 🔱 TradingAgents-Axon — how this fork diverges from upstream
+
+**This is [`samyrwendel/TradingAgents-Axon`](https://github.com/samyrwendel/TradingAgents-Axon)**, a
+fork of [`TauricResearch/TradingAgents`](https://github.com/TauricResearch/TradingAgents). It tracks
+upstream via the `origin` remote (we pull their improvements) and ships our own changes on the `axon`
+remote — **we never push to `origin`**. The divergences below make the framework trustworthy for
+**backtesting** and turn it into a product-grade base for the *Degenerados* community. Everything is
+additive and fail-open: with our features disabled the framework behaves exactly like upstream.
+
+### 1. Data-governance cache — *historical data is immutable* (in-repo)
+`tradingagents/datacache/` implements a universal disk cache: **a request whose window ends before
+today is fetched once and kept forever; only the current day expires; a known failure (429/empty) is
+negatively cached for a few hours** so a dead source isn't hammered. It hooks the vendor funnel
+(`interface.VENDOR_METHODS`), the two social fetchers (Reddit/StockTwits, keyed by ticker+day so a
+12-date backtest fetches once instead of 12×, killing the Reddit 429 storm), and the price loader
+(stable `{symbol}-YFin-5y.csv` instead of a new 5-year CSV per day). It is activated from
+`tradingagents/__init__.py` and rewrites the upstream modules **in memory** at import, so an `origin`
+pull that changes their source never breaks it. Disable with `TA_DATACACHE_DISABLE=1`; relocate the
+store with `TA_DATACACHE_DIR`. *(Was an out-of-tree `.pth` patch; promoted to first-class fork code.)*
+
+### 2. Anti look-ahead date guard — every backtest is honest
+`tradingagents/agents/utils/date_guard.py` pins the run's analysis date as a **base date** (set around
+the graph run) and clamps every date-taking tool argument (`get_news`, `get_global_news`,
+`get_macro_indicators`, `get_stock_data`, `get_indicators`) down to it. An analyst asking for data
+"up to today" during a 2021 backtest is transparently corrected to 2021 — **a past-dated run can never
+pull data dated after it**. Live runs (analysis date = today) are unaffected. *(Concept ported, not
+copied, from `TheLocalLab/TradingAgents-GUI@40e97f34`, whose `normalize_date` accepts a base but leaves
+enforcement to the caller; we make clamping automatic and non-optional.)*
+
+### 3. FRED macro works out of the box
+The `.env` (with `FRED_API_KEY`) is now loaded at import even when the optional `python-dotenv` package
+is absent (a stdlib fallback loader was added). Previously the silent `ImportError` meant macro data
+fell back to *"unavailable"* unless you exported `FRED_API_KEY` by hand. `macro_data` defaults to `fred`,
+so the news analyst grounds commentary in real numbers (CPI, Fed funds, yields) with no setup.
+
+### 4. Prediction markets are mandatory in the news report
+The news analyst is nudged to call `get_prediction_markets` (Polymarket, keyless), and if it still
+skips it the node **deterministically appends a Prediction Markets section** — implied probabilities for
+standing forward-looking themes (rates, recession) plus the instrument, or an explicit *"no market for
+this topic"* line. The report is never silent on market-implied probabilities.
+(`tradingagents/agents/utils/prediction_market_coverage.py`.)
+
+> Not in this fork yet (separate tasks): community interface, crypto expansion, multi-timeframe.
+
+---
+
 ## News
 - [2026-07] **TradingAgents v0.3.1** released with correctness and stability fixes: Alpha Vantage look-ahead filtering, graph-router crash-safety, graph-shape-aware checkpoint resume, working crypto sentiment sources, a configurable LLM retry budget, Bedrock API-key auth, and Claude Sonnet 5 / Fable 5 support. See [CHANGELOG.md](CHANGELOG.md) for the full list.
 - [2026-06] **TradingAgents v0.3.0** released with a verified data-access contract, an expanded provider registry (NVIDIA, Kimi, Groq, Mistral, Bedrock, and any OpenAI-compatible endpoint), FRED and Polymarket data vendors, a current-generation model catalog, and a CI gate.

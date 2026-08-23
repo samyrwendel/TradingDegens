@@ -367,6 +367,25 @@ def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = N
 
 @pytest.mark.unit
 class TestSentimentAnalystAgent:
+    @pytest.fixture(autouse=True)
+    def _stub_live_fetchers(self, monkeypatch):
+        """Keep these tests hermetic and fast.
+
+        The sentiment node pre-fetches Reddit + StockTwits + news over the
+        network before the (mocked) LLM runs; none of the assertions here depend
+        on that content. Stub the three fetchers so the tests don't hit live
+        endpoints (Reddit's 429-retry backoff alone made each run ~20s) and pass
+        offline. The data-governance cache is disabled in tests, so without this
+        the fetches would go live every time.
+        """
+        import tradingagents.agents.analysts.sentiment_analyst as _sa
+
+        fake_news = MagicMock()
+        fake_news.func = lambda *a, **k: "<no news in test>"
+        monkeypatch.setattr(_sa, "get_news", fake_news)
+        monkeypatch.setattr(_sa, "fetch_stocktwits_messages", lambda *a, **k: "<no stocktwits in test>")
+        monkeypatch.setattr(_sa, "fetch_reddit_posts", lambda *a, **k: "<no reddit in test>")
+
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
         report = SentimentReport(

@@ -2,10 +2,12 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.agents.utils.date_guard import guard_dates
 from tradingagents.dataflows.interface import route_to_vendor
 
 
 @tool
+@guard_dates("curr_date")
 def get_macro_indicators(
     indicator: Annotated[
         str,
