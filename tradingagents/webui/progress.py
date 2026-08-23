@@ -24,14 +24,14 @@ from langchain_core.callbacks import BaseCallbackHandler
 # out — a tool call belongs to the analyst that is already the current stage, so
 # ignoring them keeps the bar from flickering backwards.
 _STAGE_MAP: dict[str, tuple[int, str, str]] = {
-    "Market Analyst":       (10, "Analista de Mercado — preço, multi-timeframe, derivativos", "Analistas"),
+    "Market Analyst":       (10, "Analista de Mercado — preço, múltiplos tempos gráficos, derivativos", "Analistas"),
     "Sentiment Analyst":    (20, "Analista de Sentimento", "Analistas"),
-    "News Analyst":         (30, "Analista de Notícias — macro e prediction markets", "Analistas"),
+    "News Analyst":         (30, "Analista de Notícias — macro e mercados de previsão", "Analistas"),
     "Fundamentals Analyst": (40, "Analista Fundamentalista", "Analistas"),
-    "Bull Researcher":      (50, "Pesquisador Bull — tese de alta", "Debate"),
-    "Bear Researcher":      (60, "Pesquisador Bear — tese de baixa", "Debate"),
+    "Bull Researcher":      (50, "Pesquisador da tese de alta (bull case)", "Debate"),
+    "Bear Researcher":      (60, "Pesquisador da tese de baixa (bear case)", "Debate"),
     "Research Manager":     (70, "Gestor de Pesquisa — juiz do debate", "Debate"),
-    "Trader":               (80, "Trader — plano de execução", "Trading"),
+    "Trader":               (80, "Trader — plano de execução", "Execução"),
     "Aggressive Analyst":   (90, "Debate de Risco — Agressivo", "Risco"),
     "Conservative Analyst": (92, "Debate de Risco — Conservador", "Risco"),
     "Neutral Analyst":      (94, "Debate de Risco — Neutro", "Risco"),

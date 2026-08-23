@@ -17,15 +17,23 @@ from tradingagents.dataflows.interface import route_to_vendor
 
 logger = logging.getLogger(__name__)
 
-# Substrings that show the report already discussed the derivatives signal.
-_MARKERS = ("funding rate", "open interest", "liquidation")
+# Each derivatives signal, with the synonyms that reveal it in the report. The
+# report is written in pt-BR (leading term) but keeps the English original in
+# parentheses on first use, so we match either form. Grouped by concept so one
+# signal mentioned bilingually still counts once, not twice.
+_SIGNALS = (
+    ("taxa de financiamento", "funding rate", "funding"),
+    ("contratos em aberto", "open interest"),
+    ("liquidaç", "liquidation"),
+)
 
 
 def report_covers_derivatives(report: str) -> bool:
     if not report:
         return False
     low = report.lower()
-    return sum(m in low for m in _MARKERS) >= 2
+    covered = sum(any(term in low for term in signal) for signal in _SIGNALS)
+    return covered >= 2
 
 
 def ensure_crypto_derivatives_coverage(report: str, symbol: str, curr_date: str) -> str:
@@ -37,9 +45,10 @@ def ensure_crypto_derivatives_coverage(report: str, symbol: str, curr_date: str)
     except Exception as exc:  # noqa: BLE001 — never break the report over enrichment
         logger.warning("crypto derivatives coverage failed for %s: %s", symbol, exc)
         section = (
-            f"## Crypto Derivatives — {symbol}\n\n"
-            f"Derivatives (funding, open interest, liquidations) unavailable "
-            f"({type(exc).__name__}); no values fabricated."
+            f"## Derivativos (derivatives) — {symbol}\n\n"
+            f"Derivativos — taxa de financiamento (funding), contratos em aberto "
+            f"(open interest), liquidações (liquidations) — indisponíveis "
+            f"({type(exc).__name__}); nenhum valor inventado."
         )
     base = (report or "").rstrip()
     return f"{base}\n\n{section}\n" if base else section + "\n"

@@ -721,11 +721,11 @@ class TestPortfolioManagerInjection:
         pm_node = create_portfolio_manager(llm)
         result = pm_node(_make_pm_state())
         md = result["final_trade_decision"]
-        assert "**Rating**: Overweight" in md
-        assert "**Executive Summary**: Build position gradually" in md
-        assert "**Investment Thesis**: AI capex cycle" in md
-        assert "**Price Target**: 215.0" in md
-        assert "**Time Horizon**: 3-6 months" in md
+        assert "**Nota**: AUMENTAR — Overweight" in md
+        assert "**Resumo Executivo**: Build position gradually" in md
+        assert "**Tese de Investimento**: AI capex cycle" in md
+        assert "**Preço-Alvo**: 215.0" in md
+        assert "**Horizonte de Tempo**: 3-6 months" in md
 
     def test_pm_falls_back_to_freetext_when_structured_unavailable(self):
         """If a provider does not support with_structured_output, the agent

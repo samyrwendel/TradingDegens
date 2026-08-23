@@ -66,7 +66,29 @@ def get_language_instruction() -> str:
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
         return ""
-    return f" Write your entire response in {lang}."
+    return (
+        f" Write your entire response in {lang}. Translate section headers, "
+        f"labels, and financial/market terminology into {lang} — leave NOTHING "
+        f"in English on its own. When a term is widely known by its English "
+        f"name, LEAD with the {lang} translation and put the English original in "
+        f"parentheses on first use, so a reader who only knows the English term "
+        f"is not lost: 'taxa de financiamento (funding rate)', 'contratos em "
+        f"aberto (open interest)', 'liquidações (liquidations)', 'preço de "
+        f"marcação (mark price)', 'comprado (long)', 'vendido (short)', 'tese de "
+        f"alta (bull case)', 'tese de baixa (bear case)'. Apply this same "
+        f"lead-with-{lang} pattern to EVERY market term — the plurals "
+        f"'longs'/'shorts' become 'comprados (longs)'/'vendidos (shorts)'. "
+        f"Everything else reads in {lang}: write the descriptive adjectives "
+        f"'bullish'/'bearish' as 'de alta'/'de baixa', 'uptrend'/'downtrend' as "
+        f"'tendência de alta'/'tendência de baixa', 'momentum' as 'impulso', "
+        f"'weekly'/'daily' as 'semanal'/'diário', 'increase'/'decrease' as "
+        f"'aumento'/'queda'. Also render any English source snippets you cite "
+        f"(news headlines, prediction-market questions) in {lang}. "
+        f"Kept verbatim (never translated): proper nouns / company / data-source "
+        f"names and tickers (e.g. AAPL, BTC-USD, Hyperliquid, Binance, OKX, "
+        f"Polymarket, FRED) and the word 'backtest', used as-is in Brazilian "
+        f"usage."
+    )
 
 
 def _clean_identity_value(value: Any) -> str | None:

@@ -107,10 +107,10 @@ def test_source_failure_degrades_without_fabrication(monkeypatch):
     monkeypatch.setattr(crypto, "_post_json", boom)
     monkeypatch.setattr(crypto, "_get_json", boom)
     out = crypto.get_crypto_derivatives("BTC-USD", date.today().isoformat())
-    assert out.lower().count("unavailable") >= 3      # funding, OI, liquidations
-    assert "no value reported" in out
+    assert out.lower().count("indisponível") >= 3     # funding, OI, liquidations
+    assert "sem valor reportado" in out
     # No fabricated dollar figure slipped in.
-    assert "$" not in out.split("_Sources")[0].replace("USDⓈ", "")
+    assert "$" not in out.split("_Fontes")[0].replace("USDⓈ", "")
 
 
 # --------------------------------------------------- no look-ahead -------------
@@ -148,7 +148,7 @@ def test_backtest_uses_hl_history_not_live_and_clamps(monkeypatch):
     assert "fundingHistory" in seen["types"]         # HL historical funding used
     assert "Hyperliquid perp, 1h" in out             # HL is primary, not Binance
     assert "0.0000125" in out                        # exact API rate, not rounded
-    assert "unavailable" in out.lower()              # OI + liquidations degrade
+    assert "indisponível" in out.lower()             # OI + liquidations degrade
 
 
 @pytest.mark.unit
@@ -193,4 +193,4 @@ def test_tool_clamps_curr_date(monkeypatch):
 def test_route_dispatches_to_vendor(monkeypatch, live_http):
     from datetime import date
     out = route_to_vendor("get_crypto_derivatives", "BTC-USD", date.today().isoformat())
-    assert "Crypto Derivatives" in out
+    assert "Derivativos Cripto" in out

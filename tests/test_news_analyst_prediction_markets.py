@@ -31,29 +31,37 @@ def test_already_covered_report_is_untouched(monkeypatch):
 
 @pytest.mark.unit
 def test_section_appended_with_market_data(monkeypatch):
-    def fake_route(method, topic, limit):
+    def fake_route(method, topic, limit, display=None):
         assert method == "get_prediction_markets"
-        return f'## Polymarket prediction markets: "{topic}"\n- **Event?** — Yes 62% ($1M volume)'
+        # The standing macro topics search in English but must DISPLAY a pt-BR
+        # label — the report carries no stray English topic string.
+        shown = display or topic
+        return f'## Mercados de previsão Polymarket: "{shown}"\n- **Event?** — 62% ($1M volume)'
 
     monkeypatch.setattr(pmc, "route_to_vendor", fake_route)
     out = pmc.ensure_prediction_market_coverage("Body.", "BE")
-    assert "## Prediction Markets" in out
-    assert "Yes 62%" in out
+    assert "## Mercados de Previsão" in out
+    assert "62%" in out
     assert out.startswith("Body.")
+    # The English search queries never surface; their pt-BR labels do.
+    assert "Decisão de juros do Fed" in out
+    assert "Recessão nos EUA" in out
+    assert "Fed interest rate decision" not in out
+    assert "US recession" not in out
 
 
 @pytest.mark.unit
 def test_no_market_yields_explicit_justification(monkeypatch):
     monkeypatch.setattr(
         pmc, "route_to_vendor",
-        lambda method, topic, limit: (
-            f'## Polymarket prediction markets: "{topic}"\n'
-            f"No open prediction markets matched '{topic}'."
+        lambda method, topic, limit, display=None: (
+            f'## Mercados de previsão Polymarket: "{display or topic}"\n'
+            f"Nenhum mercado de previsão aberto casou com '{display or topic}'."
         ),
     )
     out = pmc.ensure_prediction_market_coverage("Body.", "BE")
-    assert "## Prediction Markets" in out
-    assert "no open prediction market found" in out.lower()
+    assert "## Mercados de Previsão" in out
+    assert "nenhum mercado de previsão aberto para este tópico" in out.lower()
 
 
 @pytest.mark.unit
@@ -63,8 +71,8 @@ def test_vendor_error_does_not_crash(monkeypatch):
 
     monkeypatch.setattr(pmc, "route_to_vendor", boom)
     out = pmc.ensure_prediction_market_coverage("Body.", "BE")
-    assert "## Prediction Markets" in out
-    assert "errored" in out.lower()
+    assert "## Mercados de Previsão" in out
+    assert "a consulta de mercado de previsão falhou" in out.lower()
 
 
 @pytest.mark.unit

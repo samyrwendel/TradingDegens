@@ -13,70 +13,85 @@
       <span class="logo">◪</span>
       <div>
         <h1>TradingDegens</h1>
-        <p class="tagline">Multi-agente • debate bull × bear • veredito com custo</p>
+        <p class="tagline">Multi-agente • debate alta × baixa • veredito com custo</p>
       </div>
     </div>
     <div class="net-note" id="netNote">rede Tailscale</div>
   </header>
 
-  <main>
-    <section class="panel launcher">
-      <form id="analyzeForm" autocomplete="off">
-        <div class="field">
-          <label for="ticker">Ticker</label>
-          <input id="ticker" name="ticker" placeholder="AAPL · BTC-USD · 0700.HK" required />
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel history-panel">
+        <h2 class="section-title">Histórico</h2>
+        <ul class="history" id="history"></ul>
+      </section>
+    </aside>
+
+    <div class="content">
+      <section class="panel launcher">
+        <form id="analyzeForm" autocomplete="off">
+          <div class="field">
+            <label for="ticker">Ativo <span class="orig">(ticker)</span></label>
+            <input id="ticker" name="ticker" placeholder="AAPL · BTC-USD · 0700.HK" required />
+          </div>
+          <div class="field">
+            <label for="date">Data <span class="tz" id="tzLabel"></span></label>
+            <input id="date" name="date" type="date" />
+          </div>
+          <button type="submit" id="runBtn">Analisar</button>
+        </form>
+        <p class="hint" id="assetHint"></p>
+        <p class="error" id="formError"></p>
+      </section>
+
+      <section class="panel progress-panel hidden" id="progressPanel">
+        <div class="progress-head">
+          <div>
+            <span class="chip" id="progressPhase">Inicializando</span>
+            <span class="progress-label" id="progressLabel">…</span>
+          </div>
+          <div class="progress-meta">
+            <span id="progressElapsed">0s</span>
+            <span class="dot">•</span>
+            <span id="progressCost">$0.0000</span>
+          </div>
         </div>
-        <div class="field">
-          <label for="date">Data <span class="tz" id="tzLabel"></span></label>
-          <input id="date" name="date" type="date" />
+        <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+        <ol class="steps" id="steps"></ol>
+      </section>
+
+      <section class="panel result-panel hidden" id="resultPanel">
+        <div class="result-head">
+          <div class="verdict" id="verdictBadge">—</div>
+          <div class="result-meta" id="resultMeta"></div>
         </div>
-        <button type="submit" id="runBtn">Analisar</button>
-      </form>
-      <p class="hint" id="assetHint"></p>
-      <p class="error" id="formError"></p>
-    </section>
 
-    <section class="panel progress-panel hidden" id="progressPanel">
-      <div class="progress-head">
-        <div>
-          <span class="chip" id="progressPhase">Inicializando</span>
-          <span class="progress-label" id="progressLabel">…</span>
+        <div class="chart-card hidden" id="chartCard">
+          <div class="chart-head">
+            <h2 class="section-title">Gráfico de candles <span class="orig">(candlestick)</span> com médias</h2>
+            <div class="chart-legend" id="chartLegend"></div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="priceChart"></canvas>
+          </div>
+          <p class="chart-note" id="chartNote"></p>
         </div>
-        <div class="progress-meta">
-          <span id="progressElapsed">0s</span>
-          <span class="dot">•</span>
-          <span id="progressCost">$0.0000</span>
+
+        <h2 class="section-title">Teses em confronto</h2>
+        <div class="theses">
+          <article class="thesis bull">
+            <h3>🟢 Tese de Alta <span class="orig">(bull case)</span></h3>
+            <div class="md" id="bull"></div>
+          </article>
+          <article class="thesis bear">
+            <h3>🔴 Tese de Baixa <span class="orig">(bear case)</span></h3>
+            <div class="md" id="bear"></div>
+          </article>
         </div>
-      </div>
-      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
-      <ol class="steps" id="steps"></ol>
-    </section>
 
-    <section class="panel result-panel hidden" id="resultPanel">
-      <div class="result-head">
-        <div class="verdict" id="verdictBadge">—</div>
-        <div class="result-meta" id="resultMeta"></div>
-      </div>
-
-      <h2 class="section-title">Teses em confronto</h2>
-      <div class="theses">
-        <article class="thesis bull">
-          <h3>🟢 Tese de Alta (Bull)</h3>
-          <div class="md" id="bull"></div>
-        </article>
-        <article class="thesis bear">
-          <h3>🔴 Tese de Baixa (Bear)</h3>
-          <div class="md" id="bear"></div>
-        </article>
-      </div>
-
-      <div id="sections"></div>
-    </section>
-
-    <section class="panel history-panel">
-      <h2 class="section-title">Histórico</h2>
-      <ul class="history" id="history"></ul>
-    </section>
+        <div id="sections"></div>
+      </section>
+    </div>
   </main>
 
   <footer>

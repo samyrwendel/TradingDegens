@@ -62,6 +62,9 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         # Filled by the runner for crypto from the engine's deterministic
         # derivatives data path (named source, "unavailable" not fabricated).
         "derivatives_report": "",
+        # Filled by the runner for every asset: candles + moving averages +
+        # detected setup markers for the chart (deterministic, cached series).
+        "price_chart": {},
     }
 
 
@@ -79,6 +82,20 @@ def fetch_derivatives_report(ticker: str, date: str) -> str:
         return route_to_vendor("get_crypto_derivatives", ticker, date) or ""
     except Exception:
         return ""
+
+
+def fetch_price_chart(ticker: str, date: str) -> dict[str, Any]:
+    """Candle + moving-average + setup-marker payload for the UI chart.
+
+    Reuses the same cached, date-guarded daily series the engine already loaded,
+    so it is free and cannot see a future candle. Fail-open: returns an empty
+    payload on any error so a chart hiccup never blocks the analysis result.
+    """
+    try:
+        from tradingagents.dataflows.price_structure import build_price_chart
+        return build_price_chart(ticker, date)
+    except Exception:
+        return {}
 
 
 class _Run:
@@ -193,6 +210,7 @@ class AnalysisRunner:
                 run.result["derivatives_report"] = fetch_derivatives_report(
                     run.ticker, run.date
                 )
+            run.result["price_chart"] = fetch_price_chart(run.ticker, run.date)
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server

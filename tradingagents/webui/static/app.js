@@ -4,6 +4,44 @@ const $ = (id) => document.getElementById(id);
 let pollTimer = null;
 let TZ_LABEL = "GMT-4 (Manaus)";
 
+// The engine emits the canonical English 5-tier rating (Buy / Overweight / Hold
+// / Underweight / Sell). On screen we show the *practical meaning* in pt-BR —
+// what to actually do — and keep the original jargon in gray beside it for
+// whoever knows the scale. Keyed by the rating lowercased with non-letters
+// stripped, matching verdictClass()/verdictKey().
+const VERDICT_PT = {
+  buy: "COMPRAR",
+  overweight: "AUMENTAR",
+  hold: "MANTER",
+  underweight: "REDUZIR",
+  sell: "VENDER",
+};
+
+// Non-verdict run statuses that can reach the history chip (verdict is null on
+// a failed run), so nothing shows up in English there either.
+const STATUS_PT = { error: "ERRO", running: "RODANDO", done: "CONCLUÍDO" };
+
+// The engine tags each run with an asset class in English ("stock"/"crypto").
+// Show it in pt-BR so the meta row carries no stray English.
+const ASSET_PT = { stock: "ação", crypto: "cripto" };
+function assetPt(t) {
+  const k = (t || "").toString().toLowerCase();
+  return ASSET_PT[k] || t || "";
+}
+
+function verdictKey(v) {
+  return (v || "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+// Practical pt-BR label + the original English rating in gray beside it.
+function verdictHtml(v) {
+  const key = verdictKey(v);
+  const raw = (v || "").toString();
+  if (VERDICT_PT[key]) return `${VERDICT_PT[key]}<span class="verdict-orig">${escapeHtml(raw)}</span>`;
+  if (STATUS_PT[key]) return escapeHtml(STATUS_PT[key]);
+  return escapeHtml((raw || "—").toUpperCase());
+}
+
 // Format a Manaus ISO stamp ("2026-08-23T20:30:00-04:00") for display WITHOUT
 // going through Date() — the string already carries Manaus wall time, so we read
 // it verbatim and never let the browser's timezone re-shift it. Returns e.g.
@@ -146,25 +184,28 @@ function renderResult(snap) {
   panel.classList.remove("hidden");
 
   if (snap.status === "error") {
+    $("chartCard").classList.add("hidden");
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
     $("bull").innerHTML = ""; $("bear").innerHTML = "";
-    $("sections").innerHTML = section("Trace", "```\n" + ((snap.result && snap.result.trace) || "") + "\n```");
+    $("sections").innerHTML = section("Rastreamento do erro", "```\n" + ((snap.result && snap.result.trace) || "") + "\n```");
     return;
   }
 
   const r = snap.result || {};
   $("verdictBadge").className = verdictClass(r.verdict);
-  $("verdictBadge").textContent = (r.verdict || "—").toUpperCase();
+  $("verdictBadge").innerHTML = verdictHtml(r.verdict);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
     `<span>Ativo <b>${escapeHtml(snap.ticker)}</b></span>` +
     `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
-    `<span>Tipo <b>${escapeHtml(snap.asset_type || "")}</b></span>` +
+    `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
+
+  renderChartCard(r.price_chart, snap.ticker);
 
   $("bull").innerHTML = renderMarkdown(r.bull);
   $("bear").innerHTML = renderMarkdown(r.bear);
@@ -174,12 +215,12 @@ function renderResult(snap) {
   // For crypto, the deterministic derivatives feed goes first and open — it is
   // the data yfinance can't see and the source is always named here.
   if (isCrypto && r.derivatives_report && r.derivatives_report.trim()) {
-    html += `<details class="section" open><summary>🪙 Derivativos — funding · open interest · liquidações (fonte nomeada)</summary>` +
+    html += `<details class="section" open><summary>🪙 Derivativos — taxa de financiamento <span class="orig">(funding)</span> · contratos em aberto <span class="orig">(open interest)</span> · liquidações <span class="orig">(liquidations)</span> (fonte nomeada)</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.derivatives_report)}</div></div></details>`;
   }
   html += section("⚖️ Juiz do Debate (Gestor de Pesquisa)", r.research_manager || r.investment_plan);
-  html += section("📊 Mercado — preço e multi-timeframe", r.market_report);
-  html += section("📰 Notícias — macro e prediction markets", r.news_report);
+  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report);
+  html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
   html += section("💬 Sentimento", r.sentiment_report);
   if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);
   html += section("🎯 Plano do Trader", r.trader_plan);
@@ -189,6 +230,177 @@ function renderResult(snap) {
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   loadHistory();
 }
+
+// ---- candlestick chart (canvas, no external deps) -------------------------
+// Moving-average colours, keyed by window. Chosen to stay legible on the dark
+// panel and distinct from the green/red candles.
+const MA_COLORS = { "20": "#f5b445", "50": "#6ea8fe", "200": "#b48ef5" };
+let _lastChart = null; // kept so a window resize can redraw crisply.
+
+function renderChartCard(chart, ticker) {
+  const card = $("chartCard");
+  const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
+  if (!hasData) { card.classList.add("hidden"); _lastChart = null; return; }
+  card.classList.remove("hidden");
+  _lastChart = chart;
+
+  const active = chart.markers && chart.markers.active_region;
+  const pat = chart.markers && chart.markers.pattern_123;
+  card.classList.toggle("setup-active", !!active || (pat && pat.state === "acionado"));
+
+  // legend: candles + each MA present + setup markers
+  const wins = (chart.ma_windows || [20, 50, 200]).map(String);
+  const legend = [
+    `<span class="lg"><span class="sw" style="background:var(--green)"></span>vela de alta <span class="orig">(candle)</span></span>`,
+    `<span class="lg"><span class="sw" style="background:var(--red)"></span>vela de baixa</span>`,
+  ];
+  wins.forEach((w) => {
+    if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
+  });
+  legend.push(`<span class="lg"><span class="sw dot" style="background:#2ecc71"></span>região de compra</span>`);
+  if (pat) legend.push(`<span class="lg"><span class="sw dot" style="background:#6ea8fe"></span>padrão 1-2-3</span>`);
+  $("chartLegend").innerHTML = legend.join("");
+
+  // note: pt-BR summary of what's marked
+  const notes = [];
+  if (active) {
+    notes.push(`🎯 <b>Setup ativo agora</b>: preço na ${active.ma_label} (${Math.abs(active.distance_pct).toFixed(1)}% ${active.distance_pct >= 0 ? "acima" : "abaixo"}).`);
+  }
+  const nreg = (chart.markers && chart.markers.buy_regions || []).length;
+  if (nreg) notes.push(`${nreg} região(ões) de compra na média marcada(s) no período.`);
+  if (pat) notes.push(`Padrão 1-2-3: gatilho em ${fmtNum(pat.trigger)} — <b>${pat.state}</b>.`);
+  if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
+  $("chartNote").innerHTML = notes.join(" ");
+
+  drawPriceChart($("priceChart"), chart);
+}
+
+function fmtNum(v) {
+  return (typeof v === "number" ? v : Number(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function drawPriceChart(canvas, chart) {
+  const candles = chart.candles;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || canvas.parentElement.clientWidth || 640;
+  const cssH = canvas.clientHeight || 380;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = 8, padR = 58, padT = 12, padB = 22;
+  const plotW = cssW - padL - padR, plotH = cssH - padT - padB;
+  const n = candles.length;
+
+  // price range across candles + MAs + pattern levels, with a little padding
+  let lo = Infinity, hi = -Infinity;
+  candles.forEach((c) => { if (c.l != null) lo = Math.min(lo, c.l); if (c.h != null) hi = Math.max(hi, c.h); });
+  Object.values(chart.ma || {}).forEach((arr) => arr.forEach((v) => { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+  const pat = chart.markers && chart.markers.pattern_123;
+  if (pat) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach((v) => { lo = Math.min(lo, v); hi = Math.max(hi, v); });
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
+  const pad = (hi - lo) * 0.05; lo -= pad; hi += pad;
+
+  const x = (i) => padL + (i + 0.5) * (plotW / n);
+  const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
+
+  // gridlines + price labels (y axis, right)
+  ctx.font = "11px ui-monospace, Menlo, monospace";
+  ctx.textBaseline = "middle";
+  const ticks = 5;
+  for (let t = 0; t <= ticks; t++) {
+    const p = lo + (hi - lo) * (t / ticks);
+    const yy = y(p);
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
+    ctx.fillStyle = "#8b97ad"; ctx.textAlign = "left";
+    ctx.fillText(p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 2 : 0 }), padL + plotW + 6, yy);
+  }
+
+  // date labels (x axis) — a handful, evenly spaced
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const labels = 5;
+  for (let t = 0; t <= labels; t++) {
+    const i = Math.min(n - 1, Math.round((n - 1) * (t / labels)));
+    const d = candles[i].d; // YYYY-MM-DD -> DD/MM
+    ctx.fillStyle = "#8b97ad";
+    ctx.fillText(d.slice(8, 10) + "/" + d.slice(5, 7), x(i), padT + plotH + 5);
+  }
+
+  // candles
+  const cw = Math.max(1, Math.min((plotW / n) * 0.7, 9));
+  candles.forEach((c, i) => {
+    if (c.o == null || c.c == null) return;
+    const up = c.c >= c.o;
+    const col = up ? "#2ecc71" : "#ff5c6c";
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    const cx = x(i);
+    ctx.beginPath(); ctx.moveTo(cx, y(c.h)); ctx.lineTo(cx, y(c.l)); ctx.stroke();
+    const yo = y(c.o), yc = y(c.c);
+    const top = Math.min(yo, yc), h = Math.max(1, Math.abs(yc - yo));
+    ctx.fillRect(cx - cw / 2, top, cw, h);
+  });
+
+  // moving-average polylines
+  Object.entries(chart.ma || {}).forEach(([w, arr]) => {
+    const color = MA_COLORS[w]; if (!color) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
+    let started = false;
+    arr.forEach((v, i) => {
+      if (v == null) { started = false; return; }
+      const px = x(i), py = y(v);
+      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+    });
+    ctx.stroke(); ctx.lineWidth = 1;
+  });
+
+  // date -> index map for markers
+  const idx = {}; candles.forEach((c, i) => { idx[c.d] = i; });
+
+  // buy-region dots (at the candle low)
+  const regions = (chart.markers && chart.markers.buy_regions) || [];
+  regions.forEach((r) => {
+    const i = idx[r.date]; if (i == null) return;
+    const px = x(i), py = y(candles[i].l) + 7;
+    ctx.fillStyle = "#2ecc71";
+    ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // 1-2-3 pattern: connecting line, labelled points, trigger level
+  if (pat) {
+    const pts = [["1", pat.p1, "L"], ["2", pat.p2, "H"], ["3", pat.p3, "L"]]
+      .map(([lab, p, kind]) => ({ lab, kind, i: idx[p.date], price: p.price }))
+      .filter((p) => p.i != null);
+    if (pts.length) {
+      ctx.strokeStyle = "#6ea8fe"; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+      ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+      // trigger horizontal line
+      const ty = y(pat.trigger);
+      ctx.strokeStyle = "rgba(110,168,254,0.5)"; ctx.setLineDash([2, 3]);
+      ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke(); ctx.setLineDash([]);
+      // point labels
+      ctx.fillStyle = "#6ea8fe"; ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      pts.forEach((p) => {
+        const px = x(p.i), py = y(p.price) + (p.kind === "L" ? 14 : -14);
+        ctx.fillStyle = "#0b0e14"; ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#6ea8fe"; ctx.stroke();
+        ctx.fillStyle = "#6ea8fe"; ctx.fillText(p.lab, px, py);
+      });
+    }
+  }
+}
+
+// redraw on resize so the canvas stays crisp and correctly scaled
+let _resizeTimer = null;
+window.addEventListener("resize", () => {
+  if (!_lastChart) return;
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => drawPriceChart($("priceChart"), _lastChart), 150);
+});
 
 // ---- polling & actions ----------------------------------------------------
 async function poll(runId) {
@@ -244,7 +456,7 @@ async function loadHistory() {
       const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
       return `<li data-id="${escapeHtml(r.run_id)}">` +
         `<span class="h-ticker">${escapeHtml(r.ticker || "?")}</span>` +
-        `<span class="h-verdict ${verdictClass(v).replace("verdict", "").trim()}">${escapeHtml(v.toUpperCase())}</span>` +
+        `<span class="h-verdict ${verdictClass(v).replace("verdict", "").trim()}" title="${escapeHtml(v)}">${verdictHtml(v)}</span>` +
         `<span class="h-meta">${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
         `</li>`;
     }).join("");
@@ -283,7 +495,7 @@ function init() {
   $("analyzeForm").addEventListener("submit", startAnalysis);
   $("ticker").addEventListener("input", () => {
     const t = $("ticker").value.trim().toUpperCase();
-    $("assetHint").textContent = /-(USD|USDT)$|^BTC|^ETH/.test(t) ? "Detectado: cripto — inclui funding, OI e liquidações." : "";
+    $("assetHint").innerHTML = /-(USD|USDT)$|^BTC|^ETH/.test(t) ? `Detectado: cripto — inclui taxa de financiamento <span class="orig">(funding)</span>, contratos em aberto <span class="orig">(open interest)</span> e liquidações <span class="orig">(liquidations)</span>.` : "";
   });
   $("netNote").textContent = "acesse por " + location.host;
   loadHistory();

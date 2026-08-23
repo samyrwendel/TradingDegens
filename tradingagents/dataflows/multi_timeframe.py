@@ -70,15 +70,15 @@ def _trend_read(frame: pd.DataFrame, fast: int, slow: int, label: str) -> dict:
 
     if fast_sma is not None and slow_sma is not None:
         if last > fast_sma > slow_sma:
-            state = "uptrend"
+            state = "tendência de alta"
         elif last < fast_sma < slow_sma:
-            state = "downtrend"
+            state = "tendência de baixa"
         elif last > slow_sma:
-            state = "up-biased / mixed"
+            state = "viés de alta / misto"
         else:
-            state = "down-biased / mixed"
+            state = "viés de baixa / misto"
     else:
-        state = "insufficient history for full SMA stack"
+        state = "histórico insuficiente para o empilhamento completo de médias"
 
     return {
         "label": label,
@@ -94,23 +94,27 @@ def _trend_read(frame: pd.DataFrame, fast: int, slow: int, label: str) -> dict:
 
 
 def _direction(state: str) -> str:
-    if "uptrend" in state or state.startswith("up"):
+    if "alta" in state:
         return "up"
-    if "downtrend" in state or state.startswith("down"):
+    if "baixa" in state:
         return "down"
     return "flat"
 
 
+# Direction key -> pt-BR word for display in the convergence verdict.
+_DIR_PT = {"up": "alta", "down": "baixa", "flat": "lateralizado"}
+
+
 def _fmt_read(r: dict) -> str:
     if r.get("bars", 0) == 0:
-        return f"- **{r['label']}**: no data."
-    parts = [f"last {r['last']:,.2f}"]
+        return f"- **{r['label']}**: sem dados."
+    parts = [f"último {r['last']:,.2f}"]
     if r.get("fast") is not None:
-        parts.append(f"SMA{r['fast_n']} {r['fast']:,.2f}")
+        parts.append(f"MMS{r['fast_n']} {r['fast']:,.2f}")
     if r.get("slow") is not None:
-        parts.append(f"SMA{r['slow_n']} {r['slow']:,.2f}")
+        parts.append(f"MMS{r['slow_n']} {r['slow']:,.2f}")
     if r.get("chg") is not None:
-        parts.append(f"{r['chg']:+.1f}% over last {r['slow_n']} bars")
+        parts.append(f"{r['chg']:+.1f}% nos últimos {r['slow_n']} períodos")
     return f"- **{r['label']}** → _{r['state']}_ ({'; '.join(parts)})."
 
 
@@ -124,30 +128,34 @@ def build_timeframe_summary(symbol: str, curr_date: str) -> str:
     daily = load_ohlcv(symbol, curr_date)
     weekly = _resample_weekly(daily)
 
-    daily_read = _trend_read(daily, fast=10, slow=50, label="Daily")
-    weekly_read = _trend_read(weekly, fast=10, slow=40, label="Weekly")
+    daily_read = _trend_read(daily, fast=10, slow=50, label="Diário")
+    weekly_read = _trend_read(weekly, fast=10, slow=40, label="Semanal")
 
     wd, dd = _direction(weekly_read["state"]), _direction(daily_read["state"])
     if wd == dd and wd != "flat":
-        verdict = f"**Converge** — weekly and daily both {wd}. Trend and timing agree."
+        verdict = (
+            f"**Convergência** — semanal e diário ambos em {_DIR_PT[wd]}. "
+            "Tendência e momento de entrada concordam."
+        )
     elif {wd, dd} == {"up", "down"}:
         verdict = (
-            "**Divergent** — weekly and daily point opposite ways. Treat as a "
-            "warning: the higher timeframe (weekly) sets the dominant trend, the "
-            "daily is the timing/inflection signal."
+            "**Divergência** — semanal e diário apontam em direções opostas. "
+            "Trate como alerta: o tempo gráfico maior (semanal) define a "
+            "tendência dominante; o diário é o sinal de momento/inflexão."
         )
     else:
         verdict = (
-            f"**Mixed** — weekly {wd}, daily {dd}. No clean multi-timeframe "
-            "alignment; weight the weekly for trend, the daily for entry timing."
+            f"**Misto** — semanal em {_DIR_PT[wd]}, diário em {_DIR_PT[dd]}. Sem "
+            "alinhamento limpo entre tempos gráficos; priorize o semanal para a "
+            "tendência e o diário para o momento de entrada."
         )
 
     return "\n".join(
         [
-            "## Multi-Timeframe Trend",
+            "## Tendência multiperíodo (multi-timeframe)",
             "",
-            "_Higher timeframe = dominant trend; lower timeframe = timing. "
-            "Divergence between them is signal, not noise._",
+            "_Tempo gráfico maior = tendência dominante; tempo gráfico menor = "
+            "momento de entrada. Divergência entre eles é sinal, não ruído._",
             "",
             _fmt_read(weekly_read),
             _fmt_read(daily_read),

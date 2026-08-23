@@ -70,6 +70,34 @@ def test_debate_router_return_always_routable(current_response):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("bull_response", [
+    "Bull Analyst: growth is strong",           # legacy English prefix
+    "Analista de Alta (bull): crescimento forte",  # pt-BR fork prefix
+])
+def test_debate_bull_turn_routes_to_bear(bull_response):
+    """After the bull speaks, the bear must speak next — the debate alternates.
+
+    Regression guard: the pt-BR prefix ("Analista de Alta (bull):") once broke
+    the ``startswith("Bull")`` check, so the bull spoke twice and the bear never
+    ran. Routing keys on the "(bull)" marker kept beside the translated label.
+    """
+    logic = ConditionalLogic(max_debate_rounds=1)
+    assert logic.should_continue_debate(_debate_state(bull_response, count=1)) == "Bear Researcher"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bear_response", [
+    "Bear Analyst: risks dominate",
+    "Analista de Baixa (bear): riscos dominam",
+])
+def test_debate_bear_turn_routes_to_bull(bear_response):
+    """After the bear speaks, control returns to the bull (a "(bull)" appearing
+    in the bear's prose must not misroute — only the prefix window is read)."""
+    logic = ConditionalLogic(max_debate_rounds=1)
+    assert logic.should_continue_debate(_debate_state(bear_response, count=1)) == "Bull Researcher"
+
+
+@pytest.mark.unit
 def test_debate_path_map_covers_full_router_range():
     logic = ConditionalLogic(max_debate_rounds=1)
     returns = {

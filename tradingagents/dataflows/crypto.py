@@ -303,8 +303,10 @@ def _okx_liquidations(base: str, as_of: datetime, is_live: bool) -> dict:
 
 # --------------------------------------------------------------- assembly ------
 def _sign_text(rate: float) -> str:
-    return "longs pay shorts (crowd long)" if rate >= 0 else \
-        "shorts pay longs (crowd short)"
+    # long/short traduzidos p/ comprado/vendido, com o original em parênteses
+    # (regra: nada de inglês solto — só no par 'tradução (original)').
+    return "comprados (longs) pagam vendidos (shorts) — multidão comprada" if rate >= 0 else \
+        "vendidos (shorts) pagam comprados (longs) — multidão vendida"
 
 
 def _funding_line(base, as_of, is_live) -> str:
@@ -318,8 +320,9 @@ def _funding_line(base, as_of, is_live) -> str:
         hl = _hl_ctx(base) if is_live else _hl_funding_history(base, as_of)
         stamp = "" if is_live else f" @ {hl['as_of'].strftime('%Y-%m-%d %H:%MZ')}"
         return (
-            f"- **Funding** (Hyperliquid perp, 1h{stamp}): {hl['funding_raw']} "
-            f"= {hl['funding_hourly'] * 100:+.5f}%/hr → ~{hl['funding_annual_pct']:+.1f}%/yr. "
+            f"- **Taxa de financiamento** (funding — quem está comprado (long) paga p/ segurar a "
+            f"posição; Hyperliquid perp, 1h{stamp}): {hl['funding_raw']} "
+            f"= {hl['funding_hourly'] * 100:+.5f}%/hr → ~{hl['funding_annual_pct']:+.1f}%/ano. "
             f"{_sign_text(hl['funding_hourly'])}."
         )
     except Exception as exc:  # noqa: BLE001 — degrade to fallback, never fabricate
@@ -328,13 +331,14 @@ def _funding_line(base, as_of, is_live) -> str:
         bf = _binance_funding(base, as_of, is_live)
         stamp = bf["as_of"].strftime("%Y-%m-%d %H:%MZ")
         return (
-            f"- **Funding** (Binance perp fallback, 8h @ {stamp}): {bf['funding_raw']} "
-            f"= {bf['funding_8h'] * 100:+.5f}%/8h → ~{bf['funding_annual_pct']:+.1f}%/yr. "
+            f"- **Taxa de financiamento** (funding — quem está comprado (long) paga p/ segurar a "
+            f"posição; Binance perp fallback, 8h @ {stamp}): {bf['funding_raw']} "
+            f"= {bf['funding_8h'] * 100:+.5f}%/8h → ~{bf['funding_annual_pct']:+.1f}%/ano. "
             f"{_sign_text(bf['funding_8h'])}."
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Binance funding unavailable for %s: %s", base, exc)
-        return f"- **Funding**: unavailable ({type(exc).__name__}); no value reported."
+        return f"- **Taxa de financiamento** (funding): indisponível ({type(exc).__name__}); sem valor reportado."
 
 
 def _oi_line(base, as_of, is_live) -> str:
@@ -347,8 +351,9 @@ def _oi_line(base, as_of, is_live) -> str:
         try:
             hl = _hl_ctx(base)
             return (
-                f"- **Open interest** (Hyperliquid perp): {hl['oi_raw']} {base} "
-                f"(≈ {_fmt_usd(hl['oi_usd'])} at mark {hl['mark_raw']})."
+                f"- **Contratos em aberto** (open interest — capital alavancado "
+                f"no book; Hyperliquid perp): {hl['oi_raw']} {base} "
+                f"(≈ {_fmt_usd(hl['oi_usd'])} ao preço de marca {hl['mark_raw']})."
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Hyperliquid OI unavailable for %s: %s", base, exc)
@@ -356,13 +361,14 @@ def _oi_line(base, as_of, is_live) -> str:
         oi = _binance_oi(base, as_of, is_live)
         src = "Binance perp" if is_live else "Binance perp fallback"
         return (
-            f"- **Open interest** ({src}): {oi['oi_raw']} {base} "
+            f"- **Contratos em aberto** (open interest — capital alavancado "
+            f"no book; {src}): {oi['oi_raw']} {base} "
             f"(≈ {_fmt_usd(oi['oi_usd'])})."
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Binance OI unavailable for %s: %s", base, exc)
-        note = "" if is_live else " (Hyperliquid has no historical OI; Binance retains ~30d)"
-        return f"- **Open interest**: unavailable ({type(exc).__name__}){note}; no value reported."
+        note = "" if is_live else " (Hyperliquid não tem OI histórico; Binance retém ~30d)"
+        return f"- **Contratos em aberto** (open interest): indisponível ({type(exc).__name__}){note}; sem valor reportado."
 
 
 def _liq_line(base, as_of, is_live) -> str:
@@ -373,24 +379,26 @@ def _liq_line(base, as_of, is_live) -> str:
             else f"~{lq['span_hours'] * 60:.0f}min"
         )
         bias = (
-            "long-dominated (longs forced out — bullish flush)"
+            "dominado por comprados (longs) — posições compradas liquidadas à "
+            "força, lavagem em cascata (long flush)"
             if lq["long_usd"] > lq["short_usd"]
-            else "short-dominated (shorts forced out — bearish squeeze)"
+            else "dominado por vendidos (shorts) — posições vendidas liquidadas "
+            "à força, estrangulamento de baixa (short squeeze)"
         )
         # OKX carries liquidations because neither Hyperliquid's /info nor
         # Binance expose an aggregate liquidation feed without an API key.
         return (
-            f"- **Liquidations** (OKX SWAP — HL/Binance have no keyless liq feed; "
-            f"last {lq['count']} orders over {window} to "
-            f"{lq['span_hi'].strftime('%Y-%m-%d %H:%MZ')}): "
-            f"{_fmt_usd(lq['total_usd'])} total — "
-            f"longs {_fmt_usd(lq['long_usd'])} ({lq['long_n']}) / "
-            f"shorts {_fmt_usd(lq['short_usd'])} ({lq['short_n']}). {bias}."
+            f"- **Liquidações** (liquidations — posições fechadas à força; OKX SWAP — HL/Binance "
+            f"não têm feed de liquidação sem chave; últimas {lq['count']} ordens em "
+            f"{window} até {lq['span_hi'].strftime('%Y-%m-%d %H:%MZ')}): "
+            f"{_fmt_usd(lq['total_usd'])} no total — "
+            f"comprados (longs) {_fmt_usd(lq['long_usd'])} ({lq['long_n']}) / "
+            f"vendidos (shorts) {_fmt_usd(lq['short_usd'])} ({lq['short_n']}). {bias}."
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("OKX liquidations unavailable for %s: %s", base, exc)
-        note = "" if is_live else " (feed is live/recent only, no history for backtest dates)"
-        return f"- **Liquidations**: unavailable ({type(exc).__name__}){note}; no value reported."
+        note = "" if is_live else " (o feed é só ao vivo/recente, sem histórico p/ datas de backtest)"
+        return f"- **Liquidações** (liquidations): indisponível ({type(exc).__name__}){note}; sem valor reportado."
 
 
 def _mark_line(base, is_live) -> str:
@@ -399,8 +407,8 @@ def _mark_line(base, is_live) -> str:
     try:
         hl = _hl_ctx(base)
         return (
-            f"- **Mark / 24h volume** (Hyperliquid): {hl['mark_raw']} / "
-            f"≈ {_fmt_usd(hl['day_ntl_vlm'])}."
+            f"- **Preço de marcação / volume 24h** (mark price — preço de referência do perp; Hyperliquid): "
+            f"{hl['mark_raw']} / ≈ {_fmt_usd(hl['day_ntl_vlm'])}."
         )
     except Exception:  # noqa: BLE001 — flavour line, drop silently
         return ""
@@ -422,9 +430,9 @@ def get_crypto_derivatives(symbol: str, curr_date: str) -> str:
     is_live = as_of.date() >= today
     stale_days = (today - as_of.date()).days
 
-    mode = "live" if is_live else f"backtest, {as_of.date()}"
+    mode = "ao vivo" if is_live else f"backtest, {as_of.date()}"
     lines = [
-        f"## Crypto Derivatives — {base} (as of {as_of.date()}, {mode})",
+        f"## Derivativos Cripto — {base} (em {as_of.date()}, {mode})",
         "",
         _funding_line(base, as_of, is_live),
         _oi_line(base, as_of, is_live),
@@ -436,13 +444,13 @@ def get_crypto_derivatives(symbol: str, curr_date: str) -> str:
 
     if not is_live and stale_days > _HIST_WINDOW_DAYS:
         lines.append(
-            f"- _Note: {as_of.date()} is {stale_days}d ago; OI and liquidation "
-            f"feeds only retain ~{_HIST_WINDOW_DAYS}d, so those degrade above._"
+            f"- _Nota: {as_of.date()} foi há {stale_days}d; os feeds de OI e "
+            f"liquidações só retêm ~{_HIST_WINDOW_DAYS}d, então esses degradam acima._"
         )
     lines.append("")
     lines.append(
-        "_Sources: Hyperliquid info API, Binance USDⓈ-M fapi, OKX public "
-        "liquidation-orders (all keyless). A source that failed is marked "
-        "unavailable inline — no derivative value is ever fabricated._"
+        "_Fontes (todas sem chave): Hyperliquid (endpoint `info`), Binance USDⓈ-M "
+        "(`fapi`), OKX (`liquidation-orders`). Uma fonte que falhou é marcada "
+        "como indisponível na própria linha — nenhum valor de derivativo é jamais inventado._"
     )
     return "\n".join(lines)

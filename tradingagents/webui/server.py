@@ -60,7 +60,7 @@ class _Handler(BaseHTTPRequestHandler):
         safe = Path(name).name
         path = _STATIC_DIR / safe
         if not path.is_file():
-            self._send_json({"error": "not found"}, 404)
+            self._send_json({"error": "não encontrado"}, 404)
             return
         ctype = _CONTENT_TYPES.get(path.suffix, "application/octet-stream")
         self._send_bytes(path.read_bytes(), ctype)
@@ -91,13 +91,13 @@ class _Handler(BaseHTTPRequestHandler):
                 run_id = path.rsplit("/", 1)[-1]
                 snap = self.runner.status(run_id)
                 if snap is None:
-                    self._send_json({"error": "run desconhecido"}, 404)
+                    self._send_json({"error": "execução desconhecida"}, 404)
                 else:
                     self._send_json(snap)
             elif path == "/api/history":
                 self._send_json({"runs": self.runner.history()})
             else:
-                self._send_json({"error": "not found"}, 404)
+                self._send_json({"error": "não encontrado"}, 404)
         except Exception as exc:  # never leak a stack to the socket as HTML
             self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
@@ -114,7 +114,7 @@ class _Handler(BaseHTTPRequestHandler):
                 run_id = self.runner.start(ticker, date)
                 self._send_json({"run_id": run_id})
             else:
-                self._send_json({"error": "not found"}, 404)
+                self._send_json({"error": "não encontrado"}, 404)
         except ValueError as exc:
             self._send_json({"error": str(exc)}, 400)
         except Exception as exc:

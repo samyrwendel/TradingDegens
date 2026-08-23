@@ -23,6 +23,23 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from tradingagents.agents.utils.rating import rating_pt_label
+
+# Practical pt-BR direction for the Trader's 3-tier action, shown beside the
+# English canonical (kept for any consumer that greps the value).
+_ACTION_PT = {"Buy": "COMPRAR", "Hold": "MANTER", "Sell": "VENDER"}
+
+# pt-BR reading of each sentiment band, shown beside the English canonical.
+_SENTIMENT_PT = {
+    "Bullish": "Alta",
+    "Mildly Bullish": "Leve Alta",
+    "Neutral": "Neutro",
+    "Mixed": "Misto",
+    "Mildly Bearish": "Leve Baixa",
+    "Bearish": "Baixa",
+}
+_CONFIDENCE_PT = {"low": "Baixa", "medium": "Média", "high": "Alta"}
+
 # LLMs sometimes write a placeholder string ("None", "N/A", ...) into an optional
 # numeric field instead of omitting it. Coerce those to None so the structured
 # call validates instead of erroring (#1058). Pydantic still parses real numeric
@@ -105,11 +122,11 @@ class ResearchPlan(BaseModel):
 def render_research_plan(plan: ResearchPlan) -> str:
     """Render a ResearchPlan to markdown for storage and the trader's prompt context."""
     return "\n".join([
-        f"**Recommendation**: {plan.recommendation.value}",
+        f"**Recomendação**: {rating_pt_label(plan.recommendation.value)}",
         "",
-        f"**Rationale**: {plan.rationale}",
+        f"**Justificativa**: {plan.rationale}",
         "",
-        f"**Strategic Actions**: {plan.strategic_actions}",
+        f"**Ações Estratégicas**: {plan.strategic_actions}",
     ])
 
 
@@ -156,26 +173,29 @@ class TraderProposal(BaseModel):
 
 
 def render_trader_proposal(proposal: TraderProposal) -> str:
-    """Render a TraderProposal to markdown.
+    """Render a TraderProposal to markdown (pt-BR).
 
-    The trailing ``FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**`` line is
-    preserved for backward compatibility with the analyst stop-signal text
-    and any external code that greps for it.
+    The trailing ``PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER**`` line
+    is the pt-BR successor to the old English ``FINAL TRANSACTION PROPOSAL``
+    marker; the report reads fully in Portuguese and the machine-facing action
+    comes from ``proposal.action`` (structured output), not from grepping text.
     """
+    action = proposal.action.value
+    action_pt = _ACTION_PT.get(action, action)
     parts = [
-        f"**Action**: {proposal.action.value}",
+        f"**Ação**: {action_pt} — {action}",
         "",
-        f"**Reasoning**: {proposal.reasoning}",
+        f"**Raciocínio**: {proposal.reasoning}",
     ]
     if proposal.entry_price is not None:
-        parts.extend(["", f"**Entry Price**: {proposal.entry_price}"])
+        parts.extend(["", f"**Preço de Entrada**: {proposal.entry_price}"])
     if proposal.stop_loss is not None:
         parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
     if proposal.position_sizing:
-        parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
+        parts.extend(["", f"**Tamanho da Posição**: {proposal.position_sizing}"])
     parts.extend([
         "",
-        f"FINAL TRANSACTION PROPOSAL: **{proposal.action.value.upper()}**",
+        f"PROPOSTA FINAL DE TRANSAÇÃO: **{action_pt.upper()}**",
     ])
     return "\n".join(parts)
 
@@ -229,24 +249,25 @@ class PortfolioDecision(BaseModel):
 
 
 def render_pm_decision(decision: PortfolioDecision) -> str:
-    """Render a PortfolioDecision back to the markdown shape the rest of the system expects.
+    """Render a PortfolioDecision back to the markdown the rest of the system reads (pt-BR).
 
-    Memory log, CLI display, and saved report files all read this markdown,
-    so the rendered output preserves the exact section headers (``**Rating**``,
-    ``**Executive Summary**``, ``**Investment Thesis**``) that downstream
-    parsers and the report writers already handle.
+    Memory log, CLI display, and saved report files all read this markdown. The
+    rating line leads with the practical pt-BR meaning and keeps the English
+    canonical word verbatim (``REDUZIR — Underweight``), so
+    :func:`tradingagents.agents.utils.rating.parse_rating` still recovers the
+    5-tier signal for the memory log and the UI verdict.
     """
     parts = [
-        f"**Rating**: {decision.rating.value}",
+        f"**Nota**: {rating_pt_label(decision.rating.value)}",
         "",
-        f"**Executive Summary**: {decision.executive_summary}",
+        f"**Resumo Executivo**: {decision.executive_summary}",
         "",
-        f"**Investment Thesis**: {decision.investment_thesis}",
+        f"**Tese de Investimento**: {decision.investment_thesis}",
     ]
     if decision.price_target is not None:
-        parts.extend(["", f"**Price Target**: {decision.price_target}"])
+        parts.extend(["", f"**Preço-Alvo**: {decision.price_target}"])
     if decision.time_horizon:
-        parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+        parts.extend(["", f"**Horizonte de Tempo**: {decision.time_horizon}"])
     return "\n".join(parts)
 
 
@@ -332,10 +353,13 @@ def render_sentiment_report(report: SentimentReport) -> str:
     narrative so the saved report is both human-readable and machine-parseable
     without regex.
     """
+    band = report.overall_band.value
+    band_pt = _SENTIMENT_PT.get(band, band)
+    conf_pt = _CONFIDENCE_PT.get(report.confidence, report.confidence.capitalize())
     return "\n".join([
-        f"**Overall Sentiment:** **{report.overall_band.value}** "
-        f"(Score: {report.overall_score:.1f}/10)",
-        f"**Confidence:** {report.confidence.capitalize()}",
+        f"**Sentimento Geral:** **{band_pt} — {band}** "
+        f"(Nota: {report.overall_score:.1f}/10)",
+        f"**Confiança:** {conf_pt}",
         "",
         report.narrative,
     ])

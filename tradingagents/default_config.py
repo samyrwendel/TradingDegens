@@ -103,9 +103,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
-    # Output language for analyst reports and final decision
-    # Internal agent debate stays in English for reasoning quality
-    "output_language": "English",
+    # Output language for analyst reports and final decision.
+    # This fork ships pt-BR by default — every report-facing agent
+    # (analysts, researchers, debaters, managers, trader) writes its output
+    # in this language, so a run comes out fully localized with no language
+    # mix. Override per-run with the TRADINGAGENTS_OUTPUT_LANGUAGE env var.
+    "output_language": "Portuguese",
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,

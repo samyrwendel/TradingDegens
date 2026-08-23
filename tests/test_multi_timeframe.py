@@ -57,10 +57,10 @@ def test_resample_weekly_aggregates_ohlc():
 # -------------------------------------------------------------- trend ----------
 @pytest.mark.unit
 def test_trend_read_labels_up_and_down():
-    up = mtf._trend_read(_uptrend(), fast=10, slow=50, label="Daily")
-    down = mtf._trend_read(_downtrend(), fast=10, slow=50, label="Daily")
-    assert up["state"] == "uptrend"
-    assert down["state"] == "downtrend"
+    up = mtf._trend_read(_uptrend(), fast=10, slow=50, label="Diário")
+    down = mtf._trend_read(_downtrend(), fast=10, slow=50, label="Diário")
+    assert up["state"] == "tendência de alta"
+    assert down["state"] == "tendência de baixa"
 
 
 # ------------------------------------------------------ summary + verdict ------
@@ -68,8 +68,8 @@ def test_trend_read_labels_up_and_down():
 def test_summary_cites_both_frames_and_converges(monkeypatch):
     monkeypatch.setattr(mtf, "load_ohlcv", lambda sym, cd: _uptrend())
     out = mtf.build_timeframe_summary("AAA", "2026-01-01")
-    assert "Weekly" in out and "Daily" in out
-    assert "Converge" in out
+    assert "Semanal" in out and "Diário" in out
+    assert "Convergência" in out
 
 
 @pytest.mark.unit
@@ -79,20 +79,23 @@ def test_summary_flags_divergence(monkeypatch):
     monkeypatch.setattr(mtf, "load_ohlcv", lambda sym, cd: _uptrend())
 
     def fake_read(frame, fast, slow, label):
-        state = "uptrend" if label == "Weekly" else "downtrend"
+        state = "tendência de alta" if label == "Semanal" else "tendência de baixa"
         return {"label": label, "state": state, "last": 100.0, "fast": 1.0,
                 "slow": 1.0, "fast_n": fast, "slow_n": slow, "chg": 0.0, "bars": 400}
 
     monkeypatch.setattr(mtf, "_trend_read", fake_read)
     out = mtf.build_timeframe_summary("AAA", "2026-01-01")
-    assert "Divergent" in out
+    assert "Divergência" in out
 
 
 # ----------------------------------------------------------- coverage ----------
 @pytest.mark.unit
 def test_report_covers_timeframes_detection():
     assert report_covers_timeframes("weekly trend up, daily pulling back")
+    # pt-BR is the fork's primary output language — must be detected too.
+    assert report_covers_timeframes("tendência semanal de alta, diário recuando")
     assert not report_covers_timeframes("daily RSI is 55")   # weekly missing
+    assert not report_covers_timeframes("RSI diário em 55")  # semanal missing
     assert not report_covers_timeframes("")
 
 
@@ -103,8 +106,8 @@ def test_coverage_appends_when_missing(monkeypatch):
     )
     report = "Daily RSI looks fine.\n"   # no 'weekly'
     out = ensure_multi_timeframe_coverage(report, "AAA", "2026-01-01")
-    assert "Multi-Timeframe Trend" in out
-    assert "Weekly" in out
+    assert "Tendência multiperíodo" in out
+    assert "Semanal" in out
 
 
 @pytest.mark.unit
@@ -120,8 +123,8 @@ def test_coverage_degrades_on_data_failure(monkeypatch):
 
     monkeypatch.setattr(mtf, "load_ohlcv", boom)
     out = ensure_multi_timeframe_coverage("daily only", "BADSYM", "2026-01-01")
-    assert "unavailable" in out.lower()
-    assert "fabricat" in out.lower()
+    assert "indisponível" in out.lower()
+    assert "inventado" in out.lower()
 
 
 # ------------------------------------------------------ guard + 24/7 -----------
@@ -146,4 +149,4 @@ def test_weekend_date_is_a_normal_trading_day(monkeypatch):
     monkeypatch.setattr(mtf, "load_ohlcv", lambda sym, cd: _uptrend())
     out = mtf.build_timeframe_summary("BTC-USD", "2026-01-03")
     assert "not a trading day" not in out.lower()
-    assert "Daily" in out and "Weekly" in out
+    assert "Diário" in out and "Semanal" in out

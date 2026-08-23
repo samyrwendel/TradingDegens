@@ -15,6 +15,9 @@ from tradingagents.agents.utils.crypto_coverage import (
 from tradingagents.agents.utils.multi_timeframe_coverage import (
     ensure_multi_timeframe_coverage,
 )
+from tradingagents.agents.utils.price_structure_coverage import (
+    ensure_price_structure_coverage,
+)
 
 
 def create_market_analyst(llm):
@@ -98,8 +101,8 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " If you or any other assistant has the PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER** or deliverable,"
+                    " prefix your response with PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER** so the team knows to stop."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}",
@@ -131,6 +134,11 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                 report = ensure_crypto_derivatives_coverage(
                     report, symbol, current_date
                 )
+            # Price structure (buy-at-the-average regions + 1-2-3) is appended
+            # unconditionally: the LLM describes indicators but never detects the
+            # setup, so there is nothing to detect-and-skip. Stocks and crypto
+            # alike get it; it reuses the cached, date-guarded daily series.
+            report = ensure_price_structure_coverage(report, symbol, current_date)
 
         return {
             "messages": [result],

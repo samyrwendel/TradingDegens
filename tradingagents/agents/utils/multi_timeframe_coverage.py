@@ -22,11 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 def report_covers_timeframes(report: str) -> bool:
-    """True if the report already discusses both the weekly and daily frames."""
+    """True if the report already discusses both the weekly and daily frames.
+
+    The fork writes reports in pt-BR (semanal/diário), so both the Portuguese
+    terms and the older English markers are accepted — detection stays robust
+    across language and any legacy path.
+    """
     if not report:
         return False
     low = report.lower()
-    return "weekly" in low and "daily" in low
+    weekly = "semanal" in low or "weekly" in low
+    daily = "diário" in low or "diario" in low or "daily" in low
+    return weekly and daily
 
 
 def ensure_multi_timeframe_coverage(report: str, symbol: str, curr_date: str) -> str:
@@ -44,9 +51,9 @@ def ensure_multi_timeframe_coverage(report: str, symbol: str, curr_date: str) ->
     except Exception as exc:  # noqa: BLE001 — never break the report over enrichment
         logger.warning("multi-timeframe coverage failed for %s: %s", symbol, exc)
         section = (
-            "## Multi-Timeframe Trend\n\n"
-            f"Weekly/daily trend read unavailable ({type(exc).__name__}); "
-            "no timeframe values fabricated."
+            "## Tendência multiperíodo (multi-timeframe)\n\n"
+            f"Leitura de tendência semanal/diária indisponível "
+            f"({type(exc).__name__}); nenhum valor de tempo gráfico inventado."
         )
     base = (report or "").rstrip()
     return f"{base}\n\n{section}\n" if base else section + "\n"

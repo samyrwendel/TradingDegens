@@ -20,6 +20,28 @@ RATINGS_5_TIER: tuple[str, ...] = (
 
 _RATING_SET = {r.lower() for r in RATINGS_5_TIER}
 
+# Practical pt-BR meaning for each canonical rating — what to actually *do*,
+# not the jargon. The report and UI show this meaning with the English
+# canonical kept beside it for whoever knows the scale (same pattern the web
+# UI's verdict badge uses). Keyed by the canonical English value.
+RATING_PT: dict[str, str] = {
+    "Buy": "COMPRAR",
+    "Overweight": "AUMENTAR",
+    "Hold": "MANTER",
+    "Underweight": "REDUZIR",
+    "Sell": "VENDER",
+}
+
+
+def rating_pt_label(value: str) -> str:
+    """``"Underweight"`` -> ``"REDUZIR — Underweight"`` for report/UI display.
+
+    Keeps the English canonical word verbatim (no parentheses) so
+    :func:`parse_rating` still recovers it, while leading with the pt-BR meaning.
+    """
+    pt = RATING_PT.get(value)
+    return f"{pt} — {value}" if pt else value
+
 # Matches "Rating: X" / "rating - X" / "Rating: **X**" — tolerates markdown
 # bold wrappers and either a colon or hyphen separator.
 _RATING_LABEL_RE = re.compile(r"rating.*?[:\-][\s*]*(\w+)", re.IGNORECASE)
@@ -41,7 +63,7 @@ def parse_rating(text: str, default: str = "Hold") -> str:
 
     for line in text.splitlines():
         for word in line.lower().split():
-            clean = word.strip("*:.,")
+            clean = word.strip("*:.,()[]—-")
             if clean in _RATING_SET:
                 return clean.capitalize()
 

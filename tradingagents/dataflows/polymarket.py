@@ -65,14 +65,20 @@ def _is_forward_looking(market: dict, now: datetime) -> bool:
     )
 
 
-def get_prediction_markets(topic: str, limit: int | None = None) -> str:
+def get_prediction_markets(
+    topic: str, limit: int | None = None, display: str | None = None
+) -> str:
     """Return live prediction-market probabilities for an event topic.
 
     Args:
-        topic: Event keyword(s), e.g. "Fed rate cut", "recession 2026",
-            "US election", or a sector/company event.
+        topic: Event keyword(s) used to SEARCH Polymarket, e.g. "Fed rate cut",
+            "recession 2026", "US election". Kept in English because Polymarket's
+            markets are titled in English and the keyword search matches on them.
         limit: Max markets to return (ranked by traded volume); ``None`` uses
             DEFAULT_LIMIT.
+        display: Optional pt-BR label shown in the report in place of the raw
+            English search query, so the output carries no stray English topic
+            string. Defaults to ``topic`` when not given.
 
     Returns:
         A markdown report of the most-traded open markets matching the topic,
@@ -81,14 +87,15 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
     """
     if limit is None:
         limit = DEFAULT_LIMIT
+    shown = display or topic
 
     try:
         data = _request("public-search", {"q": topic, "limit_per_type": 20})
     except requests.RequestException as e:
         logger.warning("Polymarket search failed for %r: %s", topic, e)
         return (
-            f"Polymarket data is currently unavailable (network error: {e}). "
-            f"Proceed without prediction-market signal for '{topic}'."
+            f"O acesso à Polymarket está indisponível no momento (erro de rede: "
+            f"{e}). Prossiga sem o sinal de mercado de previsão para '{shown}'."
         )
 
     now = datetime.now(timezone.utc)
@@ -101,17 +108,17 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
     candidates.sort(key=lambda m: m.get("volumeNum") or 0, reverse=True)
 
     header = (
-        f'## Polymarket prediction markets: "{topic}"\n'
-        f"Live, market-implied probabilities (higher traded volume = deeper, "
-        f"more reliable). A probability is the crowd's priced odds of the event, "
-        f"not a forecast you should take as certain.\n\n"
+        f'## Mercados de previsão Polymarket: "{shown}"\n'
+        f"Probabilidades implícitas ao vivo (maior volume negociado = mais "
+        f"profundo e confiável). A probabilidade é a odd precificada pela "
+        f"multidão para o evento, não uma previsão a tomar como certa.\n\n"
     )
 
     if not candidates:
         return header + (
-            f"No open prediction markets matched '{topic}'. Polymarket coverage "
-            f"is concentrated in macro, political, geopolitical, and crypto "
-            f"events; a specific equity may have none."
+            f"Nenhum mercado de previsão aberto casou com '{shown}'. A cobertura "
+            f"da Polymarket se concentra em eventos macro, políticos, "
+            f"geopolíticos e cripto; um ativo específico pode não ter nenhum."
         )
 
     lines = []
@@ -123,17 +130,18 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
         except (ValueError, IndexError):
             continue
         label = outcomes[0] if outcomes else "Yes"
+        label = {"Yes": "Sim", "No": "Não"}.get(label, label)
         volume = m.get("volumeNum") or 0
         end_date = (m.get("endDate") or "")[:10]
         wk = m.get("oneWeekPriceChange")
         wk_str = (
-            f", 1-week {wk * 100:+.1f}pp"
+            f", 1 semana {wk * 100:+.1f}pp"
             if isinstance(wk, (int, float)) and wk
             else ""
         )
         lines.append(
             f"- **{m.get('question')}** — {label} {prob:.0%} "
-            f"(${volume:,.0f} volume, resolves {end_date}{wk_str})"
+            f"(volume ${volume:,.0f}, resolve em {end_date}{wk_str})"
         )
 
     return header + "\n".join(lines) + "\n"

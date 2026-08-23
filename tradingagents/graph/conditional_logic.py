@@ -56,7 +56,13 @@ class ConditionalLogic:
             state["investment_debate_state"]["count"] >= 2 * self.max_debate_rounds
         ):  # 3 rounds of back-and-forth between 2 agents
             return "Research Manager"
-        if state["investment_debate_state"]["current_response"].startswith("Bull"):
+        # The bull researcher tags its turn with a "(bull)" marker kept verbatim
+        # beside the pt-BR label ("Analista de Alta (bull): ...") precisely so
+        # routing survives translation; the legacy prefix was "Bull Analyst:".
+        # Match a bounded prefix window (not the whole text) so a "(bull)" that
+        # the bear happens to write in its prose can't misroute the alternation.
+        head = state["investment_debate_state"]["current_response"][:40].lower()
+        if head.startswith("bull") or "(bull)" in head:
             return "Bear Researcher"
         return "Bull Researcher"
 

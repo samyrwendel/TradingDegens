@@ -72,22 +72,22 @@ class PolymarketFormatTests(unittest.TestCase):
     def test_probability_volume_and_weekly_change_render(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
             out = polymarket.get_prediction_markets("anything", limit=10)
-        self.assertIn("Yes 76%", out)
-        self.assertIn("$5,000,000 volume", out)
-        self.assertIn("resolves 2030-12-31", out)
-        self.assertIn("1-week -4.5pp", out)  # -0.045 -> -4.5pp
+        self.assertIn("Sim 76%", out)
+        self.assertIn("volume $5,000,000", out)
+        self.assertIn("resolve em 2030-12-31", out)
+        self.assertIn("1 semana -4.5pp", out)  # -0.045 -> -4.5pp
 
     def test_weekly_change_omitted_when_absent(self):
         # "Open small?" has wk=None -> no 1-week clause on its line.
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
             out = polymarket.get_prediction_markets("anything", limit=10)
         small_line = next(ln for ln in out.splitlines() if "Open small?" in ln)
-        self.assertNotIn("1-week", small_line)
+        self.assertNotIn("1 semana", small_line)
 
     def test_no_matches_reports_clearly(self):
         with mock.patch.object(polymarket, "_request", return_value={"events": []}):
             out = polymarket.get_prediction_markets("obscure ticker", limit=6)
-        self.assertIn("No open prediction markets", out)
+        self.assertIn("Nenhum mercado de previsão aberto", out)
 
 
 @pytest.mark.unit
@@ -98,7 +98,7 @@ class PolymarketResilienceTests(unittest.TestCase):
             polymarket, "_request", side_effect=requests.RequestException("boom")
         ):
             out = polymarket.get_prediction_markets("Fed rate cut")
-        self.assertIn("unavailable", out.lower())
+        self.assertIn("indisponível", out.lower())
         self.assertIn("Fed rate cut", out)
 
 
