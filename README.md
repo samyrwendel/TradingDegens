@@ -99,9 +99,11 @@ fabricates a value:
 Crypto is **24/7**: every window is driven by UTC millisecond timestamps, weekends are normal trading
 days, and the read applies to any weekday. It flows through the **same cache** (`crypto_derivatives`
 category — second same-day run is served from disk, zero network) and the **same date guard** (a
-backtest date reads Binance funding *history* clamped to that day and degrades OI/liquidations that only
-retain a recent window, rather than borrowing today's number). If the report omits the signal the node
-appends it deterministically. (`tradingagents/dataflows/crypto.py`,
+backtest date reads Hyperliquid funding *history* clamped to that day — Binance history as fallback —
+and degrades OI/liquidations that only retain a recent window, rather than borrowing today's number).
+Values are printed **exactly as the API returns them** (raw funding rate, open interest, mark price); only
+derived figures (annualized %, USD notional) are approximations, marked `~`/`≈`. If the report omits the
+signal the node appends it deterministically. (`tradingagents/dataflows/crypto.py`,
 `tradingagents/agents/utils/crypto_coverage.py`.)
 
 > Not in this fork yet (separate tasks): community interface, exchange-native crypto OHLCV as the price

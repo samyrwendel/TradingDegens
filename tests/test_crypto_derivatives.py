@@ -81,6 +81,9 @@ def test_live_report_has_all_three_signals_and_sources(live_http):
     # Named sources, not anonymous numbers.
     assert "Hyperliquid" in out
     assert "OKX" in out
+    # Exact API values printed verbatim, not prettied-up round numbers.
+    assert "0.0000125" in out      # raw funding rate
+    assert "36000" in out          # raw open interest
     # Real computed liquidation total: 10*0.01*77000 + 5*0.01*77100 = 7700 + 3855
     assert "$11.6K" in out or "11,555" in out or "$11" in out
 
@@ -112,21 +115,23 @@ def test_source_failure_degrades_without_fabrication(monkeypatch):
 
 # --------------------------------------------------- no look-ahead -------------
 @pytest.mark.unit
-def test_backtest_never_calls_live_hyperliquid(monkeypatch):
-    """A past-dated run must not read a live 'now' funding/OI value."""
-    calls = {"hl": 0}
+def test_backtest_uses_hl_history_not_live_and_clamps(monkeypatch):
+    """A past-dated run must read HL funding *history* (clamped), never the live
+    ``metaAndAssetCtxs`` 'now' snapshot — that would be look-ahead."""
+    seen = {"types": []}
+    day_end_2026_06_01 = 1_780_444_799_999   # ~2026-06-01T23:59:59Z
 
-    def no_hl(url, payload):
-        calls["hl"] += 1
-        return _hl_payload()
+    def fake_post(url, payload):
+        seen["types"].append(payload["type"])
+        assert payload["type"] != "metaAndAssetCtxs", "live snapshot in a backtest!"
+        if payload["type"] == "fundingHistory":
+            assert payload["endTime"] <= day_end_2026_06_01   # clamped to the day
+            return [{"coin": "BTC", "fundingRate": "0.0000125",
+                     "time": 1_780_400_000_000}]
+        raise AssertionError(f"unexpected type {payload['type']}")
 
     def fake_get(url, params=None):
-        if "fapi/v1/fundingRate" in url:
-            # endTime must be clamped to the backtest day, not today.
-            assert params["endTime"] < 1_780_400_000_000
-            return [{"fundingTime": 1_780_200_000_000, "fundingRate": "0.0001",
-                     "markPrice": "70000"}]
-        # OI hist / liquidations degrade (return empty / raise) for old dates.
+        # OI hist / liquidations degrade for an old date.
         if "openInterestHist" in url:
             return []
         if "liquidation-orders" in url:
@@ -135,13 +140,40 @@ def test_backtest_never_calls_live_hyperliquid(monkeypatch):
             return _okx_instruments_payload()
         raise AssertionError(f"unexpected GET {url}")
 
-    monkeypatch.setattr(crypto, "_post_json", no_hl)
+    monkeypatch.setattr(crypto, "_post_json", fake_post)
     monkeypatch.setattr(crypto, "_get_json", fake_get)
 
     out = crypto.get_crypto_derivatives("BTC-USD", "2026-06-01")
-    assert calls["hl"] == 0                       # Hyperliquid live never touched
-    assert "Binance perp, 8h" in out              # historical funding used instead
-    assert "unavailable" in out.lower()           # OI + liquidations degrade
+    assert "metaAndAssetCtxs" not in seen["types"]   # live snapshot never touched
+    assert "fundingHistory" in seen["types"]         # HL historical funding used
+    assert "Hyperliquid perp, 1h" in out             # HL is primary, not Binance
+    assert "0.0000125" in out                        # exact API rate, not rounded
+    assert "unavailable" in out.lower()              # OI + liquidations degrade
+
+
+@pytest.mark.unit
+def test_hl_unknown_coin_degrades_to_binance(monkeypatch):
+    """A coin Hyperliquid doesn't list (null history) degrades to Binance, no crash."""
+    def fake_post(url, payload):
+        return None    # HL returns null for an unlisted coin
+
+    def fake_get(url, params=None):
+        if "fapi/v1/fundingRate" in url:
+            return [{"fundingTime": 1_780_400_000_000, "fundingRate": "0.0002",
+                     "markPrice": "5"}]
+        if "openInterestHist" in url:
+            return []
+        if "liquidation-orders" in url:
+            return {"code": "0", "data": []}
+        if "instruments" in url:
+            return {"code": "0", "data": [{"ctVal": "1"}]}
+        raise AssertionError(f"unexpected GET {url}")
+
+    monkeypatch.setattr(crypto, "_post_json", fake_post)
+    monkeypatch.setattr(crypto, "_get_json", fake_get)
+    out = crypto.get_crypto_derivatives("LINK-USD", "2026-06-01")
+    assert "Binance perp fallback" in out            # HL missing → Binance took over
+    assert "0.0002" in out
 
 
 @pytest.mark.unit

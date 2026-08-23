@@ -27,13 +27,22 @@ Design rules honored:
   window is driven by millisecond UTC timestamps, and a weekend analysis date is
   a normal trading day.
 * **No look-ahead** — for a backtest date (``curr_date`` < today) we never read a
-  live "now" value: funding comes from Binance history clamped to the requested
-  day's end, and OI/liquidations that only expose a recent window degrade with an
-  explicit notice rather than borrowing today's number. The tool wrapper also
-  clamps ``curr_date`` via the date guard.
+  live "now" value: funding comes from Hyperliquid ``fundingHistory`` (Binance
+  history as fallback) clamped to the requested day's end, and OI/liquidations
+  that only expose a recent window degrade with an explicit notice rather than
+  borrowing today's number. The tool wrapper also clamps ``curr_date`` via the
+  date guard.
+* **Exact values** — the raw funding rate, open interest and mark price are
+  printed verbatim as the API returned them (``*_raw``); only clearly-derived
+  figures (annualized %, USD notional) are approximations, marked ``~`` / ``≈``.
 * **Never fabricate** — a source that errors or has no data for the requested
   date contributes an explicit "unavailable" line naming the source; it is never
   silently replaced by an invented figure.
+
+Hyperliquid is the **primary** derivatives source (funding + OI + mark in one
+call, plus its own historical-funding endpoint); Binance is fallback only. A coin
+Hyperliquid does not list returns ``null`` / raises, which cleanly degrades to the
+fallback rather than crashing.
 """
 from __future__ import annotations
 
@@ -104,9 +113,18 @@ def _annualize(rate: float, per_day: float) -> float:
     return rate * per_day * 365 * 100
 
 
-# ---------------------------------------------------------- Hyperliquid live --
+# -------------------------------------------------------------- Hyperliquid ----
+# Hyperliquid is the PRIMARY derivatives source (Samyr's call): funding, OI and
+# mark price arrive in one keyless call, and historical funding has its own
+# endpoint — so HL leads for both live and backtest, Binance is only fallback.
+# The raw API strings are carried through verbatim so the report prints the
+# exact value the API returned, never a prettied-up round number.
 def _hl_ctx(base: str) -> dict:
-    """Live per-asset context from Hyperliquid: funding(1h), OI, mark, 24h vol."""
+    """Live per-asset context from Hyperliquid: funding(1h), OI, mark, 24h vol.
+
+    Keeps the raw API strings (``*_raw``) alongside parsed floats so the report
+    can cite the exact figure the endpoint returned.
+    """
     data = _post_json(_HL_URL, {"type": "metaAndAssetCtxs"})
     universe = data[0]["universe"]
     ctxs = data[1]
@@ -117,14 +135,41 @@ def _hl_ctx(base: str) -> dict:
     funding = float(c["funding"])          # hourly rate
     oi_coin = float(c["openInterest"])     # in coin units
     mark = float(c["markPx"])
-    day_vol = float(c.get("dayNtlVlm", 0) or 0)
     return {
+        "funding_raw": str(c["funding"]),
         "funding_hourly": funding,
         "funding_annual_pct": _annualize(funding, 24),
+        "oi_raw": str(c["openInterest"]),
         "oi_coin": oi_coin,
         "oi_usd": oi_coin * mark,
+        "mark_raw": str(c["markPx"]),
         "mark": mark,
-        "day_ntl_vlm": day_vol,
+        "day_ntl_vlm": float(c.get("dayNtlVlm", 0) or 0),
+    }
+
+
+def _hl_funding_history(base: str, as_of: datetime) -> dict:
+    """Last Hyperliquid funding (1h) at/before the requested day — for backtests.
+
+    HL ``fundingHistory`` returns ``null`` for an unknown coin; we treat that as
+    "not on Hyperliquid" so the caller degrades to Binance rather than crashing.
+    """
+    # A 3-day lookback window is plenty to contain the last hourly funding print.
+    start = _end_of_day_ms(as_of) - 3 * 86_400_000
+    rows = _post_json(
+        _HL_URL,
+        {"type": "fundingHistory", "coin": base,
+         "startTime": start, "endTime": _end_of_day_ms(as_of)},
+    )
+    if not rows:
+        raise NoMarketDataError(base, None, "no Hyperliquid funding history for that date")
+    last = rows[-1]
+    rate = float(last["fundingRate"])
+    return {
+        "funding_raw": str(last["fundingRate"]),
+        "funding_hourly": rate,
+        "funding_annual_pct": _annualize(rate, 24),
+        "as_of": datetime.fromtimestamp(int(last["time"]) / 1000, tz=timezone.utc),
     }
 
 
@@ -146,7 +191,9 @@ def _binance_funding(base: str, as_of: datetime, is_live: bool) -> dict:
         last = rows[-1]
         rate = float(last["fundingRate"])
         when = datetime.fromtimestamp(int(last["fundingTime"]) / 1000, tz=timezone.utc)
+        d = last
     return {
+        "funding_raw": str(d["lastFundingRate"] if is_live else d["fundingRate"]),
         "funding_8h": rate,
         "funding_annual_pct": _annualize(rate, 3),
         "as_of": when,
@@ -161,7 +208,7 @@ def _binance_oi(base: str, as_of: datetime, is_live: bool) -> dict:
         oi_coin = float(d["openInterest"])
         px = _get_json(f"{_BINANCE_FAPI}/fapi/v1/premiumIndex", {"symbol": sym})
         mark = float(px["markPrice"])
-        return {"oi_coin": oi_coin, "oi_usd": oi_coin * mark}
+        return {"oi_raw": str(d["openInterest"]), "oi_coin": oi_coin, "oi_usd": oi_coin * mark}
     rows = _get_json(
         f"{_BINANCE_FAPI}/futures/data/openInterestHist",
         {"symbol": sym, "period": "1d", "endTime": _end_of_day_ms(as_of), "limit": 1},
@@ -170,6 +217,7 @@ def _binance_oi(base: str, as_of: datetime, is_live: bool) -> dict:
         raise NoMarketDataError(base, sym, "no Binance OI history at that date")
     last = rows[-1]
     return {
+        "oi_raw": str(last["sumOpenInterest"]),
         "oi_coin": float(last["sumOpenInterest"]),
         "oi_usd": float(last["sumOpenInterestValue"]),
     }
@@ -254,29 +302,35 @@ def _okx_liquidations(base: str, as_of: datetime, is_live: bool) -> dict:
 
 
 # --------------------------------------------------------------- assembly ------
+def _sign_text(rate: float) -> str:
+    return "longs pay shorts (crowd long)" if rate >= 0 else \
+        "shorts pay longs (crowd short)"
+
+
 def _funding_line(base, as_of, is_live) -> str:
-    # Prefer Hyperliquid live (hourly, matches degenbot); fall back to Binance.
-    if is_live:
-        try:
-            hl = _hl_ctx(base)
-            sign = "longs pay shorts (crowd long)" if hl["funding_hourly"] >= 0 else \
-                "shorts pay longs (crowd short)"
-            return (
-                f"- **Funding** (Hyperliquid perp, 1h): "
-                f"{hl['funding_hourly'] * 100:+.4f}%/hr → ~{hl['funding_annual_pct']:+.1f}%/yr. "
-                f"{sign}."
-            )
-        except Exception as exc:  # noqa: BLE001 — degrade to fallback, never fabricate
-            logger.warning("Hyperliquid funding unavailable for %s: %s", base, exc)
+    """Funding — Hyperliquid primary (live ctx or funding history), Binance fallback.
+
+    The raw API rate is printed verbatim (``funding_raw``); the %/hr and %/yr are
+    faithful transforms of it, the annualized one marked ``~`` since it compounds
+    a single print forward.
+    """
+    try:
+        hl = _hl_ctx(base) if is_live else _hl_funding_history(base, as_of)
+        stamp = "" if is_live else f" @ {hl['as_of'].strftime('%Y-%m-%d %H:%MZ')}"
+        return (
+            f"- **Funding** (Hyperliquid perp, 1h{stamp}): {hl['funding_raw']} "
+            f"= {hl['funding_hourly'] * 100:+.5f}%/hr → ~{hl['funding_annual_pct']:+.1f}%/yr. "
+            f"{_sign_text(hl['funding_hourly'])}."
+        )
+    except Exception as exc:  # noqa: BLE001 — degrade to fallback, never fabricate
+        logger.warning("Hyperliquid funding unavailable for %s: %s", base, exc)
     try:
         bf = _binance_funding(base, as_of, is_live)
-        sign = "longs pay shorts (crowd long)" if bf["funding_8h"] >= 0 else \
-            "shorts pay longs (crowd short)"
         stamp = bf["as_of"].strftime("%Y-%m-%d %H:%MZ")
         return (
-            f"- **Funding** (Binance perp, 8h @ {stamp}): "
-            f"{bf['funding_8h'] * 100:+.4f}%/8h → ~{bf['funding_annual_pct']:+.1f}%/yr. "
-            f"{sign}."
+            f"- **Funding** (Binance perp fallback, 8h @ {stamp}): {bf['funding_raw']} "
+            f"= {bf['funding_8h'] * 100:+.5f}%/8h → ~{bf['funding_annual_pct']:+.1f}%/yr. "
+            f"{_sign_text(bf['funding_8h'])}."
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Binance funding unavailable for %s: %s", base, exc)
@@ -284,25 +338,30 @@ def _funding_line(base, as_of, is_live) -> str:
 
 
 def _oi_line(base, as_of, is_live) -> str:
+    """Open interest — Hyperliquid primary (live), Binance fallback / history.
+
+    ``oi_raw`` is the exact coin figure the API returned; the USD notional is a
+    derived approximation, marked ``≈``.
+    """
     if is_live:
         try:
             hl = _hl_ctx(base)
             return (
-                f"- **Open interest** (Hyperliquid perp): "
-                f"{hl['oi_coin']:,.0f} {base} (~{_fmt_usd(hl['oi_usd'])} at mark "
-                f"${hl['mark']:,.0f})."
+                f"- **Open interest** (Hyperliquid perp): {hl['oi_raw']} {base} "
+                f"(≈ {_fmt_usd(hl['oi_usd'])} at mark {hl['mark_raw']})."
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Hyperliquid OI unavailable for %s: %s", base, exc)
     try:
         oi = _binance_oi(base, as_of, is_live)
+        src = "Binance perp" if is_live else "Binance perp fallback"
         return (
-            f"- **Open interest** (Binance perp): {oi['oi_coin']:,.0f} {base} "
-            f"(~{_fmt_usd(oi['oi_usd'])})."
+            f"- **Open interest** ({src}): {oi['oi_raw']} {base} "
+            f"(≈ {_fmt_usd(oi['oi_usd'])})."
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Binance OI unavailable for %s: %s", base, exc)
-        note = "" if is_live else " (historical OI only retained ~30d)"
+        note = "" if is_live else " (Hyperliquid has no historical OI; Binance retains ~30d)"
         return f"- **Open interest**: unavailable ({type(exc).__name__}){note}; no value reported."
 
 
@@ -318,9 +377,12 @@ def _liq_line(base, as_of, is_live) -> str:
             if lq["long_usd"] > lq["short_usd"]
             else "short-dominated (shorts forced out — bearish squeeze)"
         )
+        # OKX carries liquidations because neither Hyperliquid's /info nor
+        # Binance expose an aggregate liquidation feed without an API key.
         return (
-            f"- **Liquidations** (OKX SWAP, last {lq['count']} orders over {window} "
-            f"to {lq['span_hi'].strftime('%Y-%m-%d %H:%MZ')}): "
+            f"- **Liquidations** (OKX SWAP — HL/Binance have no keyless liq feed; "
+            f"last {lq['count']} orders over {window} to "
+            f"{lq['span_hi'].strftime('%Y-%m-%d %H:%MZ')}): "
             f"{_fmt_usd(lq['total_usd'])} total — "
             f"longs {_fmt_usd(lq['long_usd'])} ({lq['long_n']}) / "
             f"shorts {_fmt_usd(lq['short_usd'])} ({lq['short_n']}). {bias}."
@@ -337,8 +399,8 @@ def _mark_line(base, is_live) -> str:
     try:
         hl = _hl_ctx(base)
         return (
-            f"- **Mark / 24h volume** (Hyperliquid): ${hl['mark']:,.0f} / "
-            f"{_fmt_usd(hl['day_ntl_vlm'])}."
+            f"- **Mark / 24h volume** (Hyperliquid): {hl['mark_raw']} / "
+            f"≈ {_fmt_usd(hl['day_ntl_vlm'])}."
         )
     except Exception:  # noqa: BLE001 — flavour line, drop silently
         return ""
