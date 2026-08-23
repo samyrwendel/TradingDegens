@@ -303,10 +303,10 @@ def _okx_liquidations(base: str, as_of: datetime, is_live: bool) -> dict:
 
 # --------------------------------------------------------------- assembly ------
 def _sign_text(rate: float) -> str:
-    # long/short traduzidos p/ comprado/vendido, com o original em parênteses
-    # (regra: nada de inglês solto — só no par 'tradução (original)').
-    return "comprados (longs) pagam vendidos (shorts) — multidão comprada" if rate >= 0 else \
-        "vendidos (shorts) pagam comprados (longs) — multidão vendida"
+    # long/short mantidos em inglês (vocabulário corrente do público degen);
+    # só o texto descritivo em volta é pt-BR.
+    return "longs pagam shorts — multidão long" if rate >= 0 else \
+        "shorts pagam longs — multidão short"
 
 
 def _funding_line(base, as_of, is_live) -> str:
@@ -320,7 +320,7 @@ def _funding_line(base, as_of, is_live) -> str:
         hl = _hl_ctx(base) if is_live else _hl_funding_history(base, as_of)
         stamp = "" if is_live else f" @ {hl['as_of'].strftime('%Y-%m-%d %H:%MZ')}"
         return (
-            f"- **Taxa de financiamento** (funding — quem está comprado (long) paga p/ segurar a "
+            f"- **Taxa de financiamento** (funding — quem está long paga p/ segurar a "
             f"posição; Hyperliquid perp, 1h{stamp}): {hl['funding_raw']} "
             f"= {hl['funding_hourly'] * 100:+.5f}%/hr → ~{hl['funding_annual_pct']:+.1f}%/ano. "
             f"{_sign_text(hl['funding_hourly'])}."
@@ -331,7 +331,7 @@ def _funding_line(base, as_of, is_live) -> str:
         bf = _binance_funding(base, as_of, is_live)
         stamp = bf["as_of"].strftime("%Y-%m-%d %H:%MZ")
         return (
-            f"- **Taxa de financiamento** (funding — quem está comprado (long) paga p/ segurar a "
+            f"- **Taxa de financiamento** (funding — quem está long paga p/ segurar a "
             f"posição; Binance perp fallback, 8h @ {stamp}): {bf['funding_raw']} "
             f"= {bf['funding_8h'] * 100:+.5f}%/8h → ~{bf['funding_annual_pct']:+.1f}%/ano. "
             f"{_sign_text(bf['funding_8h'])}."
@@ -379,10 +379,10 @@ def _liq_line(base, as_of, is_live) -> str:
             else f"~{lq['span_hours'] * 60:.0f}min"
         )
         bias = (
-            "dominado por comprados (longs) — posições compradas liquidadas à "
+            "dominado por longs — posições long liquidadas à "
             "força, lavagem em cascata (long flush)"
             if lq["long_usd"] > lq["short_usd"]
-            else "dominado por vendidos (shorts) — posições vendidas liquidadas "
+            else "dominado por shorts — posições short liquidadas "
             "à força, estrangulamento de baixa (short squeeze)"
         )
         # OKX carries liquidations because neither Hyperliquid's /info nor
@@ -392,8 +392,8 @@ def _liq_line(base, as_of, is_live) -> str:
             f"não têm feed de liquidação sem chave; últimas {lq['count']} ordens em "
             f"{window} até {lq['span_hi'].strftime('%Y-%m-%d %H:%MZ')}): "
             f"{_fmt_usd(lq['total_usd'])} no total — "
-            f"comprados (longs) {_fmt_usd(lq['long_usd'])} ({lq['long_n']}) / "
-            f"vendidos (shorts) {_fmt_usd(lq['short_usd'])} ({lq['short_n']}). {bias}."
+            f"longs {_fmt_usd(lq['long_usd'])} ({lq['long_n']}) / "
+            f"shorts {_fmt_usd(lq['short_usd'])} ({lq['short_n']}). {bias}."
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("OKX liquidations unavailable for %s: %s", base, exc)
