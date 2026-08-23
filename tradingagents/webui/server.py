@@ -85,6 +85,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_static(path[len("/static/"):])
             elif path == "/api/health":
                 self._send_json({"ok": True, "service": "tradingdegens-web"})
+            elif path == "/api/config":
+                self._send_json(self.runner.config_info())
             elif path.startswith("/api/status/") or path.startswith("/api/run/"):
                 run_id = path.rsplit("/", 1)[-1]
                 snap = self.runner.status(run_id)

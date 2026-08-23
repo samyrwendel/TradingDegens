@@ -48,6 +48,14 @@ def test_health(server):
     assert status == 200 and body["ok"] is True
 
 
+def test_config_endpoint_reports_manaus(server):
+    status, body = _get(server, "/api/config")
+    assert status == 200
+    assert body["tz"] == "America/Manaus"
+    assert body["now"].endswith("-04:00")
+    assert len(body["today"]) == 10  # YYYY-MM-DD
+
+
 def test_index_served(server):
     with urllib.request.urlopen(server + "/", timeout=5) as resp:
         html = resp.read().decode()

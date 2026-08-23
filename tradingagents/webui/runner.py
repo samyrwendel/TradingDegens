@@ -15,11 +15,11 @@ import threading
 import time
 import traceback
 import uuid
-from datetime import datetime
 from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
+from tradingagents.webui import timeutil
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
 from tradingagents.webui.store import HistoryStore
@@ -96,6 +96,7 @@ class _Run:
         self.result: dict[str, Any] | None = None
         self.started_at = time.time()
         self.finished_at: float | None = None
+        self.finished_stamp: str | None = None  # Manaus ISO, set on completion
         self.usage_cb = UsageMetadataCallbackHandler()
         self.tracker = ProgressTracker(selected_analysts)
 
@@ -114,6 +115,7 @@ class _Run:
             "progress": self.tracker.snapshot(),
             "cost": self.cost(),
             "elapsed": round(elapsed, 1),
+            "finished_at": self.finished_stamp,
             "result": self.result,
         }
 
@@ -160,10 +162,12 @@ class AnalysisRunner:
         ticker = (ticker or "").strip().upper()
         if not ticker:
             raise ValueError("ticker vazio")
-        date = (date or "").strip() or datetime.now().strftime("%Y-%m-%d")
+        # Default to *today in Manaus*, not the process/UTC date: at 21:30 Manaus
+        # it is already the next day in UTC and the run would carry tomorrow.
+        date = (date or "").strip() or timeutil.today()
         asset_type = self.detect_asset_type(ticker)
         selected = select_analysts_for_asset(asset_type)
-        run_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         run = _Run(run_id, ticker, date, asset_type, selected)
         with self._lock:
             self._runs[run_id] = run
@@ -195,6 +199,7 @@ class AnalysisRunner:
             run.error = f"{type(exc).__name__}: {exc}"
             run.result = {"trace": traceback.format_exc()[-3000:]}
         run.finished_at = time.time()
+        run.finished_stamp = timeutil.stamp()
         self._persist(run, final_status)
         run.status = final_status
 
@@ -212,7 +217,9 @@ class AnalysisRunner:
                 "verdict": (run.result or {}).get("verdict") if status == "done" else None,
                 "cost_usd": cost["usd"],
                 "elapsed": elapsed,
-                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                # Manaus wall-clock with explicit -04:00 offset, so the UI can
+                # show it verbatim regardless of the browser's timezone.
+                "finished_at": run.finished_stamp or timeutil.stamp(),
                 "result": run.result,
                 "cost": cost,
             }
@@ -247,3 +254,16 @@ class AnalysisRunner:
 
     def history(self, limit: int = 25) -> list[dict[str, Any]]:
         return self.store.recent(limit)
+
+    def config_info(self) -> dict[str, Any]:
+        """Client bootstrap: the authoritative *Manaus* today + tz for the UI.
+
+        The date selector defaults to this, not to the browser's clock, so a
+        laptop set to another timezone still runs under Samyr's day.
+        """
+        return {
+            "today": timeutil.today(),
+            "now": timeutil.stamp(),
+            "tz": timeutil.TZ_NAME,
+            "tz_label": timeutil.TZ_LABEL,
+        }

@@ -2,6 +2,20 @@
 
 const $ = (id) => document.getElementById(id);
 let pollTimer = null;
+let TZ_LABEL = "GMT-4 (Manaus)";
+
+// Format a Manaus ISO stamp ("2026-08-23T20:30:00-04:00") for display WITHOUT
+// going through Date() — the string already carries Manaus wall time, so we read
+// it verbatim and never let the browser's timezone re-shift it. Returns e.g.
+// "23/08 20:30" (or with the tz label appended when withTz is set).
+function fmtStamp(iso, withTz) {
+  if (!iso) return "";
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return escapeHtml(String(iso));
+  const [, , mo, d, hh, mm] = m;
+  const base = `${d}/${mo} ${hh}:${mm}`;
+  return withTz ? `${base} ${TZ_LABEL}` : base;
+}
 
 // ---- tiny markdown renderer (no external deps; offline-safe) --------------
 function escapeHtml(s) {
@@ -143,12 +157,14 @@ function renderResult(snap) {
   const r = snap.result || {};
   $("verdictBadge").className = verdictClass(r.verdict);
   $("verdictBadge").textContent = (r.verdict || "—").toUpperCase();
+  const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
     `<span>Ativo <b>${escapeHtml(snap.ticker)}</b></span>` +
-    `<span>Data <b>${escapeHtml(snap.date || "")}</b></span>` +
+    `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
     `<span>Tipo <b>${escapeHtml(snap.asset_type || "")}</b></span>` +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
-    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>`;
+    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
+    (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
   $("bull").innerHTML = renderMarkdown(r.bull);
   $("bear").innerHTML = renderMarkdown(r.bear);
@@ -225,10 +241,11 @@ async function loadHistory() {
     if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
     ul.innerHTML = runs.map((r) => {
       const v = (r.verdict || r.status || "").toString();
+      const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
       return `<li data-id="${escapeHtml(r.run_id)}">` +
         `<span class="h-ticker">${escapeHtml(r.ticker || "?")}</span>` +
         `<span class="h-verdict ${verdictClass(v).replace("verdict", "").trim()}">${escapeHtml(v.toUpperCase())}</span>` +
-        `<span class="h-meta">${escapeHtml(r.date || "")} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
+        `<span class="h-meta">${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
         `</li>`;
     }).join("");
     [...ul.children].forEach((li) => {
@@ -246,9 +263,23 @@ async function openRun(runId) {
   } catch (e) { /* ignore */ }
 }
 
+async function applyConfig() {
+  // The authoritative "today" is Manaus-on-the-server, not the browser clock.
+  try {
+    const res = await fetch("/api/config");
+    const cfg = await res.json();
+    if (cfg.tz_label) TZ_LABEL = cfg.tz_label;
+    if (cfg.today) $("date").value = cfg.today;
+    $("tzLabel").textContent = "(" + TZ_LABEL + ")";
+    $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
+  } catch (e) {
+    // fallback: browser-local date if the server is unreachable at boot
+    $("date").value = new Date().toLocaleDateString("en-CA");
+  }
+}
+
 function init() {
-  const d = new Date();
-  $("date").value = d.toISOString().slice(0, 10);
+  applyConfig();
   $("analyzeForm").addEventListener("submit", startAnalysis);
   $("ticker").addEventListener("input", () => {
     const t = $("ticker").value.trim().toUpperCase();
