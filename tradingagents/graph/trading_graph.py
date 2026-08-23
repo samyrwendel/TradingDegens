@@ -15,6 +15,7 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
+    get_crypto_derivatives,
     get_fundamentals,
     get_global_news,
     get_income_statement,
@@ -23,6 +24,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_macro_indicators,
     get_news,
     get_prediction_markets,
+    get_price_timeframes,
     get_stock_data,
     get_verified_market_snapshot,
     resolve_instrument_identity,
@@ -195,6 +197,12 @@ class TradingAgentsGraph:
                     get_stock_data,
                     # Technical indicators
                     get_indicators,
+                    # Weekly+daily multi-timeframe trend read.
+                    get_price_timeframes,
+                    # Crypto perp funding / open interest / liquidations. Bound
+                    # unconditionally so a crypto run's tool call executes here;
+                    # the analyst only offers it to the LLM on crypto assets.
+                    get_crypto_derivatives,
                     # Deterministic verification snapshot (bound to the analyst
                     # LLM and required by its prompt; must be executable here or
                     # the call fails and the model reports it "unavailable").

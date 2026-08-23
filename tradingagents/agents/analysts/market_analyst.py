@@ -1,11 +1,19 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_crypto_derivatives,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
+    get_price_timeframes,
     get_stock_data,
     get_verified_market_snapshot,
+)
+from tradingagents.agents.utils.crypto_coverage import (
+    ensure_crypto_derivatives_coverage,
+)
+from tradingagents.agents.utils.multi_timeframe_coverage import (
+    ensure_multi_timeframe_coverage,
 )
 
 
@@ -13,13 +21,19 @@ def create_market_analyst(llm):
 
     def market_analyst_node(state):
         current_date = state["trade_date"]
+        symbol = state["company_of_interest"]
+        asset_type = state.get("asset_type", "stock")
+        is_crypto = asset_type == "crypto"
         instrument_context = get_instrument_context_from_state(state)
 
         tools = [
             get_stock_data,
             get_indicators,
+            get_price_timeframes,
             get_verified_market_snapshot,
         ]
+        if is_crypto:
+            tools.append(get_crypto_derivatives)
 
         system_message = (
             """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
@@ -51,6 +65,27 @@ Volume-Based Indicators:
 Before writing the final report, call get_verified_market_snapshot for this ticker and the current date, and treat it as the source of truth for any exact OHLCV, price-level, or indicator-value claim. If another tool's output conflicts with the verified snapshot, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless they are directly supported by tool output with concrete dates and prices.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
+            + (
+                " You MUST call get_price_timeframes once and analyze BOTH the"
+                " weekly and the daily frame: use the weekly for the dominant"
+                " trend and the daily for timing. Explicitly state in your report"
+                " whether the two timeframes CONVERGE or DIVERGE — a divergence"
+                " (e.g. weekly still up while the daily rolls over) is a signal,"
+                " not noise, and must be called out. Do not write a daily-only"
+                " report."
+            )
+            + (
+                (
+                    " This is a CRYPTO asset traded 24/7 on perpetual futures. You"
+                    " MUST call get_crypto_derivatives once and report the funding"
+                    " rate, open interest, and recent liquidations with their named"
+                    " sources — these drive crypto price action and are invisible to"
+                    " ordinary OHLCV. If a source is unavailable, say so; never"
+                    " invent a derivative value."
+                )
+                if is_crypto
+                else ""
+            )
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
         )
@@ -85,7 +120,17 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            # Multi-timeframe and (for crypto) derivatives are non-optional: if the
+            # analyst wrote a report that omitted them, append the deterministic
+            # section so the report never stays silent on the weekly frame or on
+            # funding/OI/liquidations. Both reuse cached, date-guarded data.
+            report = ensure_multi_timeframe_coverage(
+                result.content, symbol, current_date
+            )
+            if is_crypto:
+                report = ensure_crypto_derivatives_coverage(
+                    report, symbol, current_date
+                )
 
         return {
             "messages": [result],

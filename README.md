@@ -73,7 +73,39 @@ standing forward-looking themes (rates, recession) plus the instrument, or an ex
 this topic"* line. The report is never silent on market-implied probabilities.
 (`tradingagents/agents/utils/prediction_market_coverage.py`.)
 
-> Not in this fork yet (separate tasks): community interface, crypto expansion, multi-timeframe.
+### 5. Multi-timeframe market analysis — weekly *and* daily
+Upstream's market analyst only ever saw the **daily** frame. The BE backtest exposed the cost: its one
+wrong `Overweight` (14 Aug) bought the first candle of a top the weekly had already started rolling
+over. The analyst now calls `get_price_timeframes`, which resamples the same cached, `<= curr_date`-cut
+daily series into a **weekly** frame in memory (no extra network, no new look-ahead surface) and returns
+both trend reads plus an explicit **converge / diverge** verdict — weekly for the dominant trend, daily
+for timing. If the report omits a frame, the node **deterministically appends the weekly+daily section**.
+(`tradingagents/dataflows/multi_timeframe.py`, `tradingagents/agents/utils/multi_timeframe_coverage.py`.)
+
+### 6. Real crypto derivatives — funding, open interest, liquidations
+Upstream "crypto support" (and the 131-star `0x0funky/TradingAgents-crypto`) is just handing a `BTC-USD`
+ticker to yfinance — blind to what actually moves a perp. On a crypto asset the market analyst now calls
+`get_crypto_derivatives`, which pulls the derivatives layer from **keyless public feeds** (the same
+approach the house's degenbot uses on Hyperliquid), degrades **per source** if one is down, and never
+fabricates a value:
+
+| signal | primary source | fallback |
+|---|---|---|
+| funding rate | Hyperliquid `metaAndAssetCtxs` (1h) | Binance `fundingRate` (8h, historical) |
+| open interest | Hyperliquid `metaAndAssetCtxs` | Binance `openInterest(Hist)` |
+| liquidations | OKX `public/liquidation-orders` | — (live/recent window only) |
+| mark / 24h vol | Hyperliquid `metaAndAssetCtxs` | Binance `premiumIndex` |
+
+Crypto is **24/7**: every window is driven by UTC millisecond timestamps, weekends are normal trading
+days, and the read applies to any weekday. It flows through the **same cache** (`crypto_derivatives`
+category — second same-day run is served from disk, zero network) and the **same date guard** (a
+backtest date reads Binance funding *history* clamped to that day and degrades OI/liquidations that only
+retain a recent window, rather than borrowing today's number). If the report omits the signal the node
+appends it deterministically. (`tradingagents/dataflows/crypto.py`,
+`tradingagents/agents/utils/crypto_coverage.py`.)
+
+> Not in this fork yet (separate tasks): community interface, exchange-native crypto OHLCV as the price
+> path (derivatives are covered above; spot/perp candles still come from yfinance for crypto).
 
 ---
 

@@ -12,6 +12,7 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
+from .crypto import get_crypto_derivatives as get_crypto_derivatives_report
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -74,6 +75,12 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_prediction_markets",
         ]
+    },
+    "crypto_derivatives": {
+        "description": "Crypto perp funding, open interest, and liquidations",
+        "tools": [
+            "get_crypto_derivatives",
+        ]
     }
 }
 
@@ -82,6 +89,7 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    "crypto_exchanges",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -89,7 +97,10 @@ VENDOR_LIST = [
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
 # key, or a network blip should not crash an analysis over flavour data). Core
 # categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
+# Crypto derivatives are enrichment layered on the price path — three keyless
+# public feeds that can each blip; a total outage degrades to a sentinel (and the
+# per-source lines already degrade individually) rather than aborting the run.
+OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "crypto_derivatives"}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -140,6 +151,11 @@ VENDOR_METHODS = {
     # prediction_markets
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
+    },
+    # crypto_derivatives — one vendor that aggregates funding/OI/liquidations
+    # across Hyperliquid, Binance and OKX with per-source graceful degradation.
+    "get_crypto_derivatives": {
+        "crypto_exchanges": get_crypto_derivatives_report,
     },
 }
 
