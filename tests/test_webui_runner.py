@@ -5,6 +5,8 @@ A fake graph stands in for TradingAgentsGraph so these tests never call an LLM.
 
 import time
 
+import pytest
+
 import tradingagents.webui.runner as runner_module
 from tradingagents.webui.runner import (
     AnalysisRunner,
@@ -13,6 +15,19 @@ from tradingagents.webui.runner import (
     select_analysts_for_asset,
 )
 from tradingagents.webui.store import HistoryStore
+
+
+@pytest.fixture(autouse=True)
+def _stub_price_chart(monkeypatch):
+    """Keep the worker tests hermetic (no network).
+
+    ``_worker`` always calls ``fetch_price_chart`` — a real, date-guarded price
+    series fetch — after the fake graph returns. No test here asserts on the
+    chart payload (chart building has its own coverage in test_price_structure.py),
+    and the live fetch can race the ``_wait`` deadline under load, making
+    ``test_runner_persists_to_history`` and its siblings flaky in the full suite.
+    """
+    monkeypatch.setattr(runner_module, "fetch_price_chart", lambda t, d: {})
 
 FINAL_STATE = {
     "final_trade_decision": "Rating: Buy\nStrong conviction.",
