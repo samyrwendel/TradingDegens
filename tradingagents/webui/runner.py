@@ -19,12 +19,12 @@ from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-from tradingagents.webui import timeutil
+from tradingagents.webui import ask as ask_module, timeutil
 from tradingagents.webui.compare import (
     build_column,
     confront_pair_valid,
-    deterministic_meta,
     detect_method,
+    deterministic_meta,
 )
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
@@ -43,6 +43,9 @@ _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 _CRYPTO_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
 _STOCK_TIMEFRAMES = ("1w", "1d")
 _DEFAULT_TIMEFRAME = "1d"
+
+# Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
+_MAX_QUESTION_CHARS = 500
 
 
 def select_analysts_for_asset(asset_type: str, include_erick: bool = False) -> list[str]:
@@ -652,6 +655,74 @@ class AnalysisRunner:
         crun.status = "done"
         self._persist_compare(crun, "done")
         return crun.snapshot()
+
+    # ------------------------------------------------------- Q&A ancorado ----
+    def ask(self, run_id: str, question: str) -> dict[str, Any] | None:
+        """Responde uma pergunta ANCORADA nos dados JÁ computados de uma run.
+
+        Não re-roda a análise nem toca em dado externo: monta o contexto
+        (price_structure + veredito + relatórios que a run já cacheou) e chama o
+        modelo BARATO (``quick_think_llm``) UMA vez, medindo o custo. O grounding
+        e a honestidade ("não dá pra afirmar") vivem no prompt de
+        :mod:`tradingagents.webui.ask`. Retorna ``None`` se a run é desconhecida;
+        levanta ``ValueError`` se a pergunta vier vazia."""
+        question = (question or "").strip()
+        if not question:
+            raise ValueError("faça uma pergunta")
+        question = question[:_MAX_QUESTION_CHARS]
+        record = self._load_record(run_id)
+        if record is None:
+            return None
+
+        messages, meta = ask_module.build_messages(record, question)
+        usage_cb = UsageMetadataCallbackHandler()
+        llm = self._answer_llm([usage_cb])
+        reply = llm.invoke(messages)
+        answer = getattr(reply, "content", reply)
+        # Alguns provedores devolvem o conteúdo em "partes" (lista) em vez de texto.
+        if isinstance(answer, list):
+            answer = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in answer
+            )
+        return {
+            "run_id": record.get("run_id") or run_id,
+            "question": question,
+            "answer": str(answer).strip(),
+            "cost": cost_breakdown(usage_cb.usage_metadata),
+            "model": self.base_config.get("quick_think_llm"),
+            "mode": meta.get("mode"),
+            "grounded": bool(meta.get("has_numbers")),
+            "timeframe": meta.get("timeframe"),
+            "as_of": meta.get("as_of"),
+        }
+
+    def _answer_llm(self, callbacks: list):
+        """Chat client BARATO pra responder perguntas (``quick_think_llm``), com os
+        mesmos knobs de provedor da run e os callbacks de uso pra medir o custo."""
+        from tradingagents.llm_clients import create_llm_client
+        cfg = self.base_config
+        kwargs: dict[str, Any] = {"callbacks": callbacks}
+        provider = (cfg.get("llm_provider") or "openai").lower()
+        temperature = cfg.get("temperature")
+        if temperature is not None and temperature != "":
+            kwargs["temperature"] = float(temperature)
+        if provider == "openai" and cfg.get("openai_reasoning_effort"):
+            kwargs["reasoning_effort"] = cfg["openai_reasoning_effort"]
+        elif provider == "anthropic" and cfg.get("anthropic_effort"):
+            kwargs["effort"] = cfg["anthropic_effort"]
+        elif provider == "google" and cfg.get("google_thinking_level"):
+            kwargs["thinking_level"] = cfg["google_thinking_level"]
+        max_retries = cfg.get("llm_max_retries")
+        if max_retries is not None and max_retries != "":
+            kwargs["max_retries"] = int(max_retries)
+        client = create_llm_client(
+            provider=provider,
+            model=cfg["quick_think_llm"],
+            base_url=cfg.get("backend_url"),
+            **kwargs,
+        )
+        return client.get_llm()
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:

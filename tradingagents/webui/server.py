@@ -11,6 +11,7 @@ Routes:
     GET  /api/health           -> {"ok": true, ...}
     POST /api/analyze          -> {ticker, date[, compare]} -> {run_id}
     POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
+    POST /api/ask              -> {run_id, question} -> grounded Q&A over a run
     GET  /api/status/<run_id>  -> live run snapshot (progress, cost, result)
     GET  /api/run/<run_id>     -> alias of status (from history if needed)
     GET  /api/runs?status=running -> live in-process runs (em andamento)
@@ -172,6 +173,21 @@ class _Handler(BaseHTTPRequestHandler):
                 a = (body.get("a") or "").strip()
                 b = (body.get("b") or "").strip()
                 self._send_json(self.runner.confront(a, b))
+            elif path == "/api/ask":
+                # Q&A ancorado (task 027): pergunta em linguagem natural sobre uma
+                # run JÁ computada; responde com os NÍVEIS reais dela (price_structure)
+                # via modelo barato, sem re-rodar a análise nem buscar dado externo.
+                body = self._read_json_body()
+                run_id = (body.get("run_id") or "").strip()
+                question = (body.get("question") or "").strip()
+                if not run_id:
+                    self._send_json({"error": "informe o run_id"}, 400)
+                    return
+                answer = self.runner.ask(run_id, question)
+                if answer is None:
+                    self._send_json({"error": "execução desconhecida"}, 404)
+                else:
+                    self._send_json(answer)
             else:
                 self._send_json({"error": "não encontrado"}, 404)
         except ValueError as exc:

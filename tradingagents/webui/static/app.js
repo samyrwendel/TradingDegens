@@ -275,6 +275,7 @@ function renderResult(snap) {
     $("bull").innerHTML = ""; $("bear").innerHTML = "";
     $("bullLead").textContent = ""; $("bearLead").textContent = "";
     $("sections").innerHTML = section("Rastreamento do erro", "```\n" + ((snap.result && snap.result.trace) || "") + "\n```");
+    mountAskBox($("askSingle"), "");  // run com erro não tem dado pra ancorar pergunta
     return;
   }
 
@@ -340,6 +341,8 @@ function renderResult(snap) {
   html += section("🎯 Plano do Trader", r.trader_plan);
   html += section("🛡️ Decisão de Risco (veredito final na íntegra)", r.risk_decision || r.final_trade_decision);
   $("sections").innerHTML = html;
+
+  mountAskBox($("askSingle"), snap.run_id);
 
   scrollToOpen(panel);
   loadHistory();
@@ -474,8 +477,90 @@ function renderCompare(snap) {
   drawCompareChart("cmpChartA", a);
   drawCompareChart("cmpChartB", b);
 
+  mountAskBox($("askCompare"), snap.run_id);
+
   scrollToOpen(panel);
   loadHistory();
+}
+
+// ---- Q&A ancorado sobre a análise aberta (task 027) ------------------------
+// Uma caixa "pergunte sobre esta análise" atrelada ao run_id. A resposta vem
+// ANCORADA nos números da própria run (EMA 8/21, zonas do price_structure) via
+// /api/ask — modelo barato, custo à vista, SEM re-rodar. Igual na análise única e
+// no confronto (só muda o container). O thread acumula pergunta→resposta enquanto
+// o mesmo run está aberto; abrir outro run reconstrói a caixa limpa.
+const _askThreads = {};   // run_id -> [{q, a, cost, pending, err}]
+
+function mountAskBox(container, runId) {
+  if (!container) return;
+  if (!runId) { container.innerHTML = ""; container.dataset.runId = ""; return; }
+  // Já montada pro mesmo run: preserva o thread (renderResult pode rodar de novo).
+  if (container.dataset.runId === runId && container.firstChild) return;
+  container.dataset.runId = runId;
+  container.innerHTML =
+    `<div class="ask-head">💬 Pergunte sobre esta análise</div>` +
+    `<div class="ask-thread"></div>` +
+    `<form class="ask-form" autocomplete="off">` +
+      `<input type="text" class="ask-input" maxlength="500" ` +
+        `placeholder="Pergunte sobre esta análise… (ex.: onde seria o recuo à média?)" ` +
+        `aria-label="Pergunte sobre esta análise" />` +
+      `<button type="submit" class="ask-send">Perguntar</button>` +
+    `</form>` +
+    `<p class="ask-hint">Responde com os níveis reais desta análise — não re-roda nada · custo à vista.</p>`;
+  const thread = container.querySelector(".ask-thread");
+  const form = container.querySelector(".ask-form");
+  const input = container.querySelector(".ask-input");
+  renderAskThread(thread, runId);
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = "";
+    askQuestion(runId, q, thread, form);
+  });
+}
+
+function renderAskThread(thread, runId) {
+  if (!thread) return;
+  const items = _askThreads[runId] || [];
+  thread.innerHTML = items.map((it) => {
+    const q = `<div class="ask-q"><span class="ask-q-tag">você</span>${escapeHtml(it.q)}</div>`;
+    if (it.pending) return q + `<div class="ask-a ask-pending">pensando…</div>`;
+    if (it.err) return q + `<div class="ask-a ask-err">${escapeHtml(it.err)}</div>`;
+    const cost = it.cost ? `<span class="ask-cost">${fmtCost(it.cost)}</span>` : "";
+    return q + `<div class="ask-a"><div class="md">${renderMarkdown(it.a || "")}</div>${cost}</div>`;
+  }).join("");
+  thread.scrollTop = thread.scrollHeight;
+}
+
+async function askQuestion(runId, question, thread, form) {
+  const items = _askThreads[runId] || (_askThreads[runId] = []);
+  const entry = { q: question, pending: true };
+  items.push(entry);
+  renderAskThread(thread, runId);
+  const btn = form && form.querySelector(".ask-send");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runId, question }),
+    });
+    const data = await res.json().catch(() => ({}));
+    entry.pending = false;
+    if (!res.ok || data.error) {
+      entry.err = data.error || "falha ao responder";
+    } else {
+      entry.a = data.answer || "";
+      entry.cost = data.cost;
+    }
+  } catch (e) {
+    entry.pending = false;
+    entry.err = "erro de rede — tente de novo";
+  } finally {
+    if (btn) btn.disabled = false;
+    renderAskThread(thread, runId);
+  }
 }
 
 // ---- confronto manual (Fase 3): esta análise × outra do mesmo ativo ----------
