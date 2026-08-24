@@ -60,12 +60,24 @@ def make_resilient_analyst(node, report_key: str, label: str, attempts: int = 2)
                 logger.warning(
                     "analyst %s failed on attempt %d/%d: %s", label, i, attempts, exc
                 )
+        # Every attempt (incl. the automatic retry) failed: degrade this source and
+        # keep going. The retry already happened silently — the user only ever sees
+        # a resolved-source result or this explicit "feito sem X", never a raw error.
         reason = f"{type(last).__name__}: {last}"
         note = (
-            f"⚠️ Analista **{label}** indisponível após {attempts} tentativa(s) "
-            f"({reason}). A análise segue sem ele — trate esta leitura como ausente, "
-            "não como sinal."
+            f"⚠️ Fonte **{label}** indisponível após {attempts} tentativa(s) "
+            f"({reason}). A análise seguiu SEM essa fonte — trate esta leitura como "
+            "ausente, não como sinal."
         )
-        return {"messages": [AIMessage(content=note)], report_key: note}
+        # Structured entry aggregated onto the run state (reducer=add) so the UI can
+        # name the failed source, say the analysis was done without it, and offer a
+        # "reavaliar com essa fonte" control.
+        return {
+            "messages": [AIMessage(content=note)],
+            report_key: note,
+            "degraded_sources": [
+                {"label": label, "report_key": report_key, "reason": reason}
+            ],
+        }
 
     return wrapped

@@ -1,3 +1,4 @@
+from operator import add
 from typing import Annotated
 
 from langgraph.graph import MessagesState
@@ -50,6 +51,9 @@ class AgentState(MessagesState):
     instrument_context: Annotated[str, "Deterministic ticker identity resolved at run start"]
     trade_date: Annotated[str, "What date we are trading at"]
     timeframe: Annotated[str, "Reference timeframe for the market analyst's technical read (1w/1d/4h/1h/15m); daily by default"]
+    # Sources/analysts that degraded (failed after the auto-retry) this run. Reducer
+    # is list-add so each resilient analyst appends its own entry; the UI names them.
+    degraded_sources: Annotated[list, add]
 
     sender: Annotated[str, "Agent that sent this message"]
 

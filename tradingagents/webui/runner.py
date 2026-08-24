@@ -74,6 +74,9 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
     risk = final_state.get("risk_debate_state") or {}
     return {
         "verdict": signal,
+        # Sources that degraded (failed after the auto-retry) — the UI names them,
+        # says the analysis ran without them, and offers a "reavaliar" control.
+        "degraded": list(final_state.get("degraded_sources") or []),
         "final_trade_decision": final_state.get("final_trade_decision", "") or "",
         "bull": debate.get("bull_history", "") or "",
         "bear": debate.get("bear_history", "") or "",

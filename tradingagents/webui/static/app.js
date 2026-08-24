@@ -240,6 +240,7 @@ function renderResult(snap) {
     $("actionable").classList.add("hidden");
     $("headPrice").classList.add("hidden");
     $("verdictTf").classList.add("hidden");
+    $("degradedBanner").classList.add("hidden");
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
@@ -275,6 +276,7 @@ function renderResult(snap) {
   // trocado só pra olhar o gráfico, o carimbo fixa o frame do veredito real.
   _verdictTf = snap.verdict_timeframe || r.verdict_timeframe || r.timeframe || "1d";
   renderVerdictTf();
+  renderDegraded(r.degraded);
   hideDegrade();
 
   renderHeadPrice(r.actionable);
@@ -510,6 +512,33 @@ function renderTfSelector() {
   }).join("");
   bindTfSelector();
   renderReevalBtn();
+}
+
+// Banner de fonte degradada: nomeia a(s) fonte(s) que falhou(aram) MESMO após a
+// nova tentativa automática, deixa explícito que a análise foi feita SEM ela(s), e
+// oferece reavaliar incluindo-a(s) — o "informar + decidir" que o Samyr pediu, sem
+// congelar o run server-side. Some quando nada degradou.
+function renderDegraded(list) {
+  const el = $("degradedBanner");
+  if (!el) return;
+  if (!Array.isArray(list) || !list.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const names = list.map((d) => escapeHtml((d && (d.label || d.report_key)) || "fonte")).join(" · ");
+  const plural = list.length > 1;
+  const reasons = list
+    .filter((d) => d && d.reason)
+    .map((d) => `<li><b>${escapeHtml(d.label || d.report_key || "fonte")}</b>: ${escapeHtml(d.reason)}</li>`)
+    .join("");
+  el.innerHTML =
+    `<div class="dg-head">⚠️ Análise feita <b>SEM</b> ${plural ? "as fontes" : "a fonte"}: <b>${names}</b></div>` +
+    `<div class="dg-sub">Tentei automaticamente mais uma vez antes de seguir. As leituras acima ` +
+    `não incluem ${plural ? "essas fontes" : "essa fonte"} — trate como ausente, não como sinal.</div>` +
+    (reasons ? `<ul class="dg-list">${reasons}</ul>` : "") +
+    `<button type="button" class="dg-btn" id="reevalSourcesBtn">⟳ Reavaliar com ${plural ? "essas fontes" : "essa fonte"}</button>`;
+  el.classList.remove("hidden");
+  const btn = $("reevalSourcesBtn");
+  // Reavaliar = rodar a análise inteira de novo (mesmo TF do veredito): a fonte
+  // que caiu por transitório tende a voltar; o usuário decide pedir isso.
+  if (btn) btn.addEventListener("click", () => reevaluate(_verdictTf));
 }
 
 // Carimbo do cabeçalho: "veredito no <frame>". Deixa explícito em qual timeframe

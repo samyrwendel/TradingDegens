@@ -43,6 +43,12 @@ def test_resilient_analyst_degrades_after_all_attempts():
     msg = out["messages"][0]
     assert isinstance(msg, AIMessage)
     assert not msg.tool_calls
+    # structured entry so the UI can NAME the source + offer a re-eval (task 015)
+    ds = out["degraded_sources"]
+    assert len(ds) == 1
+    assert ds[0]["label"] == "News Analyst"
+    assert ds[0]["report_key"] == "news_report"
+    assert "boom" in ds[0]["reason"]
 
 
 def test_resilient_analyst_passes_through_success():
@@ -51,6 +57,35 @@ def test_resilient_analyst_passes_through_success():
 
     node = make_resilient_analyst(ok, "market_report", "Market Analyst")
     assert node({"messages": []})["market_report"] == "R"
+
+
+def test_degraded_sources_accumulate_through_a_real_graph():
+    """End-to-end through LangGraph: a failing analyst degrades and its entry is
+    merged onto the run state via the list-add reducer, while the run completes and
+    a healthy analyst is untouched (task 015)."""
+    from langgraph.graph import END, START, StateGraph
+
+    from tradingagents.agents.utils.agent_states import AgentState
+
+    def failing(state):
+        raise RuntimeError("src down")
+
+    def healthy(state):
+        return {"market_report": "ok"}
+
+    g = StateGraph(AgentState)
+    g.add_node("A", make_resilient_analyst(failing, "news_report", "News Analyst"))
+    g.add_node("B", make_resilient_analyst(healthy, "market_report", "Market Analyst"))
+    g.add_edge(START, "A")
+    g.add_edge("A", "B")
+    g.add_edge("B", END)
+    app = g.compile()
+
+    out = app.invoke({"messages": [], "degraded_sources": []})
+    labels = [d["label"] for d in out["degraded_sources"]]
+    assert labels == ["News Analyst"]              # only the failing one, once
+    assert out["news_report"].startswith("⚠️")     # degraded report is explicit
+    assert out["market_report"] == "ok"            # healthy analyst untouched
 
 
 def test_tool_error_message_is_a_string():

@@ -116,6 +116,16 @@ def test_extract_result_missing_fields_default_empty():
     r = extract_result({}, "Hold")
     assert r["bull"] == "" and r["bear"] == ""
     assert r["verdict"] == "Hold"
+    assert r["degraded"] == []
+
+
+def test_extract_result_surfaces_degraded_sources():
+    fs = dict(FINAL_STATE)
+    fs["degraded_sources"] = [
+        {"label": "News Analyst", "report_key": "news_report", "reason": "RuntimeError: down"}
+    ]
+    r = extract_result(fs, "Buy")
+    assert r["degraded"] == fs["degraded_sources"]
 
 
 def test_runner_completes_and_extracts(tmp_path):

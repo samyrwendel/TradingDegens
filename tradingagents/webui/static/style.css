@@ -246,6 +246,27 @@ details.section[open] > summary::before { content: "▾"; }
   background: #3a2f10; border: 1px solid #5c4a17; border-radius: 8px; padding: 7px 11px;
 }
 
+/* banner de fonte degradada: nomeia a fonte que caiu (após 1 retry), diz que a
+   análise seguiu sem ela e oferece reavaliar. Âmbar = atenção, não erro. */
+.degraded-banner {
+  margin: 4px 0 12px; padding: 11px 14px;
+  border: 1px solid #5c4a17; border-radius: 10px; background: #2a2410;
+}
+.degraded-banner .dg-head { color: var(--amber); font-size: 14px; font-weight: 600; }
+.degraded-banner .dg-head b { color: #ffd479; }
+.degraded-banner .dg-sub { color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.5; }
+.degraded-banner .dg-list {
+  margin: 8px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.5;
+}
+.degraded-banner .dg-list b { color: #d6dceb; }
+.degraded-banner .dg-btn {
+  margin-top: 10px; padding: 7px 14px; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--amber); background: transparent; border: 1px solid #5c4a17;
+  border-radius: 8px; cursor: pointer; white-space: nowrap;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.degraded-banner .dg-btn:hover { color: #fff; background: #3a2f10; border-color: var(--amber); }
+
 /* carimbo do TF no cabeçalho do veredito ("veredito no Diário/4h/15m") */
 .verdict-tf {
   font-size: 12.5px; font-weight: 600; color: var(--muted);

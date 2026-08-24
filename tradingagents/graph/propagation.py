@@ -44,6 +44,9 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "timeframe": timeframe or "1d",
+            # Degraded sources accumulate here (reducer=add) when an analyst fails
+            # after its auto-retry; empty means the run used every source.
+            "degraded_sources": [],
             "past_context": past_context,
             "investment_debate_state": InvestDebateState(
                 {
