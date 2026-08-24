@@ -292,6 +292,15 @@ details.section[open] > summary::before { content: "▾"; }
 .history li:hover { border-color: var(--accent); }
 .history .h-ticker { font-weight: 700; font-family: var(--mono); min-width: 84px; }
 .history .h-verdict { font-size: 12px; padding: 2px 9px; border-radius: 6px; border: 1px solid var(--border); }
+/* cor do veredito na lista lateral — mesma escala do badge grande: COMPRAR/AUMENTAR
+   verde, MANTER neutro, REDUZIR/VENDER vermelho. O termo em inglês ao lado
+   (.verdict-orig) segue cinza discreto. Legível no dark theme, desktop e mobile. */
+.history .h-verdict.buy,
+.history .h-verdict.overweight { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
+.history .h-verdict.hold { color: #c7cfdd; background: #232b3b; border-color: #33405a; }
+.history .h-verdict.underweight,
+.history .h-verdict.sell { color: var(--red); background: var(--red-dim); border-color: #5c1e28; }
+.history .h-verdict.error { color: var(--red); background: var(--red-dim); border-color: #5c1e28; }
 .history .h-meta { color: var(--muted); font-size: 12.5px; font-family: var(--mono); margin-left: auto; white-space: nowrap; }
 .history .empty { color: var(--muted); border: none; background: none; cursor: default; padding: 4px 0; }
 
