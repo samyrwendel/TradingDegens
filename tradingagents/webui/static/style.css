@@ -246,6 +246,59 @@ details.section[open] > summary::before { content: "▾"; }
   background: #3a2f10; border: 1px solid #5c4a17; border-radius: 8px; padding: 7px 11px;
 }
 
+/* ---- comparação Padrão × Erick (Fase 3, meta-juiz) ---- */
+.compare-panel .cmp-head { display: flex; align-items: baseline; gap: 10px 20px; flex-wrap: wrap; margin-bottom: 12px; }
+.cmp-2p { color: var(--muted); font-weight: 400; font-size: 11px; }
+
+.meta-judge {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2);
+  padding: 14px 16px; margin-bottom: 16px;
+}
+.mj-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.mj-badge {
+  font-weight: 800; font-size: 14px; padding: 4px 12px; border-radius: 999px;
+  white-space: nowrap; border: 1px solid var(--border);
+}
+.mj-head.agree .mj-badge { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
+.mj-head.diverge .mj-badge { color: var(--amber); background: #3a2f10; border-color: #5c4a17; }
+.mj-head.partial .mj-badge { color: var(--muted); }
+.mj-headline { font-size: 15px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.mj-body { display: grid; gap: 8px; }
+.mj-sec h3 { margin: 6px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.mj-sec .md { font-size: 13.5px; }
+
+.cmp-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cmp-col {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2);
+  padding: 14px 16px; min-width: 0; display: flex; flex-direction: column;
+}
+.cmp-col-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.cmp-col-title { font-weight: 700; font-size: 15px; }
+.cmp-reused {
+  font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+}
+.cmp-verdict-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.cmp-verdict-row .verdict { font-size: 20px; padding: 6px 14px; }
+.cmp-tf { color: var(--muted); font-size: 12.5px; }
+.cmp-degraded { color: var(--amber); font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
+.cmp-err { color: var(--red); font-size: 12.5px; margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
+.cmp-plan { font-size: 13px; overflow-wrap: anywhere; }
+.cmp-col-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 12px; font-family: var(--mono);
+}
+.cmp-open {
+  font: inherit; font-size: 12.5px; color: var(--accent); background: transparent;
+  border: 1px solid #2e5c7d; border-radius: 8px; padding: 5px 11px; cursor: pointer; white-space: nowrap;
+}
+.cmp-open:hover { color: #fff; background: var(--panel); border-color: var(--accent); }
+
+/* mobile: colunas empilham (nada de scroll horizontal) */
+@media (max-width: 760px) {
+  .cmp-cols { grid-template-columns: 1fr; }
+}
+
 /* banner de fonte degradada: nomeia a fonte que caiu (após 1 retry), diz que a
    análise seguiu sem ela e oferece reavaliar. Âmbar = atenção, não erro. */
 .degraded-banner {

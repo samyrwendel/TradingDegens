@@ -49,6 +49,10 @@
             <input type="checkbox" id="erickToggle" />
             <span>🧭 método Erick</span>
           </label>
+          <label class="method-toggle" title="Roda as DUAS leituras (Padrão e método Erick) e confronta com um meta-juiz: onde concordam e onde divergem (a divergência é o sinal). Reusa cache; custo ~2 pipelines.">
+            <input type="checkbox" id="compareToggle" />
+            <span>⚖️ comparar Padrão × Erick</span>
+          </label>
           <button type="submit" id="runBtn">Analisar</button>
         </form>
         <p class="hint" id="assetHint"></p>
@@ -130,6 +134,17 @@
         </div>
 
         <div id="sections"></div>
+      </section>
+
+      <!-- Comparação Padrão × Erick (Fase 3): meta-juiz no topo, duas colunas
+           lado a lado (empilha no mobile). -->
+      <section class="panel compare-panel hidden" id="comparePanel">
+        <div class="cmp-head">
+          <div class="asset-name" id="cmpAsset">—</div>
+          <div class="result-meta" id="cmpMeta"></div>
+        </div>
+        <div class="meta-judge" id="metaJudge"></div>
+        <div class="cmp-cols" id="cmpCols"></div>
       </section>
     </div>
   </main>

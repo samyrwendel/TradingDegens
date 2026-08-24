@@ -223,6 +223,9 @@ function renderResult(snap) {
   // este run passa a ser o "aberto" na tela: enquanto for ele, um término dele
   // NÃO vira aviso "pronto" (o usuário já está vendo o resultado).
   _watchedRunId = snap.run_id || _watchedRunId;
+  $("comparePanel").classList.add("hidden");
+  // Run de comparação (Padrão × Erick): view própria, lado a lado.
+  if ((snap.result || {}).compare) { renderCompare(snap); return; }
   const nameEl = document.getElementById("assetName");
   if (nameEl) nameEl.textContent = snap.ticker || "—";
   _openTicker = snap.ticker || "";
@@ -310,6 +313,87 @@ function renderResult(snap) {
   html += section("🎯 Plano do Trader", r.trader_plan);
   html += section("🛡️ Decisão de Risco (veredito final na íntegra)", r.risk_decision || r.final_trade_decision);
   $("sections").innerHTML = html;
+
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  loadHistory();
+}
+
+// ---- comparação Padrão × Erick (meta-juiz) --------------------------------
+// Bloco titulado do meta-juiz (concordância / divergência / significado). Renderiza
+// markdown pra manter negrito e listas; nada é cortado — o texto flui inteiro.
+function metaSection(title, md) {
+  if (!md || !String(md).trim()) return "";
+  return `<div class="mj-sec"><h3>${escapeHtml(title)}</h3><div class="md">${renderMarkdown(String(md))}</div></div>`;
+}
+
+// Uma coluna (Padrão ou Erick): veredito + timeframe, plano operável, custo, flag
+// de cache reusado, e um atalho pra abrir a análise completa daquele lado.
+function compareColumn(title, c) {
+  if (!c || !c.method) return "";
+  const isErick = c.method === "erick";
+  const v = c.verdict || (c.status === "error" ? "error" : "");
+  const plan = isErick
+    ? (c.erick_report || c.trader_plan || c.final_decision || "")
+    : (c.trader_plan || c.final_decision || "");
+  const reused = c.reused
+    ? `<span class="cmp-reused" title="reaproveitado do cache — não re-rodou">♻ cache</span>`
+    : "";
+  const deg = (Array.isArray(c.degraded) && c.degraded.length)
+    ? `<div class="cmp-degraded">⚠️ Feito sem: ${c.degraded.map((d) => escapeHtml((d && (d.label || d.report_key)) || "fonte")).join(" · ")}</div>`
+    : "";
+  const err = c.status === "error"
+    ? `<div class="cmp-err">Leitura indisponível: ${escapeHtml(c.error || "falha")}</div>`
+    : "";
+  const tf = TF_LABEL[c.timeframe] || c.timeframe || "Diário";
+  return `<div class="cmp-col">` +
+    `<div class="cmp-col-head"><span class="cmp-col-title">${escapeHtml(title)}</span>${reused}</div>` +
+    `<div class="cmp-verdict-row"><span class="${verdictClass(v)}">${verdictHtml(v)}</span>` +
+    `<span class="cmp-tf">veredito no ${escapeHtml(tf)}</span></div>` +
+    deg + err +
+    `<div class="cmp-plan md">${renderMarkdown(plan)}</div>` +
+    `<div class="cmp-col-foot"><span>${fmtCost(c.cost)} · ${c.elapsed || 0}s</span>` +
+    (c.run_id ? `<button type="button" class="cmp-open" data-id="${escapeHtml(c.run_id)}">abrir análise completa →</button>` : "") +
+    `</div></div>`;
+}
+
+function renderCompare(snap) {
+  clearInterval(pollTimer); pollTimer = null;
+  $("runBtn").disabled = false;
+  $("progressPanel").classList.add("hidden");
+  $("resultPanel").classList.add("hidden");
+  const panel = $("comparePanel");
+  panel.classList.remove("hidden");
+
+  const cmp = (snap.result || {}).compare || {};
+  const meta = cmp.meta || {};
+  const p = cmp.padrao || {}, e = cmp.erick || {};
+
+  $("cmpAsset").textContent = snap.ticker || "—";
+  const finished = snap.finished_at;
+  $("cmpMeta").innerHTML =
+    `<span>Data <b>${escapeHtml(snap.date || "")}</b></span>` +
+    `<span>Custo <b>${fmtCost(snap.cost)}</b> <span class="cmp-2p">(2 pipelines)</span></span>` +
+    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
+    (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
+
+  const agr = meta.agreement || "";
+  const agrCls = agr === "concordam" ? "agree" : (agr === "divergem" ? "diverge" : "partial");
+  const agrLabel = agr === "concordam" ? "✅ Concordam" : (agr === "divergem" ? "⚠️ Divergem" : "◐ Parcial");
+  $("metaJudge").innerHTML =
+    `<div class="mj-head ${agrCls}">` +
+      `<span class="mj-badge">${agrLabel}</span>` +
+      `<span class="mj-headline">${escapeHtml(meta.headline || "")}</span>` +
+    `</div>` +
+    `<div class="mj-body">` +
+      metaSection("Concordância", meta.concordancia) +
+      metaSection("Divergência — o sinal", meta.divergencia) +
+      metaSection("O que significa pra decisão", meta.significado) +
+    `</div>`;
+
+  $("cmpCols").innerHTML = compareColumn("Padrão", p) + compareColumn("🧭 Método Erick", e);
+  $("cmpCols").querySelectorAll("button.cmp-open").forEach((b) =>
+    b.addEventListener("click", () => openRun(b.dataset.id))
+  );
 
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   loadHistory();
@@ -1081,19 +1165,23 @@ async function startAnalysis(ev) {
   const date = $("date").value;
   if (!ticker) { $("formError").textContent = "Informe um ticker."; return; }
   const et = $("erickToggle");
+  const ct = $("compareToggle");
+  const compare = !!(ct && ct.checked);
   const method = et && et.checked ? "erick" : "padrao";
   $("runBtn").disabled = true;
   $("resultPanel").classList.add("hidden");
+  $("comparePanel").classList.add("hidden");
   $("steps").innerHTML = "";
   try {
     const res = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker, date, method }),
+      body: JSON.stringify({ ticker, date, method, compare }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");
-    renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: "Subindo o motor…", percent: 2, plan: [], reached: [] } });
+    const boot = compare ? "Comparando Padrão × Erick…" : "Subindo o motor…";
+    renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: boot, percent: 2, plan: [], reached: [] } });
     watchRun(data.run_id);
     loadHistory();   // o novo run aparece na lista como "em andamento" na hora
   } catch (e) {

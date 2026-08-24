@@ -155,6 +155,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
                     return
+                # "comparar Padrão × Erick" (Fase 3): roda as duas leituras + meta-juiz.
+                if body.get("compare"):
+                    run_id = self.runner.start_compare(ticker, date, timeframe=timeframe)
+                    self._send_json({"run_id": run_id})
+                    return
                 run_id = self.runner.start(
                     ticker, date, method=method or "padrao", timeframe=timeframe
                 )

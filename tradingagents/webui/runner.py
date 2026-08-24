@@ -20,6 +20,7 @@ from typing import Any
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from tradingagents.webui import timeutil
+from tradingagents.webui.compare import build_column, deterministic_meta
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
 from tradingagents.webui.store import HistoryStore
@@ -194,12 +195,89 @@ class _Run:
         }
 
 
+class _SimpleProgress:
+    """Coarse progress for a compare run (three phases: Padrão → Erick → meta).
+
+    Exposes the same ``snapshot()`` shape a :class:`ProgressTracker` does so a
+    compare run flows through ``status``/``active_runs`` unchanged.
+    """
+
+    def __init__(self):
+        self._phase = "Inicializando"
+        self._label = "Preparando comparação…"
+        self._pct = 0
+        self._started = time.monotonic()
+
+    def set(self, phase: str, label: str, pct: int) -> None:
+        self._phase, self._label, self._pct = phase, label, pct
+
+    def done(self) -> None:
+        self.set("Concluído", "Comparação concluída", 100)
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "phase": self._phase, "label": self._label, "percent": self._pct,
+            "index": 0, "total": 0,
+            "elapsed": round(time.monotonic() - self._started, 1),
+            "plan": [], "reached": [],
+        }
+
+
+class _CompareRun:
+    """In-memory state for a Padrão × Erick comparison run.
+
+    Duck-types the pieces of :class:`_Run` that ``status``/``active_runs``/
+    ``_running_summary`` read, so it lives in the same ``_runs`` table and reuses
+    the polling + history plumbing. Its ``result`` carries a ``compare`` block the
+    UI renders side by side.
+    """
+
+    def __init__(self, run_id, ticker, date, asset_type, timeframe):
+        self.run_id = run_id
+        self.ticker = ticker
+        self.date = date
+        self.asset_type = asset_type
+        self.timeframe = timeframe
+        self.status = "running"
+        self.error: str | None = None
+        self.result: dict[str, Any] | None = None
+        self.started_at = time.time()
+        self.finished_at: float | None = None
+        self.finished_stamp: str | None = None
+        self.tracker = _SimpleProgress()
+
+    def cost(self) -> dict[str, Any]:
+        cols = (self.result or {}).get("compare") or {}
+        total = 0.0
+        for k in ("padrao", "erick"):
+            total += float(((cols.get(k) or {}).get("cost") or {}).get("usd") or 0)
+        return {"usd": round(total, 6), "complete": True}
+
+    def snapshot(self) -> dict[str, Any]:
+        elapsed = (self.finished_at or time.time()) - self.started_at
+        return {
+            "run_id": self.run_id,
+            "ticker": self.ticker,
+            "date": self.date,
+            "asset_type": self.asset_type,
+            "status": self.status,
+            "error": self.error,
+            "verdict_timeframe": self.timeframe,
+            "compare": True,
+            "progress": self.tracker.snapshot(),
+            "cost": self.cost(),
+            "elapsed": round(elapsed, 1),
+            "finished_at": self.finished_stamp,
+            "result": self.result,
+        }
+
+
 class AnalysisRunner:
     """Starts analyses and tracks their live status."""
 
     def __init__(self, base_config: dict[str, Any] | None = None,
                  store: HistoryStore | None = None,
-                 graph_factory=None):
+                 graph_factory=None, meta_judge=None):
         # Imported lazily so unit tests can construct the runner (and exercise
         # the pure helpers) without importing the heavy engine / config.
         if base_config is None:
@@ -213,7 +291,11 @@ class AnalysisRunner:
         # graph_factory(config, selected_analysts, callbacks) -> engine graph.
         # Injectable so tests can drive a fake engine.
         self._graph_factory = graph_factory or self._default_graph_factory
-        self._runs: dict[str, _Run] = {}
+        # meta_judge(padrao_col, erick_col, asset_type) -> comparison dict.
+        # Deterministic by default (anchored, free, keeps the run at 2 pipelines);
+        # injectable so tests drive it and a future LLM narrative can slot in.
+        self._meta_judge = meta_judge or (lambda p, e, at: deterministic_meta(p, e))
+        self._runs: dict[str, Any] = {}
         self._lock = threading.Lock()
 
     @staticmethod
@@ -272,6 +354,18 @@ class AnalysisRunner:
         # ``final_status`` is flipped onto the run only after the history write,
         # so any poller that sees a terminal status also sees both the result and
         # the persisted history row (no read-before-write race).
+        final_status = self._execute(run)
+        self._persist(run, final_status)
+        run.status = final_status
+
+    def _execute(self, run: _Run) -> str:
+        """Run the analysis pipeline for ``run`` in the CURRENT thread.
+
+        Fills ``run.result`` / ``run.error`` and stamps ``finished_at`` /
+        ``finished_stamp``; returns ``"done"`` or ``"error"``. Does NOT persist or
+        flip ``run.status`` — the caller owns those so it can compose (the compare
+        orchestrator runs two of these inline before persisting).
+        """
         final_status = "error"
         try:
             config = dict(self.base_config)
@@ -307,8 +401,7 @@ class AnalysisRunner:
             run.result = {"trace": traceback.format_exc()[-3000:]}
         run.finished_at = time.time()
         run.finished_stamp = timeutil.stamp()
-        self._persist(run, final_status)
-        run.status = final_status
+        return final_status
 
     def _persist(self, run: _Run, status: str) -> None:
         try:
@@ -334,6 +427,138 @@ class AnalysisRunner:
             self.store.save(record)
         except Exception:
             pass  # history is best-effort; a failed write must not kill the run
+
+    # ----------------------------------------------------- compare (Fase 3) ----
+    def start_compare(self, ticker: str, date: str,
+                      timeframe: str = _DEFAULT_TIMEFRAME) -> str:
+        """Kick off a Padrão × Erick comparison; returns a run_id to poll.
+
+        Runs both readings (reusing a cached prior run for either side when one
+        exists for the same ticker/date/timeframe) and confronts them with the
+        meta-judge. Cost is up to two pipelines — a cached side costs nothing.
+        """
+        ticker = (ticker or "").strip().upper()
+        if not ticker:
+            raise ValueError("ticker vazio")
+        date = (date or "").strip() or timeutil.today()
+        asset_type = self.detect_asset_type(ticker)
+        timeframe = (timeframe or _DEFAULT_TIMEFRAME).strip() or _DEFAULT_TIMEFRAME
+        allowed = timeframes_for_asset(asset_type)
+        if timeframe not in allowed:
+            raise ValueError(
+                f"timeframe {timeframe!r} indisponível para {asset_type} "
+                f"(disponíveis: {', '.join(allowed)})"
+            )
+        run_id = timeutil.run_id_stamp() + "-cmp" + uuid.uuid4().hex[:4]
+        crun = _CompareRun(run_id, ticker, date, asset_type, timeframe)
+        with self._lock:
+            self._runs[run_id] = crun
+        threading.Thread(target=self._compare_worker, args=(crun,), daemon=True).start()
+        return run_id
+
+    def _compare_worker(self, crun: _CompareRun) -> None:
+        final_status = "error"
+        try:
+            crun.tracker.set("Padrão", "Resolvendo a leitura Padrão…", 5)
+            padrao_rec = self._resolve_side(crun, want_erick=False)
+            crun.tracker.set("Erick", "Resolvendo a leitura pelo método Erick…", 50)
+            erick_rec = self._resolve_side(crun, want_erick=True)
+            crun.tracker.set("Meta-juiz", "Confrontando as duas leituras…", 92)
+            col_p = build_column(padrao_rec, "padrao")
+            col_e = build_column(erick_rec, "erick")
+            meta = self._meta_judge(col_p, col_e, crun.asset_type)
+            crun.result = {
+                "compare": {"padrao": col_p, "erick": col_e, "meta": meta},
+                "verdict": meta.get("verdict"),
+                "verdict_timeframe": crun.timeframe,
+                "asset_type": crun.asset_type,
+            }
+            crun.tracker.done()
+            final_status = "done"
+        except Exception as exc:  # surface, never crash the server
+            crun.error = f"{type(exc).__name__}: {exc}"
+            crun.result = {"trace": traceback.format_exc()[-3000:]}
+        crun.finished_at = time.time()
+        crun.finished_stamp = timeutil.stamp()
+        self._persist_compare(crun, final_status)
+        crun.status = final_status
+
+    def _resolve_side(self, crun: _CompareRun, want_erick: bool) -> dict[str, Any]:
+        """Return the full record for one side of the comparison — reusing a
+        cached prior run for (ticker, date, timeframe, method) when present, else
+        running that pipeline fresh (inline, in this worker thread)."""
+        existing = self._find_reusable(
+            crun.ticker, crun.date, crun.timeframe, want_erick
+        )
+        if existing is not None:
+            existing = dict(existing)
+            existing["_reused"] = True
+            return existing
+        selected = select_analysts_for_asset(crun.asset_type, include_erick=want_erick)
+        sub_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
+        sub = _Run(sub_id, crun.ticker, crun.date, crun.asset_type, selected,
+                   timeframe=crun.timeframe)
+        # Not registered in ``_runs``: the compare run's coarse progress already
+        # covers it, so it should not appear as a second live item. It is still
+        # persisted below, so it shows in history and is reusable afterwards.
+        status = self._execute(sub)
+        self._persist(sub, status)
+        sub.status = status
+        return self.store.get(sub_id) or {
+            "run_id": sub_id, "ticker": crun.ticker, "date": crun.date,
+            "asset_type": crun.asset_type, "status": status, "error": sub.error,
+            "verdict_timeframe": crun.timeframe, "result": sub.result,
+            "cost": sub.cost(),
+        }
+
+    def _find_reusable(self, ticker: str, date: str, timeframe: str,
+                       want_erick: bool) -> dict[str, Any] | None:
+        """Most-recent DONE plain run matching (ticker, date, timeframe) whose
+        Erick-presence matches ``want_erick`` — or ``None``. Compare runs are
+        skipped (they are not a plain padrão/erick reading)."""
+        for summ in self.store.recent(30):
+            if summ.get("status") != "done":
+                continue
+            if (summ.get("ticker") or "").upper() != ticker.upper():
+                continue
+            if (summ.get("date") or "") != date:
+                continue
+            if (summ.get("verdict_timeframe") or _DEFAULT_TIMEFRAME) != timeframe:
+                continue
+            rec = self.store.get(summ["run_id"])
+            if not rec or rec.get("status") != "done":
+                continue
+            res = rec.get("result") or {}
+            if res.get("compare"):
+                continue  # a comparison record is not a single-method reading
+            has_erick = bool((res.get("erick_report") or "").strip())
+            if has_erick == want_erick:
+                return rec
+        return None
+
+    def _persist_compare(self, crun: _CompareRun, status: str) -> None:
+        try:
+            cost = crun.cost()
+            elapsed = round((crun.finished_at or time.time()) - crun.started_at, 1)
+            record = {
+                "run_id": crun.run_id,
+                "ticker": crun.ticker,
+                "date": crun.date,
+                "asset_type": crun.asset_type,
+                "status": status,
+                "error": crun.error,
+                "verdict": (crun.result or {}).get("verdict") if status == "done" else None,
+                "verdict_timeframe": crun.timeframe,
+                "cost_usd": cost["usd"],
+                "elapsed": elapsed,
+                "finished_at": crun.finished_stamp or timeutil.stamp(),
+                "result": crun.result,
+                "cost": cost,
+                "compare": True,  # marks this record as a comparison
+            }
+            self.store.save(record)
+        except Exception:
+            pass
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:

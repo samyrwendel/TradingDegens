@@ -161,6 +161,29 @@ def test_analyze_rejects_intraday_timeframe_for_stock(server):
     raise AssertionError("expected HTTP 400")
 
 
+# --------------------------------------------- Padrão × Erick compare (task 017) ---
+def test_analyze_compare_flow(server, monkeypatch):
+    """POST /api/analyze with compare:true runs both readings and returns a
+    compare block (two columns + meta-judge)."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
+    status, body = _post(server, "/api/analyze",
+                         {"ticker": "AAPL", "date": "2026-08-22", "compare": True})
+    assert status == 200
+    run_id = body["run_id"]
+    for _ in range(400):
+        _, snap = _get(server, "/api/status/" + run_id)
+        if snap["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert snap["status"] == "done"
+    cmp = snap["result"]["compare"]
+    assert set(("padrao", "erick", "meta")).issubset(cmp)
+    assert cmp["meta"]["agreement"] in ("concordam", "divergem", "parcial")
+
+
 def test_chart_endpoint_requires_ticker(server):
     try:
         _get(server, "/api/chart?tf=1d")
