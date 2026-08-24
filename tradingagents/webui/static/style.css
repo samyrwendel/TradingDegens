@@ -246,6 +246,22 @@ details.section[open] > summary::before { content: "▾"; }
   background: #3a2f10; border: 1px solid #5c4a17; border-radius: 8px; padding: 7px 11px;
 }
 
+/* carimbo do TF no cabeçalho do veredito ("veredito no Diário/4h/15m") */
+.verdict-tf {
+  font-size: 12.5px; font-weight: 600; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px;
+  white-space: nowrap; align-self: center;
+}
+/* botão "reavaliar veredito neste TF" — roda análise real no frame escolhido */
+.reeval-btn {
+  margin: 0 0 10px; padding: 7px 14px; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--accent); background: var(--panel); border: 1px solid #2e5c7d;
+  border-radius: 8px; cursor: pointer; white-space: nowrap;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.reeval-btn:hover:not(:disabled) { color: #fff; border-color: var(--accent); background: var(--panel-2); }
+.reeval-btn:disabled { opacity: .6; cursor: default; color: var(--muted); border-color: var(--border); }
+
 /* history */
 .history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .history li {

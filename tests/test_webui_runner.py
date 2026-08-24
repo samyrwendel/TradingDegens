@@ -28,7 +28,7 @@ def _stub_price_chart(monkeypatch):
     and the live fetch can race the ``_wait`` deadline under load, making
     ``test_runner_persists_to_history`` and its siblings flaky in the full suite.
     """
-    monkeypatch.setattr(runner_module, "fetch_price_chart", lambda t, d: {})
+    monkeypatch.setattr(runner_module, "fetch_price_chart", lambda t, d, tf="1d": {})
 
 FINAL_STATE = {
     "final_trade_decision": "Rating: Buy\nStrong conviction.",
@@ -59,7 +59,8 @@ class _FakeGraph:
         self.signal = signal
         self.raise_exc = raise_exc
 
-    def propagate(self, ticker, date, asset_type="stock"):
+    def propagate(self, ticker, date, asset_type="stock", timeframe="1d"):
+        self.timeframe = timeframe
         import uuid as _uuid
 
         from tradingagents.webui.progress import ProgressCallbackHandler
@@ -296,6 +297,54 @@ def test_timeframe_view_falls_back_on_intraday_outage(tmp_path, monkeypatch):
     assert "indisponível" in (view["notice"] or "").lower()
 
 
+# ------------------------------------------- verdict per timeframe (task 012) ---
+def test_start_threads_timeframe_and_stamps(tmp_path, monkeypatch):
+    """The requested timeframe reaches graph.propagate and is stamped on the run
+    (verdict_timeframe) + the chart opens on that same frame."""
+    monkeypatch.setattr(runner_module, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(runner_module, "fetch_derivatives_report", lambda t, d: "")
+    seen = {}
+
+    class _Rec:
+        def __init__(self, callbacks):
+            self.callbacks = callbacks
+
+        def propagate(self, ticker, date, asset_type="stock", timeframe="1d"):
+            seen["tf"] = timeframe
+            return FINAL_STATE, "Buy"
+
+    def factory(config, selected, callbacks):
+        return _Rec(callbacks)
+
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=factory)
+    run_id = runner.start("BTC-USD", "2026-08-22", timeframe="4h")
+    snap = _wait(runner, run_id)
+    assert seen["tf"] == "4h"                       # reached the engine
+    assert snap["status"] == "done"
+    assert snap["verdict_timeframe"] == "4h"        # stamped on the snapshot
+    assert snap["result"]["verdict_timeframe"] == "4h"
+    assert snap["result"]["timeframe"] == "4h"      # chart opens on the verdict frame
+    assert runner.store.get(run_id)["verdict_timeframe"] == "4h"
+
+
+def test_start_defaults_to_daily(tmp_path):
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    run_id = runner.start("AAPL", "2026-08-22")
+    snap = _wait(runner, run_id)
+    assert snap["verdict_timeframe"] == "1d"
+
+
+def test_start_rejects_intraday_timeframe_for_stock(tmp_path):
+    """An equity has no keyless intraday frame — a 15m verdict request is rejected
+    here just like /api/chart rejects the 15m chart."""
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    with pytest.raises(ValueError):
+        runner.start("AAPL", "2026-08-22", timeframe="15m")
+
+
 # ------------------------------------------------ background runs (task 010) ---
 def _blocking_factory(gate, final_state=FINAL_STATE, signal="Buy"):
     """A graph whose ``propagate`` blocks on ``gate`` so the run stays ``running``
@@ -305,7 +354,7 @@ def _blocking_factory(gate, final_state=FINAL_STATE, signal="Buy"):
         def __init__(self, callbacks):
             self.callbacks = callbacks
 
-        def propagate(self, ticker, date, asset_type="stock"):
+        def propagate(self, ticker, date, asset_type="stock", timeframe="1d"):
             gate.wait(3.0)
             return final_state, signal
 

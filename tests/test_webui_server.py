@@ -128,6 +128,39 @@ def test_chart_endpoint_rejects_intraday_for_stock(server):
     raise AssertionError("expected HTTP 400")
 
 
+# ------------------------------------------- verdict per timeframe (task 012) ---
+def test_analyze_accepts_timeframe_and_stamps_verdict(server, monkeypatch):
+    """POST /api/analyze with a timeframe runs at that frame and the resulting
+    snapshot carries verdict_timeframe."""
+    import tradingagents.webui.runner as rm
+    # keep the worker hermetic: no exchange/vendor network for the crypto run
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
+    status, body = _post(server, "/api/analyze",
+                         {"ticker": "BTC-USD", "date": "2026-08-22", "timeframe": "4h"})
+    assert status == 200
+    run_id = body["run_id"]
+    for _ in range(200):
+        _, snap = _get(server, "/api/status/" + run_id)
+        if snap["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert snap["status"] == "done"
+    assert snap["verdict_timeframe"] == "4h"
+    assert snap["result"]["verdict_timeframe"] == "4h"
+
+
+def test_analyze_rejects_intraday_timeframe_for_stock(server):
+    try:
+        _post(server, "/api/analyze",
+              {"ticker": "AAPL", "date": "2026-08-22", "timeframe": "15m"})
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+        return
+    raise AssertionError("expected HTTP 400")
+
+
 def test_chart_endpoint_requires_ticker(server):
     try:
         _get(server, "/api/chart?tf=1d")

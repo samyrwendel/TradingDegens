@@ -22,6 +22,7 @@ class Propagator:
         asset_type: str = "stock",
         past_context: str = "",
         instrument_context: str = "",
+        timeframe: str = "1d",
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -30,6 +31,11 @@ class Propagator:
         ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
         fall back to ticker-only context via
         ``get_instrument_context_from_state``.
+
+        ``timeframe`` is the reference frame the market analyst reads the technical
+        structure on (daily by default). Only the market analyst is timeframe-aware
+        — fundamentals/news/sentiment stay timeframe-agnostic — so the same
+        instrument on a shorter frame can yield a different timing/verdict.
         """
         return {
             "messages": [("human", company_name)],
@@ -37,6 +43,7 @@ class Propagator:
             "asset_type": asset_type,
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
+            "timeframe": timeframe or "1d",
             "past_context": past_context,
             "investment_debate_state": InvestDebateState(
                 {

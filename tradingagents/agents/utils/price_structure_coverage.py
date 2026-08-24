@@ -19,10 +19,18 @@ from tradingagents.dataflows.price_structure import build_price_structure_sectio
 logger = logging.getLogger(__name__)
 
 
-def ensure_price_structure_coverage(report: str, symbol: str, curr_date: str) -> str:
-    """Return the report with the deterministic price-structure section appended."""
+def ensure_price_structure_coverage(
+    report: str, symbol: str, curr_date: str, timeframe: str = "1d"
+) -> str:
+    """Return the report with the deterministic price-structure section appended.
+
+    ``timeframe`` selects the frame the structure/1-2-3/setup is detected on, so a
+    run asked for a shorter frame carries that frame's concrete setup into the
+    debate (the lever that lets a 15m verdict differ from the daily one). Daily by
+    default — the timeframe-agnostic path stays unchanged.
+    """
     try:
-        section = build_price_structure_section(symbol, curr_date)
+        section = build_price_structure_section(symbol, curr_date, timeframe)
     except Exception as exc:  # noqa: BLE001 — never break the report over enrichment
         logger.warning("price-structure coverage failed for %s: %s", symbol, exc)
         return report

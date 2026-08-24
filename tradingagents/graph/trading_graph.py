@@ -373,21 +373,24 @@ class TradingAgentsGraph:
         identity = resolve_instrument_identity(ticker)
         return build_instrument_context(ticker, asset_type, identity)
 
-    def _run_signature(self, asset_type: str) -> str:
+    def _run_signature(self, asset_type: str, timeframe: str = "1d") -> str:
         """Graph-shape inputs that must invalidate a checkpoint if changed.
 
         Keyed into the checkpoint thread ID so a resume under a different analyst
-        selection, debate/risk depth, or asset mode starts fresh instead of
-        silently continuing the previous graph (#1089).
+        selection, debate/risk depth, asset mode, or reference timeframe starts
+        fresh instead of silently continuing the previous graph (#1089). Each
+        (ticker, date, TF) is therefore its own cacheable run.
         """
         return "|".join([
             "analysts=" + ",".join(self.selected_analysts),
             f"debate={self.config['max_debate_rounds']}",
             f"risk={self.config['max_risk_discuss_rounds']}",
             f"asset={asset_type}",
+            f"tf={timeframe}",
         ])
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock"):
+    def propagate(self, company_name, trade_date, asset_type: str = "stock",
+                  timeframe: str = "1d"):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -396,6 +399,11 @@ class TradingAgentsGraph:
         ``checkpoint_enabled`` is set in config, the graph is recompiled with
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
+
+        ``timeframe`` is the reference frame the market analyst reads the technical
+        structure on (daily by default); a different frame is a distinct, cacheable
+        run whose timing/verdict may differ. Only the market analyst is
+        timeframe-aware — the fundamental/news/sentiment theses are unchanged.
         """
         self.ticker = company_name
 
@@ -412,7 +420,7 @@ class TradingAgentsGraph:
 
             step = checkpoint_step(
                 self.config["data_cache_dir"], company_name, str(trade_date),
-                self._run_signature(asset_type),
+                self._run_signature(asset_type, timeframe),
             )
             if step is not None:
                 logger.info(
@@ -422,7 +430,8 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
         try:
-            return self._run_graph(company_name, trade_date, asset_type=asset_type)
+            return self._run_graph(company_name, trade_date, asset_type=asset_type,
+                                   timeframe=timeframe)
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -444,7 +453,8 @@ class TradingAgentsGraph:
             )
         return write_report_tree(final_state, ticker, save_path)
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
+    def _run_graph(self, company_name, trade_date, asset_type: str = "stock",
+                   timeframe: str = "1d"):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
@@ -456,13 +466,15 @@ class TradingAgentsGraph:
             asset_type=asset_type,
             past_context=past_context,
             instrument_context=instrument_context,
+            timeframe=timeframe,
         )
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date+graph-shape resumes; a different
         # date or graph shape starts fresh (#1089).
         if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
+            tid = thread_id(company_name, str(trade_date),
+                            self._run_signature(asset_type, timeframe))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
         # Pin the analysis date as the run's base date so every data tool clamps
@@ -509,7 +521,7 @@ class TradingAgentsGraph:
         if self.config.get("checkpoint_enabled"):
             clear_checkpoint(
                 self.config["data_cache_dir"], company_name, str(trade_date),
-                self._run_signature(asset_type),
+                self._run_signature(asset_type, timeframe),
             )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])

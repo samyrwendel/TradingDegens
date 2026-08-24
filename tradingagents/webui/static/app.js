@@ -239,6 +239,7 @@ function renderResult(snap) {
     $("chartCard").classList.add("hidden");
     $("actionable").classList.add("hidden");
     $("headPrice").classList.add("hidden");
+    $("verdictTf").classList.add("hidden");
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
@@ -269,6 +270,11 @@ function renderResult(snap) {
   _timeframes = Array.isArray(r.timeframes) && r.timeframes.length
     ? r.timeframes
     : (_assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"]);
+  // TF em que o VEREDITO foi computado (carimbo do cabeçalho). Runs antigas não
+  // têm o campo → cai no frame do gráfico. É diferente de _tf: _tf pode ser
+  // trocado só pra olhar o gráfico, o carimbo fixa o frame do veredito real.
+  _verdictTf = snap.verdict_timeframe || r.verdict_timeframe || r.timeframe || "1d";
+  renderVerdictTf();
   hideDegrade();
 
   renderHeadPrice(r.actionable);
@@ -413,6 +419,7 @@ let _tf = "1d";               // timeframe atualmente exibido no gráfico
 let _timeframes = ["1d"];     // frames operáveis do ativo aberto (cripto = escada)
 let _openDate = "";           // data da análise aberta (recomputa por timeframe)
 let _assetType = "";          // tipo do ativo aberto (cripto habilita intradiário)
+let _verdictTf = "1d";        // timeframe em que o veredito ABERTO foi computado (carimbo)
 
 // paddings do gráfico, compartilhados entre o desenho e a interação de zoom/pan
 // (o zoom vertical precisa converter y do cursor → preço com a MESMA geometria)
@@ -502,6 +509,62 @@ function renderTfSelector() {
       `title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
   }).join("");
   bindTfSelector();
+  renderReevalBtn();
+}
+
+// Carimbo do cabeçalho: "veredito no <frame>". Deixa explícito em qual timeframe
+// o veredito aberto foi realmente computado (task 012) — some no run com erro.
+function renderVerdictTf() {
+  const el = $("verdictTf");
+  if (!el) return;
+  el.textContent = "veredito no " + (TF_LABEL[_verdictTf] || _verdictTf);
+  el.classList.remove("hidden");
+}
+
+// Botão "reavaliar veredito neste TF": usa o frame ATUAL do gráfico (_tf). Quando
+// já é o frame do veredito, fica desabilitado dizendo isso — não há o que refazer.
+function renderReevalBtn() {
+  const btn = $("reevalBtn");
+  if (!btn) return;
+  if (!_openTicker) { btn.classList.add("hidden"); return; }
+  const label = TF_LABEL[_tf] || _tf;
+  const same = _tf === _verdictTf;
+  btn.textContent = same ? `✓ veredito já é no ${label}` : `⟳ Reavaliar veredito no ${label}`;
+  btn.disabled = same;
+  btn.classList.remove("hidden");
+}
+
+function bindReeval() {
+  const btn = $("reevalBtn");
+  if (!btn || btn._bound) return;
+  btn._bound = true;
+  btn.addEventListener("click", () => reevaluate(_tf));
+}
+
+// Reavaliação REAL: roda uma nova análise no timeframe escolhido (o analista de
+// mercado lê a estrutura daquele frame); o veredito pode mudar. Mesma (ticker,data),
+// só o TF muda. Reusa o método (Erick/Padrão) marcado no launcher.
+function reevaluate(tf) {
+  if (!_openTicker) return;
+  const et = $("erickToggle");
+  const method = et && et.checked ? "erick" : "padrao";
+  $("resultPanel").classList.add("hidden");
+  $("steps").innerHTML = "";
+  renderProgress({
+    status: "running", ticker: _openTicker, elapsed: 0, cost: null,
+    progress: { phase: "Inicializando", label: `Reavaliando no ${TF_LABEL[tf] || tf}…`, percent: 2, plan: [], reached: [] },
+  });
+  fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ticker: _openTicker, date: _openDate || "", method, timeframe: tf }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data && data.run_id) { watchRun(data.run_id); loadHistory(); }
+      else { $("formError").textContent = (data && data.error) || "falha ao reavaliar"; }
+    })
+    .catch(() => { $("formError").textContent = "falha ao reavaliar"; });
 }
 
 function bindTfSelector() {
@@ -1215,6 +1278,7 @@ function init() {
   $("netNote").textContent = "acesse por " + location.host;
   bindHistoryTabs();
   bindRefresh();
+  bindReeval();
   loadHistory().then(openLatestRun);
   startHistoryAutoRefresh();
 }

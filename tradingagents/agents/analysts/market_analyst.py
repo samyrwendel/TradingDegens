@@ -26,11 +26,19 @@ from tradingagents.agents.utils.price_structure_coverage import (
 
 def create_market_analyst(llm):
 
+    # Reference-timeframe label in English for the prompt (the report body itself
+    # is pt-BR via get_language_instruction). Daily is the default frame.
+    _TF_EN = {"1w": "weekly", "1d": "daily", "4h": "4-hour", "1h": "1-hour", "15m": "15-minute"}
+
     def market_analyst_node(state):
         current_date = state["trade_date"]
         symbol = state["company_of_interest"]
         asset_type = state.get("asset_type", "stock")
         is_crypto = asset_type == "crypto"
+        # Reference frame for the technical read (task 012). Only THIS analyst is
+        # timeframe-aware; the other analysts stay frame-agnostic.
+        timeframe = state.get("timeframe", "1d") or "1d"
+        tf_en = _TF_EN.get(timeframe, timeframe)
         instrument_context = get_instrument_context_from_state(state)
 
         tools = [
@@ -81,6 +89,23 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                 " (e.g. weekly still up while the daily rolls over) is a signal,"
                 " not noise, and must be called out. Do not write a daily-only"
                 " report."
+            )
+            + (
+                f" The reference timeframe stamped on THIS verdict is the {tf_en} frame."
+                + (
+                    (
+                        f" Read the price STRUCTURE — trend, momentum, the"
+                        f" pullback-to-average buy region and the 1-2-3 setup — on the"
+                        f" {tf_en} frame and let it drive the TIMING and the technical"
+                        f" half of your verdict. Keep the weekly/daily context for the"
+                        f" dominant trend, but when the {tf_en} structure and the higher"
+                        f" frame DISAGREE, say so explicitly and weight the {tf_en} read"
+                        f" for the entry decision — a short-frame verdict is allowed to"
+                        f" differ from the daily one."
+                    )
+                    if timeframe != "1d"
+                    else ""
+                )
             )
             + (
                 (
@@ -156,7 +181,9 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             # unconditionally: the LLM describes indicators but never detects the
             # setup, so there is nothing to detect-and-skip. Stocks and crypto
             # alike get it; it reuses the cached, date-guarded daily series.
-            report = ensure_price_structure_coverage(report, symbol, current_date)
+            report = ensure_price_structure_coverage(
+                report, symbol, current_date, timeframe
+            )
 
         return {
             "messages": [result],

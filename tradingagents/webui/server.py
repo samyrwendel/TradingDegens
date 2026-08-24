@@ -149,10 +149,15 @@ class _Handler(BaseHTTPRequestHandler):
                 method = (body.get("method") or "").strip().lower()
                 if not method and body.get("erick"):
                     method = "erick"
+                # Reference timeframe for the verdict (task 012); default daily. An
+                # invalid frame for the asset is a ValueError -> 400 below.
+                timeframe = (body.get("timeframe") or "1d").strip() or "1d"
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
                     return
-                run_id = self.runner.start(ticker, date, method=method or "padrao")
+                run_id = self.runner.start(
+                    ticker, date, method=method or "padrao", timeframe=timeframe
+                )
                 self._send_json({"run_id": run_id})
             else:
                 self._send_json({"error": "não encontrado"}, 404)

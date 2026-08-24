@@ -79,6 +79,7 @@
           <div class="head-main">
             <div class="asset-name" id="assetName">—</div>
             <div class="verdict" id="verdictBadge">—</div>
+            <div class="verdict-tf hidden" id="verdictTf"></div>
             <div class="head-price hidden" id="headPrice"></div>
           </div>
           <div class="head-nav">
@@ -101,6 +102,9 @@
                tempo gráfico. Cripto tem a escada intradiária (candle real de
                exchange); ação só o diário (intradiário aparece desabilitado). -->
           <div class="tf-selector" id="tfSelector" role="group" aria-label="Timeframe do gráfico"></div>
+          <!-- Reavaliar o VEREDITO no timeframe escolhido: roda uma análise real
+               com o analista de mercado lendo esse frame (o veredito pode mudar). -->
+          <button type="button" class="reeval-btn hidden" id="reevalBtn"></button>
           <p class="chart-degrade hidden" id="chartDegrade"></p>
           <div class="chart-wrap">
             <span class="chart-zoom-hint">roda = zoom · shift+roda = vertical · arrasta = move · 2 cliques = reseta</span>

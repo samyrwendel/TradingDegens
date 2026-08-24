@@ -152,12 +152,15 @@ class _Run:
     """In-memory state for a single analysis run."""
 
     def __init__(self, run_id: str, ticker: str, date: str, asset_type: str,
-                 selected_analysts: list[str]):
+                 selected_analysts: list[str], timeframe: str = _DEFAULT_TIMEFRAME):
         self.run_id = run_id
         self.ticker = ticker
         self.date = date
         self.asset_type = asset_type
         self.selected_analysts = selected_analysts
+        # Reference frame the market analyst reads for THIS run (task 012). Stamped
+        # on the verdict and used as the chart's opening frame.
+        self.timeframe = timeframe or _DEFAULT_TIMEFRAME
         self.status = "running"           # running | done | error
         self.error: str | None = None
         self.result: dict[str, Any] | None = None
@@ -179,6 +182,7 @@ class _Run:
             "asset_type": self.asset_type,
             "status": self.status,
             "error": self.error,
+            "verdict_timeframe": self.timeframe,
             "progress": self.tracker.snapshot(),
             "cost": self.cost(),
             "elapsed": round(elapsed, 1),
@@ -224,11 +228,18 @@ class AnalysisRunner:
         from cli.utils import detect_asset_type
         return detect_asset_type(ticker).value
 
-    def start(self, ticker: str, date: str, method: str = "padrao") -> str:
+    def start(self, ticker: str, date: str, method: str = "padrao",
+              timeframe: str = _DEFAULT_TIMEFRAME) -> str:
         """Kick off an analysis; returns a run_id to poll immediately.
 
         ``method="erick"`` adds the on-demand Erick-method analyst to the run
         (Modo Erick); any other value runs the Padrão selection unchanged.
+
+        ``timeframe`` is the reference frame the market analyst reads (task 012);
+        it must be one of the asset's operable frames (``timeframes_for_asset``) —
+        an intraday frame on an equity is rejected here, mirroring ``/api/chart``.
+        Each (ticker, date, timeframe) is a distinct, cacheable run whose verdict
+        may differ; only the technical read changes, the fundamental thesis holds.
         """
         ticker = (ticker or "").strip().upper()
         if not ticker:
@@ -237,11 +248,18 @@ class AnalysisRunner:
         # it is already the next day in UTC and the run would carry tomorrow.
         date = (date or "").strip() or timeutil.today()
         asset_type = self.detect_asset_type(ticker)
+        timeframe = (timeframe or _DEFAULT_TIMEFRAME).strip() or _DEFAULT_TIMEFRAME
+        allowed = timeframes_for_asset(asset_type)
+        if timeframe not in allowed:
+            raise ValueError(
+                f"timeframe {timeframe!r} indisponível para {asset_type} "
+                f"(disponíveis: {', '.join(allowed)})"
+            )
         selected = select_analysts_for_asset(
             asset_type, include_erick=(method == "erick")
         )
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
-        run = _Run(run_id, ticker, date, asset_type, selected)
+        run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe)
         with self._lock:
             self._runs[run_id] = run
         threading.Thread(target=self._worker, args=(run,), daemon=True).start()
@@ -259,19 +277,25 @@ class AnalysisRunner:
                 config, run.selected_analysts, [run.usage_cb, progress_cb]
             )
             final_state, signal = graph.propagate(
-                run.ticker, run.date, asset_type=run.asset_type
+                run.ticker, run.date, asset_type=run.asset_type,
+                timeframe=run.timeframe
             )
             run.result = extract_result(final_state, signal)
             if run.asset_type == "crypto":
                 run.result["derivatives_report"] = fetch_derivatives_report(
                     run.ticker, run.date
                 )
-            run.result["price_chart"] = fetch_price_chart(run.ticker, run.date)
-            run.result["actionable"] = fetch_actionable_plan(run.ticker, run.date)
-            # The chart is computed on the daily frame by default; the UI can
-            # recalculate any of these frames on demand via /api/chart. Persist the
-            # ladder + the shown frame so a history reload rebuilds the selector.
-            run.result["timeframe"] = _DEFAULT_TIMEFRAME
+            # The chart opens on the SAME frame the verdict was computed on, so the
+            # picture matches the stamp; the UI can still recalc other frames via
+            # /api/chart. Persist the ladder + the shown frame + the verdict frame.
+            run.result["price_chart"] = fetch_price_chart(
+                run.ticker, run.date, run.timeframe
+            )
+            run.result["actionable"] = fetch_actionable_plan(
+                run.ticker, run.date, run.timeframe
+            )
+            run.result["timeframe"] = run.timeframe
+            run.result["verdict_timeframe"] = run.timeframe
             run.result["timeframes"] = timeframes_for_asset(run.asset_type)
             run.tracker.mark_done()
             final_status = "done"
@@ -295,6 +319,7 @@ class AnalysisRunner:
                 "status": status,
                 "error": run.error,
                 "verdict": (run.result or {}).get("verdict") if status == "done" else None,
+                "verdict_timeframe": run.timeframe,
                 "cost_usd": cost["usd"],
                 "elapsed": elapsed,
                 # Manaus wall-clock with explicit -04:00 offset, so the UI can
@@ -323,6 +348,9 @@ class AnalysisRunner:
             "asset_type": record.get("asset_type"),
             "status": record.get("status"),
             "error": record.get("error"),
+            "verdict_timeframe": record.get("verdict_timeframe")
+                or (record.get("result") or {}).get("verdict_timeframe")
+                or _DEFAULT_TIMEFRAME,
             "progress": {"percent": 100, "phase": "Concluído", "label": "Do histórico",
                           "index": 0, "total": 0, "elapsed": record.get("elapsed"),
                           "plan": [], "reached": []},
