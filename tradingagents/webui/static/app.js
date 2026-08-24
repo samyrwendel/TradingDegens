@@ -189,6 +189,9 @@ function section(title, mdText) {
 function renderResult(snap) {
   const nameEl = document.getElementById("assetName");
   if (nameEl) nameEl.textContent = snap.ticker || "—";
+  _openTicker = snap.ticker || "";
+  const rb = document.getElementById("refreshBtn");
+  if (rb) rb.classList.toggle("hidden", !_openTicker);
   clearInterval(pollTimer); pollTimer = null;
   $("runBtn").disabled = false;
   $("progressPanel").classList.add("hidden");
@@ -500,7 +503,25 @@ async function startAnalysis(ev) {
   }
 }
 
+let _openTicker = "";
+let _todayManaus = "";
 let _historyFilter = "all";
+
+// Reanalisa o ativo que está aberto, na data de hoje (Manaus, vinda do servidor).
+// Preenche o formulário e dispara o mesmo caminho da análise manual — nenhum
+// fluxo paralelo, pra não divergir do que o botão principal faz.
+function bindRefresh() {
+  const rb = document.getElementById("refreshBtn");
+  if (!rb) return;
+  rb.addEventListener("click", () => {
+    if (!_openTicker) return;
+    $("ticker").value = _openTicker;
+    if (_todayManaus) $("date").value = _todayManaus;
+    $("analyzeForm").requestSubmit
+      ? $("analyzeForm").requestSubmit()
+      : startAnalysis(new Event("submit"));
+  });
+}
 let _allRuns = [];
 
 function bindHistoryTabs() {
@@ -561,7 +582,7 @@ async function applyConfig() {
     const res = await fetch("/api/config");
     const cfg = await res.json();
     if (cfg.tz_label) TZ_LABEL = cfg.tz_label;
-    if (cfg.today) $("date").value = cfg.today;
+    if (cfg.today) { _todayManaus = cfg.today; $("date").value = cfg.today; }
     $("tzLabel").textContent = "(" + TZ_LABEL + ")";
     $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
   } catch (e) {
@@ -579,6 +600,7 @@ function init() {
   });
   $("netNote").textContent = "acesse por " + location.host;
   bindHistoryTabs();
+  bindRefresh();
   loadHistory().then(openLatestRun);
 }
 

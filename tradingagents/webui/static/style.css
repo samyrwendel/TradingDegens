@@ -305,3 +305,23 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   white-space: nowrap;
 }
 @media (max-width: 700px) { .asset-name { font-size: 26px; } }
+
+/* Atualizar: reanalisa o ativo aberto com os dados de hoje. */
+.refresh-btn {
+  margin-left: auto;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted, #8b93a7);
+  background: transparent;
+  border: 1px solid var(--line, #2a3040);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.refresh-btn:hover {
+  color: var(--fg, #e6e9f0);
+  border-color: var(--accent, #4c9aff);
+  background: var(--panel-2, #1a1f2b);
+}
