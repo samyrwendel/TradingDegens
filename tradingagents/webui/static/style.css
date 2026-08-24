@@ -216,4 +216,39 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   .launcher form { flex-direction: column; align-items: stretch; }
   .field input { min-width: 0; width: 100%; }
   #priceChart { height: 300px; }
+  .act-grid { grid-template-columns: 1fr; }
 }
+
+/* actionable plan — operable levels right under the verdict */
+.actionable {
+  border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2);
+  padding: 12px 16px; margin: 4px 0 10px;
+}
+.act-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.act-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted);
+}
+.act-setup {
+  font-size: 12.5px; font-weight: 600; border-radius: 999px;
+  padding: 3px 11px; border: 1px solid var(--border); color: var(--text);
+}
+.act-setup.ativo { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
+.act-setup.aguardar_pullback, .act-setup.aguardar_rompimento {
+  color: var(--amber); background: #3a2f10; border-color: #5c4a17;
+}
+.act-setup.sem_setup, .act-setup.sem_dado { color: var(--muted); }
+.act-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px;
+}
+.act-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.act-k { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.act-v { font-size: 13.5px; text-align: right; font-family: var(--mono); }
+.act-v b { color: var(--text); font-family: var(--mono); }
+.act-v .zlabel { color: var(--muted); font-family: inherit; font-size: 12px; }
+.act-v .nolevel { color: var(--muted); font-style: italic; font-family: inherit; }

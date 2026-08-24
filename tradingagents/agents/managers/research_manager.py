@@ -14,6 +14,34 @@ from tradingagents.agents.utils.structured import (
 )
 
 
+def assert_debate_integrity(investment_debate_state: dict) -> None:
+    """Refuse a one-sided debate before the judge rules on it (fork brief 23/08).
+
+    When at least one full back-and-forth was supposed to happen (``count >= 2``),
+    BOTH sides must have argued. The pt-BR speaker-label bug once routed the bull
+    twice and the bear never, so ``bear_history`` came in empty and the judge
+    decided with the confidence of having weighed two sides — a silent, corrupting
+    failure. This raises LOUD instead, so the run surfaces as an error rather than
+    shipping a fake balanced verdict.
+
+    ``count < 2`` (e.g. ``max_debate_rounds=0``, which still runs the bull once via
+    the unconditional entry edge) legitimately has only one speaker and is skipped,
+    so this never false-positives on that config.
+    """
+    count = investment_debate_state.get("count", 0)
+    bull = (investment_debate_state.get("bull_history", "") or "").strip()
+    bear = (investment_debate_state.get("bear_history", "") or "").strip()
+    if count >= 2 and not (bull and bear):
+        raise RuntimeError(
+            "Debate integrity: reached the Research Manager with count="
+            f"{count} but bull_history={'set' if bull else 'EMPTY'} / "
+            f"bear_history={'set' if bear else 'EMPTY'} — the bull/bear "
+            "alternation broke and the judge would decide one-sided. "
+            "Refusing to judge a broken debate (see conditional_logic."
+            "should_continue_debate / the pt-BR speaker-label routing)."
+        )
+
+
 def create_research_manager(llm):
     structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
 
@@ -22,6 +50,9 @@ def create_research_manager(llm):
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
+
+        # Never let the judge rule on a one-sided debate (fork brief 23/08).
+        assert_debate_integrity(investment_debate_state)
 
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 

@@ -65,6 +65,10 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         # Filled by the runner for every asset: candles + moving averages +
         # detected setup markers for the chart (deterministic, cached series).
         "price_chart": {},
+        # Filled by the runner for every asset: operable levels beside the verdict
+        # (price @ analysis, horizon, timeframe, buy/realize/pullback zones), all
+        # from the same cached series — "sem nível definido", never a fake number.
+        "actionable": {},
     }
 
 
@@ -94,6 +98,21 @@ def fetch_price_chart(ticker: str, date: str) -> dict[str, Any]:
     try:
         from tradingagents.dataflows.price_structure import build_price_chart
         return build_price_chart(ticker, date)
+    except Exception:
+        return {}
+
+
+def fetch_actionable_plan(ticker: str, date: str) -> dict[str, Any]:
+    """Operable levels for the verdict header (price @ analysis, horizon,
+    timeframe, buy/realize/pullback zones).
+
+    Reuses the same cached, date-guarded series and the detector's own structure,
+    so it is free and cannot see a future candle. Fail-open: returns ``{}`` on any
+    error so this enrichment never blocks the analysis result.
+    """
+    try:
+        from tradingagents.dataflows.price_structure import build_actionable_plan_dict
+        return build_actionable_plan_dict(ticker, date)
     except Exception:
         return {}
 
@@ -211,6 +230,7 @@ class AnalysisRunner:
                     run.ticker, run.date
                 )
             run.result["price_chart"] = fetch_price_chart(run.ticker, run.date)
+            run.result["actionable"] = fetch_actionable_plan(run.ticker, run.date)
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server

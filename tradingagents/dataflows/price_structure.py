@@ -383,3 +383,158 @@ def build_price_chart(symbol: str, curr_date: str, bars: int = 260) -> dict[str,
             "pattern_123": pattern,
         },
     }
+
+
+# ------------------------------------------------------ actionable plan ---------
+# The reference read is the DAILY series (what the detector runs on); the engine's
+# weekly pass supplies the trend backdrop. Stated verbatim so the verdict always
+# declares its timeframe instead of leaving the reader to guess (fork brief 23/08).
+_TIMEFRAME_REF = "diário (referência) · semanal (tendência de fundo)"
+
+# Horizon bands are the documented nature of these setups (pullback-to-a-rising-
+# average / 1-2-3), which "over days-to-months tend to pay" — NOT a per-asset
+# number invented for one chart. Keyed by the detected setup state.
+_HORIZON = {
+    "ativo": "dias para confirmar · semanas a meses para o alvo",
+    "aguardar_pullback": "aguardar recuo à média (dias a semanas) · alvo em semanas a meses",
+    "aguardar_rompimento": "aguardar rompimento (dias a semanas) · alvo em semanas a meses",
+    "sem_setup": "sem gatilho de preço definido — sem horizonte operável",
+    "sem_dado": "sem dado suficiente para definir horizonte",
+}
+
+
+@dataclass
+class ActionablePlan:
+    """Deterministic, operable read attached to the verdict header.
+
+    Every price is a real level from the date-guarded series (last close, a rising
+    moving average the detector already found, or a prior swing high). When there
+    is no basis for a level it is ``None`` — the UI renders "sem nível definido"
+    and NEVER a fabricated or rounded-to-look-precise number (fork brief 23/08).
+    """
+
+    symbol: str
+    as_of: str | None            # date of the last candle actually read
+    price: float | None          # last close = "preço no momento da análise"
+    timeframe: str
+    horizon: str
+    setup_state: str             # ativo | aguardar_pullback | aguardar_rompimento | sem_setup | sem_dado
+    buy_zone: dict[str, Any] | None       # {"label", "price"} — a rising MA (MMS)
+    realize_zone: dict[str, Any] | None   # {"label", "price"} — prior swing high overhead
+    pullback_zone: dict[str, Any] | None  # {"label", "price"} — recuo to await, if not live
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "as_of": self.as_of,
+            "price": self.price,
+            "timeframe": self.timeframe,
+            "horizon": self.horizon,
+            "setup_state": self.setup_state,
+            "buy_zone": self.buy_zone,
+            "realize_zone": self.realize_zone,
+            "pullback_zone": self.pullback_zone,
+        }
+
+
+def _nearest_overhead_high(df: pd.DataFrame, highs: list[int], price: float):
+    """Nearest prior swing high sitting ABOVE ``price`` — the region to realize
+    into (resistance / topo anterior). ``None`` when price is in new-high air, so
+    the caller reports "sem nível definido" rather than inventing a target."""
+    best: tuple[str, float] | None = None
+    for i in highs:
+        h = float(df["High"].iloc[i])
+        if h > price and (best is None or h < best[1]):
+            best = (df["Date"].iloc[i].strftime("%Y-%m-%d"), round(h, 2))
+    if best is None:
+        return None
+    return {"label": f"topo anterior {best[0]}", "price": best[1]}
+
+
+def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
+    """Turn the cached daily series + detected structure into an operable plan.
+
+    Reuses :func:`detect_price_structure` (buy regions, live region, 1-2-3) and
+    the same swings — nothing is recomputed from scratch and no number is
+    fabricated. Propagates nothing: a data failure yields a ``sem_dado`` plan with
+    ``None`` levels, never a fake read.
+    """
+    try:
+        df = _prep(symbol, curr_date)
+    except Exception as exc:  # noqa: BLE001 — enrichment must never break the run
+        logger.warning("actionable-plan data load failed for %s: %s", symbol, exc)
+        return ActionablePlan(
+            symbol=symbol, as_of=None, price=None, timeframe=_TIMEFRAME_REF,
+            horizon=_HORIZON["sem_dado"], setup_state="sem_dado",
+            buy_zone=None, realize_zone=None, pullback_zone=None,
+        )
+
+    if len(df) <= 2 * _SWING_K + 1:
+        return ActionablePlan(
+            symbol=symbol,
+            as_of=df["Date"].iloc[-1].strftime("%Y-%m-%d") if len(df) else None,
+            price=round(float(df["Close"].iloc[-1]), 2) if len(df) else None,
+            timeframe=_TIMEFRAME_REF, horizon=_HORIZON["sem_dado"],
+            setup_state="sem_dado",
+            buy_zone=None, realize_zone=None, pullback_zone=None,
+        )
+
+    price = round(float(df["Close"].iloc[-1]), 2)
+    as_of = df["Date"].iloc[-1].strftime("%Y-%m-%d")
+
+    struct = detect_price_structure(symbol, curr_date)
+    _lows, highs = _swings(df)
+
+    # Região de compra — a RISING moving average the detector already identified.
+    buy_zone = None
+    if struct.active_region is not None:
+        a = struct.active_region
+        buy_zone = {"label": f"{a.ma_label} — preço na média agora", "price": a.ma_value}
+    elif struct.buy_regions:
+        r = struct.buy_regions[-1]  # most recent
+        buy_zone = {"label": f"{r.ma_label} — média onde reagiu em {r.date}", "price": r.ma_value}
+
+    # Região de realização — nearest prior swing high overhead.
+    realize_zone = _nearest_overhead_high(df, highs, price)
+
+    # Pullback a aguardar + the resulting setup state / horizon:
+    #  • already sitting on the rising MA  -> live setup, no pullback to await
+    #  • a rising MA sits BELOW price       -> await a recuo down to it
+    #  • a 1-2-3 is forming                 -> await the breakout trigger
+    #  • nothing actionable                 -> no level, no operable horizon
+    pullback_zone = None
+    if struct.active_region is not None:
+        setup_state = "ativo"
+    elif buy_zone is not None and buy_zone["price"] < price:
+        setup_state = "aguardar_pullback"
+        pullback_zone = {
+            "label": f"recuo até {buy_zone['label'].split(' —')[0]} (média subindo)",
+            "price": buy_zone["price"],
+        }
+    elif struct.pattern is not None and struct.pattern.state == "formando":
+        setup_state = "aguardar_rompimento"
+        pullback_zone = {
+            "label": "rompimento da máxima do ponto 2 (gatilho 1-2-3)",
+            "price": struct.pattern.trigger,
+        }
+    else:
+        setup_state = "sem_setup"
+
+    return ActionablePlan(
+        symbol=symbol, as_of=as_of, price=price, timeframe=_TIMEFRAME_REF,
+        horizon=_HORIZON[setup_state], setup_state=setup_state,
+        buy_zone=buy_zone, realize_zone=realize_zone, pullback_zone=pullback_zone,
+    )
+
+
+def build_actionable_plan_dict(symbol: str, curr_date: str) -> dict[str, Any]:
+    """UI-facing wrapper: always returns a JSON-serializable dict, never raises."""
+    try:
+        return build_actionable_plan(symbol, curr_date).as_dict()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("actionable-plan build failed for %s: %s", symbol, exc)
+        return ActionablePlan(
+            symbol=symbol, as_of=None, price=None, timeframe=_TIMEFRAME_REF,
+            horizon=_HORIZON["sem_dado"], setup_state="sem_dado",
+            buy_zone=None, realize_zone=None, pullback_zone=None,
+        ).as_dict()

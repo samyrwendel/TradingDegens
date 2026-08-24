@@ -29,6 +29,16 @@ function assetPt(t) {
   return ASSET_PT[k] || t || "";
 }
 
+// Setup state emitted by the deterministic actionable plan -> emoji anchor + pt-BR
+// label. Keeps the header's "what to do now" legible at a glance (DA-034).
+const SETUP_PT = {
+  ativo: ["🎯", "Setup ativo agora"],
+  aguardar_pullback: ["⏳", "Aguardar recuo à média"],
+  aguardar_rompimento: ["⏳", "Aguardar rompimento"],
+  sem_setup: ["⚪", "Sem setup de preço definido"],
+  sem_dado: ["⚪", "Sem dado suficiente"],
+};
+
 function verdictKey(v) {
   return (v || "").toLowerCase().replace(/[^a-z]/g, "");
 }
@@ -185,6 +195,7 @@ function renderResult(snap) {
 
   if (snap.status === "error") {
     $("chartCard").classList.add("hidden");
+    $("actionable").classList.add("hidden");
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
@@ -205,6 +216,7 @@ function renderResult(snap) {
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
+  renderActionable(r.actionable);
   renderChartCard(r.price_chart, snap.ticker);
 
   $("bull").innerHTML = renderMarkdown(r.bull);
@@ -229,6 +241,48 @@ function renderResult(snap) {
 
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   loadHistory();
+}
+
+// ---- actionable plan (operable levels beside the verdict) -----------------
+// A level is shown only when the engine derived it from the real series; when
+// there is no basis we print "sem nível definido" — never a fabricated number.
+function zoneHtml(zone, emptyText) {
+  if (!zone || zone.price == null) {
+    return `<span class="nolevel">${escapeHtml(emptyText || "sem nível definido")}</span>`;
+  }
+  const label = zone.label ? ` <span class="zlabel">· ${escapeHtml(zone.label)}</span>` : "";
+  return `<b>${fmtNum(zone.price)}</b>${label}`;
+}
+
+function actRow(emoji, key, valHtml) {
+  return `<div class="act-row"><span class="act-k">${emoji} ${escapeHtml(key)}</span>` +
+    `<span class="act-v">${valHtml}</span></div>`;
+}
+
+function renderActionable(a) {
+  const el = $("actionable");
+  if (!a || !a.setup_state) { el.classList.add("hidden"); return; }
+
+  const [emo, label] = SETUP_PT[a.setup_state] || ["⚪", a.setup_state];
+  const priceHtml = a.price != null
+    ? `<b>${fmtNum(a.price)}</b>${a.as_of ? ` <span class="zlabel">em ${escapeHtml(a.as_of)}</span>` : ""}`
+    : `<span class="nolevel">indisponível</span>`;
+  // When the setup is live the price is already at the buy region, so there is
+  // no recuo to wait for — say so instead of "sem nível definido".
+  const pullbackEmpty = a.setup_state === "ativo" ? "já na região (setup ativo)" : "sem nível definido";
+
+  el.innerHTML =
+    `<div class="act-head"><span class="act-title">Plano acionável</span>` +
+    `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}</span></div>` +
+    `<div class="act-grid">` +
+    actRow("💰", "Preço na análise", priceHtml) +
+    actRow("🕐", "Horizonte", escapeHtml(a.horizon || "—")) +
+    actRow("📐", "Timeframe", escapeHtml(a.timeframe || "—")) +
+    actRow("🟢", "Região de compra", zoneHtml(a.buy_zone)) +
+    actRow("🎯", "Região de realização", zoneHtml(a.realize_zone)) +
+    actRow("⏳", "Pullback a aguardar", zoneHtml(a.pullback_zone, pullbackEmpty)) +
+    `</div>`;
+  el.classList.remove("hidden");
 }
 
 // ---- candlestick chart (canvas, no external deps) -------------------------
