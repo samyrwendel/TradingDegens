@@ -835,6 +835,11 @@ let _verdictTf = "1d";        // timeframe em que o veredito ABERTO foi computad
 // paddings do gráfico, compartilhados entre o desenho e a interação de zoom/pan
 // (o zoom vertical precisa converter y do cursor → preço com a MESMA geometria)
 const PAD_L = 8, PAD_R = 58, PAD_T = 12, PAD_B = 22;
+// Respiro horizontal entre a última vela e a régua/pílulas do eixo direito (task
+// 033): as velas terminam PLOT_RIGHT_GAP px antes do eixo, então a pílula de preço
+// não cola no candle. As linhas de nível ainda cruzam até o eixo. O mapeamento
+// x/zoom/arrasto usa a largura reduzida (plotW - PLOT_RIGHT_GAP) pra continuar certo.
+const PLOT_RIGHT_GAP = 16;
 
 // Todos os frames do seletor, na ordem exibida. Um frame fora de `_timeframes`
 // (intradiário em ação) é renderizado DESABILITADO — o backend nunca inventa
@@ -1194,7 +1199,11 @@ function drawPriceChart(canvas, chart, a) {
   canvas._yGeom = { padT, plotH, lo, hi };
   canvas.dataset.plo = lo; canvas.dataset.phi = hi;
 
-  const x = (i) => padL + (i - v0 + 0.5) * (plotW / vis);
+  // Velas/médias/marcadores ocupam a largura MENOS o respiro à direita (plotWx),
+  // deixando um gap até a régua; gridlines/bandas/linhas de nível ainda vão até o
+  // eixo (padL + plotW) pra conectar nas pílulas.
+  const plotWx = Math.max(1, plotW - PLOT_RIGHT_GAP);
+  const x = (i) => padL + (i - v0 + 0.5) * (plotWx / vis);
   const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
 
   // Etiquetas de nível na RÉGUA DA DIREITA (estilo Quantfury): o preço atual e as
@@ -1286,7 +1295,7 @@ function drawPriceChart(canvas, chart, a) {
   }
 
   // candles
-  const cw = Math.max(1, Math.min((plotW / vis) * 0.7, 14));
+  const cw = Math.max(1, Math.min((plotWx / vis) * 0.7, 14));
   candles.forEach((c, i) => {
     if (i < v0 || i >= v1) return;
     if (c.o == null || c.c == null) return;
@@ -1426,7 +1435,7 @@ function bindChartZoom(canvas) {
     if (e.shiftKey) { zoomVerticalWheel(e); return; }   // shift+roda = eixo de preço
     const { v0, v1 } = cur(); const vis = v1 - v0;
     const rect = canvas.getBoundingClientRect();
-    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - 8) / (rect.width - 66)));
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - PAD_L) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP)));
     const anchor = v0 + frac * vis;
     const factor = e.deltaY < 0 ? 0.82 : 1.22;
     let nv = Math.max(8, Math.min(N(), Math.round(vis * factor)));
@@ -1443,7 +1452,7 @@ function bindChartZoom(canvas) {
   let vdrag = null;   // pan VERTICAL: arrastar na faixa dos rótulos de preço (eixo direito)
   const fracX = (clientX) => {
     const rect = canvas.getBoundingClientRect();
-    return Math.min(1, Math.max(0, (clientX - rect.left - 8) / (rect.width - 66)));
+    return Math.min(1, Math.max(0, (clientX - rect.left - PAD_L) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP)));
   };
   canvas.addEventListener("pointerdown", (e) => {
     if (!N()) return;
@@ -1495,7 +1504,7 @@ function bindChartZoom(canvas) {
     if (drag) {
       const rect = canvas.getBoundingClientRect();
       const vis = drag.v1 - drag.v0;
-      const dC = Math.round((e.clientX - drag.x) / (rect.width - 66) * vis);
+      const dC = Math.round((e.clientX - drag.x) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP) * vis);
       let nv0 = Math.max(0, Math.min(drag.v0 - dC, N() - vis));
       canvas._view = { v0: nv0, v1: nv0 + vis };
       redraw();
