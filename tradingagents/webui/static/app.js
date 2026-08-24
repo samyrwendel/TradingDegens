@@ -64,7 +64,7 @@ function verdictKey(v) {
 function verdictHtml(v) {
   const key = verdictKey(v);
   const raw = (v || "").toString();
-  if (VERDICT_PT[key]) return `${VERDICT_PT[key]}<span class="verdict-orig">${escapeHtml(raw)}</span>`;
+  if (VERDICT_PT[key]) return `${VERDICT_PT[key]} <span class="verdict-orig">${escapeHtml(raw)}</span>`;
   if (STATUS_PT[key]) return escapeHtml(STATUS_PT[key]);
   return escapeHtml((raw || "—").toUpperCase());
 }
@@ -366,11 +366,13 @@ function patColor(pat) {
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
 let _lastChart = null;        // kept so a window resize can redraw crisply.
 let _lastActionable = null;   // plan bands drawn on the chart alongside _lastChart.
+let _view = null;             // {v0,v1} janela de candles visível; null = tudo
 
 function renderChartCard(chart, ticker, actionable) {
   const card = $("chartCard");
   const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
   if (!hasData) { card.classList.add("hidden"); _lastChart = null; _lastActionable = null; return; }
+  _view = null;
   card.classList.remove("hidden");
   _lastChart = chart;
   _lastActionable = actionable || null;
@@ -386,10 +388,8 @@ function renderChartCard(chart, ticker, actionable) {
 
   // legend: candles + cada MMS + faixas do plano + 1-2-3
   const wins = (chart.ma_windows || [20, 50, 200]).map(String);
-  const legend = [
-    `<span class="lg"><span class="sw" style="background:var(--green)"></span>vela de alta <span class="orig">(candle)</span></span>`,
-    `<span class="lg"><span class="sw" style="background:var(--red)"></span>vela de baixa</span>`,
-  ];
+  // Cor da vela (verde=alta, vermelho=baixa) é convenção universal; sem legenda.
+  const legend = [];
   wins.forEach((w) => {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
   });
@@ -417,6 +417,7 @@ function renderChartCard(chart, ticker, actionable) {
   $("chartNote").innerHTML = notes.join(" ");
 
   drawPriceChart($("priceChart"), chart, _lastActionable);
+  bindChartZoom($("priceChart"));
 }
 
 // The plan's operable zones, ready to draw ON the chart (price on the band edge),
@@ -486,6 +487,9 @@ function drawPriceChart(canvas, chart, a) {
   const padL = 8, padR = 58, padT = 12, padB = 22;
   const plotW = cssW - padL - padR, plotH = cssH - padT - padB;
   const n = candles.length;
+  let v0 = _view ? Math.max(0, Math.min(_view.v0, n - 8)) : 0;
+  let v1 = _view ? Math.max(v0 + 8, Math.min(_view.v1, n)) : n;
+  const vis = v1 - v0;
 
   const zones = planZones(a);
   const price = a && a.price != null ? a.price : null;
@@ -494,8 +498,8 @@ function drawPriceChart(canvas, chart, a) {
   // price — the plan bands are part of the picture now, so they must fit on screen
   let lo = Infinity, hi = -Infinity;
   const grow = (v) => { if (v != null && isFinite(Number(v))) { lo = Math.min(lo, v); hi = Math.max(hi, v); } };
-  candles.forEach((c) => { grow(c.l); grow(c.h); });
-  Object.values(chart.ma || {}).forEach((arr) => arr.forEach(grow));
+  for (let i = v0; i < v1; i++) { grow(candles[i].l); grow(candles[i].h); }
+  Object.values(chart.ma || {}).forEach((arr) => { for (let i = v0; i < v1; i++) grow(arr[i]); });
   const pat = chart.markers && chart.markers.pattern_123;
   if (pat) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach(grow);
   zones.forEach((z) => { grow(z.price); grow(z.low); grow(z.high); });
@@ -503,7 +507,7 @@ function drawPriceChart(canvas, chart, a) {
   if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
   const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
 
-  const x = (i) => padL + (i + 0.5) * (plotW / n);
+  const x = (i) => padL + (i - v0 + 0.5) * (plotW / vis);
   const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
 
   // gridlines + price labels (y axis, right)
@@ -540,15 +544,16 @@ function drawPriceChart(canvas, chart, a) {
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   const labels = 5;
   for (let t = 0; t <= labels; t++) {
-    const i = Math.min(n - 1, Math.round((n - 1) * (t / labels)));
+    const i = Math.min(v1 - 1, v0 + Math.round((vis - 1) * (t / labels)));
     const d = candles[i].d; // YYYY-MM-DD -> DD/MM
     ctx.fillStyle = "#8b97ad";
     ctx.fillText(d.slice(8, 10) + "/" + d.slice(5, 7), x(i), padT + plotH + 5);
   }
 
   // candles
-  const cw = Math.max(1, Math.min((plotW / n) * 0.7, 9));
+  const cw = Math.max(1, Math.min((plotW / vis) * 0.7, 14));
   candles.forEach((c, i) => {
+    if (i < v0 || i >= v1) return;
     if (c.o == null || c.c == null) return;
     const up = c.c >= c.o;
     const col = up ? "#2ecc71" : "#ff5c6c";
@@ -566,6 +571,7 @@ function drawPriceChart(canvas, chart, a) {
     ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
     let started = false;
     arr.forEach((v, i) => {
+      if (i < v0 || i >= v1) { started = false; return; }
       if (v == null) { started = false; return; }
       const px = x(i), py = y(v);
       if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
@@ -637,6 +643,46 @@ function drawPriceChart(canvas, chart, a) {
     const val = hasBand ? `${fmtNum(z.low)}–${fmtNum(z.high)}` : fmtNum(z.price);
     drawEdgeLabel(ctx, padL, yy, `${z.tag} ${val}`, z.color, "#0b0e14", "left", cssH);
   });
+}
+
+function bindChartZoom(canvas) {
+  if (!canvas || canvas._zoomBound) return;
+  canvas._zoomBound = true;
+  const N = () => (_lastChart && _lastChart.candles ? _lastChart.candles.length : 0);
+  const redraw = () => drawPriceChart(canvas, _lastChart, _lastActionable);
+  const cur = () => _view || { v0: 0, v1: N() };
+  canvas.addEventListener("wheel", (e) => {
+    if (!N()) return;
+    e.preventDefault();
+    const { v0, v1 } = cur(); const vis = v1 - v0;
+    const rect = canvas.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - 8) / (rect.width - 66)));
+    const anchor = v0 + frac * vis;
+    const factor = e.deltaY < 0 ? 0.82 : 1.22;
+    let nv = Math.max(8, Math.min(N(), Math.round(vis * factor)));
+    let nv0 = Math.max(0, Math.min(Math.round(anchor - frac * nv), N() - nv));
+    _view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
+    redraw();
+  }, { passive: false });
+  let drag = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!_view) return;
+    drag = { x: e.clientX, v0: _view.v0, v1: _view.v1 };
+    canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing";
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const rect = canvas.getBoundingClientRect();
+    const vis = drag.v1 - drag.v0;
+    const dC = Math.round((e.clientX - drag.x) / (rect.width - 66) * vis);
+    let nv0 = Math.max(0, Math.min(drag.v0 - dC, N() - vis));
+    _view = { v0: nv0, v1: nv0 + vis };
+    redraw();
+  });
+  const end = () => { drag = null; canvas.style.cursor = _view ? "grab" : "default"; };
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+  canvas.addEventListener("dblclick", () => { _view = null; redraw(); });
 }
 
 // redraw on resize so the canvas stays crisp and correctly scaled

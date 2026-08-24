@@ -195,6 +195,12 @@ details.section[open] > summary::before { content: "▾"; }
 .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .chart-legend .sw { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
 .chart-legend .sw.dot { width: 9px; height: 9px; border-radius: 50%; }
+/* EMA legend swatch reads as a DASHED line (matches the dashed EMA polyline);
+   a mask punches the gaps so the inline swatch colour still shows through. */
+.chart-legend .sw.ema {
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 7px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 7px);
+}
 .chart-wrap { position: relative; width: 100%; }
 #priceChart { width: 100%; height: 380px; display: block; }
 .chart-note { color: var(--muted); font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
@@ -394,3 +400,13 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   font-weight: 600;
 }
 .act-live b { font-weight: 800; }
+
+/* dica de zoom no canto do gráfico */
+.chart-wrap { position: relative; }
+.chart-zoom-hint {
+  position: absolute; right: 66px; top: 10px;
+  font-size: 10.5px; color: var(--muted, #8b97ad);
+  background: rgba(20,24,34,.7); padding: 2px 7px; border-radius: 5px;
+  pointer-events: none; letter-spacing: .02em;
+}
+#priceChart { touch-action: none; cursor: default; }
