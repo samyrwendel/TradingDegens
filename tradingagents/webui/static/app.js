@@ -1123,6 +1123,10 @@ function drawPriceChart(canvas, chart, a) {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
+  // fundo do gráfico PRETO PURO (Quantfury, task 029) — nada de navy; velas, médias
+  // e as pílulas do eixo contrastam sobre ele.
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, cssW, cssH);
 
   const padL = PAD_L, padR = PAD_R, padT = PAD_T, padB = PAD_B;
   const plotW = cssW - padL - padR, plotH = cssH - padT - padB;
@@ -1180,13 +1184,13 @@ function drawPriceChart(canvas, chart, a) {
   });
   const axisPills = [];
   if (price != null) {
-    axisPills.push({ y: y(price), text: fmtAxis(price), bg: "#e6eaf2", fg: "#0b0e14", strong: true });
+    axisPills.push({ y: y(price), text: fmtAxis(price), bg: "#e6eaf2", fg: "#000000", strong: true });
   }
   zones.forEach((z) => {
-    if (z.price != null) axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#0b0e14" });
+    if (z.price != null) axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#000000" });
   });
   if (pat) {
-    axisPills.push({ y: y(pat.trigger), text: fmtAxis(pat.trigger), bg: patColor(pat), fg: "#0b0e14" });
+    axisPills.push({ y: y(pat.trigger), text: fmtAxis(pat.trigger), bg: patColor(pat), fg: "#000000" });
   }
   layoutAxisPills(axisPills, padT + pillH / 2 + 1, padT + plotH - pillH / 2 - 1, pillH + 2);
   const pillCovers = (yy) => axisPills.some((p) => Math.abs(p.ry - yy) < pillH);
@@ -1213,7 +1217,7 @@ function drawPriceChart(canvas, chart, a) {
   ctx.font = "bold 11px ui-monospace, Menlo, monospace";
   const tfW = ctx.measureText(tfText).width + 14;
   roundRect(ctx, padL + 2, padT + 2, tfW, 17, 4);
-  ctx.globalAlpha = 0.85; ctx.fillStyle = "#1b2130"; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.globalAlpha = 0.85; ctx.fillStyle = "#111111"; ctx.fill(); ctx.globalAlpha = 1;
   ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1; ctx.stroke();
   ctx.fillStyle = "#cdd6e4"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
   ctx.fillText(tfText, padL + 9, padT + 2 + 8.5);
@@ -1320,7 +1324,7 @@ function drawPriceChart(canvas, chart, a) {
       pts.forEach((p) => {
         const px = x(p.i), cy = y(p.price), off = p.kind === "L" ? 14 : -14;
         ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillStyle = "#0b0e14"; ctx.beginPath(); ctx.arc(px, cy + off, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(px, cy + off, 8, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = col; ctx.stroke();
         ctx.fillStyle = col; ctx.fillText(p.lab, px, cy + off);
         ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8b97ad";

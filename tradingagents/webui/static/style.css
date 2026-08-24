@@ -1,8 +1,12 @@
 :root {
-  --bg: #0b0e14;
-  --panel: #121722;
-  --panel-2: #171d2b;
-  --border: #232b3b;
+  /* Fundo QUASE PRETO estilo Quantfury (task 029): neutro-escuro, sem tom azulado.
+     O gráfico é o mais profundo (#000), painéis #111, superfícies elevadas #1a1a1a.
+     As cores de FUNÇÃO (verde/amarelo/vermelho) e o azul de DADO (MMS50/1-2-3,
+     hardcoded em app.js) ficam intactos — só o chrome navy saiu. */
+  --bg: #000000;
+  --panel: #111111;
+  --panel-2: #1a1a1a;
+  --border: #2a2a2a;
   --text: #e6eaf2;
   --muted: #8b97ad;
   --accent: #6ea8fe;
@@ -223,19 +227,21 @@ details.section[open] > summary::before { content: "▾"; }
 .md ul, .md ol { margin: 8px 0; padding-left: 22px; }
 .md li { margin: 3px 0; }
 .md strong { color: #fff; }
-.md code { font-family: var(--mono); background: #0d1118; padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
-.md pre { background: #0d1118; padding: 12px; border-radius: 8px; overflow-x: auto; }
+.md code { font-family: var(--mono); background: #0d0d0d; padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+.md pre { background: #0d0d0d; padding: 12px; border-radius: 8px; overflow-x: auto; }
 .md pre code { background: none; padding: 0; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .md table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
 .md th, .md td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; }
-.md th { background: #0d1118; color: #fff; }
+.md th { background: #0d0d0d; color: #fff; }
 .md a { color: var(--accent); }
 .unavailable { color: var(--amber); }
 
 /* candlestick chart */
 .chart-card {
-  border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2);
+  /* o gráfico é a superfície mais profunda: preto puro (Quantfury), velas e
+     etiquetas do eixo destacam sobre ele. */
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg);
   padding: 14px 16px; margin: 8px 0 6px;
 }
 .chart-card.setup-active { border-color: #2e7d55; box-shadow: 0 0 0 1px rgba(46,204,113,.25) inset; }
@@ -517,7 +523,7 @@ details.section[open] > summary::before { content: "▾"; }
 .history li.is-running { border-color: #2e5c7d; }
 .history li.is-running:hover { border-color: var(--accent); }
 .history .h-verdict.running {
-  color: var(--accent); border-color: #2e5c7d; background: #10203a;
+  color: var(--accent); border-color: #2e5c7d; background: #1a1a1a;
   white-space: nowrap; font-family: var(--mono); font-weight: 700;
 }
 .run-dot {
@@ -660,15 +666,15 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   font-size: 12px;
   color: var(--muted, #8b93a7);
   background: transparent;
-  border: 1px solid var(--line, #2a3040);
+  border: 1px solid var(--line, #2a2a2a);
   border-radius: 6px;
   cursor: pointer;
   transition: background .12s, color .12s, border-color .12s;
 }
-.h-tab:hover { color: var(--fg, #e6e9f0); border-color: var(--line-strong, #3a4256); }
+.h-tab:hover { color: var(--fg, #e6e9f0); border-color: var(--line-strong, #3a3a3a); }
 .h-tab.is-active {
   color: var(--fg, #e6e9f0);
-  background: var(--panel-2, #1a1f2b);
+  background: var(--panel-2, #1a1a1a);
   border-color: var(--accent, #4c9aff);
 }
 
@@ -712,7 +718,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   font-size: 13px;
   color: var(--muted, #8b93a7);
   background: transparent;
-  border: 1px solid var(--line, #2a3040);
+  border: 1px solid var(--line, #2a2a2a);
   border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
@@ -721,7 +727,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .refresh-btn:hover {
   color: var(--fg, #e6e9f0);
   border-color: var(--accent, #4c9aff);
-  background: var(--panel-2, #1a1f2b);
+  background: var(--panel-2, #1a1a1a);
 }
 
 /* Contador de análises do ativo na lista lateral */
@@ -732,8 +738,8 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   font-size: 11px;
   font-weight: 600;
   color: var(--muted, #8b93a7);
-  background: var(--panel-2, #1a1f2b);
-  border: 1px solid var(--line, #2a3040);
+  background: var(--panel-2, #1a1a1a);
+  border: 1px solid var(--line, #2a2a2a);
   border-radius: 999px;
 }
 
@@ -754,10 +760,10 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   width: 11px; height: 11px; padding: 0;
   border-radius: 2px;
   border: 1px solid transparent;
-  background: var(--panel-2, #1a1f2b);
+  background: var(--panel-2, #1a1a1a);
   cursor: pointer;
 }
-.cal-cell.is-empty { background: #161a24; cursor: default; }
+.cal-cell.is-empty { background: #141414; cursor: default; }
 .cal-cell:not(.is-empty):hover { outline: 1px solid var(--accent, #4c9aff); }
 .cal-cell.is-current { border-color: var(--accent, #4c9aff); }
 /* cor = veredito daquele dia (mesma escala: verde compra · amarelo mantém · vermelho vende) */
