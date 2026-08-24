@@ -498,6 +498,21 @@ async function startAnalysis(ev) {
   }
 }
 
+let _historyFilter = "all";
+let _allRuns = [];
+
+function bindHistoryTabs() {
+  const tabs = document.getElementById("historyTabs");
+  if (!tabs) return;
+  tabs.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".h-tab");
+    if (!btn) return;
+    _historyFilter = btn.dataset.filter || "all";
+    tabs.querySelectorAll(".h-tab").forEach((b) => b.classList.toggle("is-active", b === btn));
+    loadHistory();
+  });
+}
+
 async function loadHistory() {
   try {
     const res = await fetch("/api/history");
@@ -505,8 +520,9 @@ async function loadHistory() {
     const ul = $("history");
     const runs = data.runs || [];
     if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
-    // Duas famílias só: cripto e ações. Metais e o resto entram em ações —
-    // decisão do Samyr (24/08): "basta cripto e ações; metais entre ações".
+    // Duas famílias só: cripto e ações (metais entram em ações). O usuário
+    // escolhe pela aba — Todos / Ações / Cripto —, sem cabeçalho empilhado.
+    _allRuns = runs;
     const item = (r) => {
       const v = (r.verdict || r.status || "").toString();
       const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
@@ -516,12 +532,12 @@ async function loadHistory() {
         `<span class="h-meta">${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
         `</li>`;
     };
-    const cripto = runs.filter((r) => r.asset_type === "crypto");
-    const acoes = runs.filter((r) => r.asset_type !== "crypto");
-    let html = "";
-    if (cripto.length) html += `<li class="h-group">🪙 Cripto</li>` + cripto.map(item).join("");
-    if (acoes.length) html += `<li class="h-group">📈 Ações</li>` + acoes.map(item).join("");
-    ul.innerHTML = html;
+    const shown = _historyFilter === "all"
+      ? runs
+      : runs.filter((r) => (r.asset_type === "crypto") === (_historyFilter === "crypto"));
+    ul.innerHTML = shown.length
+      ? shown.map(item).join("")
+      : '<li class="empty">Nenhuma análise nesta aba.</li>';
     [...ul.children].forEach((li) => {
       const id = li.getAttribute("data-id");
       if (id) li.addEventListener("click", () => openRun(id));
@@ -560,6 +576,7 @@ function init() {
     $("assetHint").innerHTML = /-(USD|USDT)$|^BTC|^ETH/.test(t) ? `Detectado: cripto — inclui taxa de financiamento <span class="orig">(funding)</span>, contratos em aberto <span class="orig">(open interest)</span> e liquidações <span class="orig">(liquidations)</span>.` : "";
   });
   $("netNote").textContent = "acesse por " + location.host;
+  bindHistoryTabs();
   loadHistory().then(openLatestRun);
 }
 

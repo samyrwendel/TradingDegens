@@ -253,16 +253,23 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .act-v .zlabel { color: var(--muted); font-family: inherit; font-size: 12px; }
 .act-v .nolevel { color: var(--muted); font-style: italic; font-family: inherit; }
 
-/* Cabeçalho de família no histórico (cripto / ações) — DA: só duas famílias. */
-#history .h-group {
-  display: block;
-  padding: 10px 4px 4px;
-  font-size: 11px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+/* Abas do histórico: Todos / Ações / Cripto */
+.h-tabs { display: flex; gap: 4px; margin: 0 0 10px; }
+.h-tab {
+  flex: 1;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
   color: var(--muted, #8b93a7);
-  cursor: default;
-  background: none;
-  border: 0;
+  background: transparent;
+  border: 1px solid var(--line, #2a3040);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
 }
-#history .h-group:hover { background: none; }
+.h-tab:hover { color: var(--fg, #e6e9f0); border-color: var(--line-strong, #3a4256); }
+.h-tab.is-active {
+  color: var(--fg, #e6e9f0);
+  background: var(--panel-2, #1a1f2b);
+  border-color: var(--accent, #4c9aff);
+}

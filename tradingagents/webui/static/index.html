@@ -23,6 +23,11 @@
     <aside class="sidebar">
       <section class="panel history-panel">
         <h2 class="section-title">Histórico</h2>
+        <div class="h-tabs" id="historyTabs" role="tablist">
+          <button type="button" class="h-tab is-active" data-filter="all">Todos</button>
+          <button type="button" class="h-tab" data-filter="stock">Ações</button>
+          <button type="button" class="h-tab" data-filter="crypto">Cripto</button>
+        </div>
         <ul class="history" id="history"></ul>
       </section>
     </aside>
