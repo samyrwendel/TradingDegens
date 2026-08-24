@@ -63,6 +63,21 @@ def column_label(col: dict) -> str:
     return f"{method_label(col.get('method'))} · {_tf(col.get('timeframe', '1d'))}"
 
 
+def confront_pair_valid(col_a: dict, col_b: dict) -> bool:
+    """A confront is legitimate ONLY as Padrão × Erick on the SAME timeframe and
+    date — one reading of each method, same frame, same day (Samyr's rule, task
+    024). Two of the same method, or mismatched frames/dates, is NOT a confront:
+    it is the trivial 'método contra ele mesmo' the meta-judge must never label
+    'Concordam'. The caller reroutes an invalid pair through ``start_compare``."""
+    if {col_a.get("method"), col_b.get("method")} != {"padrao", "erick"}:
+        return False
+    if (col_a.get("timeframe") or "1d") != (col_b.get("timeframe") or "1d"):
+        return False
+    if (col_a.get("date") or "") != (col_b.get("date") or ""):
+        return False
+    return True
+
+
 def build_column(record: dict, method: str) -> dict:
     """A comparison column from a persisted run record (or a snapshot dict).
 
@@ -110,6 +125,12 @@ def meta_judge(a: dict, b: dict) -> dict:
     la, lb = column_label(a), column_label(b)
     da, db = a.get("date", ""), b.get("date", "")
     have_both = bool(_vkey(va)) and bool(_vkey(vb))
+    # Defesa (task 024): dois do MESMO método não é confronto — é concordância
+    # trivial ("6 com meia dúzia"). Nunca emitir "Concordam: ambos X" pra isso;
+    # é estado de ERRO. Os chamadores só passam Padrão × Erick, então isto é rede
+    # de segurança — se disparar, algo montou o par errado.
+    if a.get("method") == b.get("method") and a.get("method") in ("padrao", "erick"):
+        return _same_method_error(a, b, la, lb, va, vb, da, db)
     agree = have_both and _vkey(va) == _vkey(vb)
     meta_verdict = va if agree else _more_conservative(va, vb)
     diff_method = a.get("method") != b.get("method")
@@ -180,6 +201,31 @@ def meta_judge(a: dict, b: dict) -> dict:
         "concordancia": concordancia,
         "divergencia": divergencia,
         "significado": significado,
+    }
+
+
+def _same_method_error(a, b, la, lb, va, vb, da, db) -> dict:
+    """Confront result for an invalid pair (same method against itself, task 024).
+
+    Not a confront — an error state. Never says 'Concordam'; it names the mistake
+    and points to the fix (run the missing method so it is a real Padrão × Erick)."""
+    return {
+        "agreement": "invalido",
+        "verdict": None,
+        "verdict_a": va, "verdict_b": vb,
+        "timeframe_a": a.get("timeframe", "1d"), "timeframe_b": b.get("timeframe", "1d"),
+        "label_a": la, "label_b": lb,
+        "date_a": da, "date_b": db,
+        "headline": "Confronto exige Padrão × Erick — não método contra ele mesmo.",
+        "concordancia": "",
+        "divergencia": (
+            f"Par inválido: **{la}** × **{lb}** — o mesmo método contra ele mesmo."
+        ),
+        "significado": (
+            "Comparar um método com ele mesmo é concordância trivial (6 com meia "
+            "dúzia). Rode o método que falta no mesmo timeframe e confronte "
+            "Padrão × Erick de verdade — a divergência entre os dois é o sinal."
+        ),
     }
 
 

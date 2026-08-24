@@ -11,21 +11,54 @@ import pytest
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
-from tests.test_webui_runner import FINAL_STATE, _blocking_factory, _factory
+from tests.test_webui_runner import FINAL_STATE, _FakeGraph, _blocking_factory, _factory
 
 
-@pytest.fixture()
-def server(tmp_path):
+def _dual_factory():
+    """Padrão → Buy; Erick (analyst present) → Hold WITH an erick_report, so the
+    two sides are a real Padrão × Erick pair the manual confront can meta-judge
+    directly (detect_method needs the erick_report to tell them apart)."""
+    def make(config, selected, callbacks):
+        if "erick" in selected:
+            fs = {**FINAL_STATE, "erick_report": "Erick: aguardar o recuo à média."}
+            return _FakeGraph(callbacks, fs, "Hold")
+        return _FakeGraph(callbacks, FINAL_STATE, "Buy")
+    return make
+
+
+def _stub_enrich(monkeypatch):
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
+
+
+def _make_server(tmp_path, factory):
     runner = AnalysisRunner(
         base_config={"results_dir": str(tmp_path)},
         store=HistoryStore(tmp_path),
-        graph_factory=_factory(),
+        graph_factory=factory,
     )
     httpd = make_server("127.0.0.1", 0, runner=runner)
     port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{port}"
+    return httpd, f"http://127.0.0.1:{port}"
+
+
+@pytest.fixture()
+def server(tmp_path):
+    httpd, base = _make_server(tmp_path, _factory())
+    yield base
+    httpd.shutdown()
+
+
+@pytest.fixture()
+def dual_server(tmp_path):
+    """A server whose fake engine writes a real Erick report — lets the compare
+    endpoint exercise the DIRECT Padrão × Erick confront path over HTTP."""
+    httpd, base = _make_server(tmp_path, _dual_factory())
+    yield base
     httpd.shutdown()
 
 
@@ -184,30 +217,50 @@ def test_analyze_compare_flow(server, monkeypatch):
     assert cmp["meta"]["agreement"] in ("concordam", "divergem", "parcial")
 
 
-def test_compare_endpoint_confronts_two_runs(server, monkeypatch):
-    """POST /api/compare meta-judges two existing runs of the same ticker."""
-    import tradingagents.webui.runner as rm
-    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
-    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
-    monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
+def _run_on(base, payload):
+    _, body = _post(base, "/api/analyze", payload)
+    rid = body["run_id"]
+    for _ in range(400):
+        _, snap = _get(base, "/api/status/" + rid)
+        if snap["status"] != "running":
+            break
+        time.sleep(0.02)
+    return rid
 
-    def _run(payload):
-        _, body = _post(server, "/api/analyze", payload)
-        rid = body["run_id"]
-        for _ in range(400):
-            _, snap = _get(server, "/api/status/" + rid)
-            if snap["status"] != "running":
-                break
-            time.sleep(0.02)
-        return rid
 
-    a = _run({"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
-    b = _run({"ticker": "AAPL", "date": "2026-08-22", "method": "erick"})
-    status, snap = _post(server, "/api/compare", {"a": a, "b": b})
+def test_compare_endpoint_confronts_two_runs(dual_server, monkeypatch):
+    """POST /api/compare directly meta-judges a valid Padrão × Erick pair (same
+    frame/date) — no re-run, ``manual`` flagged."""
+    _stub_enrich(monkeypatch)
+    a = _run_on(dual_server, {"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
+    b = _run_on(dual_server, {"ticker": "AAPL", "date": "2026-08-22", "method": "erick"})
+    status, snap = _post(dual_server, "/api/compare", {"a": a, "b": b})
     assert status == 200
     cmp = snap["result"]["compare"]
     assert cmp["manual"] is True
     assert set(("a", "b", "meta")).issubset(cmp)
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+
+
+def test_compare_endpoint_reroutes_same_method(server, monkeypatch):
+    """POST /api/compare with two SAME-method runs never yields método×ele-mesmo:
+    it reroutes to a real Padrão × Erick run (task 024). The default fake engine
+    writes no erick_report, so both runs read as Padrão → reroute."""
+    _stub_enrich(monkeypatch)
+    a = _run_on(server, {"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
+    b = _run_on(server, {"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
+    status, snap = _post(server, "/api/compare", {"a": a, "b": b})
+    assert status == 200
+    assert snap.get("rerouted") is True and "compare" not in (snap.get("result") or {})
+    rid = snap["run_id"]
+    for _ in range(400):
+        _, done = _get(server, "/api/status/" + rid)
+        if done["status"] != "running":
+            break
+        time.sleep(0.02)
+    cmp = done["result"]["compare"]
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["meta"]["agreement"] != "invalido"
 
 
 def test_compare_endpoint_rejects_cross_ticker(server):

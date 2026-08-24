@@ -20,7 +20,12 @@ from typing import Any
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from tradingagents.webui import timeutil
-from tradingagents.webui.compare import build_column, deterministic_meta, detect_method
+from tradingagents.webui.compare import (
+    build_column,
+    confront_pair_valid,
+    deterministic_meta,
+    detect_method,
+)
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
 from tradingagents.webui.store import HistoryStore
@@ -582,12 +587,19 @@ class AnalysisRunner:
         return self.store.get(run_id)
 
     def confront(self, id_a: str, id_b: str) -> dict[str, Any]:
-        """Meta-judge over TWO existing analyses of the same ticker (manual flow,
-        task 018) — no pipeline re-run, just the deterministic comparison.
+        """Confront two analyses of the same ticker — ALWAYS Padrão × Erick on the
+        same timeframe/date (Samyr's rule, task 024). Never 'método contra ele mesmo'.
 
-        Accepts any pair of the same ticker: Padrão × Erick, or two timeframes. The
-        pair is persisted as a compare record so it shows in history and is openable.
-        Returns a ready snapshot (``result.compare`` populated).
+        If the two picked runs already are a valid Padrão × Erick pair on the same
+        frame and date, meta-judge them directly (free, no re-run, the exact runs
+        chosen). Anything else — two of the same method, or mismatched frames/dates —
+        is NOT a confront: it reroutes through :meth:`start_compare`, anchored on the
+        open run A, which reuses the cached side and runs ONLY the missing method so
+        the outcome is a true Padrão × Erick.
+
+        Returns a done snapshot (``result.compare`` populated) for the direct case,
+        or ``{"run_id": ..., "rerouted": True}`` for the rerouted (async) case — the
+        caller polls that run_id like any other.
         """
         if not id_a or not id_b:
             raise ValueError("selecione duas análises")
@@ -605,12 +617,29 @@ class AnalysisRunner:
 
         col_a = build_column(rec_a, detect_method(rec_a))
         col_b = build_column(rec_b, detect_method(rec_b))
+
+        # Not a real confront (same method, or different frame/date) → reroute to a
+        # true Padrão × Erick compare, anchored on run A (ticker/date/frame the user
+        # is looking at). start_compare reuses the cached side and runs only the
+        # missing method — impossible to produce método×ele-mesmo by this door.
+        if not confront_pair_valid(col_a, col_b):
+            run_id = self.start_compare(
+                ta, rec_a.get("date") or "",
+                timeframe=col_a.get("timeframe") or _DEFAULT_TIMEFRAME,
+            )
+            return {"run_id": run_id, "rerouted": True, "ticker": ta,
+                    "status": "running"}
+
+        # Valid pair: keep Padrão first / Erick second so the header always reads
+        # "Padrão · X × Método Erick · X" regardless of which side was picked first.
+        if col_a.get("method") != "padrao":
+            col_a, col_b = col_b, col_a
         asset_type = rec_a.get("asset_type") or rec_b.get("asset_type") or "stock"
         meta = self._meta_judge(col_a, col_b, asset_type)
 
         run_id = timeutil.run_id_stamp() + "-cmp" + uuid.uuid4().hex[:4]
-        crun = _CompareRun(run_id, ta, rec_a.get("date") or "", asset_type,
-                           col_a.get("timeframe") or _DEFAULT_TIMEFRAME)
+        crun = _CompareRun(run_id, ta, col_a.get("date") or rec_a.get("date") or "",
+                           asset_type, col_a.get("timeframe") or _DEFAULT_TIMEFRAME)
         crun.result = {
             "compare": {"a": col_a, "b": col_b, "meta": meta, "manual": True},
             "verdict": meta.get("verdict"),

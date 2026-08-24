@@ -278,6 +278,7 @@ details.section[open] > summary::before { content: "▾"; }
 .mj-head.agree .mj-badge { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
 .mj-head.diverge .mj-badge { color: var(--amber); background: #3a2f10; border-color: #5c4a17; }
 .mj-head.partial .mj-badge { color: var(--muted); }
+.mj-head.invalid .mj-badge { color: var(--red); background: #3a1414; border-color: #5c1f1f; }
 .mj-headline { font-size: 15px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
 .mj-body { display: grid; gap: 8px; }
 .mj-sec h3 { margin: 6px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }

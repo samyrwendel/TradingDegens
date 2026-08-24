@@ -435,8 +435,11 @@ function renderCompare(snap) {
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
   const agr = meta.agreement || "";
-  const agrCls = agr === "concordam" ? "agree" : (agr === "divergem" ? "diverge" : "partial");
-  const agrLabel = agr === "concordam" ? "✅ Concordam" : (agr === "divergem" ? "⚠️ Divergem" : "◐ Parcial");
+  const agrCls = agr === "concordam" ? "agree"
+    : (agr === "divergem" ? "diverge" : (agr === "invalido" ? "invalid" : "partial"));
+  const agrLabel = agr === "concordam" ? "✅ Concordam"
+    : (agr === "divergem" ? "⚠️ Divergem"
+      : (agr === "invalido" ? "⛔ Inválido" : "◐ Parcial"));
   $("metaJudge").innerHTML =
     `<div class="mj-head ${agrCls}">` +
       `<span class="mj-badge">${agrLabel}</span>` +
@@ -514,7 +517,21 @@ async function confront(a, b) {
     });
     const snap = await res.json();
     if (!res.ok) { $("formError").textContent = snap.error || "falha ao confrontar"; return; }
-    renderCompare(snap);
+    // Par Padrão × Erick já pronto (mesmo frame/data): confronto direto, reusa as
+    // duas análises. Renderiza na hora.
+    if (snap.result && snap.result.compare) { renderCompare(snap); return; }
+    // Não era Padrão × Erick no mesmo frame (ex.: dois Padrão) — o backend refez
+    // pela via correta, rodando só o método que faltava. Acompanha o run.
+    if (snap.run_id) {
+      renderProgress({
+        status: "running", ticker: snap.ticker || "", elapsed: 0, cost: null,
+        progress: { phase: "Inicializando", label: "Refazendo como Padrão × Erick…", percent: 3, plan: [], reached: [] },
+      });
+      watchRun(snap.run_id);
+      loadHistory();
+      return;
+    }
+    $("formError").textContent = "falha ao confrontar";
   } catch (e) { $("formError").textContent = "falha ao confrontar"; }
 }
 

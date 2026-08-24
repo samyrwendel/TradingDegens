@@ -71,14 +71,22 @@ def test_meta_diverge_picks_conservative_and_explains():
     assert "Padrão" in m["label_a"] and "Erick" in m["label_b"]
 
 
-def test_meta_two_timeframes_same_method():
-    """Same method, different frames: trend-frame vs timing-frame narrative."""
+def test_meta_same_method_is_error_never_concordam():
+    """Same method against itself is NOT a confront (Samyr's rule, task 024): it is
+    an error state, and must never be labelled 'Concordam' — even when both agree."""
     m = deterministic_meta(
+        {"verdict": "Hold", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
+        {"verdict": "Hold", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
+    )
+    assert m["agreement"] == "invalido"
+    assert "Concordam" not in m["headline"]
+    assert "Padrão × Erick" in m["headline"]
+    # two timeframes of the same method is equally invalid (no trend/timing story)
+    m2 = deterministic_meta(
         {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
         {"verdict": "Hold", "timeframe": "4h", "method": "padrao", "date": "2026-08-22"},
     )
-    assert m["agreement"] == "divergem"
-    assert "frame" in m["significado"].lower()
+    assert m2["agreement"] == "invalido"
 
 
 def test_meta_partial_when_one_side_missing():
@@ -145,14 +153,55 @@ def test_confront_two_existing_runs(tmp_path):
     assert r.store.get(snap["run_id"])["compare"] is True
 
 
-def test_confront_two_timeframes(tmp_path):
+def test_confront_valid_pair_orders_padrao_first(tmp_path):
+    """A valid Padrão × Erick pair is confronted directly (free, no re-run); the
+    header always reads Padrão first even if Erick was picked as side A."""
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                        store=HistoryStore(tmp_path), graph_factory=_dual_factory())
-    rid_1d = r.start("BTC-USD", "2026-08-22", method="padrao", timeframe="1d"); _wait(r, rid_1d)
-    rid_4h = r.start("BTC-USD", "2026-08-22", method="padrao", timeframe="4h"); _wait(r, rid_4h)
-    cmp = r.confront(rid_1d, rid_4h)["result"]["compare"]
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "padrao"
-    assert cmp["a"]["timeframe"] != cmp["b"]["timeframe"]
+    rid_e = r.start("BTC-USD", "2026-08-22", method="erick"); _wait(r, rid_e)
+    rid_p = r.start("BTC-USD", "2026-08-22", method="padrao"); _wait(r, rid_p)
+    out = r.confront(rid_e, rid_p)              # Erick picked first
+    assert "rerouted" not in out               # direct: it was already a valid pair
+    cmp = out["result"]["compare"]
+    assert cmp["manual"] is True
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+
+
+def test_confront_same_method_reroutes_to_padrao_erick(tmp_path):
+    """SPCX bug (task 024): confronting two runs of the SAME method can no longer
+    produce 'Padrão × Padrão'. It reroutes to a real Padrão × Erick compare that
+    reuses the cached side and runs only the missing method."""
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    # history has ONLY Padrão readings — exactly the SPCX situation
+    rid_a = r.start("SPCX", "2026-08-22", method="padrao"); _wait(r, rid_a)
+    rid_b = r.start("SPCX", "2026-08-22", method="padrao"); _wait(r, rid_b)
+    out = r.confront(rid_a, rid_b)
+    # not a direct confront: rerouted to an async Padrão × Erick run
+    assert out.get("rerouted") is True and "run_id" in out
+    assert "compare" not in (out.get("result") or {})
+    snap = _wait(r, out["run_id"])
+    cmp = snap["result"]["compare"]
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["b"]["erick_report"]                 # the missing method actually ran
+    assert cmp["a"]["reused"] is True               # the existing Padrão was reused
+    assert cmp["meta"]["agreement"] != "invalido"   # a real confront, not método×ele-mesmo
+
+
+def test_confront_mismatched_timeframe_reroutes(tmp_path):
+    """Padrão × Erick but on DIFFERENT frames is not 'same timeframe' → reroute to a
+    fresh same-frame Padrão × Erick anchored on the open run A."""
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    rid_p1d = r.start("BTC-USD", "2026-08-22", method="padrao", timeframe="1d"); _wait(r, rid_p1d)
+    rid_e4h = r.start("BTC-USD", "2026-08-22", method="erick", timeframe="4h"); _wait(r, rid_e4h)
+    out = r.confront(rid_p1d, rid_e4h)
+    assert out.get("rerouted") is True
+    snap = _wait(r, out["run_id"])
+    cmp = snap["result"]["compare"]
+    # anchored on A (1d): both sides on the same frame now
+    assert cmp["a"]["timeframe"] == "1d" and cmp["b"]["timeframe"] == "1d"
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
 
 
 def test_confront_rejects_different_tickers(tmp_path):
