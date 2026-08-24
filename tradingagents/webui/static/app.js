@@ -406,10 +406,17 @@ const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
 let _lastChart = null;        // kept so a window resize can redraw crisply.
 let _lastActionable = null;   // plan bands drawn on the chart alongside _lastChart.
 let _view = null;             // {v0,v1} janela de candles visível; null = tudo
+let _vview = null;            // {lo,hi} janela de PREÇO (eixo Y); null = autoescala
+let _yGeom = null;            // {padT,plotH,lo,hi} da última render — base do zoom/pan vertical
+let _autoY = null;            // {lo,hi} autoescala atual — solta o _vview no zoom-out total
 let _tf = "1d";               // timeframe atualmente exibido no gráfico
 let _timeframes = ["1d"];     // frames operáveis do ativo aberto (cripto = escada)
 let _openDate = "";           // data da análise aberta (recomputa por timeframe)
 let _assetType = "";          // tipo do ativo aberto (cripto habilita intradiário)
+
+// paddings do gráfico, compartilhados entre o desenho e a interação de zoom/pan
+// (o zoom vertical precisa converter y do cursor → preço com a MESMA geometria)
+const PAD_L = 8, PAD_R = 58, PAD_T = 12, PAD_B = 22;
 
 // Todos os frames do seletor, na ordem exibida. Um frame fora de `_timeframes`
 // (intradiário em ação) é renderizado DESABILITADO — o backend nunca inventa
@@ -422,6 +429,7 @@ function renderChartCard(chart, ticker, actionable) {
   const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
   if (!hasData) { card.classList.add("hidden"); _lastChart = null; _lastActionable = null; return; }
   _view = null;
+  _vview = null;   // novo gráfico (outro ativo/timeframe) recomeça na autoescala
   card.classList.remove("hidden");
   _lastChart = chart;
   _lastActionable = actionable || null;
@@ -614,7 +622,7 @@ function drawPriceChart(canvas, chart, a) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  const padL = 8, padR = 58, padT = 12, padB = 22;
+  const padL = PAD_L, padR = PAD_R, padT = PAD_T, padB = PAD_B;
   const plotW = cssW - padL - padR, plotH = cssH - padT - padB;
   const n = candles.length;
   let v0 = _view ? Math.max(0, Math.min(_view.v0, n - 8)) : 0;
@@ -639,6 +647,15 @@ function drawPriceChart(canvas, chart, a) {
   grow(price);
   if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
   const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+
+  // Autoescala vertical (padrão) fica registrada em _autoY; a janela vertical
+  // MANUAL (_vview) sobrepõe quando setada — é o zoom de preço que foca nas velas
+  // quando uma média distante (ex.: MMS200) estica a escala e as espreme em cima.
+  // Os rótulos e gridlines do eixo Y usam lo/hi, então respeitam a janela sozinhos.
+  _autoY = { lo, hi };
+  if (_vview && _vview.hi > _vview.lo) { lo = _vview.lo; hi = _vview.hi; }
+  _yGeom = { padT, plotH, lo, hi };
+  canvas.dataset.plo = lo; canvas.dataset.phi = hi;
 
   const x = (i) => padL + (i - v0 + 0.5) * (plotW / vis);
   const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
@@ -807,9 +824,29 @@ function bindChartZoom(canvas) {
   const N = () => (_lastChart && _lastChart.candles ? _lastChart.candles.length : 0);
   const redraw = () => drawPriceChart(canvas, _lastChart, _lastActionable);
   const cur = () => _view || { v0: 0, v1: N() };
+
+  // zoom VERTICAL (eixo de preço), ancorado no preço sob o cursor. Espelha o
+  // horizontal: roda pra cima aproxima; zoom-out total solta pra autoescala.
+  function zoomVerticalWheel(e) {
+    const g = _yGeom; if (!g) return;
+    const rect = canvas.getBoundingClientRect();
+    const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
+    const frac = Math.min(1, Math.max(0, (e.clientY - rect.top - PAD_T) / plotH)); // 0=topo,1=base
+    const range = g.hi - g.lo;
+    const anchor = g.hi - frac * range;                 // preço sob o cursor
+    const factor = e.deltaY < 0 ? 0.82 : 1.22;          // roda pra cima = aproxima
+    const autoRange = _autoY ? (_autoY.hi - _autoY.lo) : range;
+    const nr = range * factor;
+    if (nr >= autoRange) { _vview = null; redraw(); return; }  // zoom-out total = volta ao auto
+    const nhi = anchor + frac * nr;
+    _vview = { lo: nhi - nr, hi: nhi };
+    redraw();
+  }
+
   canvas.addEventListener("wheel", (e) => {
     if (!N()) return;
     e.preventDefault();
+    if (e.shiftKey) { zoomVerticalWheel(e); return; }   // shift+roda = eixo de preço
     const { v0, v1 } = cur(); const vis = v1 - v0;
     const rect = canvas.getBoundingClientRect();
     const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - 8) / (rect.width - 66)));
@@ -826,6 +863,7 @@ function bindChartZoom(canvas) {
   const pts = new Map();
   let drag = null;
   let pinch = null;
+  let vdrag = null;   // pan VERTICAL: arrastar na faixa dos rótulos de preço (eixo direito)
   const fracX = (clientX) => {
     const rect = canvas.getBoundingClientRect();
     return Math.min(1, Math.max(0, (clientX - rect.left - 8) / (rect.width - 66)));
@@ -839,9 +877,18 @@ function bindChartZoom(canvas) {
       const { v0, v1 } = cur();
       pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, v0, v1, frac: fracX((a.x + b.x) / 2) };
       drag = null;
-    } else if (pts.size === 1 && _view) {
-      drag = { x: e.clientX, v0: _view.v0, v1: _view.v1 };
-      canvas.style.cursor = "grabbing";
+    } else if (pts.size === 1) {
+      const rect = canvas.getBoundingClientRect();
+      const inAxis = (e.clientX - rect.left) >= (rect.width - PAD_R - 2); // faixa dos rótulos
+      if (inAxis && _yGeom) {
+        // arrastar no eixo de preço = pan vertical (move a janela _vview)
+        vdrag = { y: e.clientY, lo: _yGeom.lo, hi: _yGeom.hi };
+        canvas.style.cursor = "ns-resize";
+        drag = null;
+      } else if (_view) {
+        drag = { x: e.clientX, v0: _view.v0, v1: _view.v1 };
+        canvas.style.cursor = "grabbing";
+      }
     }
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -859,6 +906,15 @@ function bindChartZoom(canvas) {
       redraw();
       return;
     }
+    if (vdrag) {
+      const rect = canvas.getBoundingClientRect();
+      const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
+      const range = vdrag.hi - vdrag.lo;
+      const shift = (e.clientY - vdrag.y) / plotH * range;   // arrastar pra baixo = janela sobe
+      _vview = { lo: vdrag.lo + shift, hi: vdrag.hi + shift };
+      redraw();
+      return;
+    }
     if (drag) {
       const rect = canvas.getBoundingClientRect();
       const vis = drag.v1 - drag.v0;
@@ -871,11 +927,12 @@ function bindChartZoom(canvas) {
   const drop = (e) => {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
-    if (pts.size === 0) { drag = null; canvas.style.cursor = _view ? "grab" : "default"; }
+    if (pts.size === 0) { drag = null; vdrag = null; canvas.style.cursor = _view ? "grab" : "default"; }
   };
   canvas.addEventListener("pointerup", drop);
   canvas.addEventListener("pointercancel", drop);
-  canvas.addEventListener("dblclick", () => { _view = null; redraw(); });
+  // duplo-clique / duplo-toque reseta os DOIS eixos (horizontal + vertical)
+  canvas.addEventListener("dblclick", () => { _view = null; _vview = null; redraw(); });
 }
 
 // redraw on resize so the canvas stays crisp and correctly scaled
