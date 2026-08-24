@@ -369,6 +369,9 @@ function compareColumn(c, slot) {
     ? `<span class="cmp-reused" title="reaproveitado do cache — não re-rodou">♻ cache</span>`
     : "";
   const dateStr = c.date ? `<span class="cmp-col-date">${escapeHtml(fmtDate(c.date))}</span>` : "";
+  const openBtn = c.run_id
+    ? `<button type="button" class="cmp-open" data-id="${escapeHtml(c.run_id)}">abrir análise completa →</button>`
+    : "";
   const deg = (Array.isArray(c.degraded) && c.degraded.length)
     ? `<div class="cmp-degraded">⚠️ Feito sem: ${c.degraded.map((d) => escapeHtml((d && (d.label || d.report_key)) || "fonte")).join(" · ")}</div>`
     : "";
@@ -386,14 +389,13 @@ function compareColumn(c, slot) {
         `</div></div>`
     : "";
   return `<div class="cmp-col">` +
-    `<div class="cmp-col-head"><span class="cmp-col-title">${escapeHtml(title)}${dateStr}</span>${reused}</div>` +
+    `<div class="cmp-col-head"><span class="cmp-col-title">${escapeHtml(title)}${dateStr}</span>` +
+      `<span class="cmp-col-actions">${reused}${openBtn}</span></div>` +
     `<div class="cmp-verdict-row"><span class="${verdictClass(v)}">${verdictHtml(v)}</span></div>` +
     deg + err +
     chartCard +
     `<div class="cmp-plan md">${renderMarkdown(plan)}</div>` +
-    `<div class="cmp-col-foot"><span>${fmtCost(c.cost)} · ${c.elapsed || 0}s</span>` +
-    (c.run_id ? `<button type="button" class="cmp-open" data-id="${escapeHtml(c.run_id)}">abrir análise completa →</button>` : "") +
-    `</div></div>`;
+    `<div class="cmp-col-foot"><span>${fmtCost(c.cost)} · ${c.elapsed || 0}s</span></div></div>`;
 }
 
 // Desenha o gráfico de uma coluna no seu canvas (após o innerHTML existir). Cada
