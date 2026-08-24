@@ -55,10 +55,6 @@ const PAT_DIR = {
   compra: ["🟢", "de compra", "fundo ascendente"],
   venda: ["🔴", "de venda", "topo descendente"],
 };
-const PAT_STATE = {
-  acionado: ["✅", "acionado"],
-  formando: ["⏳", "em formação"],
-};
 
 // "2025-08-14" -> "14/08" sem passar por Date() (evita re-shift de timezone).
 function fmtDate(iso) {
@@ -1072,8 +1068,6 @@ function fmtNum(v) {
   return (typeof v === "number" ? v : Number(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// A small rounded chip with the price written ON a band/line edge, so the number
-// lives on the chart where the level is — not repeated in a card below.
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -1083,17 +1077,40 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
-function drawEdgeLabel(ctx, ex, ey, text, bg, fg, align, clampH) {
+
+// Empilha as pílulas do eixo pra que não se sobreponham quando os níveis ficam
+// perto (a Quantfury faz igual): ordena por y, garante um vão mínimo empurrando pra
+// baixo e, se estourar a base, comprime de volta pra cima. ``ry`` é o y DESENHADO
+// da pílula (pode diferir do nível real ``y``, e aí um leader curto religa os dois).
+function layoutAxisPills(pills, top, bottom, gap) {
+  if (!pills.length) return;
+  pills.forEach((p) => { p.ry = p.y; });
+  pills.sort((a, b) => a.ry - b.ry);
+  for (let i = 1; i < pills.length; i++) {
+    if (pills[i].ry < pills[i - 1].ry + gap) pills[i].ry = pills[i - 1].ry + gap;
+  }
+  const last = pills.length - 1;
+  if (pills[last].ry > bottom) {
+    pills[last].ry = bottom;
+    for (let i = last - 1; i >= 0; i--) {
+      if (pills[i].ry > pills[i + 1].ry - gap) pills[i].ry = pills[i + 1].ry - gap;
+    }
+  }
+  pills.forEach((p) => { p.ry = Math.max(top, Math.min(p.ry, bottom)); });
+}
+
+// Uma pílula no eixo Y direito (dentro da régua, largura ≤ gutter): o número do
+// nível no y ``ry``, cor da função. ``strong`` = preço atual (contraste claro).
+function drawAxisPill(ctx, axisX, gutter, ry, text, bg, fg, strong) {
   ctx.font = "bold 10.5px ui-monospace, Menlo, monospace";
   const padX = 5, h = 15;
-  const w = ctx.measureText(text).width + padX * 2;
-  const x0 = align === "right" ? ex - w : ex;
-  let y0 = ey - h / 2;
-  if (clampH != null) y0 = Math.max(1, Math.min(y0, clampH - h - 1));
-  roundRect(ctx, x0, y0, w, h, 4);
-  ctx.globalAlpha = 0.93; ctx.fillStyle = bg; ctx.fill(); ctx.globalAlpha = 1;
+  const w = Math.min(ctx.measureText(text).width + padX * 2, gutter - 2);
+  const x0 = axisX + 1;
+  roundRect(ctx, x0, ry - h / 2, w, h, 4);
+  ctx.fillStyle = bg; ctx.globalAlpha = strong ? 1 : 0.95; ctx.fill(); ctx.globalAlpha = 1;
+  if (strong) { ctx.strokeStyle = "rgba(0,0,0,0.28)"; ctx.lineWidth = 1; ctx.stroke(); }
   ctx.fillStyle = fg; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-  ctx.fillText(text, x0 + padX, y0 + h / 2 + 0.5);
+  ctx.fillText(text, x0 + padX, ry + 0.5);
 }
 
 function drawPriceChart(canvas, chart, a) {
@@ -1149,7 +1166,33 @@ function drawPriceChart(canvas, chart, a) {
   const x = (i) => padL + (i - v0 + 0.5) * (plotW / vis);
   const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
 
-  // gridlines + price labels (y axis, right)
+  // Etiquetas de nível na RÉGUA DA DIREITA (estilo Quantfury): o preço atual e as
+  // zonas viram pílulas coloridas no eixo Y, na altura exata do nível — a linha
+  // horizontal (desenhada adiante) cruza o gráfico até elas. Nada de caixa tampando
+  // vela. Montadas aqui pra que os números de grade que caírem sob uma pílula sejam
+  // omitidos (a pílula manda). O empilhamento (não colar quando os níveis estão
+  // perto) é resolvido em layoutAxisPills.
+  const axisX = padL + plotW;
+  const pillH = 15;
+  const fmtAxis = (v) => Number(v).toLocaleString("pt-BR", {
+    minimumFractionDigits: Math.abs(v) < 1000 ? 2 : 0,
+    maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0,
+  });
+  const axisPills = [];
+  if (price != null) {
+    axisPills.push({ y: y(price), text: fmtAxis(price), bg: "#e6eaf2", fg: "#0b0e14", strong: true });
+  }
+  zones.forEach((z) => {
+    if (z.price != null) axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#0b0e14" });
+  });
+  if (pat) {
+    axisPills.push({ y: y(pat.trigger), text: fmtAxis(pat.trigger), bg: patColor(pat), fg: "#0b0e14" });
+  }
+  layoutAxisPills(axisPills, padT + pillH / 2 + 1, padT + plotH - pillH / 2 - 1, pillH + 2);
+  const pillCovers = (yy) => axisPills.some((p) => Math.abs(p.ry - yy) < pillH);
+
+  // gridlines + price labels (y axis, right) — o número de grade some onde uma
+  // pílula de nível ocupa a linha (senão ficariam dois números sobrepostos).
   ctx.font = "11px ui-monospace, Menlo, monospace";
   ctx.textBaseline = "middle";
   const ticks = 5;
@@ -1158,8 +1201,10 @@ function drawPriceChart(canvas, chart, a) {
     const yy = y(p);
     ctx.strokeStyle = "rgba(255,255,255,0.05)";
     ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
-    ctx.fillStyle = "#8b97ad"; ctx.textAlign = "left";
-    ctx.fillText(p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 2 : 0 }), padL + plotW + 6, yy);
+    if (!pillCovers(yy)) {
+      ctx.fillStyle = "#8b97ad"; ctx.textAlign = "left";
+      ctx.fillText(p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 2 : 0 }), padL + plotW + 6, yy);
+    }
   }
 
   // timeframe stamp — o frame do padrão fica escrito NO gráfico (não só no card),
@@ -1281,29 +1326,30 @@ function drawPriceChart(canvas, chart, a) {
         ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8b97ad";
         ctx.fillText(fmtNum(p.price), px, cy + off + (p.kind === "L" ? 16 : -16));
       });
-      // gatilho + estado, rotulado na borda DIREITA (a esquerda é das faixas do
-      // plano — separar evita a colisão quando gatilho e compra ficam colados)
-      const [semo] = PAT_STATE[pat.state] || ["⚪"];
-      drawEdgeLabel(ctx, padL + plotW, ty, `1-2-3 gatilho ${fmtNum(pat.trigger)} ${semo}`, col, "#0b0e14", "right", cssH);
+      // o número do gatilho vai pra pílula no eixo direito (junto com preço/zonas);
+      // aqui fica só a linha do 1-2-3 e os pontos numerados na vela.
     }
   }
 
-  // linha do preço atual, destacada, com o valor na borda direita ("agora")
+  // linha fina do preço atual cruzando o gráfico até a régua direita (o número
+  // vira pílula no eixo, logo abaixo — nada de caixa sobre as velas).
   if (price != null) {
     const yp = y(price);
     ctx.strokeStyle = "rgba(230,234,242,0.5)"; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(padL, yp); ctx.lineTo(padL + plotW, yp); ctx.stroke();
     ctx.setLineDash([]);
-    drawEdgeLabel(ctx, padL + plotW, yp, "agora " + fmtNum(price), "#e6eaf2", "#0b0e14", "right", cssH);
   }
 
-  // faixas do plano: o preço escrito NA borda da banda (esquerda), por cima de
-  // tudo pra ler claro. Faixa -> mín–máx; ponto -> o valor.
-  zones.forEach((z) => {
-    const hasBand = z.low != null && z.high != null && z.high > z.low;
-    const yy = hasBand ? y(z.high) : y(z.price);
-    const val = hasBand ? `${fmtNum(z.low)}–${fmtNum(z.high)}` : fmtNum(z.price);
-    drawEdgeLabel(ctx, padL, yy, `${z.tag} ${val}`, z.color, "#0b0e14", "left", cssH);
+  // pílulas de nível na RÉGUA DIREITA (por último, por cima dos números de grade):
+  // preço atual (destaque claro), zonas (cor da função) e gatilho 1-2-3. Quando o
+  // nível foi deslocado pra não colar, um leader curto liga o y REAL à pílula.
+  axisPills.forEach((p) => {
+    if (Math.abs(p.ry - p.y) > 1) {
+      ctx.strokeStyle = p.bg; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(axisX, p.y); ctx.lineTo(axisX + 5, p.ry); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    drawAxisPill(ctx, axisX, padR, p.ry, p.text, p.bg, p.fg, p.strong);
   });
 }
 
