@@ -211,6 +211,29 @@ function renderProgress(snap) {
   $("barFill").style.width = (p.percent || 0) + "%";
 
   const steps = $("steps");
+  const cmpStepsEl = $("compareSteps");
+
+  // Progresso de CONFRONTO: trilha de 3 etapas (Padrão → Erick → Comparação) com
+  // o estado de cada — em vez dos chips de analista da análise única.
+  if (p.compare_steps && p.compare_steps.length) {
+    steps.classList.add("hidden");
+    cmpStepsEl.classList.remove("hidden");
+    cmpStepsEl.innerHTML = p.compare_steps.map((s, i) => {
+      const st = s.state || "pending";
+      const icon = { pending: "○", running: "⏳", done: "✅", reused: "♻" }[st] || "○";
+      const stateTxt = { pending: "aguardando", running: "rodando…", done: "concluída", reused: "reusada do cache" }[st] || "";
+      return `<li class="cmp-step is-${st}">` +
+        `<span class="cmp-step-n">${i + 1}</span>` +
+        `<span class="cmp-step-icon">${icon}</span>` +
+        `<span class="cmp-step-body"><span class="cmp-step-label">${escapeHtml(s.label)}</span>` +
+        `<span class="cmp-step-state">${stateTxt}</span></span></li>`;
+    }).join("");
+    return;
+  }
+
+  // Análise única: chips dos analistas (plano + alcançados).
+  cmpStepsEl.classList.add("hidden");
+  steps.classList.remove("hidden");
   if (p.plan && p.plan.length && steps.childElementCount !== p.plan.length) {
     steps.innerHTML = p.plan.map((s) => `<li data-label="${escapeHtml(s.label)}">${escapeHtml(s.label.split(" — ")[0])}</li>`).join("");
   }

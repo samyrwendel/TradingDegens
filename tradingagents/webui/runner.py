@@ -204,30 +204,55 @@ class _Run:
 
 
 class _SimpleProgress:
-    """Coarse progress for a compare run (three phases: Padrão → Erick → meta).
+    """Progresso do confronto como TRILHA de 3 etapas: Análise Padrão → Análise
+    método Erick → Comparação (meta-juiz). Cada etapa tem estado próprio
+    (``pending``/``running``/``done``/``reused``) para o front desenhar o stepper —
+    o motor já roda as 3 em série, isto só EXPÕE o que rodou e o que veio do cache
+    (um lado reaproveitado aparece ``reused``, sem fingir que rodou; DA-058).
 
-    Exposes the same ``snapshot()`` shape a :class:`ProgressTracker` does so a
-    compare run flows through ``status``/``active_runs`` unchanged.
-    """
+    Expõe a mesma forma de ``snapshot()`` que :class:`ProgressTracker`, mais o campo
+    ``compare_steps``, para fluir por ``status``/``active_runs`` sem mudança."""
+
+    # (key, rótulo) na ordem em que o worker as executa.
+    STEPS = (
+        ("padrao", "Análise Padrão"),
+        ("erick", "Análise método Erick"),
+        ("meta", "Comparação (meta-juiz)"),
+    )
 
     def __init__(self):
         self._phase = "Inicializando"
         self._label = "Preparando comparação…"
         self._pct = 0
         self._started = time.monotonic()
+        self._state = {key: "pending" for key, _ in self.STEPS}
 
     def set(self, phase: str, label: str, pct: int) -> None:
         self._phase, self._label, self._pct = phase, label, pct
 
+    def step(self, key: str, state: str) -> None:
+        """Marca o estado de uma etapa (running/done/reused/pending)."""
+        if key in self._state:
+            self._state[key] = state
+
     def done(self) -> None:
+        # qualquer etapa que ficou 'running' na conclusão vira 'done'
+        for key, st in self._state.items():
+            if st == "running":
+                self._state[key] = "done"
         self.set("Concluído", "Comparação concluída", 100)
 
     def snapshot(self) -> dict[str, Any]:
+        steps = [
+            {"key": key, "label": label, "state": self._state[key]}
+            for key, label in self.STEPS
+        ]
         return {
             "phase": self._phase, "label": self._label, "percent": self._pct,
-            "index": 0, "total": 0,
+            "index": 0, "total": len(self.STEPS),
             "elapsed": round(time.monotonic() - self._started, 1),
             "plan": [], "reached": [],
+            "compare_steps": steps,
         }
 
 
@@ -469,15 +494,26 @@ class AnalysisRunner:
 
     def _compare_worker(self, crun: _CompareRun) -> None:
         final_status = "error"
+        tr = crun.tracker
         try:
-            crun.tracker.set("Padrão", "Resolvendo a leitura Padrão…", 5)
+            # Etapa 1 — Padrão. Marca 'running' antes de resolver; se voltou do cache
+            # (DA-058: lado já existente NÃO re-roda), a etapa vira 'reused'.
+            tr.step("padrao", "running")
+            tr.set("Padrão", "Resolvendo a leitura Padrão…", 8)
             padrao_rec = self._resolve_side(crun, want_erick=False)
-            crun.tracker.set("Erick", "Resolvendo a leitura pelo método Erick…", 50)
+            tr.step("padrao", "reused" if padrao_rec.get("_reused") else "done")
+            # Etapa 2 — método Erick (mesma regra de cache).
+            tr.step("erick", "running")
+            tr.set("Erick", "Resolvendo a leitura pelo método Erick…", 55)
             erick_rec = self._resolve_side(crun, want_erick=True)
-            crun.tracker.set("Meta-juiz", "Confrontando as duas leituras…", 92)
+            tr.step("erick", "reused" if erick_rec.get("_reused") else "done")
+            # Etapa 3 — meta-juiz (sempre roda: é o confronto das duas leituras).
+            tr.step("meta", "running")
+            tr.set("Meta-juiz", "Confrontando as duas leituras…", 92)
             col_a = build_column(padrao_rec, "padrao")
             col_b = build_column(erick_rec, "erick")
             meta = self._meta_judge(col_a, col_b, crun.asset_type)
+            tr.step("meta", "done")
             crun.result = {
                 "compare": {"a": col_a, "b": col_b, "meta": meta},
                 "verdict": meta.get("verdict"),

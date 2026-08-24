@@ -135,6 +135,50 @@ def test_compare_reuses_cached_sides(tmp_path):
     assert cmp["b"]["reused"] is True
 
 
+# ------------------------------------ progresso do confronto: stepper (task 030) ---
+def _steps_by_key(snap):
+    return {s["key"]: s["state"] for s in snap["progress"]["compare_steps"]}
+
+
+def test_simple_progress_three_step_model():
+    """Trilha das 3 etapas: começa tudo 'pending', o worker marca cada uma, e
+    done() converte a que ficou 'running' em 'done' (a 'reused' permanece)."""
+    tr = rm._SimpleProgress()
+    steps = tr.snapshot()["compare_steps"]
+    assert [s["key"] for s in steps] == ["padrao", "erick", "meta"]
+    assert [s["label"] for s in steps] == [
+        "Análise Padrão", "Análise método Erick", "Comparação (meta-juiz)"]
+    assert all(s["state"] == "pending" for s in steps)
+    tr.step("padrao", "reused")
+    tr.step("erick", "done")
+    tr.step("meta", "running")
+    tr.done()  # 'running' -> 'done'; 'reused'/'done' intactos
+    final = {s["key"]: s["state"] for s in tr.snapshot()["compare_steps"]}
+    assert final == {"padrao": "reused", "erick": "done", "meta": "done"}
+    assert tr.snapshot()["percent"] == 100
+
+
+def test_compare_progress_steps_done_when_fresh(tmp_path):
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    snap = _wait(r, r.start_compare("BTC-USD", "2026-08-22"))
+    states = _steps_by_key(snap)
+    # nada em cache → os dois lados rodaram fresco; meta sempre roda
+    assert states == {"padrao": "done", "erick": "done", "meta": "done"}
+
+
+def test_compare_progress_marks_reused_sides(tmp_path):
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    _wait(r, r.start_compare("BTC-USD", "2026-08-22"))          # popula o cache
+    snap2 = _wait(r, r.start_compare("BTC-USD", "2026-08-22"))  # reusa os dois lados
+    states = _steps_by_key(snap2)
+    # DA-058: lado cacheado NÃO re-roda → etapa 'reused'; meta confronta e conclui
+    assert states["padrao"] == "reused"
+    assert states["erick"] == "reused"
+    assert states["meta"] == "done"
+
+
 # ------------------------------------------------ manual confront (task 018) ---
 def test_confront_two_existing_runs(tmp_path):
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
