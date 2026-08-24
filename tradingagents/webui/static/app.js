@@ -354,6 +354,7 @@ function renderThesis(which, md) {
 // Moving-average colours, keyed by window. Chosen to stay legible on the dark
 // panel and distinct from the green/red candles.
 const MA_COLORS = { "20": "#f5b445", "50": "#6ea8fe", "200": "#b48ef5" };
+const EMA_COLORS = { "8": "#4be3a0", "21": "#e3894b", "50": "#e34bd0" };
 // 1-2-3 marker colour by direction — distinct so compra (fundo) and venda (topo)
 // never read the same on the chart. Blue for compra, orange for venda; both stay
 // clear of the green/red candle bodies.
@@ -388,10 +389,14 @@ function renderChartCard(chart, ticker, actionable) {
 
   // legend: candles + cada MMS + faixas do plano + 1-2-3
   const wins = (chart.ma_windows || [20, 50, 200]).map(String);
+  const ewins = (chart.ema_windows || []).map(String);
   // Cor da vela (verde=alta, vermelho=baixa) é convenção universal; sem legenda.
   const legend = [];
   wins.forEach((w) => {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
+  });
+  ewins.forEach((w) => {
+    if (EMA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${EMA_COLORS[w]}"></span>EMA${w}</span>`);
   });
   zones.forEach((z) => legend.push(`<span class="lg"><span class="sw band" style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
   if (pat) {
@@ -500,6 +505,7 @@ function drawPriceChart(canvas, chart, a) {
   const grow = (v) => { if (v != null && isFinite(Number(v))) { lo = Math.min(lo, v); hi = Math.max(hi, v); } };
   for (let i = v0; i < v1; i++) { grow(candles[i].l); grow(candles[i].h); }
   Object.values(chart.ma || {}).forEach((arr) => { for (let i = v0; i < v1; i++) grow(arr[i]); });
+  Object.values(chart.ema || {}).forEach((arr) => { for (let i = v0; i < v1; i++) grow(arr[i]); });
   const pat = chart.markers && chart.markers.pattern_123;
   if (pat) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach(grow);
   zones.forEach((z) => { grow(z.price); grow(z.low); grow(z.high); });
@@ -566,6 +572,18 @@ function drawPriceChart(canvas, chart, a) {
   });
 
   // moving-average polylines
+  Object.entries(chart.ema || {}).forEach(([w, arr]) => {
+    const color = EMA_COLORS[w]; if (!color) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.setLineDash([4, 3]); ctx.beginPath();
+    let st = false;
+    arr.forEach((v, i) => {
+      if (i < v0 || i >= v1) { st = false; return; }
+      if (v == null) { st = false; return; }
+      const px = x(i), py = y(v);
+      if (!st) { ctx.moveTo(px, py); st = true; } else ctx.lineTo(px, py);
+    });
+    ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+  });
   Object.entries(chart.ma || {}).forEach(([w, arr]) => {
     const color = MA_COLORS[w]; if (!color) return;
     ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
