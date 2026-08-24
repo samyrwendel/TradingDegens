@@ -11,6 +11,11 @@
   --red: #ff5c6c;
   --red-dim: #3d1620;
   --amber: #f5b445;
+  /* MANTER = amarelo com FUNÇÃO: texto amarelo vivo e legível no dark, fundo e
+     borda amarelados (não o dourado-oliva apagado de antes). */
+  --yellow: #ffd23f;
+  --yellow-dim: #33290a;
+  --yellow-border: #6b5514;
   --orange: #ff8a3d;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -39,10 +44,13 @@ img, canvas, svg, video { max-width: 100%; }
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 80% -10%, #16233b 0%, var(--bg) 55%);
+  /* Edge-to-edge (padrão Quantfury): sem moldura escura em volta. O corpo é uma
+     coluna que preenche a tela; o palco (main) ocupa toda a altura restante e é a
+     superfície contínua — o fundo escuro só aparece atrás do topo/rodapé. */
+  display: flex; flex-direction: column; min-height: 100vh;
+  background: var(--bg);
   color: var(--text);
   font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  min-height: 100vh;
 }
 
 .topbar {
@@ -61,24 +69,31 @@ body {
   border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px;
 }
 
-main { max-width: 1800px; margin: 0 auto; padding: 20px 24px 48px; }
+/* Palco edge-to-edge: sem max-width nem margem — o conteúdo vai até as bordas e
+   preenche a altura (flex:1). O fundo do palco é a cor de painel, então não há
+   faixa escura em volta; as divisórias entre blocos são hairlines de 1px. */
+main { max-width: none; margin: 0; padding: 0; flex: 1; background: var(--panel); }
 /* two columns: history sidebar (left) + analysis content (right) */
 main.layout {
-  display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 20px;
+  display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 0;
   align-items: start;
 }
-.sidebar { position: sticky; top: 18px; }
+/* divisória vertical fina entre histórico e conteúdo (encosta, sem gap gordo) */
+.sidebar { position: sticky; top: 0; border-right: 1px solid var(--border); }
 .sidebar .history { max-height: calc(100vh - 130px); overflow-y: auto; }
 /* narrow column: let each row wrap so the timestamp drops to its own line
    instead of clipping off the right edge */
 .sidebar .history li { flex-wrap: wrap; }
 .sidebar .history .h-ticker { min-width: 0; }
 .sidebar .history .h-meta { margin-left: 0; width: 100%; white-space: normal; }
-.content { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* blocos empilhados separados por hairline de 1px (o fundo da coluna é a cor da
+   borda; os painéis cobrem tudo menos o filete de 1px do gap) */
+.content { display: flex; flex-direction: column; gap: 1px; background: var(--border); min-width: 0; }
 
+/* painéis achatados: superfície contínua, sem cartão flutuando (sem borda própria
+   nem cantos arredondados) — a divisão vem das hairlines de 1px entre eles */
 .panel {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 14px; padding: 18px;
+  background: var(--panel); border: none; border-radius: 0; padding: 18px;
 }
 .hidden { display: none !important; }
 
@@ -157,10 +172,11 @@ details.section.erick > summary { color: #9cc7f5; }
   font-size: 22px; font-weight: 800; letter-spacing: .5px;
   padding: 8px 18px; border-radius: 12px; border: 1px solid var(--border);
 }
+/* Cor por FUNÇÃO: COMPRAR/AUMENTAR verde · MANTER amarelo · REDUZIR/VENDER vermelho */
 .verdict.buy { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
-.verdict.overweight { color: #7ee0a1; background: #113224; }
-.verdict.hold { color: var(--amber); background: #3a2f10; border-color: #5c4a17; }
-.verdict.underweight { color: var(--orange); background: #3a220f; }
+.verdict.overweight { color: #7ee0a1; background: #113224; border-color: #1e5c3c; }
+.verdict.hold { color: var(--yellow); background: var(--yellow-dim); border-color: var(--yellow-border); }
+.verdict.underweight { color: var(--red); background: var(--red-dim); border-color: #5c1e28; }
 .verdict.sell { color: var(--red); background: var(--red-dim); border-color: #5c1e28; }
 /* the original English rating, kept in gray beside the pt-BR meaning */
 .verdict .verdict-orig {
@@ -382,8 +398,10 @@ details.section[open] > summary::before { content: "▾"; }
    do launcher e elimina a redigitação do ativo. */
 .reanalyze-bar {
   display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
-  margin: 12px 0 4px; padding: 12px 14px;
-  border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2);
+  margin: 0; padding: 12px 18px;
+  /* faixa de controle achatada (edge-to-edge): sem cartão flutuando; a divisória
+     de 1px da coluna já a separa dos blocos vizinhos */
+  border: none; border-radius: 0; background: var(--panel-2);
 }
 .re-lead { font-size: 13.5px; color: var(--muted); white-space: nowrap; }
 .re-lead .re-icon { margin-right: 6px; }
@@ -438,7 +456,7 @@ details.section[open] > summary::before { content: "▾"; }
    (.verdict-orig) segue cinza discreto. Legível no dark theme, desktop e mobile. */
 .history .h-verdict.buy,
 .history .h-verdict.overweight { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
-.history .h-verdict.hold { color: #c7cfdd; background: #232b3b; border-color: #33405a; }
+.history .h-verdict.hold { color: var(--yellow); background: var(--yellow-dim); border-color: var(--yellow-border); }
 .history .h-verdict.underweight,
 .history .h-verdict.sell { color: var(--red); background: var(--red-dim); border-color: #5c1e28; }
 .history .h-verdict.error { color: var(--red); background: var(--red-dim); border-color: #5c1e28; }
@@ -488,8 +506,9 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 
 /* stack the two columns before they get cramped; history vira faixa no topo */
 @media (max-width: 900px) {
-  main.layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; order: 1; }
+  main.layout { grid-template-columns: 1fr; gap: 1px; background: var(--border); }
+  /* coluna única: a divisória vira horizontal (embaixo do histórico), não à direita */
+  .sidebar { position: static; order: 1; border-right: none; }
   .content { order: 2; }
   .sidebar .history { max-height: 320px; }
   /* faixa recolhível: seta indica que abre/fecha; some o respiro do heading */
@@ -499,8 +518,8 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 }
 
 @media (max-width: 720px) {
-  /* menos padding lateral = mais largura útil no telefone */
-  main { padding: 14px 12px 40px; }
+  /* edge-to-edge no telefone: painel encosta na borda; padding fica só dentro */
+  main { padding: 0; }
   .panel { padding: 16px 14px; }
 
   .theses { grid-template-columns: 1fr; }
@@ -693,9 +712,9 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .cal-cell.is-empty { background: #161a24; cursor: default; }
 .cal-cell:not(.is-empty):hover { outline: 1px solid var(--accent, #4c9aff); }
 .cal-cell.is-current { border-color: var(--accent, #4c9aff); }
-/* cor = veredito daquele dia */
+/* cor = veredito daquele dia (mesma escala: verde compra · amarelo mantém · vermelho vende) */
 .cal-cell.buy, .cal-cell.overweight { background: #2ea043; }
-.cal-cell.hold { background: #6b7280; }
+.cal-cell.hold { background: var(--yellow); }
 .cal-cell.underweight, .cal-cell.sell { background: #d1434b; }
 
 /* "já na região (setup ativo)": é chamada pra ação, não ausência de dado.
