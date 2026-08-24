@@ -552,7 +552,21 @@ function init() {
     $("assetHint").innerHTML = /-(USD|USDT)$|^BTC|^ETH/.test(t) ? `Detectado: cripto — inclui taxa de financiamento <span class="orig">(funding)</span>, contratos em aberto <span class="orig">(open interest)</span> e liquidações <span class="orig">(liquidations)</span>.` : "";
   });
   $("netNote").textContent = "acesse por " + location.host;
-  loadHistory();
+  loadHistory().then(openLatestRun);
+}
+
+// Ao abrir a página, mostra a análise mais recente em vez de tela vazia. Sem isso
+// o usuário abre depois de um deploy, vê a lista e o formulário, e conclui que
+// "nada mudou" — porque o card novo só aparece ao clicar num run.
+async function openLatestRun() {
+  try {
+    const res = await fetch("/api/history");
+    if (!res.ok) return;
+    const runs = await res.json();
+    const first = Array.isArray(runs) ? runs[0] : (runs.runs || [])[0];
+    const id = first && (first.run_id || first.id);
+    if (id) openRun(id);
+  } catch (e) { /* histórico vazio ou offline: deixa a tela como está */ }
 }
 
 document.addEventListener("DOMContentLoaded", init);
