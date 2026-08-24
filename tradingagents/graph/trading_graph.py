@@ -42,6 +42,7 @@ from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, t
 from .conditional_logic import ConditionalLogic
 from .propagation import Propagator
 from .reflection import Reflector
+from .resilience import tool_error_message
 from .setup import GraphSetup
 from .signal_processing import SignalProcessor
 
@@ -191,8 +192,14 @@ class TradingAgentsGraph:
 
     def _create_tool_nodes(self) -> dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""
+        # A tool that raises must NOT abort the graph: the handler turns any tool
+        # exception into a message the analyst reads and moves past (a cache-wrapped
+        # RuntimeError from a bad indicator used to tear the whole run down here).
+        def _tn(tools):
+            return ToolNode(tools, handle_tool_errors=tool_error_message)
+
         return {
-            "market": ToolNode(
+            "market": _tn(
                 [
                     # Core stock data tools
                     get_stock_data,
@@ -218,7 +225,7 @@ class TradingAgentsGraph:
             # (EMA/intraday come through the deterministic method coverage, not a
             # new tool), but its own node so it can run beside market without
             # sharing the tool-routing edge.
-            "erick": ToolNode(
+            "erick": _tn(
                 [
                     get_stock_data,
                     get_indicators,
@@ -228,13 +235,13 @@ class TradingAgentsGraph:
                     get_verified_market_snapshot,
                 ]
             ),
-            "social": ToolNode(
+            "social": _tn(
                 [
                     # News tools for social media analysis
                     get_news,
                 ]
             ),
-            "news": ToolNode(
+            "news": _tn(
                 [
                     # News and insider information
                     get_news,
@@ -244,7 +251,7 @@ class TradingAgentsGraph:
                     get_prediction_markets,
                 ]
             ),
-            "fundamentals": ToolNode(
+            "fundamentals": _tn(
                 [
                     # Fundamental analysis tools
                     get_fundamentals,

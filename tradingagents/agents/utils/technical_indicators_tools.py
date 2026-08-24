@@ -32,6 +32,10 @@ def get_indicators(
     for ind in indicators:
         try:
             results.append(route_to_vendor("get_indicators", symbol, ind, curr_date, look_back_days))
-        except ValueError as e:
-            results.append(str(e))
+        except Exception as e:  # noqa: BLE001
+            # A single bad/unsupported indicator (or a cache-wrapped failure, which
+            # surfaces as RuntimeError, not ValueError) must NEVER abort the run:
+            # return the message so the model reads it and moves on. Degrade, not
+            # crash — a stray 'ema' request can't throw the whole analysis away.
+            results.append(f"Indicador '{ind}' indisponível: {e}")
     return "\n\n".join(results)

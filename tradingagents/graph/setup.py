@@ -25,6 +25,7 @@ from tradingagents.agents.utils.agent_states import AgentState
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
+from .resilience import make_resilient_analyst
 
 # Every target a shared conditional router can return. Each edge driven by the
 # router maps all of them, so a fall-through return (e.g. under prompt/i18n/
@@ -96,9 +97,16 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
+        # Add analyst nodes to the graph. Each is wrapped so a phase that raises
+        # retries once and then degrades to an "indisponível" report instead of
+        # aborting the whole run (Samyr: "retry or throw it all away?" — retry).
         for spec in plan.specs:
-            workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
+            workflow.add_node(
+                spec.agent_node,
+                make_resilient_analyst(
+                    analyst_factories[spec.key](), spec.report_key, spec.agent_node
+                ),
+            )
             workflow.add_node(spec.clear_node, create_msg_delete())
             workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
 

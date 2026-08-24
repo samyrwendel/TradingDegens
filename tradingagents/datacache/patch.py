@@ -57,6 +57,24 @@ def _remake(error):
     return RuntimeError(f"[ta_datacache cached failure: {t}] {m}")
 
 
+def _is_validation_error(exc) -> bool:
+    """A deterministic *validation* failure — a malformed request the vendor will
+    reject the same way every time (e.g. an unsupported indicator name), NOT a
+    transient vendor/network hiccup.
+
+    These must not be negative-cached: caching them is pointless (they never
+    succeed on retry) and harmful — the neg-cache re-raises the stored failure as
+    a generic ``RuntimeError`` that bypasses a caller's ``ValueError`` handling and
+    can abort a whole run for 3h. A genuine outage (429/timeout) is still cached
+    so a dead vendor is not hammered (DA-058: failure short-lived, never
+    permanent).
+    """
+    msg = str(exc or "").lower()
+    return isinstance(exc, (ValueError, KeyError)) and (
+        "not supported" in msg or "unsupported" in msg or "unknown indicator" in msg
+    )
+
+
 def _wrap_route_impl(method, vendor, fn):
     if getattr(fn, _WRAP, False):
         return fn
@@ -79,10 +97,13 @@ def _wrap_route_impl(method, vendor, fn):
         try:
             val = fn(*args, **kwargs)
         except BaseException as exc:  # noqa: BLE001 — cache-and-reraise
-            # Cache the failure briefly so a repeat run does not re-hit a dead
-            # primary vendor, then propagate unchanged so the router's own
-            # fallback/no-data handling is preserved.
-            cache.set_neg(category, k, error={"type": type(exc).__name__, "msg": str(exc)})
+            # Cache a *transient* failure briefly so a repeat run does not re-hit a
+            # dead primary vendor, then propagate unchanged so the router's own
+            # fallback/no-data handling is preserved. A deterministic validation
+            # error (bad indicator name) is NOT cached — it would never succeed on
+            # retry and the cached re-raise (RuntimeError) can abort a whole run.
+            if not _is_validation_error(exc):
+                cache.set_neg(category, k, error={"type": type(exc).__name__, "msg": str(exc)})
             raise
 
         if _is_sentinel(val):

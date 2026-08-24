@@ -120,6 +120,42 @@ def test_raised_failure_cached_and_reraised_without_network(clean_cache):
 
 
 @pytest.mark.unit
+def test_validation_error_is_not_negative_cached(clean_cache):
+    """A deterministic validation error (bad indicator name) must NOT be
+    negative-cached: it would never succeed on retry and the cached re-raise
+    (RuntimeError) can abort a whole run for 3h. So the underlying fn is called
+    every time — no stale cached failure repeated (task 014, criterion 4)."""
+    rc = {"n": 0}
+
+    def bad_indicator(symbol, indicator, curr_date, look_back_days=30):
+        rc["n"] += 1
+        raise ValueError("Indicator ema is not supported. Please choose from: [...]")
+
+    w = patch._wrap_route_impl("get_indicators", "yfinance", bad_indicator)
+    for _ in range(4):
+        with pytest.raises(ValueError):     # propagates as the ORIGINAL ValueError, not a cached RuntimeError
+            w("BTC-USD", "ema", "2026-08-22")
+    assert rc["n"] == 4                     # never served from a negative cache
+
+
+@pytest.mark.unit
+def test_transient_error_still_negative_cached(clean_cache):
+    """A genuine transient/vendor failure is still cached so a dead vendor is not
+    hammered — the validation-error skip must not regress this (DA-058)."""
+    rc = {"n": 0}
+
+    def rate_limited(ticker, start_date, end_date):
+        rc["n"] += 1
+        raise RuntimeError("vendor 429")
+
+    w = patch._wrap_route_impl("get_news", "yfinance", rate_limited)
+    for _ in range(4):
+        with pytest.raises(Exception):
+            w("BE", "2021-01-01", "2021-01-07")
+    assert rc["n"] == 1                     # hit once, then served from neg-cache
+
+
+@pytest.mark.unit
 def test_metrics_summary_renders(clean_cache):
     cache.record_net("get_news")
     cache.record_hit("get_news")

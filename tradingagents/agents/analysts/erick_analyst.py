@@ -65,7 +65,7 @@ def create_erick_analyst(llm):
 8. **Peso relativo do trade.** Responda "quanto entrar" em termos RELATIVOS conforme a confirmação: posição cheia (alinhamento pleno), meia posição (confirmação parcial), posição inicial (só um começo, aguardando somar) ou caixa (sem gatilho). NUNCA chute um valor absoluto em % ou em dinheiro.
 9. **Filtros.** Evite comprar no sentimento extremo sem confirmação; desconfie de alavancagem alta no mercado. Em cripto, leia funding/OI/liquidações e o medo & ganância como filtro — não como gatilho isolado.
 
-Ancore CADA nível em dado de ferramenta — nunca invente um número. Chame get_price_timeframes para a tendência de fundo (semanal + diário) e get_indicators para as médias (inclua as EMAs 8/21). Antes de fechar, chame get_verified_market_snapshot e trate-o como fonte da verdade para qualquer preço/indicador exato; se algo conflitar, aponte a divergência em vez de inventar um número reconciliado."""
+Ancore CADA nível em dado de ferramenta — nunca invente um número. Chame get_price_timeframes para a tendência de fundo (semanal + diário). As EMAs 8/21 do método JÁ vêm calculadas na seção determinística de estrutura/método deste relatório — NÃO peça 'ema' (nem 'ema8'/'ema21') ao get_indicators: a fonte não conhece esse nome e a chamada falha. Se usar get_indicators, escolha só nomes VÁLIDOS: close_10_ema, close_50_sma, close_200_sma, rsi, macd, macds, macdh, atr, boll, boll_ub, boll_lb, vwma. Antes de fechar, chame get_verified_market_snapshot e trate-o como fonte da verdade para qualquer preço/indicador exato; se algo conflitar, aponte a divergência em vez de inventar um número reconciliado."""
             + (
                 (
                     " Este é um ativo CRIPTO, 24/7 em perpétuo. Chame get_crypto_derivatives"
