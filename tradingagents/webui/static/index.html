@@ -76,6 +76,17 @@
         <ol class="steps" id="steps"></ol>
       </section>
 
+      <!-- Reanalisar SEM redigitar (task 023): faixa do ativo ABERTO (clicado no
+           histórico ou já na tela) — vale tanto pra análise simples quanto pra
+           comparação, por isso fica FORA dos dois painéis (o de comparação esconde
+           o de resultado). Traz o ticker JÁ preenchido + escolha EXPLÍCITA de método
+           (Padrão / Erick / Comparar) + timeframe, e roda direto. Reusa os endpoints
+           de /api/analyze — não reescreve o motor. "Atualizar" e "Confrontar" seguem
+           funcionando; isto só tira a escolha de método de dentro do launcher e
+           elimina a redigitação. Visível só com um resultado/comparação na tela
+           (escondida enquanto uma análise roda). Populada por JS. -->
+      <div class="reanalyze-bar hidden" id="reanalyzeBar"></div>
+
       <section class="panel result-panel hidden" id="resultPanel">
         <!-- Cabeçalho = a decisão: ticker · veredito · preço. À direita, só
              navegação (calendário do ativo + reanalisar), nunca conteúdo. -->

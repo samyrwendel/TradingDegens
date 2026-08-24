@@ -185,8 +185,21 @@ function fmtCost(cost) {
   return "$" + usd.toFixed(4) + partial;
 }
 
+// Ao abrir um resultado/comparação, rola pra faixa de reanálise (quando visível)
+// em vez do painel — assim o controle de método/TF fica no topo da visão, logo à
+// mão, e não some scrollado acima da borda. Sem a faixa, rola pro próprio painel.
+function scrollToOpen(panel) {
+  const bar = $("reanalyzeBar");
+  const target = bar && !bar.classList.contains("hidden") ? bar : panel;
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function renderProgress(snap) {
   $("progressPanel").classList.remove("hidden");
+  // a faixa de reanálise só faz sentido com um resultado/comparação na tela;
+  // enquanto uma análise roda ela some (reaparece quando o resultado renderiza).
+  const reBar = $("reanalyzeBar");
+  if (reBar) reBar.classList.add("hidden");
   const tk = $("progressTicker");
   if (tk) {
     // qual ativo está sendo analisado — some quando não sabemos o ticker (start
@@ -248,6 +261,14 @@ function renderResult(snap) {
     $("verdictTf").classList.add("hidden");
     $("degradedBanner").classList.add("hidden");
     $("confrontCtl").classList.add("hidden");   // não confrontar a partir de um run com erro
+    // Reanálise segue disponível: uma falha (fonte fora do ar, transitório) é
+    // justamente quando o usuário quer rerodar escolhendo método/TF, sem redigitar.
+    _openDate = snap.date || "";
+    _assetType = snap.asset_type || "";
+    _timeframes = _assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"];
+    _verdictTf = snap.verdict_timeframe || "1d";
+    _reTf = _timeframes.includes(_verdictTf) ? _verdictTf : "1d";
+    renderReanalyzeBar();
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
@@ -283,6 +304,8 @@ function renderResult(snap) {
   // trocado só pra olhar o gráfico, o carimbo fixa o frame do veredito real.
   _verdictTf = snap.verdict_timeframe || r.verdict_timeframe || r.timeframe || "1d";
   renderVerdictTf();
+  _reTf = _verdictTf;                 // a reanálise começa no frame do veredito aberto
+  renderReanalyzeBar();
   renderDegraded(r.degraded);
   hideDegrade();
 
@@ -318,7 +341,7 @@ function renderResult(snap) {
   html += section("🛡️ Decisão de Risco (veredito final na íntegra)", r.risk_decision || r.final_trade_decision);
   $("sections").innerHTML = html;
 
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  scrollToOpen(panel);
   loadHistory();
 }
 
@@ -425,6 +448,19 @@ function renderCompare(snap) {
       metaSection("O que significa pra decisão", meta.significado) +
     `</div>`;
 
+  // Faixa de reanálise também na comparação: o ativo está aberto, então dá pra
+  // rerodar (Padrão / Erick / Comparar) sem redigitar direto daqui. Estado do ativo
+  // aberto vem do snapshot do compare (TF de referência = lado A, senão B, senão diário).
+  _openTicker = snap.ticker || "";
+  _openDate = snap.date || "";
+  _assetType = snap.asset_type || "";
+  _timeframes = _assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"];
+  const cmpTf = (a && (a.verdict_timeframe || a.timeframe)) ||
+    (b && (b.verdict_timeframe || b.timeframe)) || "1d";
+  _verdictTf = cmpTf;
+  _reTf = _timeframes.includes(cmpTf) ? cmpTf : "1d";
+  renderReanalyzeBar();
+
   $("cmpCols").innerHTML = compareColumn(a, "A") + compareColumn(b, "B");
   $("cmpCols").querySelectorAll("button.cmp-open").forEach((btn) =>
     btn.addEventListener("click", () => openRun(btn.dataset.id))
@@ -433,7 +469,7 @@ function renderCompare(snap) {
   drawCompareChart("cmpChartA", a);
   drawCompareChart("cmpChartB", b);
 
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  scrollToOpen(panel);
   loadHistory();
 }
 
@@ -480,6 +516,88 @@ async function confront(a, b) {
     if (!res.ok) { $("formError").textContent = snap.error || "falha ao confrontar"; return; }
     renderCompare(snap);
   } catch (e) { $("formError").textContent = "falha ao confrontar"; }
+}
+
+// ---- reanálise com método explícito, sem redigitar (task 023) ---------------
+// Com um ativo ABERTO (clicado no histórico ou já na tela), esta faixa oferece o
+// ticker JÁ preenchido + escolha de método (Padrão / Erick / Comparar) + timeframe.
+// Clicar um método RODA na hora — a comparação fica a ≤2 cliques do ativo escolhido
+// (1: abrir o ativo · 2: ⚖️ Comparar). Reusa exatamente os endpoints de /api/analyze.
+let _reTf = "1d";   // timeframe escolhido para a próxima reanálise (default = TF do veredito aberto)
+
+function renderReanalyzeBar() {
+  const bar = $("reanalyzeBar");
+  if (!bar) return;
+  if (!_openTicker) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  const enabled = new Set(_timeframes || ["1d"]);
+  // TF escolhido não operável no ativo (ex.: intradiário em ação) cai no do veredito.
+  if (!enabled.has(_reTf)) _reTf = enabled.has(_verdictTf) ? _verdictTf : "1d";
+  const tfBtns = ALL_TFS.map(([tf, label]) => {
+    const on = enabled.has(tf);
+    const active = tf === _reTf;
+    const cls = ["re-tf", active ? "is-active" : "", on ? "" : "is-off"].filter(Boolean).join(" ");
+    const title = on ? `Reanalisar no ${label}` : "Intradiário indisponível para ação (só cripto tem candle real de exchange)";
+    return `<button type="button" class="${cls}" data-retf="${tf}" ${on ? "" : "disabled"} title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  }).join("");
+  bar.innerHTML =
+    `<div class="re-lead"><span class="re-icon">🔁</span>Reanalisar <b class="re-ticker">${escapeHtml(_openTicker)}</b></div>` +
+    `<div class="re-grp">` +
+      `<span class="re-glabel">tempo</span>` +
+      `<div class="re-tfs" role="group" aria-label="Timeframe da reanálise">${tfBtns}</div>` +
+    `</div>` +
+    `<div class="re-grp re-grp-methods">` +
+      `<span class="re-glabel">método</span>` +
+      `<div class="re-methods">` +
+        `<button type="button" class="re-method padrao" data-method="padrao" title="Reanalisa com a leitura Padrão no timeframe escolhido">Padrão</button>` +
+        `<button type="button" class="re-method erick" data-method="erick" title="Reanalisa com o método Erick — recuo à média, saída antes da reversão, peso do trade">🧭 Erick</button>` +
+        `<button type="button" class="re-method compare" data-method="compare" title="Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal">⚖️ Comparar</button>` +
+      `</div>` +
+    `</div>`;
+  bar.classList.remove("hidden");
+}
+
+function bindReanalyzeBar() {
+  const bar = $("reanalyzeBar");
+  if (!bar || bar._bound) return;
+  bar._bound = true;
+  bar.addEventListener("click", (e) => {
+    const tfBtn = e.target.closest("button.re-tf");
+    if (tfBtn && !tfBtn.disabled) { _reTf = tfBtn.dataset.retf; renderReanalyzeBar(); return; }
+    const mBtn = e.target.closest("button.re-method");
+    if (mBtn) runReanalyze(mBtn.dataset.method, _reTf);
+  });
+}
+
+// Dispara a reanálise do ativo ABERTO sem redigitar: método explícito + TF escolhido,
+// dados de hoje (mesma semântica de "Atualizar"). Reusa /api/analyze (method|compare +
+// timeframe) — o mesmo caminho do launcher, sem fluxo paralelo que possa divergir.
+function runReanalyze(method, tf) {
+  if (!_openTicker) return;
+  const compare = method === "compare";
+  const m = method === "erick" ? "erick" : "padrao";
+  const date = _todayManaus || _openDate || "";
+  $("formError").textContent = "";
+  $("resultPanel").classList.add("hidden");
+  $("comparePanel").classList.add("hidden");
+  $("steps").innerHTML = "";
+  const boot = compare
+    ? "Comparando Padrão × Erick…"
+    : (m === "erick" ? "Método Erick — subindo o motor…" : "Subindo o motor…");
+  renderProgress({
+    status: "running", ticker: _openTicker, elapsed: 0, cost: null,
+    progress: { phase: "Inicializando", label: boot, percent: 2, plan: [], reached: [] },
+  });
+  fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ticker: _openTicker, date, method: m, compare, timeframe: tf || "1d" }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data && data.run_id) { watchRun(data.run_id); loadHistory(); }
+      else { $("formError").textContent = (data && data.error) || "falha ao reanalisar"; }
+    })
+    .catch(() => { $("formError").textContent = "falha ao reanalisar"; });
 }
 
 // ---- header price + setup strip -------------------------------------------
@@ -1455,6 +1573,8 @@ async function openRun(runId) {
     const res = await fetch("/api/run/" + runId);
     const snap = await res.json();
     if (!res.ok) return;
+    // selecionar o ativo pré-preenche o ticker no launcher também (zero redigitação)
+    if (snap.ticker) $("ticker").value = snap.ticker;
     if (snap.status === "running") {
       // reabre um run EM ANDAMENTO: volta a acompanhar ao vivo (re-liga o polling
       // daquele run_id). O run nunca parou — só a visão tinha saído dele.
@@ -1495,6 +1615,7 @@ function init() {
   bindRefresh();
   bindReeval();
   bindConfront();
+  bindReanalyzeBar();
   loadHistory().then(openLatestRun);
   startHistoryAutoRefresh();
 }
