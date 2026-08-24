@@ -365,3 +365,11 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .cal-cell.buy, .cal-cell.overweight { background: #2ea043; }
 .cal-cell.hold { background: #6b7280; }
 .cal-cell.underweight, .cal-cell.sell { background: #d1434b; }
+
+/* "já na região (setup ativo)": é chamada pra ação, não ausência de dado.
+   Sai em verde, ao contrário do cinza apagado de "sem nível definido". */
+.act-live {
+  color: var(--green, #2ea043);
+  font-weight: 600;
+}
+.act-live b { font-weight: 800; }

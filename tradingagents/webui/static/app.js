@@ -254,7 +254,10 @@ function renderResult(snap) {
 // there is no basis we print "sem nível definido" — never a fabricated number.
 function zoneHtml(zone, emptyText) {
   if (!zone || zone.price == null) {
-    return `<span class="nolevel">${escapeHtml(emptyText || "sem nível definido")}</span>`;
+    // emptyText já pode vir como HTML (ex.: destaque do setup ativo); só o
+    // texto simples precisa de escape.
+    const t = emptyText || "sem nível definido";
+    return t.startsWith("<") ? t : `<span class="nolevel">${escapeHtml(t)}</span>`;
   }
   const label = zone.label ? ` <span class="zlabel">· ${escapeHtml(zone.label)}</span>` : "";
   return `<b>${fmtNum(zone.price)}</b>${label}`;
@@ -275,7 +278,11 @@ function renderActionable(a) {
     : `<span class="nolevel">indisponível</span>`;
   // When the setup is live the price is already at the buy region, so there is
   // no recuo to wait for — say so instead of "sem nível definido".
-  const pullbackEmpty = a.setup_state === "ativo" ? "já na região (setup ativo)" : "sem nível definido";
+  // "já na região" é informação de AÇÃO, não ausência de dado — não pode sair
+  // com a mesma cor apagada de "sem nível definido".
+  const pullbackEmpty = a.setup_state === "ativo"
+    ? '<span class="act-live">já na região <b>(setup ativo)</b></span>'
+    : "sem nível definido";
 
   el.innerHTML =
     `<div class="act-head"><span class="act-title">Plano acionável</span>` +
