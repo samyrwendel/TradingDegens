@@ -24,11 +24,17 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
 )
+from tradingagents.agents.utils.correlation_coverage import (
+    ensure_correlation_coverage,
+)
 from tradingagents.agents.utils.crypto_context_coverage import (
     ensure_crypto_context_coverage,
 )
 from tradingagents.agents.utils.crypto_coverage import (
     ensure_crypto_derivatives_coverage,
+)
+from tradingagents.agents.utils.earnings_coverage import (
+    ensure_earnings_coverage,
 )
 from tradingagents.agents.utils.erick_method import ensure_erick_method_coverage
 
@@ -130,6 +136,15 @@ Feche com um veredito curto e operável do método: **AGIR ou AGUARDAR**, o **ti
                 report = ensure_crypto_context_coverage(
                     report, symbol, current_date
                 )
+            # Correlação com o âncora + FORÇA RELATIVA e o calendário de earnings —
+            # o Erick decide por correlação com a NVDA diante do EVENTO de balanço.
+            # Determinístico, ancorado nos candles/fonte cacheados e date-guarded.
+            report = ensure_correlation_coverage(
+                report, symbol, current_date, asset_type
+            )
+            report = ensure_earnings_coverage(
+                report, symbol, current_date, asset_type
+            )
 
         return {
             "messages": [result],

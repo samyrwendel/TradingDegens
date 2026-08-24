@@ -10,11 +10,17 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
 )
+from tradingagents.agents.utils.correlation_coverage import (
+    ensure_correlation_coverage,
+)
 from tradingagents.agents.utils.crypto_context_coverage import (
     ensure_crypto_context_coverage,
 )
 from tradingagents.agents.utils.crypto_coverage import (
     ensure_crypto_derivatives_coverage,
+)
+from tradingagents.agents.utils.earnings_coverage import (
+    ensure_earnings_coverage,
 )
 from tradingagents.agents.utils.multi_timeframe_coverage import (
     ensure_multi_timeframe_coverage,
@@ -183,6 +189,16 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             # alike get it; it reuses the cached, date-guarded daily series.
             report = ensure_price_structure_coverage(
                 report, symbol, current_date, timeframe
+            )
+            # Correlação com o âncora (NVDA/BTC) + força relativa, e o calendário
+            # de earnings (risco de evento) — dois insumos do método do Erick que a
+            # prosa não computa. Determinísticos, dos mesmos candles/fonte pública
+            # cacheados e date-guarded; earnings é vazio (não anexa) em cripto.
+            report = ensure_correlation_coverage(
+                report, symbol, current_date, asset_type
+            )
+            report = ensure_earnings_coverage(
+                report, symbol, current_date, asset_type
             )
 
         return {
