@@ -103,40 +103,52 @@
              diz que a análise seguiu sem ela e oferece reavaliar com ela. -->
         <div class="degraded-banner hidden" id="degradedBanner"></div>
 
-        <!-- Faixa do setup: só o que o gráfico NÃO diz — estado, horizonte,
-             timeframe. As faixas e os pontos do 1-2-3 vivem dentro do gráfico. -->
-        <div class="actionable hidden" id="actionable"></div>
-
-        <div class="chart-card hidden" id="chartCard">
-          <div class="chart-head">
-            <h2 class="section-title">Gráfico de candles <span class="orig">(candlestick)</span> com faixas do plano</h2>
-            <div class="chart-legend" id="chartLegend"></div>
+        <!-- Palco no padrão Quantfury: o gráfico é o protagonista (coluna
+             principal, grande) e a coluna de contexto (plano do setup + teses em
+             confronto) fica À DIREITA em telas largas em vez de empilhada abaixo.
+             No mobile o palco vira uma coluna só (gráfico, depois contexto). -->
+        <div class="result-stage">
+          <div class="stage-main">
+            <div class="chart-card hidden" id="chartCard">
+              <div class="chart-head">
+                <h2 class="section-title">Gráfico de candles <span class="orig">(candlestick)</span> com faixas do plano</h2>
+                <div class="chart-legend" id="chartLegend"></div>
+              </div>
+              <!-- Seletor de timeframe: recalcula região, 1-2-3 e faixas NAQUELE
+                   tempo gráfico. Cripto tem a escada intradiária (candle real de
+                   exchange); ação só o diário (intradiário aparece desabilitado). -->
+              <div class="tf-selector" id="tfSelector" role="group" aria-label="Timeframe do gráfico"></div>
+              <!-- Reavaliar o VEREDITO no timeframe escolhido: roda uma análise real
+                   com o analista de mercado lendo esse frame (o veredito pode mudar). -->
+              <button type="button" class="reeval-btn hidden" id="reevalBtn"></button>
+              <p class="chart-degrade hidden" id="chartDegrade"></p>
+              <div class="chart-wrap">
+                <span class="chart-zoom-hint">roda = zoom · shift+roda = vertical · arrasta = move · 2 cliques = reseta</span>
+                <canvas id="priceChart"></canvas>
+              </div>
+              <p class="chart-note" id="chartNote"></p>
+            </div>
           </div>
-          <!-- Seletor de timeframe: recalcula região, 1-2-3 e faixas NAQUELE
-               tempo gráfico. Cripto tem a escada intradiária (candle real de
-               exchange); ação só o diário (intradiário aparece desabilitado). -->
-          <div class="tf-selector" id="tfSelector" role="group" aria-label="Timeframe do gráfico"></div>
-          <!-- Reavaliar o VEREDITO no timeframe escolhido: roda uma análise real
-               com o analista de mercado lendo esse frame (o veredito pode mudar). -->
-          <button type="button" class="reeval-btn hidden" id="reevalBtn"></button>
-          <p class="chart-degrade hidden" id="chartDegrade"></p>
-          <div class="chart-wrap">
-            <span class="chart-zoom-hint">roda = zoom · shift+roda = vertical · arrasta = move · 2 cliques = reseta</span>
-            <canvas id="priceChart"></canvas>
-          </div>
-          <p class="chart-note" id="chartNote"></p>
-        </div>
 
-        <h2 class="section-title">Teses em confronto</h2>
-        <div class="theses">
-          <details class="thesis bull" id="bullBox">
-            <summary><span class="th-tag">🟢 Alta</span><span class="th-lead" id="bullLead"></span></summary>
-            <div class="md" id="bull"></div>
-          </details>
-          <details class="thesis bear" id="bearBox">
-            <summary><span class="th-tag">🔴 Baixa</span><span class="th-lead" id="bearLead"></span></summary>
-            <div class="md" id="bear"></div>
-          </details>
+          <aside class="stage-rail">
+            <!-- Faixa do setup: só o que o gráfico NÃO diz — estado, horizonte,
+                 timeframe. As faixas e os pontos do 1-2-3 vivem dentro do gráfico. -->
+            <div class="actionable hidden" id="actionable"></div>
+
+            <div class="rail-theses">
+              <h2 class="section-title">Teses em confronto</h2>
+              <div class="theses">
+                <details class="thesis bull" id="bullBox">
+                  <summary><span class="th-tag">🟢 Alta</span><span class="th-lead" id="bullLead"></span></summary>
+                  <div class="md" id="bull"></div>
+                </details>
+                <details class="thesis bear" id="bearBox">
+                  <summary><span class="th-tag">🔴 Baixa</span><span class="th-lead" id="bearLead"></span></summary>
+                  <div class="md" id="bear"></div>
+                </details>
+              </div>
+            </div>
+          </aside>
         </div>
 
         <div id="sections"></div>

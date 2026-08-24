@@ -74,11 +74,11 @@ main.layout {
 .sidebar .history li { flex-wrap: wrap; }
 .sidebar .history .h-ticker { min-width: 0; }
 .sidebar .history .h-meta { margin-left: 0; width: 100%; white-space: normal; }
-.content { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.content { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
 .panel {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 14px; padding: 20px;
+  border-radius: 14px; padding: 18px;
 }
 .hidden { display: none !important; }
 
@@ -148,14 +148,14 @@ details.section.erick > summary { color: #9cc7f5; }
 /* preço no momento da análise — terceira âncora, ao lado do veredito */
 .head-price {
   display: inline-flex; align-items: baseline; gap: 7px;
-  font-size: 26px; font-weight: 700; line-height: 1; font-family: var(--mono);
+  font-size: 23px; font-weight: 700; line-height: 1; font-family: var(--mono);
   color: var(--text);
 }
 .head-price .hp-when { font-size: 12px; font-weight: 500; color: var(--muted); font-family: inherit; }
 @media (max-width: 700px) { .head-price { font-size: 21px; } }
 .verdict {
-  font-size: 26px; font-weight: 800; letter-spacing: .5px;
-  padding: 10px 22px; border-radius: 12px; border: 1px solid var(--border);
+  font-size: 22px; font-weight: 800; letter-spacing: .5px;
+  padding: 8px 18px; border-radius: 12px; border: 1px solid var(--border);
 }
 .verdict.buy { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
 .verdict.overweight { color: #7ee0a1; background: #113224; }
@@ -179,7 +179,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .result-meta { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
 .result-meta b { color: var(--text); font-family: var(--mono); }
 
-.section-title { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin: 24px 0 12px; }
+.section-title { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin: 14px 0 10px; }
 .theses { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .thesis { border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--panel-2); }
 .thesis h3 { margin: 0 0 10px; font-size: 15px; }
@@ -570,7 +570,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 /* O ticker é a âncora da tela: quem abre o histórico precisa saber em 1 olhada
    de qual ativo está lendo. Antes vinha em corpo 13 na linha de metadados. */
 .asset-name {
-  font-size: 34px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: .01em;
   line-height: 1;
@@ -578,7 +578,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   margin-right: 4px;
   white-space: nowrap;
 }
-@media (max-width: 700px) { .asset-name { font-size: 26px; } }
+@media (max-width: 700px) { .asset-name { font-size: 25px; } }
 
 /* Atualizar: reanalisa o ativo aberto com os dados de hoje. */
 .refresh-btn {
@@ -658,3 +658,43 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   pointer-events: none; letter-spacing: .02em;
 }
 #priceChart { touch-action: none; cursor: default; }
+
+/* ============================================================================
+   PALCO (padrão Quantfury): gráfico protagonista + coluna de contexto
+   ----------------------------------------------------------------------------
+   Aproveitamento de tela: em vez de tudo empilhado numa coluna central com
+   margem morta, telas largas ganham DUAS colunas — o gráfico grande à esquerda
+   (o coração da análise) e o contexto (plano do setup + teses em confronto) à
+   direita. No mobile/tablet vira uma coluna só: gráfico, depois contexto.
+   ========================================================================== */
+.result-stage {
+  display: grid;
+  grid-template-columns: 1fr;   /* empilhado por padrão (mobile/tablet) */
+  gap: 16px;
+  align-items: start;
+  margin: 6px 0 4px;
+}
+.stage-main { min-width: 0; }
+.stage-rail { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+/* no palco o cartão do gráfico não precisa de margem própria — o gap cuida */
+.stage-main .chart-card { margin: 0; }
+.stage-rail .actionable { margin: 0; }
+.rail-theses .section-title { margin: 4px 0 8px; }
+
+/* Telas largas: gráfico protagonista à esquerda, contexto fixo à direita.
+   340px dá folga pro plano do setup e pras teses sem espremer o gráfico.
+   Só dispara com espaço confortável (sidebar do histórico já ocupa ~250px). */
+@media (min-width: 1280px) {
+  .result-stage { grid-template-columns: minmax(0, 1fr) 340px; }
+  /* teses empilhadas na coluna estreita (lado a lado só quando full-width) */
+  .stage-rail .theses { grid-template-columns: 1fr; }
+  /* gráfico como protagonista: mais alto do que os 380px padrão */
+  #priceChart { height: 500px; }
+}
+@media (min-width: 1500px) {
+  .result-stage { grid-template-columns: minmax(0, 1fr) 360px; }
+  #priceChart { height: 560px; }
+}
+@media (min-width: 1900px) {
+  .result-stage { grid-template-columns: minmax(0, 1fr) 400px; }
+}
