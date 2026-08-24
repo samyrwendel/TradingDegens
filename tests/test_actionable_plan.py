@@ -130,7 +130,7 @@ def test_dict_is_json_serializable(synth):
     json.dumps(d)  # must not raise
     assert set(d) == {
         "symbol", "as_of", "price", "timeframe", "horizon",
-        "setup_state", "buy_zone", "realize_zone", "pullback_zone",
+        "setup_state", "buy_zone", "realize_zone", "pullback_zone", "pattern",
     }
 
 
@@ -151,3 +151,61 @@ def test_no_fabricated_numbers_anywhere(synth):
         assert p.pullback_zone["price"] in ma_values
     if p.realize_zone:
         assert p.realize_zone["price"] in highs
+
+
+@pytest.mark.unit
+def test_zone_is_a_band_derived_from_atr(synth):
+    """A region is a FAIXA (mín–máx), not a centavo — width is ±0.5·ATR read off
+    the real series, and the band brackets the anchor. No cosmetic percentage."""
+    p = ps.build_actionable_plan("SYN", CURR)
+    df = ps._prep("SYN", CURR)
+    atr = ps._atr(df)
+    assert atr is not None and atr > 0
+    z = p.buy_zone
+    assert z is not None and z["low"] is not None and z["high"] is not None
+    # the band is exactly ±0.5·ATR around the anchor — a derived, documented width
+    assert z["low"] == round(z["price"] - 0.5 * atr, 2)
+    assert z["high"] == round(z["price"] + 0.5 * atr, 2)
+    assert z["low"] < z["price"] < z["high"]
+    assert z["band_basis"] == ps._BAND_BASIS
+
+
+@pytest.mark.unit
+def test_zone_without_atr_basis_is_an_honest_point(monkeypatch, synth):
+    """No ATR basis → the level degrades to a point (low/high None), never a
+    fabricated cosmetic band."""
+    monkeypatch.setattr(ps, "_atr", lambda df, period=ps._ATR_PERIOD: None)
+    p = ps.build_actionable_plan("SYN", CURR)
+    z = p.buy_zone
+    assert z is not None and z["price"] is not None
+    assert z["low"] is None and z["high"] is None and z["band_basis"] is None
+
+
+@pytest.mark.unit
+def test_1_2_3_trigger_stays_a_point_not_a_band(monkeypatch):
+    """When the operable step is a 1-2-3 breakout trigger it is a precise line, so
+    it must NOT be widened into a cosmetic band even though ATR exists."""
+    df = _frame()
+    # cut just before the breakout so the most-recent 1-2-3 is still 'formando'
+    cut = df["Date"].iloc[99]
+    cut_df = df[df["Date"] <= cut].reset_index(drop=True)
+    monkeypatch.setattr(ps, "load_ohlcv", lambda s, d: cut_df.copy())
+    p = ps.build_actionable_plan("SYN", cut)
+    if p.setup_state == "aguardar_rompimento":
+        assert p.pullback_zone is not None
+        assert p.pullback_zone["low"] is None and p.pullback_zone["high"] is None
+
+
+@pytest.mark.unit
+def test_pattern_is_attached_to_plan(synth):
+    """The 1-2-3 the detector found must reach the card — sentido, 3 pontos,
+    gatilho, estado — not die on the way to the screen (fork brief 24/08)."""
+    p = ps.build_actionable_plan("SYN", CURR)
+    struct = ps.detect_price_structure("SYN", CURR)
+    assert struct.pattern is not None  # this frame has a 1-2-3 de compra
+    assert p.pattern is not None
+    assert p.pattern["direction"] in ("compra", "venda")
+    for key in ("p1", "p2", "p3", "trigger", "state", "direction"):
+        assert key in p.pattern
+    for pt in (p.pattern["p1"], p.pattern["p2"], p.pattern["p3"]):
+        assert "date" in pt and "price" in pt

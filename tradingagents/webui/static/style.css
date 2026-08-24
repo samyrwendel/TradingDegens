@@ -251,7 +251,29 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .act-v { font-size: 13.5px; text-align: right; font-family: var(--mono); }
 .act-v b { color: var(--text); font-family: var(--mono); }
 .act-v .zlabel { color: var(--muted); font-family: inherit; font-size: 12px; }
+.act-v .zbasis { color: var(--muted); font-family: inherit; font-size: 11px; opacity: .8; }
 .act-v .nolevel { color: var(--muted); font-style: italic; font-family: inherit; }
+
+/* Padrão 1-2-3 (compra ou venda): linha própria, largura total do card. */
+.act-pattern {
+  margin-top: 8px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.act-pattern .act-k { margin-bottom: 1px; }
+.pat-body { font-family: var(--mono); font-size: 13px; }
+.pat-dir { font-weight: 700; font-family: inherit; }
+.pat-dir.compra { color: var(--green); }
+.pat-dir.venda { color: var(--red); }
+.pat-shape { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+.pat-pts { margin: 4px 0; color: var(--text); display: flex; flex-wrap: wrap; gap: 2px 4px; align-items: baseline; }
+.pat-pt b { color: var(--muted); font-weight: 700; margin-right: 2px; }
+.pat-arrow { color: var(--muted); }
+.pat-trig { color: var(--muted); font-size: 12.5px; }
+.pat-trig b { color: var(--text); }
+.pat-state { margin-left: 4px; }
+.pat-state.acionado { color: var(--green); }
+.pat-state.formando { color: var(--amber); }
+.pat-body .nolevel { color: var(--muted); font-style: italic; font-family: inherit; }
 
 /* Abas do histórico: Todos / Ações / Cripto */
 .h-tabs { display: flex; gap: 4px; margin: 0 0 10px; }

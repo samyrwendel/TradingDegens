@@ -7,15 +7,25 @@ actually trades:
 * **Região de compra na média** — the price pulls back to a rising moving
   average, touches it, and reacts up from there. Buy at the touch and hold; over
   days-to-months it tends to pay.
-* **Padrão 1-2-3 de compra** — the classic reversal: point 1 a swing low, point 2
-  the next swing high (repique), point 3 a higher swing low (ascending bottom);
-  the trigger is a break above point 2's high.
+* **Padrão 1-2-3, both directions** — the classic reversal in either sense:
+  * *de compra* (bottom): point 1 a swing low, point 2 the next swing high
+    (repique), point 3 a HIGHER swing low (ascending bottom); trigger = break
+    ABOVE point 2's high.
+  * *de venda* (top): point 1 a swing high, point 2 the next swing low, point 3 a
+    LOWER swing high (descending top); trigger = break BELOW point 2's low. The
+    product owner trades short, so a top-reversal read is half the job.
 
 Both are detected here from the SAME cached daily series the rest of the engine
 uses (:func:`load_ohlcv`, already cut to ``<= curr_date``), so nothing can see a
 future candle — a detection run on a past date only sees bars up to that date.
 Every reported point carries a real date and price from the series; no number is
 fabricated.
+
+Operable levels are reported as a **band** (mín–máx), not a single price — a
+centavo-exact "region" is false precision and inoperable. The band width is the
+recent **ATR** (average true range of the last :data:`_ATR_PERIOD` bars), a
+volatility measure read straight from the series; when there is no ATR basis a
+level degrades to a point and says so, never a cosmetic percentage.
 """
 from __future__ import annotations
 
@@ -47,6 +57,56 @@ _TOUCH_TOL = 0.08
 # Forward window (bars) over which a region's reaction (best close gain) is read.
 _REACT_BARS = 40
 
+# Volatility band for an operable zone. The width is ATR over the last
+# ``_ATR_PERIOD`` bars (the standard 14) — a real reading off the series, not a
+# guessed percentage — and a zone spans ``anchor ± _ZONE_HALF_ATR·ATR`` so its
+# total width is ~one ATR: the distance price typically travels, which is what
+# makes "compre na região" operable instead of "compre neste centavo".
+_ATR_PERIOD = 14
+_ZONE_HALF_ATR = 0.5
+_BAND_BASIS = f"±{_ZONE_HALF_ATR:g}·ATR{_ATR_PERIOD}"
+
+
+def _atr(df: pd.DataFrame, period: int = _ATR_PERIOD) -> float | None:
+    """Average true range of the last ``period`` bars, read from the real series.
+
+    ``None`` when the series is too short for a full window (so the caller
+    degrades a zone to a point rather than inventing a width)."""
+    if len(df) < period + 1:
+        return None
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    prev_close = df["Close"].astype(float).shift(1)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)
+    atr = tr.rolling(period).mean().iloc[-1]
+    if pd.isna(atr) or atr <= 0:
+        return None
+    return round(float(atr), 2)
+
+
+def _band(anchor: float | None, atr: float | None) -> tuple[float | None, float | None]:
+    """(low, high) = ``anchor ± _ZONE_HALF_ATR·atr``; (None, None) without a basis."""
+    if anchor is None or atr is None:
+        return None, None
+    half = _ZONE_HALF_ATR * atr
+    return round(anchor - half, 2), round(anchor + half, 2)
+
+
+def _banded(zone: dict[str, Any] | None, atr: float | None) -> dict[str, Any] | None:
+    """Attach a min–max band around ``zone['price']``. With no ATR basis the band
+    is ``None`` and the UI renders the anchor as a point (and says it is a point)."""
+    if zone is None:
+        return None
+    low, high = _band(zone.get("price"), atr)
+    return {
+        **zone,
+        "low": low,
+        "high": high,
+        "band_basis": _BAND_BASIS if low is not None else None,
+    }
+
 
 @dataclass
 class BuyRegion:
@@ -75,11 +135,13 @@ class Pattern123:
     p3: dict[str, Any]
     trigger: float
     state: str  # "acionado" | "formando"
+    direction: str  # "compra" (bottom) | "venda" (top)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "p1": self.p1, "p2": self.p2, "p3": self.p3,
             "trigger": self.trigger, "state": self.state,
+            "direction": self.direction,
         }
 
 
@@ -210,26 +272,48 @@ def _alternating(df: pd.DataFrame, lows: list[int], highs: list[int]) -> list[tu
 
 
 def _pattern_123(df: pd.DataFrame, lows: list[int], highs: list[int]) -> Pattern123 | None:
+    """Detect the most recent 1-2-3 reversal in EITHER direction.
+
+    * compra (bottom): ``L → H → L`` with point 3's low ABOVE point 1's low
+      (ascending bottom); trigger = break above point 2's high.
+    * venda (top): ``H → L → H`` with point 3's high BELOW point 1's high
+      (descending top); trigger = break below point 2's low.
+
+    Scans left-to-right and keeps overwriting, so the most recent valid triple of
+    either direction wins.
+    """
     seq = _alternating(df, lows, highs)
-    best: tuple[int, int, int] | None = None
+    lo = df["Low"].astype(float)
+    hi = df["High"].astype(float)
+    best: tuple[int, int, int, str] | None = None
     for a in range(len(seq) - 2):
-        if seq[a][1] == "L" and seq[a + 1][1] == "H" and seq[a + 2][1] == "L":
-            p1, p2, p3 = seq[a][0], seq[a + 1][0], seq[a + 2][0]
-            # ascending bottom: point 3 must sit ABOVE point 1
-            if float(df["Low"].iloc[p3]) > float(df["Low"].iloc[p1]):
-                best = (p1, p2, p3)  # keep scanning → most recent valid triple wins
+        kinds = (seq[a][1], seq[a + 1][1], seq[a + 2][1])
+        p1, p2, p3 = seq[a][0], seq[a + 1][0], seq[a + 2][0]
+        if kinds == ("L", "H", "L") and lo.iloc[p3] > lo.iloc[p1]:
+            best = (p1, p2, p3, "compra")   # ascending bottom
+        elif kinds == ("H", "L", "H") and hi.iloc[p3] < hi.iloc[p1]:
+            best = (p1, p2, p3, "venda")     # descending top
     if not best:
         return None
-    p1, p2, p3 = best
-    trigger = round(float(df["High"].iloc[p2]), 2)
-    after = df["High"].iloc[p3 + 1:].astype(float)
-    state = "acionado" if (after > trigger).any() else "formando"
+    p1, p2, p3, direction = best
+
+    if direction == "compra":
+        trigger = round(float(hi.iloc[p2]), 2)                 # rompe a máxima do ponto 2
+        state = "acionado" if (hi.iloc[p3 + 1:] > trigger).any() else "formando"
+        pt_kinds = ("L", "H", "L")
+    else:
+        trigger = round(float(lo.iloc[p2]), 2)                 # perde a mínima do ponto 2
+        state = "acionado" if (lo.iloc[p3 + 1:] < trigger).any() else "formando"
+        pt_kinds = ("H", "L", "H")
 
     def pt(idx: int, kind: str) -> dict[str, Any]:
         price = df["Low"].iloc[idx] if kind == "L" else df["High"].iloc[idx]
         return {"date": df["Date"].iloc[idx].strftime("%Y-%m-%d"), "price": round(float(price), 2)}
 
-    return Pattern123(pt(p1, "L"), pt(p2, "H"), pt(p3, "L"), trigger, state)
+    return Pattern123(
+        pt(p1, pt_kinds[0]), pt(p2, pt_kinds[1]), pt(p3, pt_kinds[2]),
+        trigger, state, direction,
+    )
 
 
 def detect_price_structure(symbol: str, curr_date: str) -> PriceStructure:
@@ -311,19 +395,32 @@ def build_price_structure_section(symbol: str, curr_date: str) -> str:
         lines.append("_Nenhuma região de compra na média identificada no último ano._")
     lines.append("")
 
-    lines.append("### Padrão 1-2-3 de compra")
     if s.pattern is not None:
         p = s.pattern
-        gatilho = "**acionado** (rompeu a máxima do ponto 2)" if p.state == "acionado" \
-            else "**em formação** (ainda não rompeu a máxima do ponto 2)"
-        lines += [
-            f"- **Ponto 1** (fundo): {p.p1['date']} — {p.p1['price']:,.2f}",
-            f"- **Ponto 2** (repique / máxima): {p.p2['date']} — {p.p2['price']:,.2f}",
-            f"- **Ponto 3** (fundo ascendente, acima do ponto 1): "
-            f"{p.p3['date']} — {p.p3['price']:,.2f}",
-            f"- **Gatilho**: rompimento de {p.trigger:,.2f} — {gatilho}.",
-        ]
+        if p.direction == "venda":
+            lines.append("### Padrão 1-2-3 de venda")
+            gatilho = "**acionado** (perdeu a mínima do ponto 2)" if p.state == "acionado" \
+                else "**em formação** (ainda não perdeu a mínima do ponto 2)"
+            lines += [
+                f"- **Ponto 1** (topo): {p.p1['date']} — {p.p1['price']:,.2f}",
+                f"- **Ponto 2** (repique / mínima): {p.p2['date']} — {p.p2['price']:,.2f}",
+                f"- **Ponto 3** (topo descendente, abaixo do ponto 1): "
+                f"{p.p3['date']} — {p.p3['price']:,.2f}",
+                f"- **Gatilho**: perda de {p.trigger:,.2f} — {gatilho}.",
+            ]
+        else:
+            lines.append("### Padrão 1-2-3 de compra")
+            gatilho = "**acionado** (rompeu a máxima do ponto 2)" if p.state == "acionado" \
+                else "**em formação** (ainda não rompeu a máxima do ponto 2)"
+            lines += [
+                f"- **Ponto 1** (fundo): {p.p1['date']} — {p.p1['price']:,.2f}",
+                f"- **Ponto 2** (repique / máxima): {p.p2['date']} — {p.p2['price']:,.2f}",
+                f"- **Ponto 3** (fundo ascendente, acima do ponto 1): "
+                f"{p.p3['date']} — {p.p3['price']:,.2f}",
+                f"- **Gatilho**: rompimento de {p.trigger:,.2f} — {gatilho}.",
+            ]
     else:
+        lines.append("### Padrão 1-2-3")
         lines.append("_Nenhum padrão 1-2-3 identificado no histórico disponível._")
 
     if not s.buy_regions and s.pattern is None and s.active_region is None:
@@ -413,15 +510,21 @@ class ActionablePlan:
     and NEVER a fabricated or rounded-to-look-precise number (fork brief 23/08).
     """
 
+    # Each zone is {"label", "price", "low", "high", "band_basis"}: ``price`` is the
+    # anchor (a real level), ``low``/``high`` a band ±0.5·ATR around it, ``band_basis``
+    # names that criterion. Without an ATR basis ``low``/``high`` are None and the UI
+    # shows the anchor as a point (fork brief 24/08). ``pattern`` is the detected
+    # 1-2-3 (either direction) as a dict, or None.
     symbol: str
     as_of: str | None            # date of the last candle actually read
     price: float | None          # last close = "preço no momento da análise"
     timeframe: str
     horizon: str
     setup_state: str             # ativo | aguardar_pullback | aguardar_rompimento | sem_setup | sem_dado
-    buy_zone: dict[str, Any] | None       # {"label", "price"} — a rising MA (MMS)
-    realize_zone: dict[str, Any] | None   # {"label", "price"} — prior swing high overhead
-    pullback_zone: dict[str, Any] | None  # {"label", "price"} — recuo to await, if not live
+    buy_zone: dict[str, Any] | None       # rising MA (MMS) — banded
+    realize_zone: dict[str, Any] | None   # prior swing high overhead — banded
+    pullback_zone: dict[str, Any] | None  # recuo to await / 1-2-3 trigger
+    pattern: dict[str, Any] | None = None  # detected 1-2-3 (compra|venda) or None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -434,6 +537,7 @@ class ActionablePlan:
             "buy_zone": self.buy_zone,
             "realize_zone": self.realize_zone,
             "pullback_zone": self.pullback_zone,
+            "pattern": self.pattern,
         }
 
 
@@ -500,9 +604,10 @@ def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
     # Pullback a aguardar + the resulting setup state / horizon:
     #  • already sitting on the rising MA  -> live setup, no pullback to await
     #  • a rising MA sits BELOW price       -> await a recuo down to it
-    #  • a 1-2-3 is forming                 -> await the breakout trigger
+    #  • a 1-2-3 is forming                 -> await the trigger (rompe/perde ponto 2)
     #  • nothing actionable                 -> no level, no operable horizon
     pullback_zone = None
+    pullback_is_trigger = False
     if struct.active_region is not None:
         setup_state = "ativo"
     elif buy_zone is not None and buy_zone["price"] < price:
@@ -513,17 +618,27 @@ def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
         }
     elif struct.pattern is not None and struct.pattern.state == "formando":
         setup_state = "aguardar_rompimento"
-        pullback_zone = {
-            "label": "rompimento da máxima do ponto 2 (gatilho 1-2-3)",
-            "price": struct.pattern.trigger,
-        }
+        pullback_is_trigger = True  # a trigger is a line, not a zone → stays a point
+        if struct.pattern.direction == "venda":
+            trig_label = "perda da mínima do ponto 2 (gatilho 1-2-3 de venda)"
+        else:
+            trig_label = "rompimento da máxima do ponto 2 (gatilho 1-2-3 de compra)"
+        pullback_zone = {"label": trig_label, "price": struct.pattern.trigger}
     else:
         setup_state = "sem_setup"
+
+    # Bands: buy/realize/recuo-pullback are genuine areas → ±0.5·ATR. A 1-2-3
+    # trigger is a precise level, so it stays a point (band_basis None).
+    atr = _atr(df)
+    buy_zone = _banded(buy_zone, atr)
+    realize_zone = _banded(realize_zone, atr)
+    pullback_zone = _banded(pullback_zone, None if pullback_is_trigger else atr)
 
     return ActionablePlan(
         symbol=symbol, as_of=as_of, price=price, timeframe=_TIMEFRAME_REF,
         horizon=_HORIZON[setup_state], setup_state=setup_state,
         buy_zone=buy_zone, realize_zone=realize_zone, pullback_zone=pullback_zone,
+        pattern=struct.pattern.as_dict() if struct.pattern is not None else None,
     )
 
 

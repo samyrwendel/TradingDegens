@@ -147,6 +147,28 @@ What the screen does:
 > Not in this fork yet (separate tasks): exchange-native crypto OHLCV as the price path (derivatives are
 > covered above; spot/perp candles still come from yfinance for crypto); user auth for a public launch.
 
+### 8. Price structure — buy/sell regions, the 1-2-3 in both directions, and an operable plan
+The market analyst describes indicators (RSI, MACD, MMS) but never names the **setup** the product owner
+trades. A deterministic detector (`tradingagents/dataflows/price_structure.py`) runs on the SAME cached,
+`<= curr_date`-cut daily series and reports only what it reads off that series — every point carries a
+real date and price; nothing is fabricated. It surfaces three things, and each reaches the verdict card
+("Plano acionável") and the price chart, not just the appended report section:
+
+- **Região de compra na média** — a pullback that touches a *rising* MMS (20/50/200) and reacts up.
+- **Padrão 1-2-3 in BOTH directions** — *de compra* (`L → H → L`, ascending bottom, trigger = break above
+  point 2's high) **and** *de venda* (`H → L → H`, descending top, trigger = break below point 2's low).
+  The owner trades short, so top reversals (MSTR, LINK) are half the job; the card shows the sense
+  (compra/venda), the three dated points, the trigger and the state (acionado / em formação), and the
+  chart marks the two senses in **distinct colours** (compra azul, venda laranja).
+- **Zones are a FAIXA, not a centavo** — buy/realize/pullback regions are reported as a **band
+  (mín–máx)**, not a single price (false precision is inoperable). The width is the recent **ATR** (average
+  true range of the last 14 bars, `anchor ± 0.5·ATR` → a band ≈ one ATR wide): a volatility figure read
+  straight from the series, never a guessed percentage. With no ATR basis a level degrades to a **point and
+  says so**. A 1-2-3 breakout trigger stays a point on purpose — a trigger is a line, not an area.
+
+(`tradingagents/dataflows/price_structure.py`, `tradingagents/agents/utils/price_structure_coverage.py`,
+`tradingagents/webui/static/app.js`.)
+
 ---
 
 ## News

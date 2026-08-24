@@ -39,6 +39,23 @@ const SETUP_PT = {
   sem_dado: ["⚪", "Sem dado suficiente"],
 };
 
+// 1-2-3 direction/state -> emoji + pt-BR. Compra (fundo ascendente) e venda
+// (topo descendente) recebem cor distinta no card e no gráfico (fork brief 24/08).
+const PAT_DIR = {
+  compra: ["🟢", "de compra", "fundo ascendente"],
+  venda: ["🔴", "de venda", "topo descendente"],
+};
+const PAT_STATE = {
+  acionado: ["✅", "acionado"],
+  formando: ["⏳", "em formação"],
+};
+
+// "2025-08-14" -> "14/08" sem passar por Date() (evita re-shift de timezone).
+function fmtDate(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}` : escapeHtml(String(iso || ""));
+}
+
 function verdictKey(v) {
   return (v || "").toLowerCase().replace(/[^a-z]/g, "");
 }
@@ -259,13 +276,44 @@ function zoneHtml(zone, emptyText) {
     const t = emptyText || "sem nível definido";
     return t.startsWith("<") ? t : `<span class="nolevel">${escapeHtml(t)}</span>`;
   }
+  // Região = FAIXA (mín–máx) quando há base de volatilidade; senão, ponto — e o
+  // rótulo diz que é ponto, nunca uma faixa cosmética inventada.
+  const hasBand = zone.low != null && zone.high != null && zone.high > zone.low;
+  const val = hasBand
+    ? `<b>${fmtNum(zone.low)} – ${fmtNum(zone.high)}</b>`
+    : `<b>${fmtNum(zone.price)}</b>`;
+  const basis = hasBand && zone.band_basis
+    ? ` <span class="zbasis">(${escapeHtml(zone.band_basis)})</span>`
+    : "";
   const label = zone.label ? ` <span class="zlabel">· ${escapeHtml(zone.label)}</span>` : "";
-  return `<b>${fmtNum(zone.price)}</b>${label}`;
+  return `${val}${basis}${label}`;
 }
 
 function actRow(emoji, key, valHtml) {
   return `<div class="act-row"><span class="act-k">${emoji} ${escapeHtml(key)}</span>` +
     `<span class="act-v">${valHtml}</span></div>`;
+}
+
+// The 1-2-3 the detector found (compra OU venda): sentido, os três pontos
+// datados, o gatilho e o estado. Sem padrão, diz que não há — nunca inventa.
+function patternHtml(p) {
+  if (!p || !p.direction) {
+    return `<span class="nolevel">nenhum padrão identificado</span>`;
+  }
+  const [demo, dlabel, shape] = PAT_DIR[p.direction] || ["⚪", p.direction, ""];
+  const [semo, slabel] = PAT_STATE[p.state] || ["⚪", p.state || ""];
+  const pts = [["1", p.p1], ["2", p.p2], ["3", p.p3]]
+    .filter(([, pt]) => pt && pt.price != null)
+    .map(([n, pt]) => `<span class="pat-pt"><b>${n}</b> ${fmtDate(pt.date)} · ${fmtNum(pt.price)}</span>`)
+    .join('<span class="pat-arrow"> › </span>');
+  const trigVerb = p.direction === "venda" ? "perder" : "romper";
+  return (
+    `<span class="pat-dir ${escapeHtml(p.direction)}">${demo} 1-2-3 ${escapeHtml(dlabel)}` +
+    `<span class="pat-shape">· ${escapeHtml(shape)}</span></span>` +
+    `<div class="pat-pts">${pts}</div>` +
+    `<div class="pat-trig">gatilho: ${trigVerb} <b>${fmtNum(p.trigger)}</b>` +
+    ` <span class="pat-state ${escapeHtml(p.state || "")}">${semo} ${escapeHtml(slabel)}</span></div>`
+  );
 }
 
 function renderActionable(a) {
@@ -294,7 +342,9 @@ function renderActionable(a) {
     actRow("🟢", "Região de compra", zoneHtml(a.buy_zone)) +
     actRow("🎯", "Região de realização", zoneHtml(a.realize_zone)) +
     actRow("⏳", "Pullback a aguardar", zoneHtml(a.pullback_zone, pullbackEmpty)) +
-    `</div>`;
+    `</div>` +
+    `<div class="act-pattern"><span class="act-k">📐 Padrão 1-2-3</span>` +
+    `<div class="pat-body">${patternHtml(a.pattern)}</div></div>`;
   el.classList.remove("hidden");
 }
 
@@ -302,6 +352,13 @@ function renderActionable(a) {
 // Moving-average colours, keyed by window. Chosen to stay legible on the dark
 // panel and distinct from the green/red candles.
 const MA_COLORS = { "20": "#f5b445", "50": "#6ea8fe", "200": "#b48ef5" };
+// 1-2-3 marker colour by direction — distinct so compra (fundo) and venda (topo)
+// never read the same on the chart. Blue for compra, orange for venda; both stay
+// clear of the green/red candle bodies.
+const PAT_COLORS = { compra: "#6ea8fe", venda: "#ff9f43" };
+function patColor(pat) {
+  return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
+}
 let _lastChart = null; // kept so a window resize can redraw crisply.
 
 function renderChartCard(chart, ticker) {
@@ -325,7 +382,10 @@ function renderChartCard(chart, ticker) {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
   });
   legend.push(`<span class="lg"><span class="sw dot" style="background:#2ecc71"></span>região de compra</span>`);
-  if (pat) legend.push(`<span class="lg"><span class="sw dot" style="background:#6ea8fe"></span>padrão 1-2-3</span>`);
+  if (pat) {
+    const [, dlabel] = PAT_DIR[pat.direction] || ["", ""];
+    legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>1-2-3 ${escapeHtml(dlabel)}</span>`);
+  }
   $("chartLegend").innerHTML = legend.join("");
 
   // note: pt-BR summary of what's marked
@@ -335,7 +395,11 @@ function renderChartCard(chart, ticker) {
   }
   const nreg = (chart.markers && chart.markers.buy_regions || []).length;
   if (nreg) notes.push(`${nreg} região(ões) de compra na média marcada(s) no período.`);
-  if (pat) notes.push(`Padrão 1-2-3: gatilho em ${fmtNum(pat.trigger)} — <b>${pat.state}</b>.`);
+  if (pat) {
+    const [demo, dlabel] = PAT_DIR[pat.direction] || ["", ""];
+    const verb = pat.direction === "venda" ? "perda de" : "rompimento de";
+    notes.push(`${demo} Padrão 1-2-3 ${dlabel}: gatilho ${verb} ${fmtNum(pat.trigger)} — <b>${pat.state}</b>.`);
+  }
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
   $("chartNote").innerHTML = notes.join(" ");
 
@@ -435,27 +499,31 @@ function drawPriceChart(canvas, chart) {
     ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
   });
 
-  // 1-2-3 pattern: connecting line, labelled points, trigger level
+  // 1-2-3 pattern: connecting line, labelled points, trigger level. Colour and
+  // point kinds follow the direction — compra (L-H-L, blue) vs venda (H-L-H,
+  // orange) — so the two setups never read the same on the chart.
   if (pat) {
-    const pts = [["1", pat.p1, "L"], ["2", pat.p2, "H"], ["3", pat.p3, "L"]]
-      .map(([lab, p, kind]) => ({ lab, kind, i: idx[p.date], price: p.price }))
+    const col = patColor(pat);
+    const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
+    const pts = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
+      .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
       .filter((p) => p.i != null);
     if (pts.length) {
-      ctx.strokeStyle = "#6ea8fe"; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5;
+      ctx.strokeStyle = col; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5;
       ctx.beginPath();
       pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
       ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
-      // trigger horizontal line
+      // trigger horizontal line (translucent version of the direction colour)
       const ty = y(pat.trigger);
-      ctx.strokeStyle = "rgba(110,168,254,0.5)"; ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = col + "80"; ctx.setLineDash([2, 3]);
       ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke(); ctx.setLineDash([]);
-      // point labels
-      ctx.fillStyle = "#6ea8fe"; ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      // point labels — offset below a low, above a high
+      ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       pts.forEach((p) => {
         const px = x(p.i), py = y(p.price) + (p.kind === "L" ? 14 : -14);
         ctx.fillStyle = "#0b0e14"; ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = "#6ea8fe"; ctx.stroke();
-        ctx.fillStyle = "#6ea8fe"; ctx.fillText(p.lab, px, py);
+        ctx.strokeStyle = col; ctx.stroke();
+        ctx.fillStyle = col; ctx.fillText(p.lab, px, py);
       });
     }
   }

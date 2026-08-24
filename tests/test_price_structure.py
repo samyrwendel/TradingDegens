@@ -41,9 +41,42 @@ def _frame() -> pd.DataFrame:
     })
 
 
+def _top_frame() -> pd.DataFrame:
+    """Vertical mirror of :func:`_frame` (closes reflected around 300): a smooth
+    DOWNTREND with a clean 1-2-3 de venda — high -> low -> lower-high -> breakdown
+    below point 2's low. The product owner trades short, so this must be detected
+    just like the bottom reversal is."""
+    buy: list[float] = []
+    buy += [100 + i for i in range(60)]
+    buy += [156, 150, 146, 150, 156]
+    buy += [162 + i for i in range(20)]
+    buy += [175, 168, 160, 150, 145]
+    buy += [150, 160, 172, 185, 190]
+    buy += [182, 175, 168, 162, 166]
+    buy += [192 + i for i in range(15)]
+    closes = [300 - c for c in buy]  # reflect: swing lows become swing highs
+    dates = pd.bdate_range("2025-01-01", periods=len(closes))
+    c = pd.Series(closes, dtype=float)
+    return pd.DataFrame({
+        "Date": dates.strftime("%Y-%m-%d"),
+        "Open": c.shift(1).fillna(c).values,
+        "High": (c * 1.01).values,
+        "Low": (c * 0.99).values,
+        "Close": c.values,
+        "Volume": [1000] * len(c),
+    })
+
+
 @pytest.fixture
 def synth(monkeypatch):
     df = _frame()
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
+    return df
+
+
+@pytest.fixture
+def top(monkeypatch):
+    df = _top_frame()
     monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
     return df
 
@@ -57,11 +90,42 @@ def test_detects_123_reversal(synth):
     assert s.pattern is not None
     p = s.pattern
     # ascending bottom + trigger is point 2's high, and it broke out -> acionado
+    assert p.direction == "compra"
     assert p.p3["price"] > p.p1["price"]
     assert p.trigger == p.p2["price"]
     assert p.state == "acionado"
     # points are ordered in time
     assert p.p1["date"] < p.p2["date"] < p.p3["date"]
+
+
+@pytest.mark.unit
+def test_detects_123_de_venda(top):
+    """Descending-top 1-2-3: H -> L -> lower H, trigger = break BELOW point 2's low."""
+    s = ps.detect_price_structure("SYN", CURR)
+    assert s.pattern is not None
+    p = s.pattern
+    assert p.direction == "venda"
+    # descending top: point 3's high sits BELOW point 1's high
+    assert p.p3["price"] < p.p1["price"]
+    # trigger is point 2's LOW (break below it), and the series broke down -> acionado
+    assert p.trigger == p.p2["price"]
+    assert p.state == "acionado"
+    assert p.p1["date"] < p.p2["date"] < p.p3["date"]
+    # nothing fabricated: every reported price is a real high/low of the series
+    df = _top_frame()
+    prices = set(round(float(v), 2) for v in df["High"]) | set(round(float(v), 2) for v in df["Low"])
+    for pt in (p.p1, p.p2, p.p3):
+        assert pt["price"] in prices
+    assert p.trigger in prices
+
+
+@pytest.mark.unit
+def test_venda_section_and_plan_carry_direction(top):
+    section = ps.build_price_structure_section("SYN", CURR)
+    assert "Padrão 1-2-3 de venda" in section
+    assert "topo descendente" in section
+    plan = ps.build_actionable_plan("SYN", CURR)
+    assert plan.pattern is not None and plan.pattern["direction"] == "venda"
 
 
 @pytest.mark.unit
