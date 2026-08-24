@@ -63,7 +63,20 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "não encontrado"}, 404)
             return
         ctype = _CONTENT_TYPES.get(path.suffix, "application/octet-stream")
-        self._send_bytes(path.read_bytes(), ctype)
+        data = path.read_bytes()
+        # Cache-buster: o index referencia app.js/style.css por nome puro, então o
+        # navegador segurava a versão antiga e a tela "não mudava" depois de um deploy.
+        # Reescreve o link com o mtime do arquivo — muda quando o arquivo muda.
+        if safe == "index.html":
+            text = data.decode("utf-8")
+            for asset in ("app.js", "style.css"):
+                f = _STATIC_DIR / asset
+                if f.is_file():
+                    text = text.replace(
+                        f"/static/{asset}", f"/static/{asset}?v={int(f.stat().st_mtime)}"
+                    )
+            data = text.encode("utf-8")
+        self._send_bytes(data, ctype)
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0) or 0)
