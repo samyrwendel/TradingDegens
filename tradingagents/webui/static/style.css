@@ -41,10 +41,10 @@ body {
   border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px;
 }
 
-main { max-width: 1280px; margin: 0 auto; padding: 24px 20px 60px; }
+main { max-width: 1800px; margin: 0 auto; padding: 20px 24px 48px; }
 /* two columns: history sidebar (left) + analysis content (right) */
 main.layout {
-  display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 18px;
+  display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 20px;
   align-items: start;
 }
 .sidebar { position: sticky; top: 18px; }
@@ -273,3 +273,35 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   background: var(--panel-2, #1a1f2b);
   border-color: var(--accent, #4c9aff);
 }
+
+/* Desktop largo: aproveita a área ociosa em vez de esticar a linha de texto.
+   Acima de 1500px o corpo do relatório vira duas colunas; acima de 1900px a
+   barra lateral ganha um pouco mais de largura porque sobra espaço. */
+@media (min-width: 1500px) {
+  /* Relatórios longos (analistas, notícias, fundamentos) viram duas colunas.
+     As teses já são lado a lado e ficam de fora. */
+  .section-body > .md {
+    column-count: 2;
+    column-gap: 30px;
+  }
+  .section-body > .md > * { break-inside: avoid; }
+}
+@media (min-width: 1900px) {
+  main.layout { grid-template-columns: 300px minmax(0, 1fr); }
+}
+/* A linha de texto não deve passar de ~95 caracteres, mesmo em tela enorme:
+   linha longa demais cansa a leitura e a tela "cheia" fica pior que a vazia. */
+.section-body > .md { max-width: none; }
+
+/* O ticker é a âncora da tela: quem abre o histórico precisa saber em 1 olhada
+   de qual ativo está lendo. Antes vinha em corpo 13 na linha de metadados. */
+.asset-name {
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  line-height: 1;
+  color: var(--fg, #e6e9f0);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+@media (max-width: 700px) { .asset-name { font-size: 26px; } }

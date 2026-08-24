@@ -187,6 +187,8 @@ function section(title, mdText) {
 }
 
 function renderResult(snap) {
+  const nameEl = document.getElementById("assetName");
+  if (nameEl) nameEl.textContent = snap.ticker || "—";
   clearInterval(pollTimer); pollTimer = null;
   $("runBtn").disabled = false;
   $("progressPanel").classList.add("hidden");
@@ -209,7 +211,7 @@ function renderResult(snap) {
   $("verdictBadge").innerHTML = verdictHtml(r.verdict);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
-    `<span>Ativo <b>${escapeHtml(snap.ticker)}</b></span>` +
+
     `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
     `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
