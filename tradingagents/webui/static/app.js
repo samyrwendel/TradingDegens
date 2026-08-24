@@ -192,6 +192,7 @@ function renderResult(snap) {
   _openTicker = snap.ticker || "";
   const rb = document.getElementById("refreshBtn");
   if (rb) rb.classList.toggle("hidden", !_openTicker);
+  renderAssetTimeline(_openTicker, snap.run_id);
   clearInterval(pollTimer); pollTimer = null;
   $("runBtn").disabled = false;
   $("progressPanel").classList.add("hidden");
@@ -504,6 +505,29 @@ async function startAnalysis(ev) {
 }
 
 let _openTicker = "";
+
+// Calendário do ativo: as análises anteriores DESTE ticker, do mais recente pro
+// mais antigo. Substitui a repetição do mesmo ativo na lista lateral.
+function renderAssetTimeline(ticker, currentId) {
+  const el = document.getElementById("assetTimeline");
+  if (!el) return;
+  const runs = (_allRuns || []).filter(
+    (r) => (r.ticker || "").toUpperCase() === (ticker || "").toUpperCase()
+  );
+  if (runs.length < 2) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.classList.remove("hidden");
+  el.innerHTML = `<span class="tl-label">Análises anteriores</span>` +
+    runs.map((r) => {
+      const v = (r.verdict || r.status || "").toString();
+      const day = (r.date || "").slice(5) || "?";
+      const cur = r.run_id === currentId ? " is-current" : "";
+      return `<button type="button" class="tl-day${cur} ${verdictClass(v).replace("verdict", "").trim()}" ` +
+        `data-id="${escapeHtml(r.run_id)}" title="${escapeHtml(r.date || "")} — ${escapeHtml(v)}">${escapeHtml(day)}</button>`;
+    }).join("");
+  el.querySelectorAll(".tl-day").forEach((b) =>
+    b.addEventListener("click", () => openRun(b.dataset.id))
+  );
+}
 let _todayManaus = "";
 let _historyFilter = "all";
 
@@ -546,20 +570,31 @@ async function loadHistory() {
     // Duas famílias só: cripto e ações (metais entram em ações). O usuário
     // escolhe pela aba — Todos / Ações / Cripto —, sem cabeçalho empilhado.
     _allRuns = runs;
-    const item = (r) => {
+    // A lateral é a LISTA DE ATIVOS, não o log de execuções: um item por ticker,
+    // com o veredito mais recente. O histórico daquele ativo (dias atrás) aparece
+    // como calendário dentro da análise aberta.
+    const item = (r, n) => {
       const v = (r.verdict || r.status || "").toString();
       const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
+      const badge = n > 1 ? `<span class="h-count" title="${n} análises">${n}</span>` : "";
       return `<li data-id="${escapeHtml(r.run_id)}">` +
-        `<span class="h-ticker">${escapeHtml(r.ticker || "?")}</span>` +
+        `<span class="h-ticker">${escapeHtml(r.ticker || "?")}${badge}</span>` +
         `<span class="h-verdict ${verdictClass(v).replace("verdict", "").trim()}" title="${escapeHtml(v)}">${verdictHtml(v)}</span>` +
         `<span class="h-meta">${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
         `</li>`;
     };
-    const shown = _historyFilter === "all"
+    const filtered = _historyFilter === "all"
       ? runs
       : runs.filter((r) => (r.asset_type === "crypto") === (_historyFilter === "crypto"));
-    ul.innerHTML = shown.length
-      ? shown.map(item).join("")
+    // um por ticker (o mais recente; a API já devolve do mais novo pro mais velho)
+    const seen = new Map();
+    filtered.forEach((r) => {
+      const k = (r.ticker || "?").toUpperCase();
+      if (!seen.has(k)) seen.set(k, { run: r, n: 0 });
+      seen.get(k).n += 1;
+    });
+    ul.innerHTML = seen.size
+      ? [...seen.values()].map(({ run, n }) => item(run, n)).join("")
       : '<li class="empty">Nenhuma análise nesta aba.</li>';
     [...ul.children].forEach((li) => {
       const id = li.getAttribute("data-id");

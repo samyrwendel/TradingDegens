@@ -325,3 +325,35 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   border-color: var(--accent, #4c9aff);
   background: var(--panel-2, #1a1f2b);
 }
+
+/* Contador de análises do ativo na lista lateral */
+.h-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #8b93a7);
+  background: var(--panel-2, #1a1f2b);
+  border: 1px solid var(--line, #2a3040);
+  border-radius: 999px;
+}
+
+/* Calendário do ativo: dias em que ele já foi analisado */
+.asset-timeline {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 2px 0 14px;
+}
+.asset-timeline .tl-label {
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted, #8b93a7); margin-right: 4px;
+}
+.tl-day {
+  padding: 4px 9px; font: inherit; font-size: 12px;
+  color: var(--fg, #e6e9f0);
+  background: var(--panel-2, #1a1f2b);
+  border: 1px solid var(--line, #2a3040);
+  border-radius: 6px; cursor: pointer;
+}
+.tl-day:hover { border-color: var(--accent, #4c9aff); }
+.tl-day.is-current { border-color: var(--accent, #4c9aff); font-weight: 700; }
