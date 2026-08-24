@@ -202,17 +202,52 @@ class PriceStructure:
         }
 
 
+# Weekly bars close on Sunday so a 7-day crypto week and a Mon–Fri equity week
+# both roll into one bar (matches multi_timeframe.py's trend read).
+_WEEKLY_RULE = "W-SUN"
+
+
+def _resample_weekly(daily: pd.DataFrame, curr_date: str) -> pd.DataFrame:
+    """Resample a date-guarded DAILY frame to weekly (Sun-closed) bars in memory.
+
+    Reuses the daily series (already cached per symbol and cut to ``<= curr_date``
+    by :func:`load_ohlcv`), so the weekly frame costs no extra network — the same
+    DA-058 daily cache covers it; there is no separate look-ahead surface.
+
+    date guard: the still-forming / future week is dropped — a weekly bar counts
+    only once its week-ending Sunday has arrived (``<= curr_date``). Under
+    ``W-SUN`` the bin label IS that ending Sunday, so any label after ``curr_date``
+    is a week that has not closed yet and must never be shown as a completed candle.
+    """
+    d = daily.copy()
+    d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+    d = d.dropna(subset=["Date"]).set_index("Date").sort_index()
+    agg = {"Open": "first", "High": "max", "Low": "min", "Close": "last"}
+    if "Volume" in d.columns:
+        agg["Volume"] = "sum"
+    weekly = d.resample(_WEEKLY_RULE).agg(agg).dropna(subset=["Close"])
+    cutoff = pd.to_datetime(curr_date, errors="coerce")
+    if pd.notna(cutoff):
+        weekly = weekly[weekly.index <= cutoff]
+    return weekly.reset_index()
+
+
 def _load_frame(symbol: str, curr_date: str, timeframe: str) -> pd.DataFrame:
     """Load the date-guarded OHLCV for ``timeframe``.
 
-    Daily/weekly come from the cached yfinance series (:func:`load_ohlcv`);
-    intraday (15m/1h) from the keyless-exchange loader, which raises
-    :class:`IntradayUnavailableError` for a non-crypto symbol so the caller
-    declares it unavailable instead of inventing a bar.
+    * daily — the cached yfinance series (:func:`load_ohlcv`);
+    * weekly — that same daily series resampled in memory (:func:`_resample_weekly`),
+      so it needs no separate feed and is operable for stocks and crypto alike;
+    * intraday (15m/1h/4h) — the keyless-exchange loader, which raises
+      :class:`IntradayUnavailableError` for a non-crypto symbol so the caller
+      declares it unavailable instead of inventing a bar.
     """
     if _is_intraday(timeframe):
         return load_intraday_ohlcv(symbol, curr_date, timeframe)
-    return load_ohlcv(symbol, curr_date)
+    daily = load_ohlcv(symbol, curr_date)
+    if timeframe == "1w":
+        return _resample_weekly(daily, curr_date)
+    return daily
 
 
 def _prep(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> pd.DataFrame:
@@ -586,9 +621,10 @@ _HORIZON = {
 
 
 def _plan_timeframe_ref(timeframe: str) -> str:
-    """Timeframe label stamped on the plan header. Intraday names the frame; the
-    daily default keeps the documented 'diário (ref) · semanal (fundo)' phrasing."""
-    if _is_intraday(timeframe):
+    """Timeframe label stamped on the plan header. Intraday and the weekly frame
+    name themselves ('4 horas (referência)', 'semanal (referência)'); the daily
+    default keeps the documented 'diário (ref) · semanal (fundo)' phrasing."""
+    if _is_intraday(timeframe) or timeframe == "1w":
         return f"{_tf_label(timeframe)} (referência)"
     return _TIMEFRAME_REF
 

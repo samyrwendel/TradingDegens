@@ -212,10 +212,11 @@ def test_runner_empty_ticker_rejected(tmp_path):
 
 # --------------------------------------------------- timeframe selector (005) ---
 def test_timeframes_for_asset_ladder():
-    """Crypto gets the intraday ladder; an equity only the daily (intraday has no
-    keyless feed). This is the single source both UI + endpoint validate against."""
-    assert timeframes_for_asset("crypto") == ["1d", "4h", "1h", "15m"]
-    assert timeframes_for_asset("stock") == ["1d"]
+    """Widest→narrowest. The weekly (resampled from the daily series) is operable for
+    both; crypto also gets the intraday ladder, an equity does not (no keyless feed).
+    This is the single source both UI + endpoint validate against (task 007)."""
+    assert timeframes_for_asset("crypto") == ["1w", "1d", "4h", "1h", "15m"]
+    assert timeframes_for_asset("stock") == ["1w", "1d"]
 
 
 def test_run_result_carries_timeframe_ladder(tmp_path):
@@ -226,7 +227,7 @@ def test_run_result_carries_timeframe_ladder(tmp_path):
     run_id = runner.start("AAPL", "2026-08-22")
     snap = _wait(runner, run_id)
     assert snap["result"]["timeframe"] == "1d"
-    assert snap["result"]["timeframes"] == ["1d"]
+    assert snap["result"]["timeframes"] == ["1w", "1d"]
 
 
 def test_timeframe_view_recomputes_for_crypto(tmp_path, monkeypatch):
@@ -244,8 +245,26 @@ def test_timeframe_view_recomputes_for_crypto(tmp_path, monkeypatch):
     assert view["degraded"] is False and view["notice"] is None
     assert view["price_chart"]["timeframe"] == "15m"
     assert view["actionable"]["timeframe"] == "15m"
-    assert view["timeframes"] == ["1d", "4h", "1h", "15m"]
+    assert view["timeframes"] == ["1w", "1d", "4h", "1h", "15m"]
     assert view["ticker"] == "BTC-USD"  # normalized upper
+
+
+def test_timeframe_view_weekly_for_stock(tmp_path, monkeypatch):
+    """The weekly frame is resampled from the daily series, so /api/chart?tf=1w must
+    work for an EQUITY too (unlike intraday, which an equity has no keyless feed for)
+    — it must not reject the stock with 'indisponível' (task 007)."""
+    monkeypatch.setattr(runner_module, "fetch_price_chart",
+                        lambda t, d, tf="1d": {"timeframe": tf, "candles": [{"d": "2025-01-12"}]})
+    monkeypatch.setattr(runner_module, "fetch_actionable_plan",
+                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "ativo"})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    view = runner.timeframe_view("AAPL", "2026-08-22", "1w")
+    assert view["asset_type"] == "stock"
+    assert view["timeframe"] == "1w" and view["requested"] == "1w"
+    assert view["degraded"] is False and view["notice"] is None
+    assert view["price_chart"]["timeframe"] == "1w"
+    assert view["timeframes"] == ["1w", "1d"]
 
 
 def test_timeframe_view_rejects_intraday_for_stock(tmp_path):

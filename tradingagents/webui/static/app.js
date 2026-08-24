@@ -249,7 +249,7 @@ function renderResult(snap) {
   _tf = r.timeframe || "1d";
   _timeframes = Array.isArray(r.timeframes) && r.timeframes.length
     ? r.timeframes
-    : (_assetType === "crypto" ? ["1d", "4h", "1h", "15m"] : ["1d"]);
+    : (_assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"]);
   hideDegrade();
 
   renderHeadPrice(r.actionable);
@@ -388,8 +388,8 @@ let _assetType = "";          // tipo do ativo aberto (cripto habilita intradiá
 // Todos os frames do seletor, na ordem exibida. Um frame fora de `_timeframes`
 // (intradiário em ação) é renderizado DESABILITADO — o backend nunca inventa
 // candle pra ele; a UI só deixa claro que não é operável.
-const ALL_TFS = [["1d", "Diário"], ["4h", "4h"], ["1h", "1h"], ["15m", "15m"]];
-const TF_LABEL = { "1d": "Diário", "4h": "4h", "1h": "1h", "15m": "15m" };
+const ALL_TFS = [["1w", "Semanal"], ["1d", "Diário"], ["4h", "4h"], ["1h", "1h"], ["15m", "15m"]];
+const TF_LABEL = { "1w": "Semanal", "1d": "Diário", "4h": "4h", "1h": "1h", "15m": "15m" };
 
 function renderChartCard(chart, ticker, actionable) {
   const card = $("chartCard");
@@ -448,10 +448,10 @@ function renderChartCard(chart, ticker, actionable) {
 }
 
 // ---- timeframe selector ----------------------------------------------------
-// Botões diário · 4h · 1h · 15m. Clicar recalcula região, 1-2-3 e faixas NAQUELE
-// tempo gráfico (via /api/chart), redesenha o gráfico e marca o frame ativo. Os
-// frames fora de `_timeframes` (intradiário em ação) ficam desabilitados — o
-// backend não inventa candle pra eles.
+// Botões semanal · diário · 4h · 1h · 15m. Clicar recalcula região, 1-2-3 e faixas
+// NAQUELE tempo gráfico (via /api/chart), redesenha o gráfico e marca o frame ativo.
+// O semanal é reamostrado do diário, então vale pra ação e cripto; os intradiários
+// fora de `_timeframes` (ação) ficam desabilitados — o backend não inventa candle.
 function renderTfSelector() {
   const el = $("tfSelector");
   if (!el) return;

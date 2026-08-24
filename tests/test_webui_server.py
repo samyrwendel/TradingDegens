@@ -116,7 +116,7 @@ def test_chart_endpoint_recomputes_timeframe(server, monkeypatch):
     assert status == 200
     assert body["timeframe"] == "4h"
     assert body["price_chart"]["timeframe"] == "4h"
-    assert body["timeframes"] == ["1d", "4h", "1h", "15m"]
+    assert body["timeframes"] == ["1w", "1d", "4h", "1h", "15m"]
 
 
 def test_chart_endpoint_rejects_intraday_for_stock(server):

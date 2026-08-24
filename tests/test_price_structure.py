@@ -334,3 +334,96 @@ def test_intraday_unavailable_declared_not_fabricated(monkeypatch):
     assert plan.buy_zone is None and plan.price is None
     d = ps.build_actionable_plan_dict("AAPL", "2026-08-20", "15m")
     assert d["setup_state"] == "intradiario_indisponivel"
+
+
+# ------------------------------------------------------ weekly timeframe (007) --
+def _weekly_frame() -> pd.DataFrame:
+    """The known 1-2-3 structure from :func:`_frame`, but with each bar one calendar
+    week apart (Mondays), so a ``W-SUN`` resample maps exactly one bar per week and
+    preserves the structure on the weekly frame — the detector must find it there."""
+    base = _frame()
+    dates = pd.date_range("2022-01-03", periods=len(base), freq="7D")  # Mondays
+    out = base.copy()
+    out["Date"] = dates.strftime("%Y-%m-%d")
+    return out
+
+
+@pytest.mark.unit
+def test_weekly_structure_runs_and_is_labelled(monkeypatch):
+    """Region + 1-2-3 recompute on the resampled WEEKLY series (crypto), the frame
+    is stamped 'semanal' on section + plan, and weekly points are date-only —
+    proving the selector's Semanal button drives a real weekly recompute (task 007)."""
+    df = _weekly_frame()
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
+    curr = "2026-12-31"  # after the whole frame
+
+    s = ps.detect_price_structure("BTC-USD", curr, "1w")
+    assert s.pattern is not None
+    assert ":" not in s.pattern.p1["date"]        # weekly is a bare date, no HH:MM
+
+    chart = ps.build_price_chart("BTC-USD", curr, timeframe="1w")
+    assert chart["timeframe"] == "1w"
+    assert ":" not in chart["candles"][-1]["d"]
+    # one bar per week: far fewer candles than the daily source would carry
+    assert 0 < len(chart["candles"]) <= len(df)
+
+    section = ps.build_price_structure_section("BTC-USD", curr, "1w")
+    assert "semanal" in section.lower()
+    plan = ps.build_actionable_plan("BTC-USD", curr, "1w")
+    assert "semanal" in plan.timeframe.lower()
+
+
+@pytest.mark.unit
+def test_weekly_works_for_equity(monkeypatch):
+    """Weekly is resampled from the daily series, so it is operable for an EQUITY too
+    (unlike intraday). No IntradayUnavailableError, a real weekly chart (task 007)."""
+    df = _weekly_frame()
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
+    # If the weekly path wrongly reached the intraday loader, this would raise.
+    monkeypatch.setattr(ps, "load_intraday_ohlcv",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("weekly must not hit intraday")))
+    chart = ps.build_price_chart("AAPL", "2026-12-31", timeframe="1w")
+    assert chart["timeframe"] == "1w"
+    assert chart["candles"]                        # weekly candles exist for a stock
+    section = ps.build_price_structure_section("AAPL", "2026-12-31", "1w")
+    assert "indisponível" not in section.lower()   # not the intraday-unavailable read
+    assert "semanal" in section.lower()
+
+
+@pytest.mark.unit
+def test_weekly_resample_aggregates_and_guards_forming_week(monkeypatch):
+    """A W-SUN resample aggregates the days in each week (first open, max high, min
+    low, last close) and the date guard drops the still-forming current week — a
+    weekly candle whose ending Sunday is after curr_date never appears (task 007)."""
+    # Mon 2025-01-06 .. Wed 2025-01-29: three full weeks + a partial current week.
+    dates = pd.date_range("2025-01-06", "2025-01-29", freq="D")
+    n = len(dates)
+    close = pd.Series(range(100, 100 + n), dtype=float)
+    daily = pd.DataFrame({
+        "Date": dates.strftime("%Y-%m-%d"),
+        "Open": close.values,
+        "High": (close + 2).values,
+        "Low": (close - 2).values,
+        "Close": close.values,
+        "Volume": [10] * n,
+    })
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: daily.copy())
+
+    curr = "2025-01-29"  # a Wednesday — its week (ending Sun 2025-02-02) is not closed
+    weekly = ps._load_frame("X", curr, "1w")
+    weekly["Date"] = pd.to_datetime(weekly["Date"])
+    weeks = set(weekly["Date"])
+
+    # date guard: the forming week (Sun 02-02, in the future vs curr) is dropped;
+    # the last visible weekly bar is the last CLOSED week (Sun 01-26).
+    assert pd.Timestamp("2025-02-02") not in weeks
+    assert weekly["Date"].max() == pd.Timestamp("2025-01-26")
+    assert (weekly["Date"] <= pd.Timestamp(curr)).all()
+
+    # aggregation of the first full week (Mon 01-06 .. Sun 01-12).
+    row = weekly.set_index("Date").loc[pd.Timestamp("2025-01-12")]
+    span = daily[(daily["Date"] >= "2025-01-06") & (daily["Date"] <= "2025-01-12")]
+    assert row["Open"] == float(span["Open"].iloc[0])
+    assert row["High"] == float(span["High"].max())
+    assert row["Low"] == float(span["Low"].min())
+    assert row["Close"] == float(span["Close"].iloc[-1])

@@ -27,13 +27,15 @@ from tradingagents.webui.store import HistoryStore
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
 _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 
-# The chart's timeframe selector, by asset type. Crypto gets the full intraday
-# ladder (real keyless exchange candles); an equity has no keyless intraday feed,
-# so only the daily is operable — the UI shows the intraday buttons disabled
-# ("indisponível para ação") rather than inventing a bar. Daily is always first
-# and is the default frame every analysis is computed on.
-_CRYPTO_TIMEFRAMES = ("1d", "4h", "1h", "15m")
-_STOCK_TIMEFRAMES = ("1d",)
+# The chart's timeframe selector, by asset type, ordered widest→narrowest
+# (semanal · diário · 4h · 1h · 15m). The weekly frame is resampled in memory from
+# the daily series, so it is operable for BOTH stocks and crypto. Crypto also gets
+# the intraday ladder (real keyless exchange candles); an equity has no keyless
+# intraday feed, so those buttons show disabled ("indisponível para ação") rather
+# than inventing a bar. Daily (``_DEFAULT_TIMEFRAME``) stays the frame every
+# analysis is first computed on — the selector re-derives the others on demand.
+_CRYPTO_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
+_STOCK_TIMEFRAMES = ("1w", "1d")
 _DEFAULT_TIMEFRAME = "1d"
 
 
