@@ -1213,8 +1213,17 @@ function drawPriceChart(canvas, chart, a) {
   if (price != null) {
     axisPills.push({ y: y(price), text: fmtAxis(price), bg: "#e6eaf2", fg: "#000000", strong: true });
   }
+  // Cada ZONA mostra o RANGE na régua: DUAS pílulas (máx e mín da banda) na altura
+  // exata de cada ponta — o Samyr lê a faixa inteira sem cobrir vela (a sombra da
+  // faixa continua). Sem banda (sem base de ATR) degrada pra uma pílula no nível.
   zones.forEach((z) => {
-    if (z.price != null) axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#000000" });
+    const hasBand = z.low != null && z.high != null && z.high > z.low;
+    if (hasBand) {
+      axisPills.push({ y: y(z.high), text: fmtAxis(z.high), bg: z.color, fg: "#000000" });
+      axisPills.push({ y: y(z.low), text: fmtAxis(z.low), bg: z.color, fg: "#000000" });
+    } else if (z.price != null) {
+      axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#000000" });
+    }
   });
   if (pat) {
     axisPills.push({ y: y(pat.trigger), text: fmtAxis(pat.trigger), bg: patColor(pat), fg: "#000000" });
