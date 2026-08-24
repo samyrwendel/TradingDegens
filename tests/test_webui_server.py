@@ -180,8 +180,43 @@ def test_analyze_compare_flow(server, monkeypatch):
         time.sleep(0.02)
     assert snap["status"] == "done"
     cmp = snap["result"]["compare"]
-    assert set(("padrao", "erick", "meta")).issubset(cmp)
+    assert set(("a", "b", "meta")).issubset(cmp)
     assert cmp["meta"]["agreement"] in ("concordam", "divergem", "parcial")
+
+
+def test_compare_endpoint_confronts_two_runs(server, monkeypatch):
+    """POST /api/compare meta-judges two existing runs of the same ticker."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
+
+    def _run(payload):
+        _, body = _post(server, "/api/analyze", payload)
+        rid = body["run_id"]
+        for _ in range(400):
+            _, snap = _get(server, "/api/status/" + rid)
+            if snap["status"] != "running":
+                break
+            time.sleep(0.02)
+        return rid
+
+    a = _run({"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
+    b = _run({"ticker": "AAPL", "date": "2026-08-22", "method": "erick"})
+    status, snap = _post(server, "/api/compare", {"a": a, "b": b})
+    assert status == 200
+    cmp = snap["result"]["compare"]
+    assert cmp["manual"] is True
+    assert set(("a", "b", "meta")).issubset(cmp)
+
+
+def test_compare_endpoint_rejects_cross_ticker(server):
+    try:
+        _post(server, "/api/compare", {"a": "does-not-exist-1", "b": "does-not-exist-2"})
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+        return
+    raise AssertionError("expected HTTP 400")
 
 
 def test_chart_endpoint_requires_ticker(server):

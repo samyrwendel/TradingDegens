@@ -1,14 +1,13 @@
-"""Padrão × Erick comparison + meta-judge (Fase 3 do Modo Erick).
+"""Comparação de duas leituras + meta-juiz (Fase 3 do Modo Erick).
 
-Runs the two readings — the Padrão pipeline and the same pipeline with the Erick
-method analyst — and confronts them: a meta-judge names where they AGREE and where
-they DIVERGE, because the divergence is the signal ("Padrão vê a tese de fundo,
-Erick vê que o timing intradiário ainda não chegou").
+Confronta DUAS análises do mesmo ativo — via o atalho "comparar" (roda Padrão +
+Erick de uma vez, task 017) ou o fluxo MANUAL (selecionar duas análises já
+existentes no histórico e mandar confrontar, task 018). O meta-juiz nomeia
+explicitamente as duas (método · timeframe · data), aponta onde CONCORDAM e onde
+DIVERGEM, e o que a divergência significa pra decisão — a divergência é o sinal.
 
-The meta-judge here is DETERMINISTIC on purpose: it is anchored in the two real
-verdicts + timeframes + the Erick setup state (never invents), keeps the run cost
-at exactly two pipelines (no third LLM call), and is fully testable. The narrative
-is derived from the actual results, not a vague summary.
+Determinístico de propósito: ancorado nos dois vereditos + timeframes + o setup do
+método (nunca inventa), sem uma 3ª chamada LLM, e testável.
 """
 
 from __future__ import annotations
@@ -18,10 +17,11 @@ _VERDICT_PT = {
     "buy": "COMPRAR", "overweight": "AUMENTAR", "hold": "MANTER",
     "underweight": "REDUZIR", "sell": "VENDER",
 }
-# Conservatism order (sell most cautious → buy most aggressive); the meta verdict
-# on a divergence is the more conservative side — a split is not a green light.
+# Conservatism order (sell most cautious → buy most aggressive).
 _ORDER = {"sell": 0, "underweight": 1, "hold": 2, "overweight": 3, "buy": 4}
 _TF_PT = {"1w": "semanal", "1d": "diário", "4h": "4h", "1h": "1h", "15m": "15m"}
+# Timeframe from widest→narrowest, so we can tell which side is the "timing" frame.
+_TF_ORDER = {"1w": 4, "1d": 3, "4h": 2, "1h": 1, "15m": 0}
 
 
 def _vkey(v: str) -> str:
@@ -45,18 +45,36 @@ def _more_conservative(vp: str, ve: str) -> str:
     return vp if op <= oe else ve
 
 
+def method_label(method: str) -> str:
+    return "Método Erick" if method == "erick" else "Padrão"
+
+
+def detect_method(record: dict) -> str:
+    """Infer a run's method from its stored result (Erick if it wrote an Erick
+    report). Compare records report ``"compare"`` and are not single readings."""
+    res = record.get("result") or {}
+    if res.get("compare"):
+        return "compare"
+    return "erick" if (res.get("erick_report") or "").strip() else "padrao"
+
+
+def column_label(col: dict) -> str:
+    """Human label naming WHICH reading this is: método · timeframe."""
+    return f"{method_label(col.get('method'))} · {_tf(col.get('timeframe', '1d'))}"
+
+
 def build_column(record: dict, method: str) -> dict:
     """A comparison column from a persisted run record (or a snapshot dict).
 
-    Carries the verdict, its timeframe, the operable plan (trader plan / final
-    decision, plus the Erick method read on the Erick side), the cost, and the
-    run_id so the UI can open the full analysis. ``_reused`` marks a column served
-    from a cached prior run (no re-run).
+    Carries the verdict, its timeframe, the operable plan, the cost, the date and a
+    human ``label`` (método · timeframe) so the meta-judge and UI can name exactly
+    which reading each column is. ``_reused`` marks a column served from cache.
     """
     r = record.get("result") or {}
-    return {
+    col = {
         "method": method,
         "run_id": record.get("run_id"),
+        "date": record.get("date") or r.get("date") or "",
         "verdict": r.get("verdict") or record.get("verdict"),
         "timeframe": (
             r.get("verdict_timeframe") or record.get("verdict_timeframe")
@@ -73,19 +91,31 @@ def build_column(record: dict, method: str) -> dict:
         "degraded": r.get("degraded") or [],
         "reused": bool(record.get("_reused")),
     }
+    col["label"] = column_label(col)
+    return col
 
 
-def deterministic_meta(padrao: dict, erick: dict) -> dict:
-    """Confront the two columns: agree/diverge + the decision meaning, anchored in
-    the real verdicts, timeframes and Erick setup state."""
-    vp, ve = padrao.get("verdict"), erick.get("verdict")
-    tfp, tfe = padrao.get("timeframe", "1d"), erick.get("timeframe", "1d")
-    have_both = bool(_vkey(vp)) and bool(_vkey(ve))
-    agree = have_both and _vkey(vp) == _vkey(ve)
-    meta_verdict = vp if agree else _more_conservative(vp, ve)
+def meta_judge(a: dict, b: dict) -> dict:
+    """Confront two columns: agree/diverge + the decision meaning, anchored in the
+    real verdicts, timeframes, methods and setup — naming exactly which two.
 
-    # Erick's timing read, if the method exposed a setup state
-    setup = (erick.get("actionable") or {}).get("setup_state") or ""
+    Works for any pair of the same ticker: Padrão × Erick (thesis vs timing) or two
+    timeframes of either method (trend frame vs timing frame).
+    """
+    va, vb = a.get("verdict"), b.get("verdict")
+    tfa, tfb = a.get("timeframe", "1d"), b.get("timeframe", "1d")
+    la, lb = column_label(a), column_label(b)
+    da, db = a.get("date", ""), b.get("date", "")
+    have_both = bool(_vkey(va)) and bool(_vkey(vb))
+    agree = have_both and _vkey(va) == _vkey(vb)
+    meta_verdict = va if agree else _more_conservative(va, vb)
+    diff_method = a.get("method") != b.get("method")
+    diff_tf = _vkey(tfa) != _vkey(tfb)
+
+    setup = (
+        (b.get("actionable") or {}).get("setup_state")
+        or (a.get("actionable") or {}).get("setup_state") or ""
+    )
     setup_pt = {
         "ativo": "o gatilho de recuo à média já está ativo",
         "aguardar_pullback": "ainda aguarda o recuo à média",
@@ -98,77 +128,106 @@ def deterministic_meta(padrao: dict, erick: dict) -> dict:
         headline = "Comparação parcial — uma das leituras não produziu veredito."
         agreement = "parcial"
     elif agree:
-        headline = f"Concordam: ambos {_vpt(vp)}."
+        headline = f"Concordam: ambos {_vpt(va)}."
         agreement = "concordam"
     else:
-        headline = (
-            f"Divergem: Padrão {_vpt(vp)} × Erick {_vpt(ve)} — a divergência é o sinal."
-        )
+        headline = f"Divergem: {la} {_vpt(va)} × {lb} {_vpt(vb)} — a divergência é o sinal."
         agreement = "divergem"
+
+    # Quem está a par (naming the exact two readings + dates: criterion 4)
+    par = (
+        f"Confronto: **{la}**{f' ({da})' if da else ''} × **{lb}**"
+        f"{f' ({db})' if db else ''}."
+    )
 
     if agree:
         concordancia = (
-            f"Os dois métodos chegam ao mesmo veredito: **{_vpt(vp)}**. A tese de "
-            "fundo (Padrão) e o timing pelo método Erick apontam na mesma direção — "
-            "confluência, sinal mais forte."
+            f"{par} Os dois chegam ao mesmo veredito: **{_vpt(va)}**. As leituras "
+            "apontam na mesma direção — confluência, sinal mais forte."
         )
     else:
         concordancia = (
-            "Ambos analisaram o mesmo ativo, na mesma data, com a mesma base de "
-            "dados (preço, notícias, derivativos). O que diverge é a leitura — abaixo."
+            f"{par} Mesma base de dados (preço, notícias, derivativos); o que "
+            "diverge é a leitura — abaixo."
         )
 
     if agree:
         divergencia = (
-            "Sem divergência no veredito. O método Erick apenas detalha o timing e o "
-            "peso da entrada" + (f" — {setup_pt}." if setup_pt else ".")
+            "Sem divergência no veredito." + (f" O timing: {setup_pt}." if setup_pt else "")
         )
     else:
-        linhas = [
-            f"- **Padrão** ({_tf(tfp)}): {_vpt(vp)} — leitura de fundo (fundamento, "
-            "notícia, tendência dominante).",
-            f"- **Erick** ({_tf(tfe)}): {_vpt(ve)} — timing pelo recuo à média"
-            + (f", {setup_pt}." if setup_pt else "."),
-        ]
-        divergencia = "\n".join(linhas)
+        divergencia = (
+            f"- **{la}**{f' ({da})' if da else ''}: {_vpt(va)}\n"
+            f"- **{lb}**{f' ({db})' if db else ''}: {_vpt(vb)}"
+            + (f"\n- Timing (método Erick): {setup_pt}." if setup_pt else "")
+        )
 
-    if agree:
-        significado = (
-            "Os dois ângulos — tese de fundo × timing intradiário — concordam. É o "
-            "cenário de maior convicção: dá pra agir com o peso que o método Erick "
-            "indicar, sem contradição entre horizonte curto e longo."
-        )
-    elif not have_both:
-        significado = (
-            "Uma das leituras ficou indisponível; use a que concluiu e considere "
-            "reavaliar a outra antes de decidir."
-        )
-    else:
-        cons = _more_conservative(vp, ve)
-        if _vkey(cons) == _vkey(ve):
-            significado = (
-                f"O Padrão vê a tese de fundo (**{_vpt(vp)}**), mas o método Erick — "
-                f"no frame {_tf(tfe)} — está mais cauteloso (**{_vpt(ve)}**): o timing "
-                "ainda não confirmou. Leitura: esperar o recuo à média antes de agir "
-                "com peso; entrar cedo é comprar contra o timing."
-            )
-        else:
-            significado = (
-                f"O método Erick vê um gatilho de timing (**{_vpt(ve)}** no frame "
-                f"{_tf(tfe)}) que a tese de fundo Padrão (**{_vpt(vp)}**) ainda não "
-                "endossa. Leitura: entrada tática de peso reduzido, ciente de que o "
-                "horizonte longo não acompanha — realizar antes se a tese não virar."
-            )
+    significado = _meaning(
+        agree, have_both, va, vb, tfa, tfb, la, lb, diff_method, diff_tf, a, b
+    )
 
     return {
         "agreement": agreement,
         "verdict": meta_verdict,
-        "verdict_padrao": vp,
-        "verdict_erick": ve,
-        "timeframe_padrao": tfp,
-        "timeframe_erick": tfe,
+        "verdict_a": va, "verdict_b": vb,
+        "timeframe_a": tfa, "timeframe_b": tfb,
+        "label_a": la, "label_b": lb,
+        "date_a": da, "date_b": db,
         "headline": headline,
         "concordancia": concordancia,
         "divergencia": divergencia,
         "significado": significado,
     }
+
+
+def _meaning(agree, have_both, va, vb, tfa, tfb, la, lb, diff_method, diff_tf, a, b) -> str:
+    if agree:
+        return (
+            "Os dois ângulos concordam — é o cenário de maior convicção: dá pra agir "
+            "com o peso indicado, sem contradição entre horizonte e timing."
+        )
+    if not have_both:
+        return (
+            "Uma das leituras ficou indisponível; use a que concluiu e considere "
+            "reavaliar a outra antes de decidir."
+        )
+    cons = _more_conservative(va, vb)
+    if diff_method:
+        # Padrão (tese de fundo) × Erick (timing pelo recuo à média)
+        erick_is_a = a.get("method") == "erick"
+        erick_v = va if erick_is_a else vb
+        padrao_v = vb if erick_is_a else va
+        erick_l = la if erick_is_a else lb
+        if _vkey(cons) == _vkey(erick_v):
+            return (
+                f"O Padrão vê a tese de fundo (**{_vpt(padrao_v)}**), mas o método "
+                f"Erick ({erick_l}) está mais cauteloso (**{_vpt(erick_v)}**): o timing "
+                "ainda não confirmou. Leitura: esperar o recuo à média antes de agir "
+                "com peso — entrar cedo é comprar contra o timing."
+            )
+        return (
+            f"O método Erick ({erick_l}) vê um gatilho de timing (**{_vpt(erick_v)}**) "
+            f"que a tese de fundo Padrão (**{_vpt(padrao_v)}**) ainda não endossa. "
+            "Leitura: entrada tática de peso reduzido, realizar antes se a tese não virar."
+        )
+    if diff_tf:
+        # mesmo método, frames diferentes: o mais curto é timing, o mais longo é tendência
+        short_is_a = _TF_ORDER.get(tfa, 3) <= _TF_ORDER.get(tfb, 3)
+        short_l, short_v = (la, va) if short_is_a else (lb, vb)
+        long_l, long_v = (lb, vb) if short_is_a else (la, va)
+        return (
+            f"Mesmo método, frames diferentes: o frame longo ({long_l}) dá a tendência "
+            f"(**{_vpt(long_v)}**) e o curto ({short_l}) o timing (**{_vpt(short_v)}**). "
+            "Divergência = tendência e timing desalinhados: siga a tendência do frame "
+            "longo e use o curto só pra cronometrar a entrada."
+        )
+    # mesma configuração (mesmo método e frame) — divergência é dado/ruído
+    return (
+        "Mesma configuração (método e frame iguais): a divergência vem de dado "
+        f"atualizado ou ruído entre as rodadas. O lado mais cauteloso é **{_vpt(cons)}** "
+        "— na dúvida, prevaleça o mais conservador e rode de novo pra confirmar."
+    )
+
+
+# Back-compat alias: the auto "comparar" path (task 017) passes (padrao, erick).
+deterministic_meta = meta_judge

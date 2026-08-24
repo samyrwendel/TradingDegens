@@ -20,7 +20,7 @@ from typing import Any
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from tradingagents.webui import timeutil
-from tradingagents.webui.compare import build_column, deterministic_meta
+from tradingagents.webui.compare import build_column, deterministic_meta, detect_method
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
 from tradingagents.webui.store import HistoryStore
@@ -249,7 +249,7 @@ class _CompareRun:
     def cost(self) -> dict[str, Any]:
         cols = (self.result or {}).get("compare") or {}
         total = 0.0
-        for k in ("padrao", "erick"):
+        for k in ("a", "b"):
             total += float(((cols.get(k) or {}).get("cost") or {}).get("usd") or 0)
         return {"usd": round(total, 6), "complete": True}
 
@@ -416,6 +416,9 @@ class AnalysisRunner:
                 "error": run.error,
                 "verdict": (run.result or {}).get("verdict") if status == "done" else None,
                 "verdict_timeframe": run.timeframe,
+                # Method for the manual-confront picker (task 018): reliable from the
+                # analyst selection, done or errored.
+                "method": "erick" if "erick" in run.selected_analysts else "padrao",
                 "cost_usd": cost["usd"],
                 "elapsed": elapsed,
                 # Manaus wall-clock with explicit -04:00 offset, so the UI can
@@ -464,11 +467,11 @@ class AnalysisRunner:
             crun.tracker.set("Erick", "Resolvendo a leitura pelo método Erick…", 50)
             erick_rec = self._resolve_side(crun, want_erick=True)
             crun.tracker.set("Meta-juiz", "Confrontando as duas leituras…", 92)
-            col_p = build_column(padrao_rec, "padrao")
-            col_e = build_column(erick_rec, "erick")
-            meta = self._meta_judge(col_p, col_e, crun.asset_type)
+            col_a = build_column(padrao_rec, "padrao")
+            col_b = build_column(erick_rec, "erick")
+            meta = self._meta_judge(col_a, col_b, crun.asset_type)
             crun.result = {
-                "compare": {"padrao": col_p, "erick": col_e, "meta": meta},
+                "compare": {"a": col_a, "b": col_b, "meta": meta},
                 "verdict": meta.get("verdict"),
                 "verdict_timeframe": crun.timeframe,
                 "asset_type": crun.asset_type,
@@ -549,6 +552,7 @@ class AnalysisRunner:
                 "error": crun.error,
                 "verdict": (crun.result or {}).get("verdict") if status == "done" else None,
                 "verdict_timeframe": crun.timeframe,
+                "method": "compare",  # not a single reading — excluded from confront picker
                 "cost_usd": cost["usd"],
                 "elapsed": elapsed,
                 "finished_at": crun.finished_stamp or timeutil.stamp(),
@@ -559,6 +563,66 @@ class AnalysisRunner:
             self.store.save(record)
         except Exception:
             pass
+
+    def _load_record(self, run_id: str) -> dict[str, Any] | None:
+        """Full record for a run — from the live table (its snapshot) or disk."""
+        with self._lock:
+            run = self._runs.get(run_id)
+        if run is not None:
+            snap = run.snapshot()
+            return {
+                "run_id": snap.get("run_id"), "ticker": snap.get("ticker"),
+                "date": snap.get("date"), "asset_type": snap.get("asset_type"),
+                "status": snap.get("status"), "error": snap.get("error"),
+                "verdict_timeframe": snap.get("verdict_timeframe"),
+                "verdict": (snap.get("result") or {}).get("verdict"),
+                "cost": snap.get("cost"), "elapsed": snap.get("elapsed"),
+                "result": snap.get("result"),
+            }
+        return self.store.get(run_id)
+
+    def confront(self, id_a: str, id_b: str) -> dict[str, Any]:
+        """Meta-judge over TWO existing analyses of the same ticker (manual flow,
+        task 018) — no pipeline re-run, just the deterministic comparison.
+
+        Accepts any pair of the same ticker: Padrão × Erick, or two timeframes. The
+        pair is persisted as a compare record so it shows in history and is openable.
+        Returns a ready snapshot (``result.compare`` populated).
+        """
+        if not id_a or not id_b:
+            raise ValueError("selecione duas análises")
+        if id_a == id_b:
+            raise ValueError("selecione duas análises diferentes")
+        rec_a, rec_b = self._load_record(id_a), self._load_record(id_b)
+        if rec_a is None or rec_b is None:
+            raise ValueError("análise não encontrada")
+        ta = (rec_a.get("ticker") or "").upper()
+        tb = (rec_b.get("ticker") or "").upper()
+        if ta != tb or not ta:
+            raise ValueError("as duas análises precisam ser do mesmo ativo")
+        if detect_method(rec_a) == "compare" or detect_method(rec_b) == "compare":
+            raise ValueError("selecione análises simples, não uma comparação")
+
+        col_a = build_column(rec_a, detect_method(rec_a))
+        col_b = build_column(rec_b, detect_method(rec_b))
+        asset_type = rec_a.get("asset_type") or rec_b.get("asset_type") or "stock"
+        meta = self._meta_judge(col_a, col_b, asset_type)
+
+        run_id = timeutil.run_id_stamp() + "-cmp" + uuid.uuid4().hex[:4]
+        crun = _CompareRun(run_id, ta, rec_a.get("date") or "", asset_type,
+                           col_a.get("timeframe") or _DEFAULT_TIMEFRAME)
+        crun.result = {
+            "compare": {"a": col_a, "b": col_b, "meta": meta, "manual": True},
+            "verdict": meta.get("verdict"),
+            "verdict_timeframe": crun.timeframe,
+            "asset_type": asset_type,
+        }
+        crun.tracker.done()
+        crun.finished_at = time.time()
+        crun.finished_stamp = timeutil.stamp()
+        crun.status = "done"
+        self._persist_compare(crun, "done")
+        return crun.snapshot()
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:

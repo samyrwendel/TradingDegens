@@ -9,7 +9,8 @@ Routes:
     GET  /                     -> index.html
     GET  /static/<file>        -> bundled static asset
     GET  /api/health           -> {"ok": true, ...}
-    POST /api/analyze          -> {ticker, date} -> {run_id}
+    POST /api/analyze          -> {ticker, date[, compare]} -> {run_id}
+    POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
     GET  /api/status/<run_id>  -> live run snapshot (progress, cost, result)
     GET  /api/run/<run_id>     -> alias of status (from history if needed)
     GET  /api/runs?status=running -> live in-process runs (em andamento)
@@ -164,6 +165,13 @@ class _Handler(BaseHTTPRequestHandler):
                     ticker, date, method=method or "padrao", timeframe=timeframe
                 )
                 self._send_json({"run_id": run_id})
+            elif path == "/api/compare":
+                # Manual confront (task 018): meta-judge over two EXISTING runs of
+                # the same ticker (no pipeline re-run). Returns a ready snapshot.
+                body = self._read_json_body()
+                a = (body.get("a") or "").strip()
+                b = (body.get("b") or "").strip()
+                self._send_json(self.runner.confront(a, b))
             else:
                 self._send_json({"error": "não encontrado"}, 404)
         except ValueError as exc:

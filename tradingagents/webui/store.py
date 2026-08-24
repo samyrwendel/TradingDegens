@@ -16,7 +16,7 @@ from typing import Any
 
 _SUMMARY_KEYS = (
     "run_id", "ticker", "date", "asset_type", "status",
-    "verdict", "cost_usd", "elapsed", "finished_at",
+    "verdict", "verdict_timeframe", "method", "cost_usd", "elapsed", "finished_at",
 )
 
 

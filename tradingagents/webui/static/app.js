@@ -9,6 +9,7 @@ let TZ_LABEL = "GMT-4 (Manaus)";
 // só a VISÃO — qual run está sendo acompanhado ao vivo, quais estavam rodando na
 // última atualização da lista, e quais terminaram sozinhos (ganham "pronto").
 let _watchedRunId = "";              // run cujo progresso está na tela agora
+let _openRunId = "";                 // run simples aberto (lado A de um confronto manual)
 let _prevRunningIds = new Set();     // ids que apareciam "running" na última lista
 const _finishedFlags = new Map();    // run_id -> "done" | "error" (terminou em 2º plano)
 let _historyTimer = null;            // atualização lenta da lista (marcadores vivos)
@@ -229,9 +230,11 @@ function renderResult(snap) {
   const nameEl = document.getElementById("assetName");
   if (nameEl) nameEl.textContent = snap.ticker || "—";
   _openTicker = snap.ticker || "";
+  _openRunId = snap.run_id || "";
   const rb = document.getElementById("refreshBtn");
   if (rb) rb.classList.toggle("hidden", !_openTicker);
   renderAssetTimeline(_openTicker, snap.run_id);
+  renderConfrontControl(snap);
   clearInterval(pollTimer); pollTimer = null;
   $("runBtn").disabled = false;
   $("progressPanel").classList.add("hidden");
@@ -244,6 +247,7 @@ function renderResult(snap) {
     $("headPrice").classList.add("hidden");
     $("verdictTf").classList.add("hidden");
     $("degradedBanner").classList.add("hidden");
+    $("confrontCtl").classList.add("hidden");   // não confrontar a partir de um run com erro
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
@@ -326,11 +330,12 @@ function metaSection(title, md) {
   return `<div class="mj-sec"><h3>${escapeHtml(title)}</h3><div class="md">${renderMarkdown(String(md))}</div></div>`;
 }
 
-// Uma coluna (Padrão ou Erick): veredito + timeframe, plano operável, custo, flag
-// de cache reusado, e um atalho pra abrir a análise completa daquele lado.
-function compareColumn(title, c) {
+// Uma coluna da comparação: título (método · timeframe), data, veredito, plano
+// operável, custo, flag de cache reusado, e atalho pra abrir a análise completa.
+function compareColumn(c) {
   if (!c || !c.method) return "";
   const isErick = c.method === "erick";
+  const title = (isErick ? "🧭 " : "") + (c.label || (isErick ? "Método Erick" : "Padrão"));
   const v = c.verdict || (c.status === "error" ? "error" : "");
   const plan = isErick
     ? (c.erick_report || c.trader_plan || c.final_decision || "")
@@ -338,17 +343,16 @@ function compareColumn(title, c) {
   const reused = c.reused
     ? `<span class="cmp-reused" title="reaproveitado do cache — não re-rodou">♻ cache</span>`
     : "";
+  const dateStr = c.date ? `<span class="cmp-col-date">${escapeHtml(fmtDate(c.date))}</span>` : "";
   const deg = (Array.isArray(c.degraded) && c.degraded.length)
     ? `<div class="cmp-degraded">⚠️ Feito sem: ${c.degraded.map((d) => escapeHtml((d && (d.label || d.report_key)) || "fonte")).join(" · ")}</div>`
     : "";
   const err = c.status === "error"
     ? `<div class="cmp-err">Leitura indisponível: ${escapeHtml(c.error || "falha")}</div>`
     : "";
-  const tf = TF_LABEL[c.timeframe] || c.timeframe || "Diário";
   return `<div class="cmp-col">` +
-    `<div class="cmp-col-head"><span class="cmp-col-title">${escapeHtml(title)}</span>${reused}</div>` +
-    `<div class="cmp-verdict-row"><span class="${verdictClass(v)}">${verdictHtml(v)}</span>` +
-    `<span class="cmp-tf">veredito no ${escapeHtml(tf)}</span></div>` +
+    `<div class="cmp-col-head"><span class="cmp-col-title">${escapeHtml(title)}${dateStr}</span>${reused}</div>` +
+    `<div class="cmp-verdict-row"><span class="${verdictClass(v)}">${verdictHtml(v)}</span></div>` +
     deg + err +
     `<div class="cmp-plan md">${renderMarkdown(plan)}</div>` +
     `<div class="cmp-col-foot"><span>${fmtCost(c.cost)} · ${c.elapsed || 0}s</span>` +
@@ -366,13 +370,16 @@ function renderCompare(snap) {
 
   const cmp = (snap.result || {}).compare || {};
   const meta = cmp.meta || {};
-  const p = cmp.padrao || {}, e = cmp.erick || {};
+  const a = cmp.a || {}, b = cmp.b || {};
+  const manual = !!cmp.manual;
 
   $("cmpAsset").textContent = snap.ticker || "—";
   const finished = snap.finished_at;
+  // Auto "comparar" roda dois pipelines; o confronto manual reusa análises prontas.
+  const costNote = manual ? "(análises já feitas)" : "(2 pipelines)";
   $("cmpMeta").innerHTML =
     `<span>Data <b>${escapeHtml(snap.date || "")}</b></span>` +
-    `<span>Custo <b>${fmtCost(snap.cost)}</b> <span class="cmp-2p">(2 pipelines)</span></span>` +
+    `<span>Custo <b>${fmtCost(snap.cost)}</b> <span class="cmp-2p">${costNote}</span></span>` +
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
@@ -390,13 +397,58 @@ function renderCompare(snap) {
       metaSection("O que significa pra decisão", meta.significado) +
     `</div>`;
 
-  $("cmpCols").innerHTML = compareColumn("Padrão", p) + compareColumn("🧭 Método Erick", e);
-  $("cmpCols").querySelectorAll("button.cmp-open").forEach((b) =>
-    b.addEventListener("click", () => openRun(b.dataset.id))
+  $("cmpCols").innerHTML = compareColumn(a) + compareColumn(b);
+  $("cmpCols").querySelectorAll("button.cmp-open").forEach((btn) =>
+    btn.addEventListener("click", () => openRun(btn.dataset.id))
   );
 
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   loadHistory();
+}
+
+// ---- confronto manual (Fase 3): esta análise × outra do mesmo ativo ----------
+// Popula o seletor com as OUTRAS análises simples (não-comparação) do mesmo ticker.
+function renderConfrontControl(snap) {
+  const ctl = $("confrontCtl"), sel = $("confrontSelect");
+  if (!ctl || !sel) return;
+  const ticker = (snap.ticker || "").toUpperCase();
+  const others = (_allRuns || []).filter((r) =>
+    (r.ticker || "").toUpperCase() === ticker &&
+    r.status === "done" &&
+    r.run_id !== snap.run_id &&
+    r.method !== "compare"
+  );
+  if (!others.length) { ctl.classList.add("hidden"); sel.innerHTML = ""; return; }
+  sel.innerHTML = others.map((r) =>
+    `<option value="${escapeHtml(r.run_id)}">${escapeHtml(confrontOptionLabel(r))}</option>`
+  ).join("");
+  ctl.classList.remove("hidden");
+}
+function confrontOptionLabel(r) {
+  const m = r.method === "erick" ? "Erick" : (r.method === "padrao" ? "Padrão" : "");
+  const tf = TF_LABEL[r.verdict_timeframe || "1d"] || (r.verdict_timeframe || "1d");
+  const when = r.finished_at ? fmtStamp(r.finished_at) : (r.date || "");
+  const v = VERDICT_PT[verdictKey(r.verdict || "")] || (r.verdict ? String(r.verdict).toUpperCase() : "");
+  return [m, tf, v, when].filter(Boolean).join(" · ");
+}
+function bindConfront() {
+  const btn = $("confrontBtn");
+  if (!btn || btn._bound) return;
+  btn._bound = true;
+  btn.addEventListener("click", () => confront(_openRunId, $("confrontSelect").value));
+}
+async function confront(a, b) {
+  if (!a || !b) return;
+  $("formError").textContent = "";
+  try {
+    const res = await fetch("/api/compare", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ a, b }),
+    });
+    const snap = await res.json();
+    if (!res.ok) { $("formError").textContent = snap.error || "falha ao confrontar"; return; }
+    renderCompare(snap);
+  } catch (e) { $("formError").textContent = "falha ao confrontar"; }
 }
 
 // ---- header price + setup strip -------------------------------------------
@@ -1396,6 +1448,7 @@ function init() {
   bindHistoryTabs();
   bindRefresh();
   bindReeval();
+  bindConfront();
   loadHistory().then(openLatestRun);
   startHistoryAutoRefresh();
 }

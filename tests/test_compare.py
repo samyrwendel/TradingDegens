@@ -48,8 +48,8 @@ def _wait(runner, run_id, timeout=8.0):
 # ---------------------------------------------------------- meta-judge units ---
 def test_meta_agree():
     m = deterministic_meta(
-        {"verdict": "Buy", "timeframe": "1d"},
-        {"verdict": "Buy", "timeframe": "4h", "actionable": {}},
+        {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
+        {"verdict": "Buy", "timeframe": "4h", "method": "erick", "date": "2026-08-22", "actionable": {}},
     )
     assert m["agreement"] == "concordam"
     assert m["verdict"] == "Buy"
@@ -58,25 +58,39 @@ def test_meta_agree():
 
 def test_meta_diverge_picks_conservative_and_explains():
     m = deterministic_meta(
-        {"verdict": "Buy", "timeframe": "1d"},
-        {"verdict": "Hold", "timeframe": "4h", "actionable": {"setup_state": "aguardar_pullback"}},
+        {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
+        {"verdict": "Hold", "timeframe": "4h", "method": "erick", "date": "2026-08-22",
+         "actionable": {"setup_state": "aguardar_pullback"}},
     )
     assert m["agreement"] == "divergem"
     assert m["verdict"] == "Hold"          # more conservative side
     assert "Divergem" in m["headline"]
     assert "timing" in m["significado"].lower()   # anchored decision meaning, not vague
+    # names WHICH two are being compared (criterion 4)
     assert "Padrão" in m["divergencia"] and "Erick" in m["divergencia"]
+    assert "Padrão" in m["label_a"] and "Erick" in m["label_b"]
+
+
+def test_meta_two_timeframes_same_method():
+    """Same method, different frames: trend-frame vs timing-frame narrative."""
+    m = deterministic_meta(
+        {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
+        {"verdict": "Hold", "timeframe": "4h", "method": "padrao", "date": "2026-08-22"},
+    )
+    assert m["agreement"] == "divergem"
+    assert "frame" in m["significado"].lower()
 
 
 def test_meta_partial_when_one_side_missing():
-    m = deterministic_meta({"verdict": "Buy", "timeframe": "1d"},
-                           {"verdict": None, "timeframe": "1d"})
+    m = deterministic_meta({"verdict": "Buy", "timeframe": "1d", "method": "padrao"},
+                           {"verdict": None, "timeframe": "1d", "method": "erick"})
     assert m["agreement"] == "parcial"
 
 
 def test_build_column_reads_record():
     rec = {
-        "run_id": "x", "verdict": "Buy", "verdict_timeframe": "4h",
+        "run_id": "x", "ticker": "BTC-USD", "date": "2026-08-22",
+        "verdict": "Buy", "verdict_timeframe": "4h",
         "cost": {"usd": 0.02}, "elapsed": 10, "status": "done",
         "result": {"verdict": "Buy", "verdict_timeframe": "4h",
                    "trader_plan": "entrar metade", "erick_report": "",
@@ -85,6 +99,7 @@ def test_build_column_reads_record():
     c = build_column(rec, "padrao")
     assert c["method"] == "padrao" and c["verdict"] == "Buy" and c["timeframe"] == "4h"
     assert c["trader_plan"] == "entrar metade" and c["reused"] is False
+    assert "Padrão" in c["label"] and c["date"] == "2026-08-22"
 
 
 # ------------------------------------------------------- runner integration ---
@@ -94,9 +109,9 @@ def test_start_compare_two_columns_and_meta(tmp_path):
     snap = _wait(r, r.start_compare("BTC-USD", "2026-08-22", timeframe="1d"))
     assert snap["status"] == "done"
     cmp = snap["result"]["compare"]
-    assert cmp["padrao"]["verdict"] == "Buy"
-    assert cmp["erick"]["verdict"] == "Hold"
-    assert cmp["erick"]["erick_report"]
+    assert cmp["a"]["method"] == "padrao" and cmp["a"]["verdict"] == "Buy"
+    assert cmp["b"]["method"] == "erick" and cmp["b"]["verdict"] == "Hold"
+    assert cmp["b"]["erick_report"]
     assert cmp["meta"]["agreement"] == "divergem"
     assert snap["cost"]["usd"] > 0                 # two pipelines summed
     assert r.store.get(snap["run_id"])["compare"] is True   # persisted + marked
@@ -108,8 +123,53 @@ def test_compare_reuses_cached_sides(tmp_path):
     _wait(r, r.start_compare("BTC-USD", "2026-08-22"))          # populates cache
     snap2 = _wait(r, r.start_compare("BTC-USD", "2026-08-22"))  # should reuse both
     cmp = snap2["result"]["compare"]
-    assert cmp["padrao"]["reused"] is True
-    assert cmp["erick"]["reused"] is True
+    assert cmp["a"]["reused"] is True
+    assert cmp["b"]["reused"] is True
+
+
+# ------------------------------------------------ manual confront (task 018) ---
+def test_confront_two_existing_runs(tmp_path):
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    rid_p = r.start("BTC-USD", "2026-08-22", method="padrao"); _wait(r, rid_p)
+    rid_e = r.start("BTC-USD", "2026-08-22", method="erick"); _wait(r, rid_e)
+    snap = r.confront(rid_p, rid_e)
+    assert snap["status"] == "done"
+    cmp = snap["result"]["compare"]
+    assert cmp["manual"] is True
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["meta"]["agreement"] == "divergem"
+    # names exactly which two readings (criterion 4)
+    assert "Padrão" in cmp["meta"]["label_a"] and "Erick" in cmp["meta"]["label_b"]
+    # persisted as a compare record, openable
+    assert r.store.get(snap["run_id"])["compare"] is True
+
+
+def test_confront_two_timeframes(tmp_path):
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    rid_1d = r.start("BTC-USD", "2026-08-22", method="padrao", timeframe="1d"); _wait(r, rid_1d)
+    rid_4h = r.start("BTC-USD", "2026-08-22", method="padrao", timeframe="4h"); _wait(r, rid_4h)
+    cmp = r.confront(rid_1d, rid_4h)["result"]["compare"]
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "padrao"
+    assert cmp["a"]["timeframe"] != cmp["b"]["timeframe"]
+
+
+def test_confront_rejects_different_tickers(tmp_path):
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    rid1 = r.start("BTC-USD", "2026-08-22"); _wait(r, rid1)
+    rid2 = r.start("ETH-USD", "2026-08-22"); _wait(r, rid2)
+    with pytest.raises(ValueError):
+        r.confront(rid1, rid2)
+
+
+def test_confront_rejects_same_run(tmp_path):
+    r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                       store=HistoryStore(tmp_path), graph_factory=_dual_factory())
+    rid = r.start("BTC-USD", "2026-08-22"); _wait(r, rid)
+    with pytest.raises(ValueError):
+        r.confront(rid, rid)
 
 
 def test_simple_analysis_still_works(tmp_path):
