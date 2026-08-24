@@ -82,6 +82,20 @@ main.layout {
   cursor: pointer; height: 44px;
 }
 #runBtn:disabled { opacity: .55; cursor: not-allowed; }
+/* toggle "método Erick" (sob demanda) no launcher — alinhado à altura do botão */
+.method-toggle {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  height: 44px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2);
+  color: var(--text); font-size: 14px; white-space: nowrap; user-select: none;
+}
+.method-toggle input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+.method-toggle:hover { border-color: var(--accent); }
+
+/* seção do método Erick no resultado: destaque sutil sem gritar */
+details.section.erick { border-color: #2e5c7d; }
+details.section.erick > summary { color: #9cc7f5; }
+
 .hint { margin: 12px 0 0; color: var(--muted); font-size: 13px; min-height: 16px; }
 .error { margin: 8px 0 0; color: var(--red); font-size: 13px; }
 

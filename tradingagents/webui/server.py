@@ -139,10 +139,15 @@ class _Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 ticker = (body.get("ticker") or "").strip()
                 date = (body.get("date") or "").strip()
+                # "método Erick" sob demanda: default Padrão. Aceita method=="erick"
+                # ou o atalho legível erick==true.
+                method = (body.get("method") or "").strip().lower()
+                if not method and body.get("erick"):
+                    method = "erick"
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
                     return
-                run_id = self.runner.start(ticker, date)
+                run_id = self.runner.start(ticker, date, method=method or "padrao")
                 self._send_json({"run_id": run_id})
             else:
                 self._send_json({"error": "não encontrado"}, 404)

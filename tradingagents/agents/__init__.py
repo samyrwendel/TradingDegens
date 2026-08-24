@@ -1,3 +1,4 @@
+from .analysts.erick_analyst import create_erick_analyst
 from .analysts.fundamentals_analyst import create_fundamentals_analyst
 from .analysts.market_analyst import create_market_analyst
 from .analysts.news_analyst import create_news_analyst
@@ -31,6 +32,7 @@ __all__ = [
     "create_aggressive_debator",
     "create_portfolio_manager",
     "create_conservative_debator",
+    "create_erick_analyst",
     "create_sentiment_analyst",
     "create_social_media_analyst",  # deprecated; will be removed in a future version
     "create_trader",

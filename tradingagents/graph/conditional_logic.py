@@ -49,6 +49,14 @@ class ConditionalLogic:
             return "tools_fundamentals"
         return "Msg Clear Fundamentals"
 
+    def should_continue_erick(self, state: AgentState):
+        """Determine if the Erick-method analyst tool round should continue."""
+        messages = state["messages"]
+        last_message = messages[-1]
+        if last_message.tool_calls:
+            return "tools_erick"
+        return "Msg Clear Erick"
+
     def should_continue_debate(self, state: AgentState) -> str:
         """Determine if debate should continue."""
 

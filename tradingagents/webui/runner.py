@@ -39,11 +39,19 @@ _STOCK_TIMEFRAMES = ("1w", "1d")
 _DEFAULT_TIMEFRAME = "1d"
 
 
-def select_analysts_for_asset(asset_type: str) -> list[str]:
-    """Analyst wire-keys to run for an asset type (crypto has no fundamentals)."""
+def select_analysts_for_asset(asset_type: str, include_erick: bool = False) -> list[str]:
+    """Analyst wire-keys to run for an asset type (crypto has no fundamentals).
+
+    ``include_erick`` appends the on-demand Erick-method analyst at the end of the
+    analyst chain (Modo Erick). Default off — the Padrão analysis is untouched.
+    """
     if asset_type == "crypto":
-        return [a for a in _ANALYST_ORDER if a != "fundamentals"]
-    return list(_ANALYST_ORDER)
+        base = [a for a in _ANALYST_ORDER if a != "fundamentals"]
+    else:
+        base = list(_ANALYST_ORDER)
+    if include_erick:
+        base.append("erick")
+    return base
 
 
 def timeframes_for_asset(asset_type: str) -> list[str]:
@@ -77,6 +85,8 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         "sentiment_report": final_state.get("sentiment_report", "") or "",
         "news_report": final_state.get("news_report", "") or "",
         "fundamentals_report": final_state.get("fundamentals_report", "") or "",
+        # On-demand "Modo Erick": empty string unless the erick analyst ran.
+        "erick_report": final_state.get("erick_report", "") or "",
         # Filled by the runner for crypto from the engine's deterministic
         # derivatives data path (named source, "unavailable" not fabricated).
         "derivatives_report": "",
@@ -214,8 +224,12 @@ class AnalysisRunner:
         from cli.utils import detect_asset_type
         return detect_asset_type(ticker).value
 
-    def start(self, ticker: str, date: str) -> str:
-        """Kick off an analysis; returns a run_id to poll immediately."""
+    def start(self, ticker: str, date: str, method: str = "padrao") -> str:
+        """Kick off an analysis; returns a run_id to poll immediately.
+
+        ``method="erick"`` adds the on-demand Erick-method analyst to the run
+        (Modo Erick); any other value runs the Padrão selection unchanged.
+        """
         ticker = (ticker or "").strip().upper()
         if not ticker:
             raise ValueError("ticker vazio")
@@ -223,7 +237,9 @@ class AnalysisRunner:
         # it is already the next day in UTC and the run would carry tomorrow.
         date = (date or "").strip() or timeutil.today()
         asset_type = self.detect_asset_type(ticker)
-        selected = select_analysts_for_asset(asset_type)
+        selected = select_analysts_for_asset(
+            asset_type, include_erick=(method == "erick")
+        )
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         run = _Run(run_id, ticker, date, asset_type, selected)
         with self._lock:

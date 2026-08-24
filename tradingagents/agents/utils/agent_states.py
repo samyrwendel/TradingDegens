@@ -59,6 +59,10 @@ class AgentState(MessagesState):
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    # On-demand "Modo Erick": present only when the erick analyst was selected;
+    # empty string otherwise. The intraday-EMA method read (recuo à média, saída,
+    # peso relativo). See agents/analysts/erick_analyst.py.
+    erick_report: Annotated[str, "Report from the Erick-method Analyst (optional)"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

@@ -262,6 +262,13 @@ function renderResult(snap) {
 
   const isCrypto = snap.asset_type === "crypto";
   let html = "";
+  // Modo Erick (sob demanda): a leitura do método vem primeiro e ABERTA — é o que
+  // o Samyr pediu em destaque (recuo à média, saída, peso do trade). Só aparece
+  // quando o método Erick foi acionado; a análise Padrão não a tem.
+  if (r.erick_report && r.erick_report.trim()) {
+    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade</summary>` +
+      `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
+  }
   // For crypto, the deterministic derivatives feed goes first and open — it is
   // the data yfinance can't see and the source is always named here.
   if (isCrypto && r.derivatives_report && r.derivatives_report.trim()) {
@@ -894,6 +901,8 @@ async function startAnalysis(ev) {
   const ticker = $("ticker").value.trim();
   const date = $("date").value;
   if (!ticker) { $("formError").textContent = "Informe um ticker."; return; }
+  const et = $("erickToggle");
+  const method = et && et.checked ? "erick" : "padrao";
   $("runBtn").disabled = true;
   $("resultPanel").classList.add("hidden");
   $("steps").innerHTML = "";
@@ -901,7 +910,7 @@ async function startAnalysis(ev) {
     const res = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker, date }),
+      body: JSON.stringify({ ticker, date, method }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");

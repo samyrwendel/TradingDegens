@@ -28,6 +28,7 @@ _STAGE_MAP: dict[str, tuple[int, str, str]] = {
     "Sentiment Analyst":    (20, "Analista de Sentimento", "Analistas"),
     "News Analyst":         (30, "Analista de Notícias — macro e mercados de previsão", "Analistas"),
     "Fundamentals Analyst": (40, "Analista Fundamentalista", "Analistas"),
+    "Erick Analyst":        (45, "Método Erick — recuo à média, saída, peso do trade", "Analistas"),
     "Bull Researcher":      (50, "Pesquisador do bull case", "Debate"),
     "Bear Researcher":      (60, "Pesquisador do bear case", "Debate"),
     "Research Manager":     (70, "Gestor de Pesquisa — juiz do debate", "Debate"),
@@ -45,6 +46,7 @@ _ANALYST_NODE = {
     "social": "Sentiment Analyst",
     "news": "News Analyst",
     "fundamentals": "Fundamentals Analyst",
+    "erick": "Erick Analyst",
 }
 
 # Fixed downstream nodes that always run after the analysts, in order.
