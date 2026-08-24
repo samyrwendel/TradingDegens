@@ -35,6 +35,11 @@ from typing import Any
 
 import pandas as pd
 
+from .intraday import (
+    INTRADAY_INTERVALS,
+    IntradayUnavailableError,
+    load_intraday_ohlcv,
+)
 from .stockstats_utils import load_ohlcv
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,39 @@ logger = logging.getLogger(__name__)
 # Moving averages we scan for a pullback-to-support touch. 50 and 200 are the
 # usual reference; 20 catches the shallower pullbacks of a steep trend.
 _MA_WINDOWS = (20, 50, 200)
+
+# Exponential moving averages the product owner actually reads off the screen —
+# EMA 8/21 for timing, EMA 50 for the intermediate trend (fork brief 24/08). They
+# are computed and charted ALONGSIDE the simple averages (``_MA_WINDOWS``); the
+# pullback/1-2-3 detection still keys off the simple averages, so nothing that
+# already worked changes — this only *adds* the exponential line to the picture.
+_EMA_WINDOWS = (8, 21, 50)
+
+# Timeframes this detector runs on. The daily/weekly frames come from the cached
+# yfinance series; the intraday frames (15m/1h) come from the keyless-exchange
+# loader and only exist for crypto (see :mod:`.intraday`).
+_DEFAULT_TIMEFRAME = "1d"
+
+# Human labels for the timeframe stamped on sections/plans (pt-BR).
+_TF_LABEL = {
+    "15m": "15 minutos (intradiário)",
+    "1h": "1 hora (intradiário)",
+    "1d": "diário",
+    "1w": "semanal",
+}
+
+
+def _is_intraday(timeframe: str) -> bool:
+    return timeframe in INTRADAY_INTERVALS
+
+
+def _date_fmt(timeframe: str) -> str:
+    """Intraday points need the time-of-day; daily/weekly are date-only."""
+    return "%Y-%m-%d %H:%M" if _is_intraday(timeframe) else "%Y-%m-%d"
+
+
+def _tf_label(timeframe: str) -> str:
+    return _TF_LABEL.get(timeframe, timeframe)
 
 # Swing look-around: a bar is a swing low/high when its Low/High is the extreme
 # of the [i-k, i+k] window. k bars must exist on BOTH sides, so the most recent k
@@ -163,14 +201,30 @@ class PriceStructure:
         }
 
 
-def _prep(symbol: str, curr_date: str) -> pd.DataFrame:
-    """Load the date-guarded daily series and attach the moving averages."""
-    df = load_ohlcv(symbol, curr_date).reset_index(drop=True)
+def _load_frame(symbol: str, curr_date: str, timeframe: str) -> pd.DataFrame:
+    """Load the date-guarded OHLCV for ``timeframe``.
+
+    Daily/weekly come from the cached yfinance series (:func:`load_ohlcv`);
+    intraday (15m/1h) from the keyless-exchange loader, which raises
+    :class:`IntradayUnavailableError` for a non-crypto symbol so the caller
+    declares it unavailable instead of inventing a bar.
+    """
+    if _is_intraday(timeframe):
+        return load_intraday_ohlcv(symbol, curr_date, timeframe)
+    return load_ohlcv(symbol, curr_date)
+
+
+def _prep(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> pd.DataFrame:
+    """Load the date-guarded series and attach the simple + exponential averages."""
+    df = _load_frame(symbol, curr_date, timeframe).reset_index(drop=True)
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["Date"]).reset_index(drop=True)
     close = df["Close"].astype(float)
     for w in _MA_WINDOWS:
         df[f"MA{w}"] = close.rolling(w).mean()
+    for w in _EMA_WINDOWS:
+        # adjust=False = the recursive EMA a charting platform draws (Quantfury/TV).
+        df[f"EMA{w}"] = close.ewm(span=w, adjust=False).mean()
     return df
 
 
@@ -211,7 +265,7 @@ def _nearest_touched_ma(df: pd.DataFrame, i: int) -> tuple[int, float, float] | 
     return best
 
 
-def _buy_regions(df: pd.DataFrame, lows: list[int]) -> list[BuyRegion]:
+def _buy_regions(df: pd.DataFrame, lows: list[int], fmt: str = "%Y-%m-%d") -> list[BuyRegion]:
     n = len(df)
     year_start = df["Date"].iloc[-1] - pd.Timedelta(days=365)
     out: list[BuyRegion] = []
@@ -226,7 +280,7 @@ def _buy_regions(df: pd.DataFrame, lows: list[int]) -> list[BuyRegion]:
         fwd = df["Close"].iloc[i + 1:min(n, i + 1 + _REACT_BARS)].astype(float)
         react = round((float(fwd.max()) / close_i - 1) * 100, 1) if len(fwd) else None
         out.append(BuyRegion(
-            date=df["Date"].iloc[i].strftime("%Y-%m-%d"),
+            date=df["Date"].iloc[i].strftime(fmt),
             ma_label=f"MMS{w}",
             low=round(float(df["Low"].iloc[i]), 2),
             ma_value=round(ma, 2),
@@ -236,7 +290,7 @@ def _buy_regions(df: pd.DataFrame, lows: list[int]) -> list[BuyRegion]:
     return out
 
 
-def _active_region(df: pd.DataFrame) -> BuyRegion | None:
+def _active_region(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> BuyRegion | None:
     """Is price sitting on a rising MA *right now* (last bar)? That is the
     actionable, live buy region the UI highlights."""
     i = len(df) - 1
@@ -245,7 +299,7 @@ def _active_region(df: pd.DataFrame) -> BuyRegion | None:
         return None
     w, ma, dist = touch
     return BuyRegion(
-        date=df["Date"].iloc[i].strftime("%Y-%m-%d"),
+        date=df["Date"].iloc[i].strftime(fmt),
         ma_label=f"MMS{w}",
         low=round(float(df["Low"].iloc[i]), 2),
         ma_value=round(ma, 2),
@@ -271,7 +325,9 @@ def _alternating(df: pd.DataFrame, lows: list[int], highs: list[int]) -> list[tu
     return seq
 
 
-def _pattern_123(df: pd.DataFrame, lows: list[int], highs: list[int]) -> Pattern123 | None:
+def _pattern_123(
+    df: pd.DataFrame, lows: list[int], highs: list[int], fmt: str = "%Y-%m-%d"
+) -> Pattern123 | None:
     """Detect the most recent 1-2-3 reversal in EITHER direction.
 
     * compra (bottom): ``L → H → L`` with point 3's low ABOVE point 1's low
@@ -308,7 +364,7 @@ def _pattern_123(df: pd.DataFrame, lows: list[int], highs: list[int]) -> Pattern
 
     def pt(idx: int, kind: str) -> dict[str, Any]:
         price = df["Low"].iloc[idx] if kind == "L" else df["High"].iloc[idx]
-        return {"date": df["Date"].iloc[idx].strftime("%Y-%m-%d"), "price": round(float(price), 2)}
+        return {"date": df["Date"].iloc[idx].strftime(fmt), "price": round(float(price), 2)}
 
     return Pattern123(
         pt(p1, pt_kinds[0]), pt(p2, pt_kinds[1]), pt(p3, pt_kinds[2]),
@@ -316,20 +372,25 @@ def _pattern_123(df: pd.DataFrame, lows: list[int], highs: list[int]) -> Pattern
     )
 
 
-def detect_price_structure(symbol: str, curr_date: str) -> PriceStructure:
-    """Detect buy regions and the 1-2-3 pattern on the date-guarded daily series.
+def detect_price_structure(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+) -> PriceStructure:
+    """Detect buy regions and the 1-2-3 pattern on the date-guarded series.
 
-    Propagates :class:`NoMarketDataError` from :func:`load_ohlcv` for an unknown
-    symbol so the caller can degrade to an explicit note.
+    ``timeframe`` selects the frame: ``"1d"`` (default) from the cached daily
+    series, or ``"15m"``/``"1h"`` intraday from the keyless exchange (crypto only).
+    Propagates :class:`NoMarketDataError` (incl. :class:`IntradayUnavailableError`
+    for a non-crypto intraday request) so the caller degrades to an explicit note.
     """
-    df = _prep(symbol, curr_date)
+    fmt = _date_fmt(timeframe)
+    df = _prep(symbol, curr_date, timeframe)
     struct = PriceStructure(symbol=symbol, as_of=str(curr_date))
     if len(df) <= 2 * _SWING_K + 1:
         return struct  # too thin to have any confirmed swing
     lows, highs = _swings(df)
-    struct.buy_regions = _buy_regions(df, lows)
-    struct.active_region = _active_region(df)
-    struct.pattern = _pattern_123(df, lows, highs)
+    struct.buy_regions = _buy_regions(df, lows, fmt)
+    struct.active_region = _active_region(df, fmt)
+    struct.pattern = _pattern_123(df, lows, highs, fmt)
     return struct
 
 
@@ -349,26 +410,40 @@ def _fmt_region(r: BuyRegion) -> str:
     )
 
 
-def build_price_structure_section(symbol: str, curr_date: str) -> str:
+def build_price_structure_section(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+) -> str:
     """Render the 'Estrutura de preço / setups' markdown section (pt-BR).
 
     Always returns a section — 'nenhum setup identificado' when nothing is found,
     an explicit note on a hard data failure. Never silence, never a fake number.
+    On an intraday request for an asset with no keyless intraday candle (e.g. an
+    equity) it declares "intradiário indisponível para ação" rather than invent.
     """
+    tf = _tf_label(timeframe)
+    heading = f"## Estrutura de preço / setups — {tf}"
     try:
-        s = detect_price_structure(symbol, curr_date)
+        s = detect_price_structure(symbol, curr_date, timeframe)
+    except IntradayUnavailableError as exc:
+        logger.info("intraday unavailable for %s (%s): %s", symbol, timeframe, exc)
+        return (
+            f"{heading}\n\n"
+            f"Intradiário indisponível para ação: não há candle {tf} keyless para "
+            f"{symbol}. Nenhum valor inventado — o intradiário só é reproduzido "
+            "onde existe candle real de exchange (cripto)."
+        )
     except Exception as exc:  # noqa: BLE001 — never break the report over enrichment
         logger.warning("price-structure detection failed for %s: %s", symbol, exc)
         return (
-            "## Estrutura de preço / setups\n\n"
+            f"{heading}\n\n"
             f"Estrutura de preço indisponível ({type(exc).__name__}); "
             "nenhum valor inventado."
         )
 
     lines = [
-        "## Estrutura de preço / setups",
+        heading,
         "",
-        "_Detecção determinística sobre a série diária real (até "
+        f"_Detecção determinística sobre a série real de {tf} (até "
         f"{s.as_of}); cada ponto tem data e preço vindos da série, nada é "
         "inventado._",
         "",
@@ -430,20 +505,24 @@ def build_price_structure_section(symbol: str, curr_date: str) -> str:
 
 
 # ----------------------------------------------------------------- chart -------
-def build_price_chart(symbol: str, curr_date: str, bars: int = 260) -> dict[str, Any]:
+def build_price_chart(
+    symbol: str, curr_date: str, bars: int = 260, timeframe: str = _DEFAULT_TIMEFRAME
+) -> dict[str, Any]:
     """Compact candle + moving-average + setup-marker payload for the web UI.
 
-    Returns the last ``bars`` daily candles (date-guarded), the moving averages
-    aligned to them (null where the window has no value yet), and the detected
-    setup markers that fall inside the window. Fail-open: returns an empty payload
-    on any error so a chart hiccup never blocks the analysis result.
+    Returns the last ``bars`` candles of ``timeframe`` (date-guarded), the simple
+    (``ma``) and exponential (``ema``) averages aligned to them (null where the
+    window has no value yet), and the detected setup markers that fall inside the
+    window. Fail-open: returns an empty payload on any error (including intraday
+    unavailable) so a chart hiccup never blocks the analysis result.
     """
+    fmt = _date_fmt(timeframe)
     try:
-        df = _prep(symbol, curr_date)
-        struct = detect_price_structure(symbol, curr_date)
+        df = _prep(symbol, curr_date, timeframe)
+        struct = detect_price_structure(symbol, curr_date, timeframe)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("price-chart build failed for %s: %s", symbol, exc)
-        return {"symbol": symbol, "candles": [], "ma": {}, "markers": {}}
+        logger.warning("price-chart build failed for %s (%s): %s", symbol, timeframe, exc)
+        return {"symbol": symbol, "timeframe": timeframe, "candles": [], "ma": {}, "ema": {}, "markers": {}}
 
     tail = df.tail(bars).reset_index(drop=True)
 
@@ -452,13 +531,14 @@ def build_price_chart(symbol: str, curr_date: str, bars: int = 260) -> dict[str,
 
     candles = [
         {
-            "d": row["Date"].strftime("%Y-%m-%d"),
+            "d": row["Date"].strftime(fmt),
             "o": num(row["Open"]), "h": num(row["High"]),
             "l": num(row["Low"]), "c": num(row["Close"]),
         }
         for _, row in tail.iterrows()
     ]
     ma = {str(w): [num(v) for v in tail[f"MA{w}"]] for w in _MA_WINDOWS}
+    ema = {str(w): [num(v) for v in tail[f"EMA{w}"]] for w in _EMA_WINDOWS}
     window_dates = {c["d"] for c in candles}
 
     regions = [r.as_dict() for r in struct.buy_regions if r.date in window_dates]
@@ -471,9 +551,12 @@ def build_price_chart(symbol: str, curr_date: str, bars: int = 260) -> dict[str,
     return {
         "symbol": symbol,
         "as_of": str(curr_date),
+        "timeframe": timeframe,
         "candles": candles,
         "ma": ma,
         "ma_windows": list(_MA_WINDOWS),
+        "ema": ema,
+        "ema_windows": list(_EMA_WINDOWS),
         "markers": {
             "buy_regions": regions,
             "active_region": struct.active_region.as_dict() if struct.active_region else None,
@@ -497,7 +580,16 @@ _HORIZON = {
     "aguardar_rompimento": "aguardar rompimento (dias a semanas) · alvo em semanas a meses",
     "sem_setup": "sem gatilho de preço definido — sem horizonte operável",
     "sem_dado": "sem dado suficiente para definir horizonte",
+    "intradiario_indisponivel": "intradiário indisponível para ação — sem candle real de exchange",
 }
+
+
+def _plan_timeframe_ref(timeframe: str) -> str:
+    """Timeframe label stamped on the plan header. Intraday names the frame; the
+    daily default keeps the documented 'diário (ref) · semanal (fundo)' phrasing."""
+    if _is_intraday(timeframe):
+        return f"{_tf_label(timeframe)} (referência)"
+    return _TIMEFRAME_REF
 
 
 @dataclass
@@ -541,7 +633,9 @@ class ActionablePlan:
         }
 
 
-def _nearest_overhead_high(df: pd.DataFrame, highs: list[int], price: float):
+def _nearest_overhead_high(
+    df: pd.DataFrame, highs: list[int], price: float, fmt: str = "%Y-%m-%d"
+):
     """Nearest prior swing high sitting ABOVE ``price`` — the region to realize
     into (resistance / topo anterior). ``None`` when price is in new-high air, so
     the caller reports "sem nível definido" rather than inventing a target."""
@@ -549,26 +643,40 @@ def _nearest_overhead_high(df: pd.DataFrame, highs: list[int], price: float):
     for i in highs:
         h = float(df["High"].iloc[i])
         if h > price and (best is None or h < best[1]):
-            best = (df["Date"].iloc[i].strftime("%Y-%m-%d"), round(h, 2))
+            best = (df["Date"].iloc[i].strftime(fmt), round(h, 2))
     if best is None:
         return None
     return {"label": f"topo anterior {best[0]}", "price": best[1]}
 
 
-def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
-    """Turn the cached daily series + detected structure into an operable plan.
+def build_actionable_plan(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+) -> ActionablePlan:
+    """Turn the cached series + detected structure into an operable plan.
 
-    Reuses :func:`detect_price_structure` (buy regions, live region, 1-2-3) and
-    the same swings — nothing is recomputed from scratch and no number is
-    fabricated. Propagates nothing: a data failure yields a ``sem_dado`` plan with
-    ``None`` levels, never a fake read.
+    ``timeframe`` selects the frame (daily default, or ``"15m"``/``"1h"`` intraday
+    for crypto). Reuses :func:`detect_price_structure` (buy regions, live region,
+    1-2-3) and the same swings — nothing is recomputed from scratch and no number
+    is fabricated. Propagates nothing: a data failure yields a ``sem_dado`` plan
+    with ``None`` levels; a non-crypto intraday request yields an explicit
+    ``intradiario_indisponivel`` plan — never a fake read.
     """
+    tf_ref = _plan_timeframe_ref(timeframe)
+    fmt = _date_fmt(timeframe)
     try:
-        df = _prep(symbol, curr_date)
+        df = _prep(symbol, curr_date, timeframe)
+    except IntradayUnavailableError as exc:
+        logger.info("actionable-plan intraday unavailable for %s (%s): %s", symbol, timeframe, exc)
+        return ActionablePlan(
+            symbol=symbol, as_of=None, price=None, timeframe=tf_ref,
+            horizon=_HORIZON["intradiario_indisponivel"],
+            setup_state="intradiario_indisponivel",
+            buy_zone=None, realize_zone=None, pullback_zone=None,
+        )
     except Exception as exc:  # noqa: BLE001 — enrichment must never break the run
         logger.warning("actionable-plan data load failed for %s: %s", symbol, exc)
         return ActionablePlan(
-            symbol=symbol, as_of=None, price=None, timeframe=_TIMEFRAME_REF,
+            symbol=symbol, as_of=None, price=None, timeframe=tf_ref,
             horizon=_HORIZON["sem_dado"], setup_state="sem_dado",
             buy_zone=None, realize_zone=None, pullback_zone=None,
         )
@@ -576,17 +684,17 @@ def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
     if len(df) <= 2 * _SWING_K + 1:
         return ActionablePlan(
             symbol=symbol,
-            as_of=df["Date"].iloc[-1].strftime("%Y-%m-%d") if len(df) else None,
+            as_of=df["Date"].iloc[-1].strftime(fmt) if len(df) else None,
             price=round(float(df["Close"].iloc[-1]), 2) if len(df) else None,
-            timeframe=_TIMEFRAME_REF, horizon=_HORIZON["sem_dado"],
+            timeframe=tf_ref, horizon=_HORIZON["sem_dado"],
             setup_state="sem_dado",
             buy_zone=None, realize_zone=None, pullback_zone=None,
         )
 
     price = round(float(df["Close"].iloc[-1]), 2)
-    as_of = df["Date"].iloc[-1].strftime("%Y-%m-%d")
+    as_of = df["Date"].iloc[-1].strftime(fmt)
 
-    struct = detect_price_structure(symbol, curr_date)
+    struct = detect_price_structure(symbol, curr_date, timeframe)
     _lows, highs = _swings(df)
 
     # Região de compra — a RISING moving average the detector already identified.
@@ -599,7 +707,7 @@ def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
         buy_zone = {"label": f"{r.ma_label} — média onde reagiu em {r.date}", "price": r.ma_value}
 
     # Região de realização — nearest prior swing high overhead.
-    realize_zone = _nearest_overhead_high(df, highs, price)
+    realize_zone = _nearest_overhead_high(df, highs, price, fmt)
 
     # Pullback a aguardar + the resulting setup state / horizon:
     #  • already sitting on the rising MA  -> live setup, no pullback to await
@@ -635,21 +743,24 @@ def build_actionable_plan(symbol: str, curr_date: str) -> ActionablePlan:
     pullback_zone = _banded(pullback_zone, None if pullback_is_trigger else atr)
 
     return ActionablePlan(
-        symbol=symbol, as_of=as_of, price=price, timeframe=_TIMEFRAME_REF,
+        symbol=symbol, as_of=as_of, price=price, timeframe=tf_ref,
         horizon=_HORIZON[setup_state], setup_state=setup_state,
         buy_zone=buy_zone, realize_zone=realize_zone, pullback_zone=pullback_zone,
         pattern=struct.pattern.as_dict() if struct.pattern is not None else None,
     )
 
 
-def build_actionable_plan_dict(symbol: str, curr_date: str) -> dict[str, Any]:
+def build_actionable_plan_dict(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+) -> dict[str, Any]:
     """UI-facing wrapper: always returns a JSON-serializable dict, never raises."""
     try:
-        return build_actionable_plan(symbol, curr_date).as_dict()
+        return build_actionable_plan(symbol, curr_date, timeframe).as_dict()
     except Exception as exc:  # noqa: BLE001
         logger.warning("actionable-plan build failed for %s: %s", symbol, exc)
         return ActionablePlan(
-            symbol=symbol, as_of=None, price=None, timeframe=_TIMEFRAME_REF,
+            symbol=symbol, as_of=None, price=None,
+            timeframe=_plan_timeframe_ref(timeframe),
             horizon=_HORIZON["sem_dado"], setup_state="sem_dado",
             buy_zone=None, realize_zone=None, pullback_zone=None,
         ).as_dict()

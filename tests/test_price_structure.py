@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from tradingagents.dataflows import price_structure as ps
+from tradingagents.dataflows.intraday import IntradayUnavailableError
 from tradingagents.agents.utils.price_structure_coverage import (
     ensure_price_structure_coverage,
 )
@@ -228,3 +229,85 @@ def test_chart_payload_is_serializable_and_aligned(synth):
     window = {c["d"] for c in chart["candles"]}
     for r in markers["buy_regions"]:
         assert r["date"] in window
+
+
+# --------------------------------------------------------------- EMA -----------
+@pytest.mark.unit
+def test_chart_carries_ema_alongside_mms(synth):
+    """EMA 8/21/50 are computed and charted ALONGSIDE the simple averages — both
+    families present, aligned to the candles (fork brief 24/08, criterion 1)."""
+    chart = ps.build_price_chart("SYN", CURR)
+    json.dumps(chart)  # still serializable with the extra series
+    n = len(chart["candles"])
+    assert chart["ema_windows"] == [8, 21, 50]
+    for w in ("8", "21", "50"):
+        assert len(chart["ema"][w]) == n
+    # the simple averages are still there too — EMA is additive, not a replacement
+    for w in ("20", "50", "200"):
+        assert len(chart["ma"][w]) == n
+    # a fast EMA has a real value early (ewm needs no full window), unlike MMS200
+    assert any(v is not None for v in chart["ema"]["8"][:10])
+
+
+# ------------------------------------------------------ intraday timeframe -----
+def _intraday_frame() -> pd.DataFrame:
+    """The same known 1-2-3 structure as :func:`_frame`, but on a 15-minute clock
+    so the detector is exercised on an intraday series."""
+    base = _frame()
+    ts = pd.date_range("2026-08-20 00:00", periods=len(base), freq="15min")
+    out = base.copy()
+    out["Date"] = ts.strftime("%Y-%m-%d %H:%M")
+    return out
+
+
+@pytest.mark.unit
+def test_intraday_crypto_structure_runs(monkeypatch):
+    """Region + 1-2-3 run on a 15m crypto series, and every point carries the
+    time-of-day (not just a date) so intraday bars stay distinct (criterion 2)."""
+    df = _intraday_frame()
+    monkeypatch.setattr(ps, "load_intraday_ohlcv", lambda symbol, curr_date, tf: df.copy())
+    s = ps.detect_price_structure("BTC-USD", "2026-08-20", "15m")
+    assert s.pattern is not None
+    # intraday points are stamped with HH:MM, not a bare date
+    assert ":" in s.pattern.p1["date"]
+    chart = ps.build_price_chart("BTC-USD", "2026-08-20", timeframe="15m")
+    assert chart["timeframe"] == "15m"
+    assert ":" in chart["candles"][-1]["d"]
+    assert chart["ema_windows"] == [8, 21, 50]
+    section = ps.build_price_structure_section("BTC-USD", "2026-08-20", "15m")
+    assert "15 minutos" in section
+
+
+@pytest.mark.unit
+def test_intraday_date_guard_no_future_bar(monkeypatch):
+    """Detection on a past intraday date only sees bars up to it (criterion 4)."""
+    df = _intraday_frame()
+    cut = df["Date"].iloc[80]
+    cut_df = df[df["Date"] <= cut].reset_index(drop=True)
+    monkeypatch.setattr(ps, "load_intraday_ohlcv", lambda symbol, curr_date, tf: cut_df.copy())
+    s = ps.detect_price_structure("BTC-USD", cut, "15m")
+    for r in s.buy_regions:
+        assert r.date <= cut
+    if s.pattern:
+        for pt in (s.pattern.p1, s.pattern.p2, s.pattern.p3):
+            assert pt["date"] <= cut
+
+
+@pytest.mark.unit
+def test_intraday_unavailable_declared_not_fabricated(monkeypatch):
+    """A non-crypto intraday request declares it unavailable — no invented bar
+    (criterion 3). The loader raises; section + plan both say so plainly."""
+    def boom(symbol, curr_date, tf):
+        raise IntradayUnavailableError(symbol, None, "sem candle intradiário keyless")
+
+    monkeypatch.setattr(ps, "load_intraday_ohlcv", boom)
+
+    section = ps.build_price_structure_section("AAPL", "2026-08-20", "15m")
+    assert "indisponível" in section.lower()
+    assert "inventado" in section.lower()
+
+    plan = ps.build_actionable_plan("AAPL", "2026-08-20", "15m")
+    assert plan.setup_state == "intradiario_indisponivel"
+    assert plan.buy_zone is None and plan.price is None
+    d = ps.build_actionable_plan_dict("AAPL", "2026-08-20", "15m")
+    assert d["setup_state"] == "intradiario_indisponivel"
