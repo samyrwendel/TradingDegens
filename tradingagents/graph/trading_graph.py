@@ -15,6 +15,7 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
+    get_crypto_context,
     get_crypto_derivatives,
     get_fundamentals,
     get_global_news,
@@ -203,6 +204,10 @@ class TradingAgentsGraph:
                     # unconditionally so a crypto run's tool call executes here;
                     # the analyst only offers it to the LLM on crypto assets.
                     get_crypto_derivatives,
+                    # Crypto network context — on-chain, spot-ETF flow, Fear &
+                    # Greed. Bound unconditionally for the same reason; offered to
+                    # the LLM only on crypto assets.
+                    get_crypto_context,
                     # Deterministic verification snapshot (bound to the analyst
                     # LLM and required by its prompt; must be executable here or
                     # the call fails and the model reports it "unavailable").

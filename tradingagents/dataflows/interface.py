@@ -13,6 +13,11 @@ from .alpha_vantage import (
 )
 from .config import get_config
 from .crypto import get_crypto_derivatives as get_crypto_derivatives_report
+from .crypto_context import (
+    get_etf_flows as get_etf_flows_report,
+    get_fear_greed as get_fear_greed_report,
+    get_onchain_metrics as get_onchain_metrics_report,
+)
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -81,6 +86,24 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_crypto_derivatives",
         ]
+    },
+    "onchain_data": {
+        "description": "On-chain network metrics (hashrate, halving, dominance, stablecoin cap)",
+        "tools": [
+            "get_onchain_metrics",
+        ]
+    },
+    "etf_flow_data": {
+        "description": "Spot BTC/ETH ETF daily net flows",
+        "tools": [
+            "get_etf_flows",
+        ]
+    },
+    "crypto_sentiment": {
+        "description": "Crypto-wide Fear & Greed sentiment index",
+        "tools": [
+            "get_fear_greed",
+        ]
     }
 }
 
@@ -90,6 +113,9 @@ VENDOR_LIST = [
     "polymarket",
     "alpha_vantage",
     "crypto_exchanges",
+    "onchain_public",
+    "farside",
+    "alternative_me",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -100,7 +126,14 @@ VENDOR_LIST = [
 # Crypto derivatives are enrichment layered on the price path — three keyless
 # public feeds that can each blip; a total outage degrades to a sentinel (and the
 # per-source lines already degrade individually) rather than aborting the run.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "crypto_derivatives"}
+OPTIONAL_CATEGORIES = {
+    "macro_data",
+    "prediction_markets",
+    "crypto_derivatives",
+    "onchain_data",
+    "etf_flow_data",
+    "crypto_sentiment",
+}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -156,6 +189,19 @@ VENDOR_METHODS = {
     # across Hyperliquid, Binance and OKX with per-source graceful degradation.
     "get_crypto_derivatives": {
         "crypto_exchanges": get_crypto_derivatives_report,
+    },
+    # onchain_data — keyless network metrics (mempool.space, blockchain.info,
+    # CoinGecko); MVRV/cost-basis declared unavailable rather than proxied.
+    "get_onchain_metrics": {
+        "onchain_public": get_onchain_metrics_report,
+    },
+    # etf_flow_data — spot BTC/ETH ETF daily net flow from Farside (keyless).
+    "get_etf_flows": {
+        "farside": get_etf_flows_report,
+    },
+    # crypto_sentiment — crypto-wide Fear & Greed index (alternative.me, keyless).
+    "get_fear_greed": {
+        "alternative_me": get_fear_greed_report,
     },
 }
 

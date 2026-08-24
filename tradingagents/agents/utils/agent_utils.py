@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, RemoveMessage
 
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
+from tradingagents.agents.utils.crypto_context_tools import get_crypto_context
 from tradingagents.agents.utils.crypto_derivatives_tools import get_crypto_derivatives
 from tradingagents.agents.utils.fundamental_data_tools import (
     get_balance_sheet,
@@ -33,6 +34,7 @@ __all__ = [
     "get_indicators",
     "get_price_timeframes",
     "get_crypto_derivatives",
+    "get_crypto_context",
     "get_fundamentals",
     "get_balance_sheet",
     "get_cashflow",

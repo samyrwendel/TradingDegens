@@ -141,6 +141,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
         "crypto_derivatives": "crypto_exchanges",  # keyless: Hyperliquid+Binance+OKX
+        "onchain_data": "onchain_public",     # keyless: mempool.space+blockchain.info+CoinGecko
+        "etf_flow_data": "farside",           # keyless: Farside Investors (BTC/ETH spot ETF)
+        "crypto_sentiment": "alternative_me", # keyless: alternative.me Fear & Greed
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_crypto_context,
     get_crypto_derivatives,
     get_indicators,
     get_instrument_context_from_state,
@@ -8,6 +9,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_price_timeframes,
     get_stock_data,
     get_verified_market_snapshot,
+)
+from tradingagents.agents.utils.crypto_context_coverage import (
+    ensure_crypto_context_coverage,
 )
 from tradingagents.agents.utils.crypto_coverage import (
     ensure_crypto_derivatives_coverage,
@@ -37,6 +41,7 @@ def create_market_analyst(llm):
         ]
         if is_crypto:
             tools.append(get_crypto_derivatives)
+            tools.append(get_crypto_context)
 
         system_message = (
             """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
@@ -85,6 +90,13 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                     " sources — these drive crypto price action and are invisible to"
                     " ordinary OHLCV. If a source is unavailable, say so; never"
                     " invent a derivative value."
+                    " You MUST also call get_crypto_context once and report the"
+                    " on-chain network health (hashrate, halving, dominance,"
+                    " stablecoin market cap), the spot-ETF net flow, and the Fear &"
+                    " Greed index with their named sources — these three feeds also"
+                    " move crypto and are invisible to OHLCV. If a source (or a"
+                    " paid-key-only metric like MVRV) is unavailable, say so with the"
+                    " source name; never invent a value."
                 )
                 if is_crypto
                 else ""
@@ -132,6 +144,12 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
             )
             if is_crypto:
                 report = ensure_crypto_derivatives_coverage(
+                    report, symbol, current_date
+                )
+                # On-chain, spot-ETF flow and Fear & Greed — three feeds the LLM
+                # may skip; append them deterministically (routed, cached,
+                # date-guarded) so a crypto report never stays silent on them.
+                report = ensure_crypto_context_coverage(
                     report, symbol, current_date
                 )
             # Price structure (buy-at-the-average regions + 1-2-3) is appended

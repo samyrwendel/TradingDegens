@@ -74,8 +74,12 @@ def test_non_crypto_symbol_raises():
 # ------------------------------------------------------------------ live -------
 @pytest.mark.unit
 def test_live_report_has_all_three_signals_and_sources(live_http):
-    from datetime import date
-    out = crypto.get_crypto_derivatives("BTC-USD", date.today().isoformat())
+    from datetime import datetime, timezone
+    # "Live" is defined by the vendor against UTC now; use UTC's today so the
+    # test stays on the live path in the local-evening/UTC-next-day window.
+    out = crypto.get_crypto_derivatives(
+        "BTC-USD", datetime.now(timezone.utc).date().isoformat()
+    )
     low = out.lower()
     assert "funding" in low and "open interest" in low and "liquidation" in low
     # Named sources, not anonymous numbers.
@@ -90,8 +94,10 @@ def test_live_report_has_all_three_signals_and_sources(live_http):
 
 @pytest.mark.unit
 def test_liquidations_split_long_vs_short(live_http):
-    from datetime import date
-    out = crypto.get_crypto_derivatives("BTC-USD", date.today().isoformat())
+    from datetime import datetime, timezone
+    out = crypto.get_crypto_derivatives(
+        "BTC-USD", datetime.now(timezone.utc).date().isoformat()
+    )
     assert "longs" in out and "shorts" in out
 
 
