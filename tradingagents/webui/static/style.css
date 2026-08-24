@@ -258,6 +258,37 @@ details.section[open] > summary::before { content: "▾"; }
 .history .h-meta { color: var(--muted); font-size: 12.5px; font-family: var(--mono); margin-left: auto; white-space: nowrap; }
 .history .empty { color: var(--muted); border: none; background: none; cursor: default; padding: 4px 0; }
 
+/* run EM ANDAMENTO na lateral: borda viva + pastilha com ponto pulsando. O run
+   segue rodando no servidor mesmo se você troca de ativo, sai da tela ou recarrega
+   — este é o marcador clicável que re-liga o acompanhamento ao vivo. */
+.history li.is-running { border-color: #2e5c7d; }
+.history li.is-running:hover { border-color: var(--accent); }
+.history .h-verdict.running {
+  color: var(--accent); border-color: #2e5c7d; background: #10203a;
+  white-space: nowrap; font-family: var(--mono); font-weight: 700;
+}
+.run-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); margin-right: 6px; vertical-align: middle;
+  animation: run-pulse 1.1s ease-in-out infinite;
+}
+@keyframes run-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
+
+/* marcador "pronto"/"erro": um run que terminou em segundo plano (não o que você
+   assistia) sinaliza no item do histórico até você abri-lo. */
+.h-flag {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  font-size: 10.5px; font-weight: 700; border-radius: 999px; vertical-align: middle;
+}
+.h-flag.done { color: var(--green); background: var(--green-dim); border: 1px solid #1e5c3c; }
+.h-flag.error { color: var(--red); background: var(--red-dim); border: 1px solid #5c1e28; }
+
+/* chip do ticker no painel de progresso — qual ativo está sendo analisado agora
+   (essencial ao reabrir um run de fundo: sem isso não se sabe o que está rodando) */
+.progress-head .chip.run { color: var(--text); font-family: var(--mono); font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) { .run-dot { animation: none; } }
+
 /* Histórico como <details>: no desktop parece um cabeçalho comum (sem seta,
    sempre aberto via JS); no mobile ganha a seta e vira faixa recolhível. */
 .history-panel > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }

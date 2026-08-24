@@ -11,7 +11,7 @@ import pytest
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
-from tests.test_webui_runner import FINAL_STATE, _factory
+from tests.test_webui_runner import FINAL_STATE, _blocking_factory, _factory
 
 
 @pytest.fixture()
@@ -135,3 +135,31 @@ def test_chart_endpoint_requires_ticker(server):
         assert e.code == 400
         return
     raise AssertionError("expected HTTP 400")
+
+
+# ------------------------------------------------ background runs (task 010) ---
+def test_runs_and_history_expose_in_flight(tmp_path):
+    """A run still executing is reachable both at /api/runs and merged into
+    /api/history as ``running`` — so the UI can show it as em-andamento and re-open
+    it without the analysis ever being cancelled."""
+    gate = threading.Event()
+    runner = AnalysisRunner(
+        base_config={"results_dir": str(tmp_path)},
+        store=HistoryStore(tmp_path),
+        graph_factory=_blocking_factory(gate),
+    )
+    httpd = make_server("127.0.0.1", 0, runner=runner)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        _, started = _post(base, "/api/analyze", {"ticker": "AAPL", "date": "2026-08-22"})
+        run_id = started["run_id"]
+        _, runs = _get(base, "/api/runs?status=running")
+        assert any(r["run_id"] == run_id and r["status"] == "running" for r in runs["runs"])
+        _, hist = _get(base, "/api/history")
+        assert any(r["run_id"] == run_id and r["status"] == "running" for r in hist["runs"])
+    finally:
+        gate.set()
+        httpd.shutdown()

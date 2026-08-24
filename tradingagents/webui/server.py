@@ -12,7 +12,8 @@ Routes:
     POST /api/analyze          -> {ticker, date} -> {run_id}
     GET  /api/status/<run_id>  -> live run snapshot (progress, cost, result)
     GET  /api/run/<run_id>     -> alias of status (from history if needed)
-    GET  /api/history          -> recent run summaries
+    GET  /api/runs?status=running -> live in-process runs (em andamento)
+    GET  /api/history          -> recent run summaries (running runs merged in front)
     GET  /api/chart            -> ?ticker=&date=&tf= -> recomputed chart + plan
 """
 
@@ -113,6 +114,10 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "execução desconhecida"}, 404)
                 else:
                     self._send_json(snap)
+            elif path == "/api/runs":
+                # Only the running set is exposed here (the finished runs live in
+                # /api/history); a status filter other than "running" is ignored.
+                self._send_json({"runs": self.runner.active_runs()})
             elif path == "/api/history":
                 self._send_json({"runs": self.runner.history()})
             elif path == "/api/chart":

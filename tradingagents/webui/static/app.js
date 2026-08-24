@@ -4,6 +4,15 @@ const $ = (id) => document.getElementById(id);
 let pollTimer = null;
 let TZ_LABEL = "GMT-4 (Manaus)";
 
+// Segundo plano: cada análise roda numa thread própria no servidor e continua
+// mesmo se o usuário troca de ativo, sai da tela ou recarrega. Estes controlam
+// só a VISÃO — qual run está sendo acompanhado ao vivo, quais estavam rodando na
+// última atualização da lista, e quais terminaram sozinhos (ganham "pronto").
+let _watchedRunId = "";              // run cujo progresso está na tela agora
+let _prevRunningIds = new Set();     // ids que apareciam "running" na última lista
+const _finishedFlags = new Map();    // run_id -> "done" | "error" (terminou em 2º plano)
+let _historyTimer = null;            // atualização lenta da lista (marcadores vivos)
+
 // The engine emits the canonical English 5-tier rating (Buy / Overweight / Hold
 // / Underweight / Sell). On screen we show the *practical meaning* in pt-BR —
 // what to actually do — and keep the original jargon in gray beside it for
@@ -177,6 +186,13 @@ function fmtCost(cost) {
 
 function renderProgress(snap) {
   $("progressPanel").classList.remove("hidden");
+  const tk = $("progressTicker");
+  if (tk) {
+    // qual ativo está sendo analisado — some quando não sabemos o ticker (start
+    // sintético antes do 1º poll já manda o ticker, então quase sempre aparece)
+    tk.textContent = snap.ticker || "";
+    tk.classList.toggle("hidden", !snap.ticker);
+  }
   const p = snap.progress || {};
   $("progressPhase").textContent = p.phase || "…";
   $("progressLabel").textContent = p.label || "";
@@ -204,6 +220,9 @@ function section(title, mdText) {
 }
 
 function renderResult(snap) {
+  // este run passa a ser o "aberto" na tela: enquanto for ele, um término dele
+  // NÃO vira aviso "pronto" (o usuário já está vendo o resultado).
+  _watchedRunId = snap.run_id || _watchedRunId;
   const nameEl = document.getElementById("assetName");
   if (nameEl) nameEl.textContent = snap.ticker || "—";
   _openTicker = snap.ticker || "";
@@ -880,11 +899,22 @@ if (_histMq.addEventListener) _histMq.addEventListener("change", syncHistoryColl
 else if (_histMq.addListener) _histMq.addListener(syncHistoryCollapse);
 
 // ---- polling & actions ----------------------------------------------------
+// Acompanha UM run ao vivo: troca o alvo do polling (2s) sem matar o run anterior
+// — ele segue rodando no servidor e continua visível na lista lateral. Só há um
+// timer por vez; o guard em poll() descarta respostas tardias do run que saímos.
+function watchRun(runId) {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  _watchedRunId = runId;
+  poll(runId);
+  pollTimer = setInterval(() => poll(runId), 2000);
+}
+
 async function poll(runId) {
   try {
     const res = await fetch("/api/status/" + runId);
     if (!res.ok) throw new Error("status " + res.status);
     const snap = await res.json();
+    if (runId !== _watchedRunId) return;   // já trocamos de run: ignora resposta tardia
     if (snap.status === "running") {
       renderProgress(snap);
     } else {
@@ -914,12 +944,15 @@ async function startAnalysis(ev) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");
-    renderProgress({ status: "running", elapsed: 0, cost: null, progress: { phase: "Inicializando", label: "Subindo o motor…", percent: 2, plan: [], reached: [] } });
-    poll(data.run_id);
-    pollTimer = setInterval(() => poll(data.run_id), 1500);
+    renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: "Subindo o motor…", percent: 2, plan: [], reached: [] } });
+    watchRun(data.run_id);
+    loadHistory();   // o novo run aparece na lista como "em andamento" na hora
   } catch (e) {
-    $("runBtn").disabled = false;
     $("formError").textContent = e.message;
+  } finally {
+    // Reabilita já: um run em curso NÃO trava iniciar outro — os dois rodam em
+    // paralelo no servidor. O botão só fica travado durante o POST (anti-duplo).
+    $("runBtn").disabled = false;
   }
 }
 
@@ -1013,6 +1046,20 @@ async function loadHistory() {
     const data = await res.json();
     const ul = $("history");
     const runs = data.runs || [];
+
+    // Detecta runs que terminaram em SEGUNDO PLANO: estavam "em andamento" na
+    // última atualização e agora não estão mais. Ganham um marcador "pronto" (ou
+    // "erro") até o usuário abri-los. O run que está sendo assistido não conta —
+    // o usuário já vê o resultado dele na tela.
+    const runningIds = new Set(runs.filter((r) => r.status === "running").map((r) => r.run_id));
+    _prevRunningIds.forEach((id) => {
+      if (!runningIds.has(id) && id !== _watchedRunId) {
+        const rec = runs.find((r) => r.run_id === id);
+        if (rec) _finishedFlags.set(id, rec.status === "error" ? "error" : "done");
+      }
+    });
+    _prevRunningIds = runningIds;
+
     if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
     // Duas famílias só: cripto e ações (metais entram em ações). O usuário
     // escolhe pela aba — Todos / Ações / Cripto —, sem cabeçalho empilhado.
@@ -1021,13 +1068,30 @@ async function loadHistory() {
     // com o veredito mais recente. O histórico daquele ativo (dias atrás) aparece
     // como calendário dentro da análise aberta.
     const item = (r, n) => {
+      const running = r.status === "running";
       const v = (r.verdict || r.status || "").toString();
-      const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
       const badge = n > 1 ? `<span class="h-count" title="${n} análises">${n}</span>` : "";
-      return `<li data-id="${escapeHtml(r.run_id)}">` +
-        `<span class="h-ticker">${escapeHtml(r.ticker || "?")}${badge}</span>` +
-        `<span class="h-verdict ${verdictClass(v).replace("verdict", "").trim()}" title="${escapeHtml(v)}">${verdictHtml(v)}</span>` +
-        `<span class="h-meta">${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
+      // marcador de término em 2º plano (só em run já concluído, some ao abrir)
+      const flag = !running && _finishedFlags.get(r.run_id);
+      const flagHtml = flag
+        ? `<span class="h-flag ${flag}">${flag === "error" ? "⚠ erro" : "✓ pronto"}</span>`
+        : "";
+      let vHtml, vClass, meta;
+      if (running) {
+        const p = r.progress || {};
+        vHtml = `<span class="run-dot"></span>${p.percent || 0}%`;
+        vClass = "running";
+        meta = `${escapeHtml(p.phase || "processando")} · ${Math.round(r.elapsed || 0)}s`;
+      } else {
+        vHtml = verdictHtml(v);
+        vClass = verdictClass(v).replace("verdict", "").trim();
+        const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
+        meta = `${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s`;
+      }
+      return `<li data-id="${escapeHtml(r.run_id)}" class="${running ? "is-running" : ""}">` +
+        `<span class="h-ticker">${escapeHtml(r.ticker || "?")}${badge}${flagHtml}</span>` +
+        `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : v)}">${vHtml}</span>` +
+        `<span class="h-meta">${meta}</span>` +
         `</li>`;
     };
     const filtered = _historyFilter === "all"
@@ -1052,9 +1116,20 @@ async function loadHistory() {
 
 async function openRun(runId) {
   try {
+    _finishedFlags.delete(runId);          // abriu: some o marcador "pronto/erro"
     const res = await fetch("/api/run/" + runId);
     const snap = await res.json();
-    if (res.ok) renderResult(snap);
+    if (!res.ok) return;
+    if (snap.status === "running") {
+      // reabre um run EM ANDAMENTO: volta a acompanhar ao vivo (re-liga o polling
+      // daquele run_id). O run nunca parou — só a visão tinha saído dele.
+      _openTicker = snap.ticker || "";
+      $("resultPanel").classList.add("hidden");
+      renderProgress(snap);
+      watchRun(runId);
+    } else {
+      renderResult(snap);
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -1084,6 +1159,15 @@ function init() {
   bindHistoryTabs();
   bindRefresh();
   loadHistory().then(openLatestRun);
+  startHistoryAutoRefresh();
+}
+
+// A lista de fundo se atualiza devagar (5s), independente do run assistido: é o
+// que faz um run em andamento APARECER na lateral, o progresso dele avançar ali, e
+// o marcador "pronto" surgir quando ele termina sozinho enquanto você olha outro.
+function startHistoryAutoRefresh() {
+  if (_historyTimer) clearInterval(_historyTimer);
+  _historyTimer = setInterval(loadHistory, 5000);
 }
 
 // Ao abrir a página, mostra a análise mais recente em vez de tela vazia. Sem isso

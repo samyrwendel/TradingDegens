@@ -332,8 +332,57 @@ class AnalysisRunner:
             "from_history": True,
         }
 
+    @staticmethod
+    def _running_summary(run: _Run) -> dict[str, Any]:
+        """History-shaped summary for a run still executing in this process.
+
+        Same keys the on-disk index carries (so the UI renders it with the same
+        code path) plus a light ``progress`` (percent + phase) for the live
+        em-andamento marker. The full progress feed still comes from
+        ``/api/status/<run_id>`` when the run is opened.
+        """
+        prog = run.tracker.snapshot()
+        cost = run.cost()
+        return {
+            "run_id": run.run_id,
+            "ticker": run.ticker,
+            "date": run.date,
+            "asset_type": run.asset_type,
+            "status": "running",
+            "verdict": None,
+            "cost_usd": cost.get("usd", 0),
+            "elapsed": round(time.time() - run.started_at, 1),
+            "finished_at": None,
+            "progress": {"percent": prog.get("percent", 0), "phase": prog.get("phase", "")},
+        }
+
+    def active_runs(self) -> list[dict[str, Any]]:
+        """Summaries for the runs still executing in THIS process, newest-first.
+
+        Each analysis runs on its own daemon thread and keeps computing even after
+        the client navigates to another ticker, reloads the page, or closes the
+        tab. Those live runs are not in the on-disk history yet (that write happens
+        only on completion), so without surfacing them the UI has no way to show an
+        "em andamento" marker or re-open a running analysis. Merged in front of the
+        persisted history by :meth:`history`.
+        """
+        with self._lock:
+            live = [r for r in self._runs.values() if r.status == "running"]
+        live.sort(key=lambda r: r.started_at, reverse=True)
+        return [self._running_summary(r) for r in live]
+
     def history(self, limit: int = 25) -> list[dict[str, Any]]:
-        return self.store.recent(limit)
+        """Recent run summaries newest-first, with the live in-process runs
+        (status ``running``) merged in front.
+
+        A running run is not on disk yet, so it can only come from the in-memory
+        table; a run that just finished is deduped out of the live set so it is
+        not listed twice while it is briefly in both places.
+        """
+        live = self.active_runs()
+        seen = {r["run_id"] for r in live}
+        persisted = [r for r in self.store.recent(limit) if r.get("run_id") not in seen]
+        return live + persisted
 
     def config_info(self) -> dict[str, Any]:
         """Client bootstrap: the authoritative *Manaus* today + tz for the UI.

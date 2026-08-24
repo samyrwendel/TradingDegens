@@ -296,6 +296,55 @@ def test_timeframe_view_falls_back_on_intraday_outage(tmp_path, monkeypatch):
     assert "indisponível" in (view["notice"] or "").lower()
 
 
+# ------------------------------------------------ background runs (task 010) ---
+def _blocking_factory(gate, final_state=FINAL_STATE, signal="Buy"):
+    """A graph whose ``propagate`` blocks on ``gate`` so the run stays ``running``
+    long enough to be observed as an in-flight background run (the whole point of
+    task 010: a run keeps computing server-side while the client looks elsewhere)."""
+    class _Block:
+        def __init__(self, callbacks):
+            self.callbacks = callbacks
+
+        def propagate(self, ticker, date, asset_type="stock"):
+            gate.wait(3.0)
+            return final_state, signal
+
+    def make(config, selected_analysts, callbacks):
+        return _Block(callbacks)
+
+    return make
+
+
+def test_active_runs_lists_in_flight_run(tmp_path):
+    """A run still executing shows up in active_runs / history as ``running`` with
+    no verdict yet but a live progress marker — and is deduped to the single
+    persisted row once it finishes."""
+    import threading
+
+    gate = threading.Event()
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path),
+                            graph_factory=_blocking_factory(gate))
+    run_id = runner.start("AAPL", "2026-08-22")
+    try:
+        active = runner.active_runs()
+        row = next((r for r in active if r["run_id"] == run_id), None)
+        assert row is not None and row["status"] == "running"
+        assert row["verdict"] is None
+        assert "percent" in row["progress"]
+        # /api/history merges the live run in front (it is not on disk yet)
+        assert any(r["run_id"] == run_id and r["status"] == "running"
+                   for r in runner.history())
+    finally:
+        gate.set()
+    snap = _wait(runner, run_id)
+    assert snap["status"] == "done"
+    # finished: it leaves the active set and is not double-listed in history
+    assert all(r["run_id"] != run_id for r in runner.active_runs())
+    matches = [r for r in runner.history() if r["run_id"] == run_id]
+    assert len(matches) == 1 and matches[0]["status"] == "done"
+
+
 def test_timeframe_view_leaves_equity_intraday_note_alone(tmp_path, monkeypatch):
     """When the plan itself is the expected 'intradiário indisponível para ação'
     (equity), the view does NOT masquerade it as a daily fallback — it returns the
