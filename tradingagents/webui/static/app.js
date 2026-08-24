@@ -505,7 +505,9 @@ async function loadHistory() {
     const ul = $("history");
     const runs = data.runs || [];
     if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
-    ul.innerHTML = runs.map((r) => {
+    // Duas famílias só: cripto e ações. Metais e o resto entram em ações —
+    // decisão do Samyr (24/08): "basta cripto e ações; metais entre ações".
+    const item = (r) => {
       const v = (r.verdict || r.status || "").toString();
       const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
       return `<li data-id="${escapeHtml(r.run_id)}">` +
@@ -513,7 +515,13 @@ async function loadHistory() {
         `<span class="h-verdict ${verdictClass(v).replace("verdict", "").trim()}" title="${escapeHtml(v)}">${verdictHtml(v)}</span>` +
         `<span class="h-meta">${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s</span>` +
         `</li>`;
-    }).join("");
+    };
+    const cripto = runs.filter((r) => r.asset_type === "crypto");
+    const acoes = runs.filter((r) => r.asset_type !== "crypto");
+    let html = "";
+    if (cripto.length) html += `<li class="h-group">🪙 Cripto</li>` + cripto.map(item).join("");
+    if (acoes.length) html += `<li class="h-group">📈 Ações</li>` + acoes.map(item).join("");
+    ul.innerHTML = html;
     [...ul.children].forEach((li) => {
       const id = li.getAttribute("data-id");
       if (id) li.addEventListener("click", () => openRun(id));

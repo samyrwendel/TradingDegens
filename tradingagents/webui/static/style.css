@@ -252,3 +252,17 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .act-v b { color: var(--text); font-family: var(--mono); }
 .act-v .zlabel { color: var(--muted); font-family: inherit; font-size: 12px; }
 .act-v .nolevel { color: var(--muted); font-style: italic; font-family: inherit; }
+
+/* Cabeçalho de família no histórico (cripto / ações) — DA: só duas famílias. */
+#history .h-group {
+  display: block;
+  padding: 10px 4px 4px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted, #8b93a7);
+  cursor: default;
+  background: none;
+  border: 0;
+}
+#history .h-group:hover { background: none; }
