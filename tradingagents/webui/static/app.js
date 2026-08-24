@@ -219,10 +219,12 @@ function renderResult(snap) {
   if (snap.status === "error") {
     $("chartCard").classList.add("hidden");
     $("actionable").classList.add("hidden");
+    $("headPrice").classList.add("hidden");
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
     $("bull").innerHTML = ""; $("bear").innerHTML = "";
+    $("bullLead").textContent = ""; $("bearLead").textContent = "";
     $("sections").innerHTML = section("Rastreamento do erro", "```\n" + ((snap.result && snap.result.trace) || "") + "\n```");
     return;
   }
@@ -239,11 +241,12 @@ function renderResult(snap) {
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
+  renderHeadPrice(r.actionable);
   renderActionable(r.actionable);
-  renderChartCard(r.price_chart, snap.ticker);
+  renderChartCard(r.price_chart, snap.ticker, r.actionable);
 
-  $("bull").innerHTML = renderMarkdown(r.bull);
-  $("bear").innerHTML = renderMarkdown(r.bear);
+  renderThesis("bull", r.bull);
+  renderThesis("bear", r.bear);
 
   const isCrypto = snap.asset_type === "crypto";
   let html = "";
@@ -266,86 +269,85 @@ function renderResult(snap) {
   loadHistory();
 }
 
-// ---- actionable plan (operable levels beside the verdict) -----------------
-// A level is shown only when the engine derived it from the real series; when
-// there is no basis we print "sem nível definido" — never a fabricated number.
-function zoneHtml(zone, emptyText) {
-  if (!zone || zone.price == null) {
-    // emptyText já pode vir como HTML (ex.: destaque do setup ativo); só o
-    // texto simples precisa de escape.
-    const t = emptyText || "sem nível definido";
-    return t.startsWith("<") ? t : `<span class="nolevel">${escapeHtml(t)}</span>`;
-  }
-  // Região = FAIXA (mín–máx) quando há base de volatilidade; senão, ponto — e o
-  // rótulo diz que é ponto, nunca uma faixa cosmética inventada.
-  const hasBand = zone.low != null && zone.high != null && zone.high > zone.low;
-  const val = hasBand
-    ? `<b>${fmtNum(zone.low)} – ${fmtNum(zone.high)}</b>`
-    : `<b>${fmtNum(zone.price)}</b>`;
-  const basis = hasBand && zone.band_basis
-    ? ` <span class="zbasis">(${escapeHtml(zone.band_basis)})</span>`
-    : "";
-  const label = zone.label ? ` <span class="zlabel">· ${escapeHtml(zone.label)}</span>` : "";
-  return `${val}${basis}${label}`;
+// ---- header price + setup strip -------------------------------------------
+// O preço no momento da análise é a terceira âncora do cabeçalho (ticker ·
+// veredito · preço), não uma linha perdida num card. Vem do plano acionável
+// (último fechamento da série datada); ausente, o cabeçalho some com ele.
+function renderHeadPrice(a) {
+  const el = $("headPrice");
+  if (!a || a.price == null) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.innerHTML = `<b>${fmtNum(a.price)}</b>` +
+    (a.as_of ? `<span class="hp-when">em ${fmtDate(a.as_of)}</span>` : "");
+  el.classList.remove("hidden");
 }
 
-function actRow(emoji, key, valHtml) {
-  return `<div class="act-row"><span class="act-k">${emoji} ${escapeHtml(key)}</span>` +
-    `<span class="act-v">${valHtml}</span></div>`;
-}
-
-// The 1-2-3 the detector found (compra OU venda): sentido, os três pontos
-// datados, o gatilho e o estado. Sem padrão, diz que não há — nunca inventa.
-function patternHtml(p) {
-  if (!p || !p.direction) {
-    return `<span class="nolevel">nenhum padrão identificado</span>`;
-  }
-  const [demo, dlabel, shape] = PAT_DIR[p.direction] || ["⚪", p.direction, ""];
-  const [semo, slabel] = PAT_STATE[p.state] || ["⚪", p.state || ""];
-  const pts = [["1", p.p1], ["2", p.p2], ["3", p.p3]]
-    .filter(([, pt]) => pt && pt.price != null)
-    .map(([n, pt]) => `<span class="pat-pt"><b>${n}</b> ${fmtDate(pt.date)} · ${fmtNum(pt.price)}</span>`)
-    .join('<span class="pat-arrow"> › </span>');
-  const trigVerb = p.direction === "venda" ? "perder" : "romper";
-  return (
-    `<span class="pat-dir ${escapeHtml(p.direction)}">${demo} 1-2-3 ${escapeHtml(dlabel)}` +
-    `<span class="pat-shape">· ${escapeHtml(shape)}</span></span>` +
-    `<div class="pat-pts">${pts}</div>` +
-    `<div class="pat-trig">gatilho: ${trigVerb} <b>${fmtNum(p.trigger)}</b>` +
-    ` <span class="pat-state ${escapeHtml(p.state || "")}">${semo} ${escapeHtml(slabel)}</span></div>`
-  );
-}
-
+// A faixa do setup carrega SÓ o que o gráfico não desenha: estado, horizonte e
+// timeframe. As faixas de preço e o 1-2-3 agora vivem dentro do gráfico, então
+// aqui não se repete um número sequer.
 function renderActionable(a) {
   const el = $("actionable");
-  if (!a || !a.setup_state) { el.classList.add("hidden"); return; }
-
+  if (!a || !a.setup_state) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   const [emo, label] = SETUP_PT[a.setup_state] || ["⚪", a.setup_state];
-  const priceHtml = a.price != null
-    ? `<b>${fmtNum(a.price)}</b>${a.as_of ? ` <span class="zlabel">em ${escapeHtml(a.as_of)}</span>` : ""}`
-    : `<span class="nolevel">indisponível</span>`;
-  // When the setup is live the price is already at the buy region, so there is
-  // no recuo to wait for — say so instead of "sem nível definido".
-  // "já na região" é informação de AÇÃO, não ausência de dado — não pode sair
-  // com a mesma cor apagada de "sem nível definido".
-  const pullbackEmpty = a.setup_state === "ativo"
-    ? '<span class="act-live">já na região <b>(setup ativo)</b></span>'
-    : "sem nível definido";
-
   el.innerHTML =
-    `<div class="act-head"><span class="act-title">Plano acionável</span>` +
-    `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}</span></div>` +
-    `<div class="act-grid">` +
-    actRow("💰", "Preço na análise", priceHtml) +
-    actRow("🕐", "Horizonte", escapeHtml(a.horizon || "—")) +
-    actRow("📐", "Timeframe", escapeHtml(a.timeframe || "—")) +
-    actRow("🟢", "Região de compra", zoneHtml(a.buy_zone)) +
-    actRow("🎯", "Região de realização", zoneHtml(a.realize_zone)) +
-    actRow("⏳", "Pullback a aguardar", zoneHtml(a.pullback_zone, pullbackEmpty)) +
-    `</div>` +
-    `<div class="act-pattern"><span class="act-k">📐 Padrão 1-2-3</span>` +
-    `<div class="pat-body">${patternHtml(a.pattern)}</div></div>`;
+    `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}</span>` +
+    `<span class="act-fact"><span class="act-k">🕐 Horizonte</span> ${escapeHtml(a.horizon || "—")}</span>` +
+    `<span class="act-fact"><span class="act-k">📐 Timeframe</span> ${escapeHtml(a.timeframe || "—")}</span>`;
   el.classList.remove("hidden");
+}
+
+// ---- thesis lead sentence -------------------------------------------------
+// Cada tese abre com UMA frase tirada do PRÓPRIO texto — nunca inventada. Pega a
+// primeira frase de prosa real (ignora títulos, listas, tabelas, código); sem
+// prosa aproveitável, devolve o começo do texto. Texto vazio -> "" (o corpo já
+// mostra "indisponível"). Retorna texto puro, exibido via textContent.
+function stripInlineMd(s) {
+  return s
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function clip(s, n) {
+  return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, "") + "…" : s;
+}
+function leadSentence(md) {
+  if (!md || !md.trim()) return "";
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  let inFence = false;
+  const prose = [];
+  for (let raw of lines) {
+    let line = raw.trim();
+    if (/^```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence || !line) continue;
+    if (/^#{1,6}\s/.test(line)) continue;             // título = rótulo, não prosa
+    if (/^.{0,48}:\s*#{1,6}\s/.test(line)) continue;  // "Papel: ### Título" também é título
+    if (/^([-*_]\s*){3,}$/.test(line)) continue;       // separador ---
+    if (/^\|/.test(line)) continue;                    // linha de tabela
+    line = line.replace(/^\s*([-*+]|\d+[.)]|>)\s+/, ""); // marcador de lista/citação
+    line = stripInlineMd(line);
+    line = line.replace(/^\s*(\d+[.)]|[-*+])\s+/, "");    // enumerador que sobrou após ênfase
+    line = line.replace(/(^|\s)#{1,6}\s+/g, "$1").trim(); // hashes de título soltos na linha
+    if (line.length < 3) continue;
+    prose.push(line);
+    if (prose.join(" ").length >= 90) break;           // já dá pra resumir com substância
+  }
+  let text = prose.join(" ").trim();
+  if (!text) return "";
+  // uma saudação de abertura ("Olá, pessoal!") não é resumo — descarta, mas só
+  // quando sobra conteúdo real depois; nada é inventado, só se corta filler
+  const noGreet = text.replace(/^(ol[áa]|oi|e a[íi]|bom dia|boa tarde|boa noite)[^.!?]*[.!?]\s+/i, "");
+  if (noGreet.length >= 40) text = noGreet;
+  const m = text.match(/^(.{40,}?[.!?])(\s|$)/);        // 1ª frase de substância
+  return clip(m ? m[1] : text, 180);
+}
+function renderThesis(which, md) {
+  $(which).innerHTML = renderMarkdown(md);
+  const leadEl = $(which + "Lead");
+  if (leadEl) leadEl.textContent = leadSentence(md);
+  const box = $(which + "Box");
+  if (box) box.open = false;   // corpo recolhido por padrão (só a frase-resumo)
 }
 
 // ---- candlestick chart (canvas, no external deps) -------------------------
@@ -359,20 +361,30 @@ const PAT_COLORS = { compra: "#6ea8fe", venda: "#ff9f43" };
 function patColor(pat) {
   return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
 }
-let _lastChart = null; // kept so a window resize can redraw crisply.
+// Faixas do plano acionável desenhadas no gráfico: compra (verde), realização /
+// alvo (dourado), recuo a aguardar (púrpura, só quando difere da compra).
+const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
+let _lastChart = null;        // kept so a window resize can redraw crisply.
+let _lastActionable = null;   // plan bands drawn on the chart alongside _lastChart.
 
-function renderChartCard(chart, ticker) {
+function renderChartCard(chart, ticker, actionable) {
   const card = $("chartCard");
   const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
-  if (!hasData) { card.classList.add("hidden"); _lastChart = null; return; }
+  if (!hasData) { card.classList.add("hidden"); _lastChart = null; _lastActionable = null; return; }
   card.classList.remove("hidden");
   _lastChart = chart;
+  _lastActionable = actionable || null;
 
   const active = chart.markers && chart.markers.active_region;
   const pat = chart.markers && chart.markers.pattern_123;
   card.classList.toggle("setup-active", !!active || (pat && pat.state === "acionado"));
 
-  // legend: candles + each MA present + setup markers
+  // As faixas do plano são as mesmas do plano acionável, agora desenhadas na
+  // linha do preço em vez de repetidas em texto. buy/pullback coincidem no caso
+  // "aguardar recuo" (mesma média) — desenha-se uma só (ver drawPriceChart).
+  const zones = planZones(actionable);
+
+  // legend: candles + cada MMS + faixas do plano + 1-2-3
   const wins = (chart.ma_windows || [20, 50, 200]).map(String);
   const legend = [
     `<span class="lg"><span class="sw" style="background:var(--green)"></span>vela de alta <span class="orig">(candle)</span></span>`,
@@ -381,7 +393,7 @@ function renderChartCard(chart, ticker) {
   wins.forEach((w) => {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
   });
-  legend.push(`<span class="lg"><span class="sw dot" style="background:#2ecc71"></span>região de compra</span>`);
+  zones.forEach((z) => legend.push(`<span class="lg"><span class="sw band" style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
   if (pat) {
     const [, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>1-2-3 ${escapeHtml(dlabel)}</span>`);
@@ -400,17 +412,67 @@ function renderChartCard(chart, ticker) {
     const verb = pat.direction === "venda" ? "perda de" : "rompimento de";
     notes.push(`${demo} Padrão 1-2-3 ${dlabel}: gatilho ${verb} ${fmtNum(pat.trigger)} — <b>${pat.state}</b>.`);
   }
+  if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
   $("chartNote").innerHTML = notes.join(" ");
 
-  drawPriceChart($("priceChart"), chart);
+  drawPriceChart($("priceChart"), chart, _lastActionable);
+}
+
+// The plan's operable zones, ready to draw ON the chart (price on the band edge),
+// de-duplicated: in "aguardar recuo" the buy zone and the pullback are the same
+// rising average, so only one green band is drawn. A trigger-point pullback is a
+// line the 1-2-3 already draws, so it is dropped here. Empty when no plan/levels.
+function planZones(a) {
+  if (!a) return [];
+  const out = [];
+  const buy = a.buy_zone;
+  if (buy && buy.price != null) {
+    const waiting = a.setup_state === "aguardar_pullback";
+    out.push({ ...buy, color: ZONE_COLORS.buy, tag: waiting ? "compra (recuo à média)" : "compra" });
+  }
+  const rz = a.realize_zone;
+  if (rz && rz.price != null) out.push({ ...rz, color: ZONE_COLORS.realize, tag: "realização (alvo)" });
+  const pb = a.pullback_zone;
+  const buyPrice = buy && buy.price;
+  const isBand = pb && pb.low != null && pb.high != null;
+  // só desenha o recuo separado quando é uma FAIXA distinta da compra (não o
+  // gatilho-ponto do 1-2-3, que a própria marcação do padrão já traça)
+  if (pb && pb.price != null && isBand && pb.price !== buyPrice) {
+    out.push({ ...pb, color: ZONE_COLORS.pullback, tag: "recuo a aguardar" });
+  }
+  return out;
 }
 
 function fmtNum(v) {
   return (typeof v === "number" ? v : Number(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function drawPriceChart(canvas, chart) {
+// A small rounded chip with the price written ON a band/line edge, so the number
+// lives on the chart where the level is — not repeated in a card below.
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function drawEdgeLabel(ctx, ex, ey, text, bg, fg, align, clampH) {
+  ctx.font = "bold 10.5px ui-monospace, Menlo, monospace";
+  const padX = 5, h = 15;
+  const w = ctx.measureText(text).width + padX * 2;
+  const x0 = align === "right" ? ex - w : ex;
+  let y0 = ey - h / 2;
+  if (clampH != null) y0 = Math.max(1, Math.min(y0, clampH - h - 1));
+  roundRect(ctx, x0, y0, w, h, 4);
+  ctx.globalAlpha = 0.93; ctx.fillStyle = bg; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = fg; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.fillText(text, x0 + padX, y0 + h / 2 + 0.5);
+}
+
+function drawPriceChart(canvas, chart, a) {
   const candles = chart.candles;
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.clientWidth || canvas.parentElement.clientWidth || 640;
@@ -425,14 +487,21 @@ function drawPriceChart(canvas, chart) {
   const plotW = cssW - padL - padR, plotH = cssH - padT - padB;
   const n = candles.length;
 
-  // price range across candles + MAs + pattern levels, with a little padding
+  const zones = planZones(a);
+  const price = a && a.price != null ? a.price : null;
+
+  // price range across candles + MAs + pattern levels + plan zones + current
+  // price — the plan bands are part of the picture now, so they must fit on screen
   let lo = Infinity, hi = -Infinity;
-  candles.forEach((c) => { if (c.l != null) lo = Math.min(lo, c.l); if (c.h != null) hi = Math.max(hi, c.h); });
-  Object.values(chart.ma || {}).forEach((arr) => arr.forEach((v) => { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+  const grow = (v) => { if (v != null && isFinite(Number(v))) { lo = Math.min(lo, v); hi = Math.max(hi, v); } };
+  candles.forEach((c) => { grow(c.l); grow(c.h); });
+  Object.values(chart.ma || {}).forEach((arr) => arr.forEach(grow));
   const pat = chart.markers && chart.markers.pattern_123;
-  if (pat) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach((v) => { lo = Math.min(lo, v); hi = Math.max(hi, v); });
+  if (pat) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach(grow);
+  zones.forEach((z) => { grow(z.price); grow(z.low); grow(z.high); });
+  grow(price);
   if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
-  const pad = (hi - lo) * 0.05; lo -= pad; hi += pad;
+  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
 
   const x = (i) => padL + (i + 0.5) * (plotW / n);
   const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
@@ -449,6 +518,23 @@ function drawPriceChart(canvas, chart) {
     ctx.fillStyle = "#8b97ad"; ctx.textAlign = "left";
     ctx.fillText(p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 2 : 0 }), padL + plotW + 6, yy);
   }
+
+  // plan zones: translucent bands BEHIND the candles (edge labels drawn on top later)
+  zones.forEach((z) => {
+    const hasBand = z.low != null && z.high != null && z.high > z.low;
+    if (hasBand) {
+      const yTop = y(z.high), yBot = y(z.low);
+      ctx.fillStyle = z.color + "1f";
+      ctx.fillRect(padL, yTop, plotW, Math.max(2, yBot - yTop));
+      ctx.strokeStyle = z.color + "55"; ctx.lineWidth = 1;
+      ctx.strokeRect(padL + 0.5, yTop + 0.5, plotW - 1, Math.max(2, yBot - yTop));
+    } else {
+      const yy = y(z.price);
+      ctx.strokeStyle = z.color + "aa"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
+      ctx.setLineDash([]); ctx.lineWidth = 1;
+    }
+  });
 
   // date labels (x axis) — a handful, evenly spaced
   ctx.textAlign = "center"; ctx.textBaseline = "top";
@@ -499,9 +585,9 @@ function drawPriceChart(canvas, chart) {
     ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
   });
 
-  // 1-2-3 pattern: connecting line, labelled points, trigger level. Colour and
-  // point kinds follow the direction — compra (L-H-L, blue) vs venda (H-L-H,
-  // orange) — so the two setups never read the same on the chart.
+  // 1-2-3 pattern: connecting line, labelled points (with price), trigger level
+  // + trigger/state label. Colour and point kinds follow the direction — compra
+  // (L-H-L, blue) vs venda (H-L-H, orange) — so the two never read the same.
   if (pat) {
     const col = patColor(pat);
     const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
@@ -517,16 +603,40 @@ function drawPriceChart(canvas, chart) {
       const ty = y(pat.trigger);
       ctx.strokeStyle = col + "80"; ctx.setLineDash([2, 3]);
       ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke(); ctx.setLineDash([]);
-      // point labels — offset below a low, above a high
-      ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      // point circles with number + price beside them
       pts.forEach((p) => {
-        const px = x(p.i), py = y(p.price) + (p.kind === "L" ? 14 : -14);
-        ctx.fillStyle = "#0b0e14"; ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
+        const px = x(p.i), cy = y(p.price), off = p.kind === "L" ? 14 : -14;
+        ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillStyle = "#0b0e14"; ctx.beginPath(); ctx.arc(px, cy + off, 8, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = col; ctx.stroke();
-        ctx.fillStyle = col; ctx.fillText(p.lab, px, py);
+        ctx.fillStyle = col; ctx.fillText(p.lab, px, cy + off);
+        ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8b97ad";
+        ctx.fillText(fmtNum(p.price), px, cy + off + (p.kind === "L" ? 16 : -16));
       });
+      // gatilho + estado, rotulado na borda DIREITA (a esquerda é das faixas do
+      // plano — separar evita a colisão quando gatilho e compra ficam colados)
+      const [semo] = PAT_STATE[pat.state] || ["⚪"];
+      drawEdgeLabel(ctx, padL + plotW, ty, `1-2-3 gatilho ${fmtNum(pat.trigger)} ${semo}`, col, "#0b0e14", "right", cssH);
     }
   }
+
+  // linha do preço atual, destacada, com o valor na borda direita ("agora")
+  if (price != null) {
+    const yp = y(price);
+    ctx.strokeStyle = "rgba(230,234,242,0.5)"; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, yp); ctx.lineTo(padL + plotW, yp); ctx.stroke();
+    ctx.setLineDash([]);
+    drawEdgeLabel(ctx, padL + plotW, yp, "agora " + fmtNum(price), "#e6eaf2", "#0b0e14", "right", cssH);
+  }
+
+  // faixas do plano: o preço escrito NA borda da banda (esquerda), por cima de
+  // tudo pra ler claro. Faixa -> mín–máx; ponto -> o valor.
+  zones.forEach((z) => {
+    const hasBand = z.low != null && z.high != null && z.high > z.low;
+    const yy = hasBand ? y(z.high) : y(z.price);
+    const val = hasBand ? `${fmtNum(z.low)}–${fmtNum(z.high)}` : fmtNum(z.price);
+    drawEdgeLabel(ctx, padL, yy, `${z.tag} ${val}`, z.color, "#0b0e14", "left", cssH);
+  });
 }
 
 // redraw on resize so the canvas stays crisp and correctly scaled
@@ -534,7 +644,7 @@ let _resizeTimer = null;
 window.addEventListener("resize", () => {
   if (!_lastChart) return;
   clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(() => drawPriceChart($("priceChart"), _lastChart), 150);
+  _resizeTimer = setTimeout(() => drawPriceChart($("priceChart"), _lastChart, _lastActionable), 150);
 });
 
 // ---- polling & actions ----------------------------------------------------
