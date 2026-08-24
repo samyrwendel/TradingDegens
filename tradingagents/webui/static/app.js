@@ -330,9 +330,11 @@ function metaSection(title, md) {
   return `<div class="mj-sec"><h3>${escapeHtml(title)}</h3><div class="md">${renderMarkdown(String(md))}</div></div>`;
 }
 
-// Uma coluna da comparação: título (método · timeframe), data, veredito, plano
-// operável, custo, flag de cache reusado, e atalho pra abrir a análise completa.
-function compareColumn(c) {
+// Uma coluna da comparação: título (método · timeframe), data, veredito, o GRÁFICO
+// daquela análise (com seu TF/indicadores/marcações, interativo), plano operável,
+// custo, flag de cache reusado, e atalho pra abrir a análise completa. ``slot`` é
+// "A"/"B" (fixa o id do canvas pra o desenho depois do innerHTML).
+function compareColumn(c, slot) {
   if (!c || !c.method) return "";
   const isErick = c.method === "erick";
   const title = (isErick ? "🧭 " : "") + (c.label || (isErick ? "Método Erick" : "Padrão"));
@@ -350,14 +352,40 @@ function compareColumn(c) {
   const err = c.status === "error"
     ? `<div class="cmp-err">Leitura indisponível: ${escapeHtml(c.error || "falha")}</div>`
     : "";
+  const ch = c.price_chart;
+  const hasChart = ch && Array.isArray(ch.candles) && ch.candles.length > 2;
+  const chartCard = hasChart
+    ? `<div class="cmp-chart-card">` +
+        `<div class="chart-legend cmp-chart-legend">${chartLegendHtml(ch, c.actionable)}</div>` +
+        `<div class="chart-wrap">` +
+          `<span class="chart-zoom-hint">roda=zoom · shift+roda=vertical · arrasta=move · 2 cliques=reseta</span>` +
+          `<canvas id="cmpChart${slot}" class="cmp-canvas"></canvas>` +
+        `</div></div>`
+    : "";
   return `<div class="cmp-col">` +
     `<div class="cmp-col-head"><span class="cmp-col-title">${escapeHtml(title)}${dateStr}</span>${reused}</div>` +
     `<div class="cmp-verdict-row"><span class="${verdictClass(v)}">${verdictHtml(v)}</span></div>` +
     deg + err +
+    chartCard +
     `<div class="cmp-plan md">${renderMarkdown(plan)}</div>` +
     `<div class="cmp-col-foot"><span>${fmtCost(c.cost)} · ${c.elapsed || 0}s</span>` +
     (c.run_id ? `<button type="button" class="cmp-open" data-id="${escapeHtml(c.run_id)}">abrir análise completa →</button>` : "") +
     `</div></div>`;
+}
+
+// Desenha o gráfico de uma coluna no seu canvas (após o innerHTML existir). Cada
+// canvas tem estado próprio → zoom/pan/reset independentes (h+v), como o principal.
+function drawCompareChart(canvasId, col) {
+  const cv = document.getElementById(canvasId);
+  if (!cv) return;
+  const chart = col && col.price_chart;
+  if (!chart || !Array.isArray(chart.candles) || chart.candles.length <= 2) return;
+  cv._chart = chart;
+  cv._actionable = col.actionable || null;
+  cv._view = null;
+  cv._vview = null;
+  drawPriceChart(cv, chart, cv._actionable);
+  bindChartZoom(cv);
 }
 
 function renderCompare(snap) {
@@ -397,10 +425,13 @@ function renderCompare(snap) {
       metaSection("O que significa pra decisão", meta.significado) +
     `</div>`;
 
-  $("cmpCols").innerHTML = compareColumn(a) + compareColumn(b);
+  $("cmpCols").innerHTML = compareColumn(a, "A") + compareColumn(b, "B");
   $("cmpCols").querySelectorAll("button.cmp-open").forEach((btn) =>
     btn.addEventListener("click", () => openRun(btn.dataset.id))
   );
+  // desenha os dois gráficos (canvas já no DOM); cada um interativo e independente
+  drawCompareChart("cmpChartA", a);
+  drawCompareChart("cmpChartB", b);
 
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   loadHistory();
@@ -547,13 +578,10 @@ function patColor(pat) {
 // Faixas do plano acionável desenhadas no gráfico: compra (verde), realização /
 // alvo (dourado), recuo a aguardar (púrpura, só quando difere da compra).
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
-let _lastChart = null;        // kept so a window resize can redraw crisply.
-let _lastActionable = null;   // plan bands drawn on the chart alongside _lastChart.
-let _view = null;             // {v0,v1} janela de candles visível; null = tudo
-let _vview = null;            // {lo,hi} janela de PREÇO (eixo Y); null = autoescala
-let _yGeom = null;            // {padT,plotH,lo,hi} da última render — base do zoom/pan vertical
-let _autoY = null;            // {lo,hi} autoescala atual — solta o _vview no zoom-out total
-let _tf = "1d";               // timeframe atualmente exibido no gráfico
+// O estado de cada gráfico (dados + janela de zoom h/v + geometria) mora no próprio
+// elemento <canvas> (canvas._chart/_actionable/_view/_vview/_yGeom/_autoY), pra que o
+// gráfico principal e os dois da comparação sejam independentes.
+let _tf = "1d";               // timeframe atualmente exibido no gráfico principal
 let _timeframes = ["1d"];     // frames operáveis do ativo aberto (cripto = escada)
 let _openDate = "";           // data da análise aberta (recomputa por timeframe)
 let _assetType = "";          // tipo do ativo aberto (cripto habilita intradiário)
@@ -569,29 +597,13 @@ const PAD_L = 8, PAD_R = 58, PAD_T = 12, PAD_B = 22;
 const ALL_TFS = [["1w", "Semanal"], ["1d", "Diário"], ["4h", "4h"], ["1h", "1h"], ["15m", "15m"]];
 const TF_LABEL = { "1w": "Semanal", "1d": "Diário", "4h": "4h", "1h": "1h", "15m": "15m" };
 
-function renderChartCard(chart, ticker, actionable) {
-  const card = $("chartCard");
-  const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
-  if (!hasData) { card.classList.add("hidden"); _lastChart = null; _lastActionable = null; return; }
-  _view = null;
-  _vview = null;   // novo gráfico (outro ativo/timeframe) recomeça na autoescala
-  card.classList.remove("hidden");
-  _lastChart = chart;
-  _lastActionable = actionable || null;
-
-  const active = chart.markers && chart.markers.active_region;
-  const pat = chart.markers && chart.markers.pattern_123;
-  card.classList.toggle("setup-active", !!active || (pat && pat.state === "acionado"));
-
-  // As faixas do plano são as mesmas do plano acionável, agora desenhadas na
-  // linha do preço em vez de repetidas em texto. buy/pullback coincidem no caso
-  // "aguardar recuo" (mesma média) — desenha-se uma só (ver drawPriceChart).
+// Legenda do gráfico (swatches das MMS/EMA + faixas do plano + 1-2-3). Extraída
+// pra ser reusada pelos mini-gráficos da comparação.
+function chartLegendHtml(chart, actionable) {
   const zones = planZones(actionable);
-
-  // legend: candles + cada MMS + faixas do plano + 1-2-3
   const wins = (chart.ma_windows || [20, 50, 200]).map(String);
   const ewins = (chart.ema_windows || []).map(String);
-  // Cor da vela (verde=alta, vermelho=baixa) é convenção universal; sem legenda.
+  const pat = chart.markers && chart.markers.pattern_123;
   const legend = [];
   wins.forEach((w) => {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
@@ -604,7 +616,30 @@ function renderChartCard(chart, ticker, actionable) {
     const [, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>1-2-3 ${escapeHtml(dlabel)}</span>`);
   }
-  $("chartLegend").innerHTML = legend.join("");
+  return legend.join("");
+}
+
+function renderChartCard(chart, ticker, actionable) {
+  const card = $("chartCard");
+  const cv = $("priceChart");
+  const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
+  if (!hasData) { card.classList.add("hidden"); if (cv) cv._chart = null; return; }
+  // Estado de zoom/pan vive no próprio canvas; novo gráfico recomeça na autoescala.
+  cv._view = null;
+  cv._vview = null;
+  cv._chart = chart;
+  cv._actionable = actionable || null;
+  card.classList.remove("hidden");
+
+  const active = chart.markers && chart.markers.active_region;
+  const pat = chart.markers && chart.markers.pattern_123;
+  card.classList.toggle("setup-active", !!active || (pat && pat.state === "acionado"));
+
+  // As faixas do plano são as mesmas do plano acionável, agora desenhadas na
+  // linha do preço em vez de repetidas em texto. buy/pullback coincidem no caso
+  // "aguardar recuo" (mesma média) — desenha-se uma só (ver drawPriceChart).
+  const zones = planZones(actionable);
+  $("chartLegend").innerHTML = chartLegendHtml(chart, actionable);
 
   // note: pt-BR summary of what's marked
   const notes = [];
@@ -622,8 +657,8 @@ function renderChartCard(chart, ticker, actionable) {
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
   $("chartNote").innerHTML = notes.join(" ");
 
-  drawPriceChart($("priceChart"), chart, _lastActionable);
-  bindChartZoom($("priceChart"));
+  drawPriceChart(cv, chart, cv._actionable);
+  bindChartZoom(cv);
 }
 
 // ---- timeframe selector ----------------------------------------------------
@@ -853,8 +888,12 @@ function drawPriceChart(canvas, chart, a) {
   const padL = PAD_L, padR = PAD_R, padT = PAD_T, padB = PAD_B;
   const plotW = cssW - padL - padR, plotH = cssH - padT - padB;
   const n = candles.length;
-  let v0 = _view ? Math.max(0, Math.min(_view.v0, n - 8)) : 0;
-  let v1 = _view ? Math.max(v0 + 8, Math.min(_view.v1, n)) : n;
+  // Zoom/pan state lives ON the canvas element, so multiple charts (the main one
+  // and the two in the comparison view) are independently interactive.
+  const view = canvas._view || null;
+  const vview = canvas._vview || null;
+  let v0 = view ? Math.max(0, Math.min(view.v0, n - 8)) : 0;
+  let v1 = view ? Math.max(v0 + 8, Math.min(view.v1, n)) : n;
   const vis = v1 - v0;
   // expõe a janela visível pra depuração/telemetria (e deixa o zoom observável)
   canvas.dataset.v0 = v0; canvas.dataset.v1 = v1; canvas.dataset.n = n;
@@ -880,9 +919,9 @@ function drawPriceChart(canvas, chart, a) {
   // MANUAL (_vview) sobrepõe quando setada — é o zoom de preço que foca nas velas
   // quando uma média distante (ex.: MMS200) estica a escala e as espreme em cima.
   // Os rótulos e gridlines do eixo Y usam lo/hi, então respeitam a janela sozinhos.
-  _autoY = { lo, hi };
-  if (_vview && _vview.hi > _vview.lo) { lo = _vview.lo; hi = _vview.hi; }
-  _yGeom = { padT, plotH, lo, hi };
+  canvas._autoY = { lo, hi };
+  if (vview && vview.hi > vview.lo) { lo = vview.lo; hi = vview.hi; }
+  canvas._yGeom = { padT, plotH, lo, hi };
   canvas.dataset.plo = lo; canvas.dataset.phi = hi;
 
   const x = (i) => padL + (i - v0 + 0.5) * (plotW / vis);
@@ -1049,25 +1088,27 @@ function drawPriceChart(canvas, chart, a) {
 function bindChartZoom(canvas) {
   if (!canvas || canvas._zoomBound) return;
   canvas._zoomBound = true;
-  const N = () => (_lastChart && _lastChart.candles ? _lastChart.candles.length : 0);
-  const redraw = () => drawPriceChart(canvas, _lastChart, _lastActionable);
-  const cur = () => _view || { v0: 0, v1: N() };
+  // Todo o estado (janela h/v, geometria) mora no próprio canvas — assim cada
+  // gráfico (o principal e os dois da comparação) tem zoom/pan independentes.
+  const N = () => (canvas._chart && canvas._chart.candles ? canvas._chart.candles.length : 0);
+  const redraw = () => drawPriceChart(canvas, canvas._chart, canvas._actionable);
+  const cur = () => canvas._view || { v0: 0, v1: N() };
 
   // zoom VERTICAL (eixo de preço), ancorado no preço sob o cursor. Espelha o
   // horizontal: roda pra cima aproxima; zoom-out total solta pra autoescala.
   function zoomVerticalWheel(e) {
-    const g = _yGeom; if (!g) return;
+    const g = canvas._yGeom; if (!g) return;
     const rect = canvas.getBoundingClientRect();
     const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
     const frac = Math.min(1, Math.max(0, (e.clientY - rect.top - PAD_T) / plotH)); // 0=topo,1=base
     const range = g.hi - g.lo;
     const anchor = g.hi - frac * range;                 // preço sob o cursor
     const factor = e.deltaY < 0 ? 0.82 : 1.22;          // roda pra cima = aproxima
-    const autoRange = _autoY ? (_autoY.hi - _autoY.lo) : range;
+    const autoRange = canvas._autoY ? (canvas._autoY.hi - canvas._autoY.lo) : range;
     const nr = range * factor;
-    if (nr >= autoRange) { _vview = null; redraw(); return; }  // zoom-out total = volta ao auto
+    if (nr >= autoRange) { canvas._vview = null; redraw(); return; }  // zoom-out total = volta ao auto
     const nhi = anchor + frac * nr;
-    _vview = { lo: nhi - nr, hi: nhi };
+    canvas._vview = { lo: nhi - nr, hi: nhi };
     redraw();
   }
 
@@ -1082,7 +1123,7 @@ function bindChartZoom(canvas) {
     const factor = e.deltaY < 0 ? 0.82 : 1.22;
     let nv = Math.max(8, Math.min(N(), Math.round(vis * factor)));
     let nv0 = Math.max(0, Math.min(Math.round(anchor - frac * nv), N() - nv));
-    _view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
+    canvas._view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
     redraw();
   }, { passive: false });
   // Ponteiros ativos (mouse OU toques). 1 dedo = arrasta/move; 2 dedos = pinça = zoom.
@@ -1108,13 +1149,13 @@ function bindChartZoom(canvas) {
     } else if (pts.size === 1) {
       const rect = canvas.getBoundingClientRect();
       const inAxis = (e.clientX - rect.left) >= (rect.width - PAD_R - 2); // faixa dos rótulos
-      if (inAxis && _yGeom) {
+      if (inAxis && canvas._yGeom) {
         // arrastar no eixo de preço = pan vertical (move a janela _vview)
-        vdrag = { y: e.clientY, lo: _yGeom.lo, hi: _yGeom.hi };
+        vdrag = { y: e.clientY, lo: canvas._yGeom.lo, hi: canvas._yGeom.hi };
         canvas.style.cursor = "ns-resize";
         drag = null;
-      } else if (_view) {
-        drag = { x: e.clientX, v0: _view.v0, v1: _view.v1 };
+      } else if (canvas._view) {
+        drag = { x: e.clientX, v0: canvas._view.v0, v1: canvas._view.v1 };
         canvas.style.cursor = "grabbing";
       }
     }
@@ -1130,7 +1171,7 @@ function bindChartZoom(canvas) {
       let nv = Math.max(8, Math.min(N(), Math.round(vis * factor)));
       const anchor = pinch.v0 + pinch.frac * vis;
       let nv0 = Math.max(0, Math.min(Math.round(anchor - pinch.frac * nv), N() - nv));
-      _view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
+      canvas._view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
       redraw();
       return;
     }
@@ -1139,7 +1180,7 @@ function bindChartZoom(canvas) {
       const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
       const range = vdrag.hi - vdrag.lo;
       const shift = (e.clientY - vdrag.y) / plotH * range;   // arrastar pra baixo = janela sobe
-      _vview = { lo: vdrag.lo + shift, hi: vdrag.hi + shift };
+      canvas._vview = { lo: vdrag.lo + shift, hi: vdrag.hi + shift };
       redraw();
       return;
     }
@@ -1148,27 +1189,32 @@ function bindChartZoom(canvas) {
       const vis = drag.v1 - drag.v0;
       const dC = Math.round((e.clientX - drag.x) / (rect.width - 66) * vis);
       let nv0 = Math.max(0, Math.min(drag.v0 - dC, N() - vis));
-      _view = { v0: nv0, v1: nv0 + vis };
+      canvas._view = { v0: nv0, v1: nv0 + vis };
       redraw();
     }
   });
   const drop = (e) => {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
-    if (pts.size === 0) { drag = null; vdrag = null; canvas.style.cursor = _view ? "grab" : "default"; }
+    if (pts.size === 0) { drag = null; vdrag = null; canvas.style.cursor = canvas._view ? "grab" : "default"; }
   };
   canvas.addEventListener("pointerup", drop);
   canvas.addEventListener("pointercancel", drop);
   // duplo-clique / duplo-toque reseta os DOIS eixos (horizontal + vertical)
-  canvas.addEventListener("dblclick", () => { _view = null; _vview = null; redraw(); });
+  canvas.addEventListener("dblclick", () => { canvas._view = null; canvas._vview = null; redraw(); });
 }
 
 // redraw on resize so the canvas stays crisp and correctly scaled
 let _resizeTimer = null;
 window.addEventListener("resize", () => {
-  if (!_lastChart) return;
   clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(() => drawPriceChart($("priceChart"), _lastChart, _lastActionable), 150);
+  // Redesenha TODOS os gráficos vivos (principal + os dois da comparação), cada um
+  // com seu próprio estado de zoom, pra ficarem nítidos e escalados após o resize.
+  _resizeTimer = setTimeout(() => {
+    document.querySelectorAll("canvas").forEach((cv) => {
+      if (cv._chart) drawPriceChart(cv, cv._chart, cv._actionable);
+    });
+  }, 150);
 });
 
 // Histórico: painel fixo no desktop, faixa recolhível no mobile. matchMedia só

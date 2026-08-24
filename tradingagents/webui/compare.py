@@ -86,6 +86,9 @@ def build_column(record: dict, method: str) -> dict:
         "trader_plan": r.get("trader_plan", "") or "",
         "erick_report": r.get("erick_report", "") or "",
         "actionable": r.get("actionable") or {},
+        # Chart of THIS reading (its own timeframe/EMA/1-2-3/bands) so the compare
+        # view can show both charts side by side (task 019).
+        "price_chart": r.get("price_chart") or {},
         "cost": record.get("cost") or {"usd": record.get("cost_usd", 0) or 0},
         "elapsed": record.get("elapsed"),
         "degraded": r.get("degraded") or [],

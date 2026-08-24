@@ -296,6 +296,13 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .cmp-verdict-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .cmp-verdict-row .verdict { font-size: 20px; padding: 6px 14px; }
+
+/* gráfico de cada análise dentro da coluna — interativo (zoom h+v, pan, reset),
+   independente do outro. Desktop lado a lado (colunas); mobile empilha e cresce. */
+.cmp-chart-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 10px 12px; margin: 2px 0 12px; }
+.cmp-chart-legend { margin-bottom: 8px; }
+.cmp-canvas { width: 100%; height: 260px; display: block; touch-action: none; cursor: default; }
+@media (max-width: 760px) { .cmp-canvas { height: 44vh; min-height: 220px; max-height: 320px; } }
 .cmp-tf { color: var(--muted); font-size: 12.5px; }
 .cmp-degraded { color: var(--amber); font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
 .cmp-err { color: var(--red); font-size: 12.5px; margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
