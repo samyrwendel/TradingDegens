@@ -21,6 +21,22 @@
 html { overflow-x: hidden; }
 img, canvas, svg, video { max-width: 100%; }
 
+/* barra de rolagem fina e discreta, combinando com o dark theme (histórico
+   lateral, blocos de código, tabelas e a página). Cinza translúcido que clareia
+   no hover; trilho quase invisível. Firefox usa scrollbar-width/color; Chrome/
+   Safari/Edge usam ::-webkit-scrollbar. Continua grabbable — só mais elegante. */
+* { scrollbar-width: thin; scrollbar-color: rgba(139, 151, 173, .32) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 151, 173, .30);
+  border-radius: 999px;
+  border: 2px solid transparent;   /* afina visualmente o thumb dentro do trilho */
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(139, 151, 173, .58); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
 body {
   margin: 0;
   background: radial-gradient(1200px 600px at 80% -10%, #16233b 0%, var(--bg) 55%);
