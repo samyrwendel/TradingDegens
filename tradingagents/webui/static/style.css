@@ -339,21 +339,29 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
   border-radius: 999px;
 }
 
-/* Calendário do ativo: dias em que ele já foi analisado */
+/* Calendário do ativo: grade de dias analisados (7 linhas × 13 semanas) */
 .asset-timeline {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   margin: 2px 0 14px;
 }
-.asset-timeline .tl-label {
+.asset-timeline .tl-label,
+.asset-timeline .cal-range {
   font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--muted, #8b93a7); margin-right: 4px;
+  color: var(--muted, #8b93a7);
 }
-.tl-day {
-  padding: 4px 9px; font: inherit; font-size: 12px;
-  color: var(--fg, #e6e9f0);
+.cal-grid { display: flex; gap: 3px; }
+.cal-col { display: grid; grid-template-rows: repeat(7, 11px); gap: 3px; }
+.cal-cell {
+  width: 11px; height: 11px; padding: 0;
+  border-radius: 2px;
+  border: 1px solid transparent;
   background: var(--panel-2, #1a1f2b);
-  border: 1px solid var(--line, #2a3040);
-  border-radius: 6px; cursor: pointer;
+  cursor: pointer;
 }
-.tl-day:hover { border-color: var(--accent, #4c9aff); }
-.tl-day.is-current { border-color: var(--accent, #4c9aff); font-weight: 700; }
+.cal-cell.is-empty { background: #161a24; cursor: default; }
+.cal-cell:not(.is-empty):hover { outline: 1px solid var(--accent, #4c9aff); }
+.cal-cell.is-current { border-color: var(--accent, #4c9aff); }
+/* cor = veredito daquele dia */
+.cal-cell.buy, .cal-cell.overweight { background: #2ea043; }
+.cal-cell.hold { background: #6b7280; }
+.cal-cell.underweight, .cal-cell.sell { background: #d1434b; }

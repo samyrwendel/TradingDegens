@@ -516,18 +516,46 @@ function renderAssetTimeline(ticker, currentId) {
   );
   if (runs.length < 2) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   el.classList.remove("hidden");
-  el.innerHTML = `<span class="tl-label">Análises anteriores</span>` +
-    runs.map((r) => {
+
+  // Grade estilo contribuições: 7 linhas (dom→sáb) × semanas. Uma faixa de
+  // botões por dia não cabe depois de algumas semanas de uso; a grade põe ~3
+  // meses num espaço fixo e o dia sem análise fica apagado.
+  const WEEKS = 13;
+  const byDay = new Map();          // "YYYY-MM-DD" -> run mais recente do dia
+  runs.forEach((r) => { if (r.date && !byDay.has(r.date)) byDay.set(r.date, r); });
+
+  const today = new Date(`${_todayManaus || runs[0].date}T12:00:00`);
+  const end = new Date(today);
+  end.setDate(end.getDate() + (6 - end.getDay()));   // fecha a semana corrente
+  const cells = [];
+  for (let i = WEEKS * 7 - 1; i >= 0; i--) {
+    const d = new Date(end);
+    d.setDate(d.getDate() - i);
+    cells.push(d.toISOString().slice(0, 10));
+  }
+
+  const cols = [];
+  for (let w = 0; w < WEEKS; w++) {
+    const days = cells.slice(w * 7, w * 7 + 7).map((iso) => {
+      const r = byDay.get(iso);
+      if (!r) return `<span class="cal-cell is-empty" title="${iso}"></span>`;
       const v = (r.verdict || r.status || "").toString();
-      const day = (r.date || "").slice(5) || "?";
       const cur = r.run_id === currentId ? " is-current" : "";
-      return `<button type="button" class="tl-day${cur} ${verdictClass(v).replace("verdict", "").trim()}" ` +
-        `data-id="${escapeHtml(r.run_id)}" title="${escapeHtml(r.date || "")} — ${escapeHtml(v)}">${escapeHtml(day)}</button>`;
+      return `<button type="button" class="cal-cell${cur} ${verdictClass(v).replace("verdict", "").trim()}" ` +
+        `data-id="${escapeHtml(r.run_id)}" title="${iso} — ${escapeHtml(v)}"></button>`;
     }).join("");
-  el.querySelectorAll(".tl-day").forEach((b) =>
+    cols.push(`<div class="cal-col">${days}</div>`);
+  }
+
+  const first = cells[0].slice(5), last = cells[cells.length - 1].slice(5);
+  el.innerHTML = `<span class="tl-label">Análises anteriores</span>` +
+    `<div class="cal-grid">${cols.join("")}</div>` +
+    `<span class="cal-range">${first} → ${last} · ${byDay.size} dia(s)</span>`;
+  el.querySelectorAll("button.cal-cell").forEach((b) =>
     b.addEventListener("click", () => openRun(b.dataset.id))
   );
 }
+
 let _todayManaus = "";
 let _historyFilter = "all";
 
