@@ -28,7 +28,7 @@ def _stub_price_chart(monkeypatch):
     and the live fetch can race the ``_wait`` deadline under load, making
     ``test_runner_persists_to_history`` and its siblings flaky in the full suite.
     """
-    monkeypatch.setattr(runner_module, "fetch_price_chart", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(runner_module, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
 
 FINAL_STATE = {
     "final_trade_decision": "Rating: Buy\nStrong conviction.",
@@ -245,9 +245,9 @@ def test_timeframe_view_recomputes_for_crypto(tmp_path, monkeypatch):
     """A valid crypto frame recomputes chart + plan on that frame (no network here:
     the two builders are stubbed)."""
     monkeypatch.setattr(runner_module, "fetch_price_chart",
-                        lambda t, d, tf="1d": {"timeframe": tf, "candles": [{"d": "x"}]})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "candles": [{"d": "x"}]})
     monkeypatch.setattr(runner_module, "fetch_actionable_plan",
-                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "ativo"})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "setup_state": "ativo"})
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path), graph_factory=_factory())
     view = runner.timeframe_view("btc-usd", "2026-08-22", "15m")
@@ -265,9 +265,9 @@ def test_timeframe_view_weekly_for_stock(tmp_path, monkeypatch):
     work for an EQUITY too (unlike intraday, which an equity has no keyless feed for)
     — it must not reject the stock with 'indisponível' (task 007)."""
     monkeypatch.setattr(runner_module, "fetch_price_chart",
-                        lambda t, d, tf="1d": {"timeframe": tf, "candles": [{"d": "2025-01-12"}]})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "candles": [{"d": "2025-01-12"}]})
     monkeypatch.setattr(runner_module, "fetch_actionable_plan",
-                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "ativo"})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "setup_state": "ativo"})
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path), graph_factory=_factory())
     view = runner.timeframe_view("AAPL", "2026-08-22", "1w")
@@ -292,11 +292,11 @@ def test_timeframe_view_falls_back_on_intraday_outage(tmp_path, monkeypatch):
     says so with a notice — never fabricates a bar (criterion 7)."""
     monkeypatch.setattr(
         runner_module, "fetch_price_chart",
-        lambda t, d, tf="1d": {"timeframe": tf, "candles": ([{"d": "x"}] if tf == "1d" else [])},
+        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "candles": ([{"d": "x"}] if tf == "1d" else [])},
     )
     monkeypatch.setattr(
         runner_module, "fetch_actionable_plan",
-        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": ("ativo" if tf == "1d" else "sem_dado")},
+        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "setup_state": ("ativo" if tf == "1d" else "sem_dado")},
     )
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path), graph_factory=_factory())
@@ -311,7 +311,7 @@ def test_timeframe_view_falls_back_on_intraday_outage(tmp_path, monkeypatch):
 def test_start_threads_timeframe_and_stamps(tmp_path, monkeypatch):
     """The requested timeframe reaches graph.propagate and is stamped on the run
     (verdict_timeframe) + the chart opens on that same frame."""
-    monkeypatch.setattr(runner_module, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(runner_module, "fetch_actionable_plan", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(runner_module, "fetch_derivatives_report", lambda t, d: "")
     seen = {}
 
@@ -414,9 +414,9 @@ def test_timeframe_view_leaves_equity_intraday_note_alone(tmp_path, monkeypatch)
     monkeypatch.setattr(runner_module, "timeframes_for_asset",
                         lambda at: ["1d", "15m"])
     monkeypatch.setattr(runner_module, "fetch_price_chart",
-                        lambda t, d, tf="1d": {"timeframe": tf, "candles": []})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "candles": []})
     monkeypatch.setattr(runner_module, "fetch_actionable_plan",
-                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "intradiario_indisponivel"})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "setup_state": "intradiario_indisponivel"})
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path), graph_factory=_factory())
     view = runner.timeframe_view("AAPL", "2026-08-22", "15m")

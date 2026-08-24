@@ -18,9 +18,9 @@ from tests.test_webui_runner import FINAL_STATE, _FakeGraph
 
 @pytest.fixture(autouse=True)
 def _stub_fetches(monkeypatch):
-    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(rm, "fetch_actionable_plan",
-                        lambda t, d, tf="1d": {"setup_state": "aguardar_pullback", "timeframe": tf})
+                        lambda t, d, tf="1d", method="padrao": {"setup_state": "aguardar_pullback", "timeframe": tf})
     monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
 
 

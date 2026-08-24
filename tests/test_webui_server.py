@@ -28,8 +28,8 @@ def _dual_factory():
 
 def _stub_enrich(monkeypatch):
     import tradingagents.webui.runner as rm
-    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
-    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
 
 
@@ -142,9 +142,9 @@ def test_chart_endpoint_recomputes_timeframe(server, monkeypatch):
     """GET /api/chart recomputes the chart + plan on the requested frame."""
     import tradingagents.webui.runner as rm
     monkeypatch.setattr(rm, "fetch_price_chart",
-                        lambda t, d, tf="1d": {"timeframe": tf, "candles": [{"d": "x"}]})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "candles": [{"d": "x"}]})
     monkeypatch.setattr(rm, "fetch_actionable_plan",
-                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "ativo"})
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "setup_state": "ativo"})
     status, body = _get(server, "/api/chart?ticker=BTC-USD&date=2026-08-22&tf=4h")
     assert status == 200
     assert body["timeframe"] == "4h"
@@ -167,8 +167,8 @@ def test_analyze_accepts_timeframe_and_stamps_verdict(server, monkeypatch):
     snapshot carries verdict_timeframe."""
     import tradingagents.webui.runner as rm
     # keep the worker hermetic: no exchange/vendor network for the crypto run
-    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
-    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
     status, body = _post(server, "/api/analyze",
                          {"ticker": "BTC-USD", "date": "2026-08-22", "timeframe": "4h"})
@@ -199,8 +199,8 @@ def test_analyze_compare_flow(server, monkeypatch):
     """POST /api/analyze with compare:true runs both readings and returns a
     compare block (two columns + meta-judge)."""
     import tradingagents.webui.runner as rm
-    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d": {})
-    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d": {})
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
     status, body = _post(server, "/api/analyze",
                          {"ticker": "AAPL", "date": "2026-08-22", "compare": True})

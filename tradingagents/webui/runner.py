@@ -128,34 +128,39 @@ def fetch_derivatives_report(ticker: str, date: str) -> str:
         return ""
 
 
-def fetch_price_chart(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> dict[str, Any]:
+def fetch_price_chart(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+                      method: str = "padrao") -> dict[str, Any]:
     """Candle + moving-average + setup-marker payload for the UI chart.
 
     ``timeframe`` selects the frame (daily default, or ``"4h"``/``"1h"``/``"15m"``
-    intraday for crypto — real keyless exchange candles). Reuses the same cached,
-    date-guarded series the detector runs on, so it is free and cannot see a future
-    candle. Fail-open: returns an empty payload on any error so a chart hiccup never
-    blocks the analysis result.
+    intraday for crypto — real keyless exchange candles). ``method`` picks the
+    average family the setup MARKERS key on (Padrão MMS / Erick EMA 8/21) so the two
+    confront columns draw different structures. Reuses the same cached, date-guarded
+    series the detector runs on, so it is free and cannot see a future candle.
+    Fail-open: returns an empty payload on any error so a chart hiccup never blocks
+    the analysis result.
     """
     try:
         from tradingagents.dataflows.price_structure import build_price_chart
-        return build_price_chart(ticker, date, timeframe=timeframe)
+        return build_price_chart(ticker, date, timeframe=timeframe, method=method)
     except Exception:
         return {}
 
 
-def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> dict[str, Any]:
+def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+                          method: str = "padrao") -> dict[str, Any]:
     """Operable levels for the verdict header (price @ analysis, horizon,
     timeframe, buy/realize/pullback zones).
 
     ``timeframe`` selects the frame (daily default, or an intraday frame for
-    crypto). Reuses the same cached, date-guarded series and the detector's own
-    structure, so it is free and cannot see a future candle. Fail-open: returns
+    crypto). ``method`` picks the average family the recuo/zones key on (Padrão MMS
+    / Erick EMA 8/21). Reuses the same cached, date-guarded series and the detector's
+    own structure, so it is free and cannot see a future candle. Fail-open: returns
     ``{}`` on any error so this enrichment never blocks the analysis result.
     """
     try:
         from tradingagents.dataflows.price_structure import build_actionable_plan_dict
-        return build_actionable_plan_dict(ticker, date, timeframe=timeframe)
+        return build_actionable_plan_dict(ticker, date, timeframe=timeframe, method=method)
     except Exception:
         return {}
 
@@ -415,14 +420,18 @@ class AnalysisRunner:
                 run.result["derivatives_report"] = fetch_derivatives_report(
                     run.ticker, run.date
                 )
+            # A estrutura desenhada é CIENTE DO MÉTODO (task 031): a coluna Erick lê o
+            # recuo/1-2-3 na EMA 8/21 (a média do método), o Padrão nas MMS — assim o
+            # confronto mostra estruturas de verdade diferentes, não o mesmo overlay 2x.
+            method = "erick" if "erick" in run.selected_analysts else "padrao"
             # The chart opens on the SAME frame the verdict was computed on, so the
             # picture matches the stamp; the UI can still recalc other frames via
             # /api/chart. Persist the ladder + the shown frame + the verdict frame.
             run.result["price_chart"] = fetch_price_chart(
-                run.ticker, run.date, run.timeframe
+                run.ticker, run.date, run.timeframe, method
             )
             run.result["actionable"] = fetch_actionable_plan(
-                run.ticker, run.date, run.timeframe
+                run.ticker, run.date, run.timeframe, method
             )
             run.result["timeframe"] = run.timeframe
             run.result["verdict_timeframe"] = run.timeframe
@@ -853,14 +862,17 @@ class AnalysisRunner:
             "tz_label": timeutil.TZ_LABEL,
         }
 
-    def timeframe_view(self, ticker: str, date: str, timeframe: str) -> dict[str, Any]:
+    def timeframe_view(self, ticker: str, date: str, timeframe: str,
+                       method: str = "padrao") -> dict[str, Any]:
         """Recompute the chart + actionable plan for ``timeframe`` on demand.
 
         Backs the ``/api/chart`` endpoint the timeframe selector calls: the region,
         1-2-3 and bands are re-detected on the chosen frame's own series (daily from
         the cached yfinance series; 4h/1h/15m from the keyless exchange for crypto).
-        Everything reuses the DA-058 caches, so flipping back to a frame already
-        fetched costs zero network.
+        ``method`` keeps the structure family consistent with the open analysis
+        (Erick EMA 8/21 / Padrão MMS) when the user flips timeframe. Everything reuses
+        the DA-058 caches, so flipping back to a frame already fetched costs zero
+        network.
 
         Honesty guards:
 
@@ -882,8 +894,8 @@ class AnalysisRunner:
                 f"(disponíveis: {', '.join(allowed)})"
             )
 
-        chart = fetch_price_chart(ticker, date, timeframe)
-        plan = fetch_actionable_plan(ticker, date, timeframe)
+        chart = fetch_price_chart(ticker, date, timeframe, method)
+        plan = fetch_actionable_plan(ticker, date, timeframe, method)
 
         degraded = False
         notice: str | None = None
@@ -900,8 +912,8 @@ class AnalysisRunner:
                 "Fonte intradiária indisponível agora — mostrando o diário. "
                 "Nenhuma barra inventada."
             )
-            chart = fetch_price_chart(ticker, date, timeframe)
-            plan = fetch_actionable_plan(ticker, date, timeframe)
+            chart = fetch_price_chart(ticker, date, timeframe, method)
+            plan = fetch_actionable_plan(ticker, date, timeframe, method)
 
         return {
             "ticker": ticker,

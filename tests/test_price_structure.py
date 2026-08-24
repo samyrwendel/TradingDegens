@@ -139,6 +139,74 @@ def test_detects_buy_region_at_average(synth):
     assert r.reaction_pct is not None and r.reaction_pct > 0
 
 
+# ------------------------------------ estrutura CIENTE DO MÉTODO (task 031) ---
+@pytest.mark.unit
+def test_method_config_maps():
+    """Padrão lê MMS (janela larga), Erick lê EMA 8/21 (timing curto)."""
+    assert ps._method_mas("padrao") == (("MMS20", "MA20"), ("MMS50", "MA50"), ("MMS200", "MA200"))
+    assert ps._method_mas("erick") == (("EMA8", "EMA8"), ("EMA21", "EMA21"))
+    assert ps._method_k("padrao") == ps._SWING_K
+    assert ps._method_k("erick") == 3
+    # método desconhecido/ausente cai no Padrão (default seguro)
+    assert ps._method_mas("qualquer") == ps._method_mas("padrao")
+    assert ps._method_k(None) == ps._SWING_K
+
+
+@pytest.mark.unit
+def test_padrao_default_is_unchanged(synth):
+    """O caminho Padrão (default) é idêntico ao de antes: MMS + k padrão. Sem o
+    argumento method, tem que dar exatamente o mesmo que method='padrao'."""
+    default = ps.detect_price_structure("SYN", CURR).as_dict()
+    padrao = ps.detect_price_structure("SYN", CURR, method="padrao").as_dict()
+    assert default == padrao
+    for r in ps.detect_price_structure("SYN", CURR, method="padrao").buy_regions:
+        assert r.ma_label.startswith("MMS")
+    act = ps.detect_price_structure("SYN", CURR, method="padrao").active_region
+    if act:
+        assert act.ma_label.startswith("MMS")
+
+
+@pytest.mark.unit
+def test_erick_keys_on_ema(synth):
+    """No método Erick a região/recuo sai da EMA 8/21 — rótulos EMA, nunca MMS."""
+    s = ps.detect_price_structure("SYN", CURR, method="erick")
+    for r in s.buy_regions:
+        assert r.ma_label.startswith("EMA")
+    if s.active_region:
+        assert s.active_region.ma_label.startswith("EMA")
+    # a família de médias do recuo mudou de verdade
+    labels_padrao = {r.ma_label for r in ps.detect_price_structure("SYN", CURR, "1d", "padrao").buy_regions}
+    labels_erick = {r.ma_label for r in s.buy_regions}
+    assert not (labels_padrao & labels_erick) or not labels_padrao or not labels_erick
+
+
+@pytest.mark.unit
+def test_actionable_plan_method_aware(synth):
+    """O plano operável do Erick ancora o buy_zone numa EMA; o do Padrão numa MMS."""
+    padrao = ps.build_actionable_plan_dict("SYN", CURR, method="padrao")
+    erick = ps.build_actionable_plan_dict("SYN", CURR, method="erick")
+    bz_p = (padrao.get("buy_zone") or {}).get("label", "")
+    bz_e = (erick.get("buy_zone") or {}).get("label", "")
+    if bz_p:
+        assert "MMS" in bz_p
+    if bz_e:
+        assert "EMA" in bz_e
+
+
+@pytest.mark.unit
+def test_chart_markers_method_aware(synth):
+    """As velas e AS DUAS famílias de média sempre são desenhadas; só os MARCADORES
+    (região/1-2-3) seguem o método — então o Erick pode marcar EMA."""
+    ch_p = ps.build_price_chart("SYN", CURR, method="padrao")
+    ch_e = ps.build_price_chart("SYN", CURR, method="erick")
+    # o payload de candles/médias é o mesmo (só marcadores mudam)
+    assert ch_p["candles"] == ch_e["candles"]
+    assert set(ch_p["ma"]) == {"20", "50", "200"} and set(ch_p["ema"]) == {"8", "21", "50"}
+    regs_e = ch_e["markers"]["buy_regions"]
+    for r in regs_e:
+        assert r["ma_label"].startswith("EMA")
+
+
 @pytest.mark.unit
 def test_nothing_is_fabricated(synth):
     """Every reported price is a real high/low of the series; every date is real."""

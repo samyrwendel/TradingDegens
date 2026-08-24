@@ -10,6 +10,7 @@ let TZ_LABEL = "GMT-4 (Manaus)";
 // última atualização da lista, e quais terminaram sozinhos (ganham "pronto").
 let _watchedRunId = "";              // run cujo progresso está na tela agora
 let _openRunId = "";                 // run simples aberto (lado A de um confronto manual)
+let _openMethod = "padrao";          // método da análise aberta (Erick EMA 8/21 / Padrão MMS) — troca de TF mantém a estrutura do método
 let _prevRunningIds = new Set();     // ids que apareciam "running" na última lista
 const _finishedFlags = new Map();    // run_id -> "done" | "error" (terminou em 2º plano)
 let _historyTimer = null;            // atualização lenta da lista (marcadores vivos)
@@ -299,6 +300,9 @@ function renderResult(snap) {
   }
 
   const r = snap.result || {};
+  // método da análise aberta: a estrutura (recuo/1-2-3) é EMA 8/21 no Erick, MMS no
+  // Padrão. Trocar de TF precisa recalcular na mesma família — daí guardar o método.
+  _openMethod = (r.erick_report && r.erick_report.trim()) ? "erick" : "padrao";
   $("verdictBadge").className = verdictClass(r.verdict);
   $("verdictBadge").innerHTML = verdictHtml(r.verdict);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
@@ -1039,7 +1043,7 @@ async function switchTimeframe(tf) {
   const note = $("chartNote");
   if (note) note.textContent = `Recalculando no ${TF_LABEL[tf] || tf}…`;
   try {
-    const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf });
+    const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf, method: _openMethod || "padrao" });
     const res = await fetch("/api/chart?" + q.toString());
     const data = await res.json();
     if (!res.ok || data.error) {

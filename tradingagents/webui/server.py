@@ -127,11 +127,14 @@ class _Handler(BaseHTTPRequestHandler):
                 ticker = (qs.get("ticker", [""])[0] or "").strip()
                 date = (qs.get("date", [""])[0] or "").strip()
                 tf = (qs.get("tf", ["1d"])[0] or "1d").strip()
+                # método da análise aberta (task 031): mantém a estrutura por método
+                # (Erick EMA 8/21 / Padrão MMS) ao trocar de timeframe.
+                method = (qs.get("method", ["padrao"])[0] or "padrao").strip().lower()
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
                 else:
                     try:
-                        self._send_json(self.runner.timeframe_view(ticker, date, tf))
+                        self._send_json(self.runner.timeframe_view(ticker, date, tf, method))
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, 400)
             else:

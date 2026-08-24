@@ -105,6 +105,33 @@ _ATR_PERIOD = 14
 _ZONE_HALF_ATR = 0.5
 _BAND_BASIS = f"±{_ZONE_HALF_ATR:g}·ATR{_ATR_PERIOD}"
 
+# Estrutura CIENTE DO MÉTODO (fork brief 24/08). O "recuo à média" que cada método
+# opera é numa família de médias DIFERENTE, então a detecção passa a keyar na média
+# do método — o confronto Padrão × Erick deixa de ser o mesmo overlay 2x:
+#   • Padrão  → MÉDIAS SIMPLES (MMS 20/50/200), como sempre;
+#   • Erick   → EMAs de timing (8/21), a média que o método realmente lê na tela.
+# Muda a MÉDIA de referência do recuo (regiões de compra/ativa) e o horizonte de
+# swing (Erick = timing mais curto → k menor → 1-2-3 e topo anterior mais recentes).
+# O que continua lido do PREÇO (velas, swings) é o mesmo — não se fabrica diferença.
+_METHOD_MAS: dict[str, tuple[tuple[str, str], ...]] = {
+    "padrao": tuple((f"MMS{w}", f"MA{w}") for w in _MA_WINDOWS),
+    "erick": tuple((f"EMA{w}", f"EMA{w}") for w in (8, 21)),
+}
+# Sensibilidade de swing por método: Erick opera timing mais curto (EMA 8/21), então
+# enxerga reversões mais recentes/apertadas; Padrão usa a janela larga de sempre.
+_METHOD_SWING_K = {"padrao": _SWING_K, "erick": 3}
+_DEFAULT_METHOD = "padrao"
+
+
+def _method_mas(method: str) -> tuple[tuple[str, str], ...]:
+    """Família de médias (rótulo, coluna) que o método usa pro recuo à média."""
+    return _METHOD_MAS.get(method or _DEFAULT_METHOD, _METHOD_MAS[_DEFAULT_METHOD])
+
+
+def _method_k(method: str) -> int:
+    """Janela de swing (look-around) do método."""
+    return _METHOD_SWING_K.get(method or _DEFAULT_METHOD, _SWING_K)
+
 
 def _atr(df: pd.DataFrame, period: int = _ATR_PERIOD) -> float | None:
     """Average true range of the last ``period`` bars, read from the real series.
@@ -280,13 +307,15 @@ def _swings(df: pd.DataFrame, k: int = _SWING_K) -> tuple[list[int], list[int]]:
     return lows, highs
 
 
-def _nearest_touched_ma(df: pd.DataFrame, i: int) -> tuple[int, float, float] | None:
-    """Return (window, ma_value, distance) for the nearest RISING MA the bar ``i``
-    pulled back into (was above it recently, low now within tolerance)."""
+def _nearest_touched_ma(
+    df: pd.DataFrame, i: int, mas: tuple[tuple[str, str], ...]
+) -> tuple[str, float, float] | None:
+    """Return (label, ma_value, distance) for the nearest RISING average (from the
+    method's family ``mas`` — (rótulo, coluna)) the bar ``i`` pulled back into (was
+    above it recently, low now within tolerance)."""
     low_i = float(df["Low"].iloc[i])
-    best: tuple[int, float, float] | None = None
-    for w in _MA_WINDOWS:
-        col = f"MA{w}"
+    best: tuple[str, float, float] | None = None
+    for label, col in mas:
         ma = df[col].iloc[i]
         if pd.isna(ma) or i < 10 or pd.isna(df[col].iloc[i - 10]):
             continue
@@ -297,27 +326,30 @@ def _nearest_touched_ma(df: pd.DataFrame, i: int) -> tuple[int, float, float] | 
         dist = (low_i - float(ma)) / float(ma)
         if rising and was_above and abs(dist) <= _TOUCH_TOL:
             if best is None or abs(dist) < abs(best[2]):
-                best = (w, float(ma), dist)
+                best = (label, float(ma), dist)
     return best
 
 
-def _buy_regions(df: pd.DataFrame, lows: list[int], fmt: str = "%Y-%m-%d") -> list[BuyRegion]:
+def _buy_regions(
+    df: pd.DataFrame, lows: list[int], mas: tuple[tuple[str, str], ...],
+    fmt: str = "%Y-%m-%d",
+) -> list[BuyRegion]:
     n = len(df)
     year_start = df["Date"].iloc[-1] - pd.Timedelta(days=365)
     out: list[BuyRegion] = []
     for i in lows:
         if df["Date"].iloc[i] < year_start:
             continue
-        touch = _nearest_touched_ma(df, i)
+        touch = _nearest_touched_ma(df, i, mas)
         if not touch:
             continue
-        w, ma, dist = touch
+        label, ma, dist = touch
         close_i = float(df["Close"].iloc[i])
         fwd = df["Close"].iloc[i + 1:min(n, i + 1 + _REACT_BARS)].astype(float)
         react = round((float(fwd.max()) / close_i - 1) * 100, 1) if len(fwd) else None
         out.append(BuyRegion(
             date=df["Date"].iloc[i].strftime(fmt),
-            ma_label=f"MMS{w}",
+            ma_label=label,
             low=round(float(df["Low"].iloc[i]), 2),
             ma_value=round(ma, 2),
             distance_pct=round(dist * 100, 1),
@@ -326,17 +358,19 @@ def _buy_regions(df: pd.DataFrame, lows: list[int], fmt: str = "%Y-%m-%d") -> li
     return out
 
 
-def _active_region(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> BuyRegion | None:
-    """Is price sitting on a rising MA *right now* (last bar)? That is the
-    actionable, live buy region the UI highlights."""
+def _active_region(
+    df: pd.DataFrame, mas: tuple[tuple[str, str], ...], fmt: str = "%Y-%m-%d"
+) -> BuyRegion | None:
+    """Is price sitting on a rising average from the method's family *right now*
+    (last bar)? That is the actionable, live buy region the UI highlights."""
     i = len(df) - 1
-    touch = _nearest_touched_ma(df, i)
+    touch = _nearest_touched_ma(df, i, mas)
     if not touch:
         return None
-    w, ma, dist = touch
+    label, ma, dist = touch
     return BuyRegion(
         date=df["Date"].iloc[i].strftime(fmt),
-        ma_label=f"MMS{w}",
+        ma_label=label,
         low=round(float(df["Low"].iloc[i]), 2),
         ma_value=round(ma, 2),
         distance_pct=round(dist * 100, 1),
@@ -409,23 +443,28 @@ def _pattern_123(
 
 
 def detect_price_structure(
-    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+    method: str = _DEFAULT_METHOD,
 ) -> PriceStructure:
     """Detect buy regions and the 1-2-3 pattern on the date-guarded series.
 
     ``timeframe`` selects the frame: ``"1d"`` (default) from the cached daily
     series, or ``"15m"``/``"1h"`` intraday from the keyless exchange (crypto only).
+    ``method`` selects the average family the "recuo à média" keys on (Padrão →
+    MMS; Erick → EMA 8/21) and the swing horizon — so the Padrão and Erick columns
+    of a confront draw genuinely different structures (fork brief 24/08).
     Propagates :class:`NoMarketDataError` (incl. :class:`IntradayUnavailableError`
     for a non-crypto intraday request) so the caller degrades to an explicit note.
     """
     fmt = _date_fmt(timeframe)
+    mas = _method_mas(method)
     df = _prep(symbol, curr_date, timeframe)
     struct = PriceStructure(symbol=symbol, as_of=str(curr_date))
     if len(df) <= 2 * _SWING_K + 1:
         return struct  # too thin to have any confirmed swing
-    lows, highs = _swings(df)
-    struct.buy_regions = _buy_regions(df, lows, fmt)
-    struct.active_region = _active_region(df, fmt)
+    lows, highs = _swings(df, _method_k(method))
+    struct.buy_regions = _buy_regions(df, lows, mas, fmt)
+    struct.active_region = _active_region(df, mas, fmt)
     struct.pattern = _pattern_123(df, lows, highs, fmt)
     return struct
 
@@ -447,7 +486,8 @@ def _fmt_region(r: BuyRegion) -> str:
 
 
 def build_price_structure_section(
-    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+    method: str = _DEFAULT_METHOD,
 ) -> str:
     """Render the 'Estrutura de preço / setups' markdown section (pt-BR).
 
@@ -455,11 +495,12 @@ def build_price_structure_section(
     an explicit note on a hard data failure. Never silence, never a fake number.
     On an intraday request for an asset with no keyless intraday candle (e.g. an
     equity) it declares "intradiário indisponível para ação" rather than invent.
+    ``method`` picks the average family the structure keys on (Padrão MMS / Erick EMA).
     """
     tf = _tf_label(timeframe)
     heading = f"## Estrutura de preço / setups — {tf}"
     try:
-        s = detect_price_structure(symbol, curr_date, timeframe)
+        s = detect_price_structure(symbol, curr_date, timeframe, method)
     except IntradayUnavailableError as exc:
         logger.info("intraday unavailable for %s (%s): %s", symbol, timeframe, exc)
         return (
@@ -542,20 +583,24 @@ def build_price_structure_section(
 
 # ----------------------------------------------------------------- chart -------
 def build_price_chart(
-    symbol: str, curr_date: str, bars: int = 260, timeframe: str = _DEFAULT_TIMEFRAME
+    symbol: str, curr_date: str, bars: int = 260, timeframe: str = _DEFAULT_TIMEFRAME,
+    method: str = _DEFAULT_METHOD,
 ) -> dict[str, Any]:
     """Compact candle + moving-average + setup-marker payload for the web UI.
 
     Returns the last ``bars`` candles of ``timeframe`` (date-guarded), the simple
     (``ma``) and exponential (``ema``) averages aligned to them (null where the
     window has no value yet), and the detected setup markers that fall inside the
-    window. Fail-open: returns an empty payload on any error (including intraday
-    unavailable) so a chart hiccup never blocks the analysis result.
+    window. The candles and BOTH average families are always drawn; ``method`` only
+    picks which family the setup MARKERS (buy regions, active region, 1-2-3) key on
+    — so Padrão and Erick columns of a confront differ (fork brief 24/08). Fail-open:
+    returns an empty payload on any error (including intraday unavailable) so a chart
+    hiccup never blocks the analysis result.
     """
     fmt = _date_fmt(timeframe)
     try:
         df = _prep(symbol, curr_date, timeframe)
-        struct = detect_price_structure(symbol, curr_date, timeframe)
+        struct = detect_price_structure(symbol, curr_date, timeframe, method)
     except Exception as exc:  # noqa: BLE001
         logger.warning("price-chart build failed for %s (%s): %s", symbol, timeframe, exc)
         return {"symbol": symbol, "timeframe": timeframe, "candles": [], "ma": {}, "ema": {}, "markers": {}}
@@ -687,15 +732,18 @@ def _nearest_overhead_high(
 
 
 def build_actionable_plan(
-    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+    method: str = _DEFAULT_METHOD,
 ) -> ActionablePlan:
     """Turn the cached series + detected structure into an operable plan.
 
     ``timeframe`` selects the frame (daily default, or ``"15m"``/``"1h"`` intraday
-    for crypto). Reuses :func:`detect_price_structure` (buy regions, live region,
-    1-2-3) and the same swings — nothing is recomputed from scratch and no number
-    is fabricated. Propagates nothing: a data failure yields a ``sem_dado`` plan
-    with ``None`` levels; a non-crypto intraday request yields an explicit
+    for crypto). ``method`` picks the average family the recuo/regiões key on (Padrão
+    MMS / Erick EMA 8/21) and the swing horizon — so a confront's two columns operate
+    each method's own zones. Reuses :func:`detect_price_structure` (buy regions, live
+    region, 1-2-3) and the same swings — nothing is recomputed from scratch and no
+    number is fabricated. Propagates nothing: a data failure yields a ``sem_dado``
+    plan with ``None`` levels; a non-crypto intraday request yields an explicit
     ``intradiario_indisponivel`` plan — never a fake read.
     """
     tf_ref = _plan_timeframe_ref(timeframe)
@@ -731,8 +779,8 @@ def build_actionable_plan(
     price = round(float(df["Close"].iloc[-1]), 2)
     as_of = df["Date"].iloc[-1].strftime(fmt)
 
-    struct = detect_price_structure(symbol, curr_date, timeframe)
-    _lows, highs = _swings(df)
+    struct = detect_price_structure(symbol, curr_date, timeframe, method)
+    _lows, highs = _swings(df, _method_k(method))
 
     # Região de compra — a RISING moving average the detector already identified.
     buy_zone = None
@@ -788,11 +836,12 @@ def build_actionable_plan(
 
 
 def build_actionable_plan_dict(
-    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+    method: str = _DEFAULT_METHOD,
 ) -> dict[str, Any]:
     """UI-facing wrapper: always returns a JSON-serializable dict, never raises."""
     try:
-        return build_actionable_plan(symbol, curr_date, timeframe).as_dict()
+        return build_actionable_plan(symbol, curr_date, timeframe, method).as_dict()
     except Exception as exc:  # noqa: BLE001
         logger.warning("actionable-plan build failed for %s: %s", symbol, exc)
         return ActionablePlan(
