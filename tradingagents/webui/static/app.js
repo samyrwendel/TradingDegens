@@ -241,9 +241,21 @@ function renderResult(snap) {
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
+  // Estado do seletor de timeframe do ativo aberto. A escada vem do backend
+  // (result.timeframes); runs antigas do histórico não a têm, então cai no
+  // padrão por tipo de ativo. Toda análise começa exibindo o diário.
+  _openDate = snap.date || "";
+  _assetType = snap.asset_type || "";
+  _tf = r.timeframe || "1d";
+  _timeframes = Array.isArray(r.timeframes) && r.timeframes.length
+    ? r.timeframes
+    : (_assetType === "crypto" ? ["1d", "4h", "1h", "15m"] : ["1d"]);
+  hideDegrade();
+
   renderHeadPrice(r.actionable);
   renderActionable(r.actionable);
   renderChartCard(r.price_chart, snap.ticker, r.actionable);
+  renderTfSelector();
 
   renderThesis("bull", r.bull);
   renderThesis("bear", r.bear);
@@ -368,6 +380,16 @@ const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
 let _lastChart = null;        // kept so a window resize can redraw crisply.
 let _lastActionable = null;   // plan bands drawn on the chart alongside _lastChart.
 let _view = null;             // {v0,v1} janela de candles visível; null = tudo
+let _tf = "1d";               // timeframe atualmente exibido no gráfico
+let _timeframes = ["1d"];     // frames operáveis do ativo aberto (cripto = escada)
+let _openDate = "";           // data da análise aberta (recomputa por timeframe)
+let _assetType = "";          // tipo do ativo aberto (cripto habilita intradiário)
+
+// Todos os frames do seletor, na ordem exibida. Um frame fora de `_timeframes`
+// (intradiário em ação) é renderizado DESABILITADO — o backend nunca inventa
+// candle pra ele; a UI só deixa claro que não é operável.
+const ALL_TFS = [["1d", "Diário"], ["4h", "4h"], ["1h", "1h"], ["15m", "15m"]];
+const TF_LABEL = { "1d": "Diário", "4h": "4h", "1h": "1h", "15m": "15m" };
 
 function renderChartCard(chart, ticker, actionable) {
   const card = $("chartCard");
@@ -423,6 +445,83 @@ function renderChartCard(chart, ticker, actionable) {
 
   drawPriceChart($("priceChart"), chart, _lastActionable);
   bindChartZoom($("priceChart"));
+}
+
+// ---- timeframe selector ----------------------------------------------------
+// Botões diário · 4h · 1h · 15m. Clicar recalcula região, 1-2-3 e faixas NAQUELE
+// tempo gráfico (via /api/chart), redesenha o gráfico e marca o frame ativo. Os
+// frames fora de `_timeframes` (intradiário em ação) ficam desabilitados — o
+// backend não inventa candle pra eles.
+function renderTfSelector() {
+  const el = $("tfSelector");
+  if (!el) return;
+  const enabled = new Set(_timeframes || ["1d"]);
+  el.innerHTML = ALL_TFS.map(([tf, label]) => {
+    const on = enabled.has(tf);
+    const active = tf === _tf;
+    const cls = ["tf-btn", active ? "is-active" : "", on ? "" : "is-off"]
+      .filter(Boolean).join(" ");
+    const title = on
+      ? `Recalcular no ${label}`
+      : "Intradiário indisponível para ação (só cripto tem candle real de exchange)";
+    return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
+      `title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  }).join("");
+  bindTfSelector();
+}
+
+function bindTfSelector() {
+  const el = $("tfSelector");
+  if (!el || el._bound) return;
+  el._bound = true;
+  el.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.tf-btn");
+    if (!btn || btn.disabled) return;
+    switchTimeframe(btn.dataset.tf);
+  });
+}
+
+function showDegrade(msg) {
+  const el = $("chartDegrade");
+  if (!el) return;
+  el.textContent = "⚠️ " + msg;
+  el.classList.remove("hidden");
+}
+function hideDegrade() {
+  const el = $("chartDegrade");
+  if (el) { el.textContent = ""; el.classList.add("hidden"); }
+}
+
+async function switchTimeframe(tf) {
+  if (!_openTicker || tf === _tf) return;
+  const prev = _tf;
+  _tf = tf;
+  renderTfSelector();                       // realce imediato no clicado
+  hideDegrade();
+  const note = $("chartNote");
+  if (note) note.textContent = `Recalculando no ${TF_LABEL[tf] || tf}…`;
+  try {
+    const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf });
+    const res = await fetch("/api/chart?" + q.toString());
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      _tf = prev; renderTfSelector();
+      if (note) note.textContent = data.error || "Falha ao recalcular timeframe.";
+      return;
+    }
+    // O backend pode ter caído pro diário (fonte intradiária fora do ar); o
+    // frame realmente exibido vem de data.timeframe, nunca uma barra inventada.
+    _tf = data.timeframe || tf;
+    if (Array.isArray(data.timeframes) && data.timeframes.length) _timeframes = data.timeframes;
+    renderTfSelector();
+    renderHeadPrice(data.actionable);
+    renderActionable(data.actionable);
+    renderChartCard(data.price_chart, _openTicker, data.actionable);
+    if (data.degraded && data.notice) showDegrade(data.notice);
+  } catch (err) {
+    _tf = prev; renderTfSelector();
+    if (note) note.textContent = "Falha ao recalcular timeframe.";
+  }
 }
 
 // The plan's operable zones, ready to draw ON the chart (price on the band edge),
@@ -528,6 +627,17 @@ function drawPriceChart(canvas, chart, a) {
     ctx.fillStyle = "#8b97ad"; ctx.textAlign = "left";
     ctx.fillText(p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 2 : 0 }), padL + plotW + 6, yy);
   }
+
+  // timeframe stamp — o frame do padrão fica escrito NO gráfico (não só no card),
+  // pra ninguém confundir um 1-2-3 de 15m com o do diário.
+  const tfText = TF_LABEL[chart.timeframe] || chart.timeframe || "Diário";
+  ctx.font = "bold 11px ui-monospace, Menlo, monospace";
+  const tfW = ctx.measureText(tfText).width + 14;
+  roundRect(ctx, padL + 2, padT + 2, tfW, 17, 4);
+  ctx.globalAlpha = 0.85; ctx.fillStyle = "#1b2130"; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = "#cdd6e4"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.fillText(tfText, padL + 9, padT + 2 + 8.5);
 
   // plan zones: translucent bands BEHIND the candles (edge labels drawn on top later)
   zones.forEach((z) => {

@@ -27,12 +27,28 @@ from tradingagents.webui.store import HistoryStore
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
 _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 
+# The chart's timeframe selector, by asset type. Crypto gets the full intraday
+# ladder (real keyless exchange candles); an equity has no keyless intraday feed,
+# so only the daily is operable — the UI shows the intraday buttons disabled
+# ("indisponível para ação") rather than inventing a bar. Daily is always first
+# and is the default frame every analysis is computed on.
+_CRYPTO_TIMEFRAMES = ("1d", "4h", "1h", "15m")
+_STOCK_TIMEFRAMES = ("1d",)
+_DEFAULT_TIMEFRAME = "1d"
+
 
 def select_analysts_for_asset(asset_type: str) -> list[str]:
     """Analyst wire-keys to run for an asset type (crypto has no fundamentals)."""
     if asset_type == "crypto":
         return [a for a in _ANALYST_ORDER if a != "fundamentals"]
     return list(_ANALYST_ORDER)
+
+
+def timeframes_for_asset(asset_type: str) -> list[str]:
+    """Operable chart timeframes for an asset type (crypto has the intraday ladder;
+    an equity only the daily). The single source of truth the UI selector and the
+    ``/api/chart`` validation both read, so they can never disagree."""
+    return list(_CRYPTO_TIMEFRAMES if asset_type == "crypto" else _STOCK_TIMEFRAMES)
 
 
 def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
@@ -88,31 +104,34 @@ def fetch_derivatives_report(ticker: str, date: str) -> str:
         return ""
 
 
-def fetch_price_chart(ticker: str, date: str) -> dict[str, Any]:
+def fetch_price_chart(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> dict[str, Any]:
     """Candle + moving-average + setup-marker payload for the UI chart.
 
-    Reuses the same cached, date-guarded daily series the engine already loaded,
-    so it is free and cannot see a future candle. Fail-open: returns an empty
-    payload on any error so a chart hiccup never blocks the analysis result.
+    ``timeframe`` selects the frame (daily default, or ``"4h"``/``"1h"``/``"15m"``
+    intraday for crypto — real keyless exchange candles). Reuses the same cached,
+    date-guarded series the detector runs on, so it is free and cannot see a future
+    candle. Fail-open: returns an empty payload on any error so a chart hiccup never
+    blocks the analysis result.
     """
     try:
         from tradingagents.dataflows.price_structure import build_price_chart
-        return build_price_chart(ticker, date)
+        return build_price_chart(ticker, date, timeframe=timeframe)
     except Exception:
         return {}
 
 
-def fetch_actionable_plan(ticker: str, date: str) -> dict[str, Any]:
+def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> dict[str, Any]:
     """Operable levels for the verdict header (price @ analysis, horizon,
     timeframe, buy/realize/pullback zones).
 
-    Reuses the same cached, date-guarded series and the detector's own structure,
-    so it is free and cannot see a future candle. Fail-open: returns ``{}`` on any
-    error so this enrichment never blocks the analysis result.
+    ``timeframe`` selects the frame (daily default, or an intraday frame for
+    crypto). Reuses the same cached, date-guarded series and the detector's own
+    structure, so it is free and cannot see a future candle. Fail-open: returns
+    ``{}`` on any error so this enrichment never blocks the analysis result.
     """
     try:
         from tradingagents.dataflows.price_structure import build_actionable_plan_dict
-        return build_actionable_plan_dict(ticker, date)
+        return build_actionable_plan_dict(ticker, date, timeframe=timeframe)
     except Exception:
         return {}
 
@@ -231,6 +250,11 @@ class AnalysisRunner:
                 )
             run.result["price_chart"] = fetch_price_chart(run.ticker, run.date)
             run.result["actionable"] = fetch_actionable_plan(run.ticker, run.date)
+            # The chart is computed on the daily frame by default; the UI can
+            # recalculate any of these frames on demand via /api/chart. Persist the
+            # ladder + the shown frame so a history reload rebuilds the selector.
+            run.result["timeframe"] = _DEFAULT_TIMEFRAME
+            run.result["timeframes"] = timeframes_for_asset(run.asset_type)
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server
@@ -304,4 +328,67 @@ class AnalysisRunner:
             "now": timeutil.stamp(),
             "tz": timeutil.TZ_NAME,
             "tz_label": timeutil.TZ_LABEL,
+        }
+
+    def timeframe_view(self, ticker: str, date: str, timeframe: str) -> dict[str, Any]:
+        """Recompute the chart + actionable plan for ``timeframe`` on demand.
+
+        Backs the ``/api/chart`` endpoint the timeframe selector calls: the region,
+        1-2-3 and bands are re-detected on the chosen frame's own series (daily from
+        the cached yfinance series; 4h/1h/15m from the keyless exchange for crypto).
+        Everything reuses the DA-058 caches, so flipping back to a frame already
+        fetched costs zero network.
+
+        Honesty guards:
+
+        * an unsupported frame for the asset (e.g. ``15m`` on an equity) is a
+          ``ValueError`` — the UI already disables those buttons;
+        * a crypto intraday **source outage** (feed down → no candle) is NOT
+          fabricated: the view degrades to the daily frame and flags ``degraded``
+          with a pt-BR ``notice`` so the UI can say so plainly.
+        """
+        ticker = (ticker or "").strip().upper()
+        date = (date or "").strip() or timeutil.today()
+        if not ticker:
+            raise ValueError("ticker vazio")
+        asset_type = self.detect_asset_type(ticker)
+        allowed = timeframes_for_asset(asset_type)
+        if timeframe not in allowed:
+            raise ValueError(
+                f"timeframe {timeframe!r} indisponível para {asset_type} "
+                f"(disponíveis: {', '.join(allowed)})"
+            )
+
+        chart = fetch_price_chart(ticker, date, timeframe)
+        plan = fetch_actionable_plan(ticker, date, timeframe)
+
+        degraded = False
+        notice: str | None = None
+        requested = timeframe
+        has_candles = bool((chart or {}).get("candles"))
+        # A crypto intraday frame that came back empty means the exchange feed is
+        # down (a non-crypto frame would have been rejected above; a genuine
+        # "intradiário indisponível para ação" plan is expected and left alone).
+        if timeframe != _DEFAULT_TIMEFRAME and not has_candles \
+                and (plan or {}).get("setup_state") != "intradiario_indisponivel":
+            degraded = True
+            timeframe = _DEFAULT_TIMEFRAME
+            notice = (
+                "Fonte intradiária indisponível agora — mostrando o diário. "
+                "Nenhuma barra inventada."
+            )
+            chart = fetch_price_chart(ticker, date, timeframe)
+            plan = fetch_actionable_plan(ticker, date, timeframe)
+
+        return {
+            "ticker": ticker,
+            "date": date,
+            "asset_type": asset_type,
+            "timeframe": timeframe,
+            "requested": requested,
+            "timeframes": allowed,
+            "degraded": degraded,
+            "notice": notice,
+            "price_chart": chart,
+            "actionable": plan,
         }

@@ -56,7 +56,7 @@ _MA_WINDOWS = (20, 50, 200)
 _EMA_WINDOWS = (8, 21, 50)
 
 # Timeframes this detector runs on. The daily/weekly frames come from the cached
-# yfinance series; the intraday frames (15m/1h) come from the keyless-exchange
+# yfinance series; the intraday frames (15m/1h/4h) come from the keyless-exchange
 # loader and only exist for crypto (see :mod:`.intraday`).
 _DEFAULT_TIMEFRAME = "1d"
 
@@ -64,6 +64,7 @@ _DEFAULT_TIMEFRAME = "1d"
 _TF_LABEL = {
     "15m": "15 minutos (intradiário)",
     "1h": "1 hora (intradiário)",
+    "4h": "4 horas (intradiário)",
     "1d": "diário",
     "1w": "semanal",
 }

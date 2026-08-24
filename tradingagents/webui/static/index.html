@@ -90,6 +90,11 @@
             <h2 class="section-title">Gráfico de candles <span class="orig">(candlestick)</span> com faixas do plano</h2>
             <div class="chart-legend" id="chartLegend"></div>
           </div>
+          <!-- Seletor de timeframe: recalcula região, 1-2-3 e faixas NAQUELE
+               tempo gráfico. Cripto tem a escada intradiária (candle real de
+               exchange); ação só o diário (intradiário aparece desabilitado). -->
+          <div class="tf-selector" id="tfSelector" role="group" aria-label="Timeframe do gráfico"></div>
+          <p class="chart-degrade hidden" id="chartDegrade"></p>
           <div class="chart-wrap">
             <span class="chart-zoom-hint">roda = zoom · arrasta = move · 2 cliques = tudo</span>
             <canvas id="priceChart"></canvas>

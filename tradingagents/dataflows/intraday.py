@@ -1,10 +1,18 @@
-"""Keyless intraday OHLCV candles — 15m / 1h — for the fork's price structure.
+"""Keyless intraday OHLCV candles — 15m / 1h / 4h — for the fork's price structure.
 
 The daily path (:func:`.stockstats_utils.load_ohlcv`, yfinance) is the whole
 timeframe story upstream: the multi-timeframe read only *resamples that daily
 series up* to weekly. The product owner, however, decides half the time on the
-**intraday** frame — 15m and 1h — and the daily series cannot be resampled *down*
-to reach it. This module adds that missing lower timeframe.
+**intraday** frame — 15m, 1h and 4h — and the daily series cannot be resampled
+*down* to reach it. This module adds those missing lower timeframes.
+
+**Why 4h is pulled straight from the exchange (not resampled 1h→4h).** Binance
+exposes ``4h`` as a *native* kline interval, so we fetch it directly: the candle
+is then aligned to the exchange's own 4h boundaries (00:00/04:00/08:00… UTC) —
+exactly the bar the product owner (and Erick) reads off Quantfury/TV. Resampling
+1h→4h in memory would (a) depend on a deep-enough 1h history and (b) risk a
+boundary/label mismatch against what the trader sees on the chart. A real native
+bar has neither problem and stays honest to "the candle the exchange printed".
 
 Scope and honesty rules (fork brief 24/08):
 
@@ -42,14 +50,16 @@ from .symbol_utils import crypto_base
 logger = logging.getLogger(__name__)
 
 # Intraday timeframes we support, mapped to Binance's kline interval strings.
-# Kept small on purpose: these are the two frames the product owner actually
-# trades (15m for timing, 1h for the intraday trend).
-INTRADAY_INTERVALS: dict[str, str] = {"15m": "15m", "1h": "1h"}
+# Kept small on purpose: these are the frames the product owner actually trades —
+# 15m for timing, 1h for the intraday trend, 4h for the swing read Erick decides
+# on. All three are NATIVE Binance intervals, so each is a real exchange bar (no
+# in-memory resampling — see the module docstring).
+INTRADAY_INTERVALS: dict[str, str] = {"15m": "15m", "1h": "1h", "4h": "4h"}
 
 _BINANCE_SPOT = "https://api.binance.com"
 _TIMEOUT = 12
-# Binance spot klines cap; ~10 days of 15m or ~41 days of 1h — deep enough for
-# MMS200 / the swing scan on the lower timeframe.
+# Binance spot klines cap; ~10 days of 15m, ~41 days of 1h or ~166 days of 4h —
+# deep enough for MMS200 / the swing scan on any supported lower timeframe.
 _KLINES_LIMIT = 1000
 
 # A current-day intraday cache older than this is refetched so a run picks up the
@@ -142,7 +152,7 @@ def _cache_is_fresh(cache_file: str, is_live: bool) -> bool:
 
 
 def load_intraday_ohlcv(symbol: str, curr_date: str, interval: str = "15m") -> pd.DataFrame:
-    """Real intraday OHLCV (15m/1h) for a crypto symbol, cached and date-guarded.
+    """Real intraday OHLCV (15m/1h/4h) for a crypto symbol, cached and date-guarded.
 
     * Non-crypto symbol -> :class:`IntradayUnavailableError` (no keyless intraday
       candle for equities), so the caller declares it unavailable, never invents.

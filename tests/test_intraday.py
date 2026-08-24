@@ -61,10 +61,10 @@ def test_unsupported_interval_rejected(cache_dir):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("interval,step", [("15m", 15), ("1h", 60)])
+@pytest.mark.parametrize("interval,step", [("15m", 15), ("1h", 60), ("4h", 240)])
 def test_crypto_intraday_returns_real_candles(cache_dir, monkeypatch, interval, step):
-    """15m and 1h both parse into a clean OHLCV frame with a datetime Date."""
-    start = datetime(2020, 1, 14, 0, 0)
+    """15m, 1h and 4h all parse into a clean OHLCV frame with a datetime Date."""
+    start = datetime(2020, 1, 10, 0, 0)
     rows = _series(start, 40, step)
     monkeypatch.setattr(it, "_binance_klines", lambda base, itv, end_ms, limit=1000: rows)
 
@@ -73,6 +73,37 @@ def test_crypto_intraday_returns_real_candles(cache_dir, monkeypatch, interval, 
     assert pd.api.types.is_datetime64_any_dtype(df["Date"])
     assert (df["High"] >= df["Low"]).all()
     assert len(df) > 10
+
+
+@pytest.mark.unit
+def test_4h_is_a_native_exchange_interval(cache_dir, monkeypatch):
+    """4h is pulled straight from Binance's NATIVE ``4h`` kline, not resampled from
+    1h — so the bar is aligned to the exchange's own 4h boundaries (fork brief
+    24/08 task 005, decision documented in intraday.py)."""
+    seen = {}
+    rows = _series(datetime(2020, 1, 10, 0, 0), 40, 240)
+
+    def capture(base, itv, end_ms, limit=1000):
+        seen["interval"] = itv
+        return rows
+
+    monkeypatch.setattr(it, "_binance_klines", capture)
+    load_intraday_ohlcv("BTC-USD", "2020-01-15", "4h")
+    assert seen["interval"] == "4h", "4h must map to Binance's native 4h interval"
+
+
+@pytest.mark.unit
+def test_4h_backtest_drops_bars_after_requested_day(cache_dir, monkeypatch):
+    """date_guard holds on 4h too: a 4h bar printed after the requested day's end
+    cannot leak into a past-dated analysis (criterion 3)."""
+    # 4h bars spanning 2020-01-15 into 2020-01-16; only D1 may survive.
+    rows = _series(datetime(2020, 1, 15, 12, 0), 12, 240)  # 12:00 D1 → into D2/D3
+    monkeypatch.setattr(it, "_binance_klines", lambda *a, **k: rows)
+
+    df = load_intraday_ohlcv("BTC-USD", "2020-01-15", "4h")
+    cutoff = pd.Timestamp("2020-01-15 23:59:59")
+    assert df["Date"].max() <= cutoff
+    assert (df["Date"].dt.date == pd.Timestamp("2020-01-15").date()).all()
 
 
 # ------------------------------------------------------------- date guard ------

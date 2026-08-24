@@ -102,3 +102,36 @@ def test_unknown_run_is_404(server):
         assert e.code == 404
         return
     raise AssertionError("expected HTTP 404")
+
+
+# ------------------------------------------------- timeframe selector (005) -----
+def test_chart_endpoint_recomputes_timeframe(server, monkeypatch):
+    """GET /api/chart recomputes the chart + plan on the requested frame."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_price_chart",
+                        lambda t, d, tf="1d": {"timeframe": tf, "candles": [{"d": "x"}]})
+    monkeypatch.setattr(rm, "fetch_actionable_plan",
+                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "ativo"})
+    status, body = _get(server, "/api/chart?ticker=BTC-USD&date=2026-08-22&tf=4h")
+    assert status == 200
+    assert body["timeframe"] == "4h"
+    assert body["price_chart"]["timeframe"] == "4h"
+    assert body["timeframes"] == ["1d", "4h", "1h", "15m"]
+
+
+def test_chart_endpoint_rejects_intraday_for_stock(server):
+    try:
+        _get(server, "/api/chart?ticker=AAPL&date=2026-08-22&tf=15m")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+        return
+    raise AssertionError("expected HTTP 400")
+
+
+def test_chart_endpoint_requires_ticker(server):
+    try:
+        _get(server, "/api/chart?tf=1d")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+        return
+    raise AssertionError("expected HTTP 400")

@@ -13,6 +13,7 @@ from tradingagents.webui.runner import (
     extract_result,
     fetch_derivatives_report,
     select_analysts_for_asset,
+    timeframes_for_asset,
 )
 from tradingagents.webui.store import HistoryStore
 
@@ -207,3 +208,91 @@ def test_runner_empty_ticker_rejected(tmp_path):
     except ValueError:
         return
     raise AssertionError("expected ValueError for empty ticker")
+
+
+# --------------------------------------------------- timeframe selector (005) ---
+def test_timeframes_for_asset_ladder():
+    """Crypto gets the intraday ladder; an equity only the daily (intraday has no
+    keyless feed). This is the single source both UI + endpoint validate against."""
+    assert timeframes_for_asset("crypto") == ["1d", "4h", "1h", "15m"]
+    assert timeframes_for_asset("stock") == ["1d"]
+
+
+def test_run_result_carries_timeframe_ladder(tmp_path):
+    """Every run persists the shown frame + the ladder so a history reload can
+    rebuild the selector."""
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    run_id = runner.start("AAPL", "2026-08-22")
+    snap = _wait(runner, run_id)
+    assert snap["result"]["timeframe"] == "1d"
+    assert snap["result"]["timeframes"] == ["1d"]
+
+
+def test_timeframe_view_recomputes_for_crypto(tmp_path, monkeypatch):
+    """A valid crypto frame recomputes chart + plan on that frame (no network here:
+    the two builders are stubbed)."""
+    monkeypatch.setattr(runner_module, "fetch_price_chart",
+                        lambda t, d, tf="1d": {"timeframe": tf, "candles": [{"d": "x"}]})
+    monkeypatch.setattr(runner_module, "fetch_actionable_plan",
+                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "ativo"})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    view = runner.timeframe_view("btc-usd", "2026-08-22", "15m")
+    assert view["asset_type"] == "crypto"
+    assert view["timeframe"] == "15m" and view["requested"] == "15m"
+    assert view["degraded"] is False and view["notice"] is None
+    assert view["price_chart"]["timeframe"] == "15m"
+    assert view["actionable"]["timeframe"] == "15m"
+    assert view["timeframes"] == ["1d", "4h", "1h", "15m"]
+    assert view["ticker"] == "BTC-USD"  # normalized upper
+
+
+def test_timeframe_view_rejects_intraday_for_stock(tmp_path):
+    """An equity has no keyless intraday — an intraday request is a ValueError (the
+    UI already disables those buttons)."""
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    with pytest.raises(ValueError):
+        runner.timeframe_view("AAPL", "2026-08-22", "15m")
+
+
+def test_timeframe_view_falls_back_on_intraday_outage(tmp_path, monkeypatch):
+    """A crypto intraday source outage (empty candles) degrades to the daily and
+    says so with a notice — never fabricates a bar (criterion 7)."""
+    monkeypatch.setattr(
+        runner_module, "fetch_price_chart",
+        lambda t, d, tf="1d": {"timeframe": tf, "candles": ([{"d": "x"}] if tf == "1d" else [])},
+    )
+    monkeypatch.setattr(
+        runner_module, "fetch_actionable_plan",
+        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": ("ativo" if tf == "1d" else "sem_dado")},
+    )
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    view = runner.timeframe_view("BTC-USD", "2026-08-22", "1h")
+    assert view["degraded"] is True
+    assert view["requested"] == "1h" and view["timeframe"] == "1d"
+    assert view["price_chart"]["candles"]  # daily fallback has candles
+    assert "indisponível" in (view["notice"] or "").lower()
+
+
+def test_timeframe_view_leaves_equity_intraday_note_alone(tmp_path, monkeypatch):
+    """When the plan itself is the expected 'intradiário indisponível para ação'
+    (equity), the view does NOT masquerade it as a daily fallback — it returns the
+    explicit unavailable read. (Defensive: the UI blocks this, but the endpoint is
+    reachable directly.)"""
+    # Force the allowed set to include an intraday frame so we reach the builders,
+    # then have the plan report the equity 'unavailable' state with empty candles.
+    monkeypatch.setattr(runner_module, "timeframes_for_asset",
+                        lambda at: ["1d", "15m"])
+    monkeypatch.setattr(runner_module, "fetch_price_chart",
+                        lambda t, d, tf="1d": {"timeframe": tf, "candles": []})
+    monkeypatch.setattr(runner_module, "fetch_actionable_plan",
+                        lambda t, d, tf="1d": {"timeframe": tf, "setup_state": "intradiario_indisponivel"})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    view = runner.timeframe_view("AAPL", "2026-08-22", "15m")
+    assert view["degraded"] is False
+    assert view["timeframe"] == "15m"
+    assert view["actionable"]["setup_state"] == "intradiario_indisponivel"

@@ -279,6 +279,29 @@ def test_intraday_crypto_structure_runs(monkeypatch):
 
 
 @pytest.mark.unit
+def test_4h_timeframe_runs_and_is_labelled(monkeypatch):
+    """The 4h frame (native exchange candle, task 005) runs the detector and stamps
+    '4 horas' on the section/chart/plan — Erick decides the 1-2-3 on 15m/4h."""
+    base = _frame()
+    ts = pd.date_range("2026-08-01 00:00", periods=len(base), freq="4h")
+    df = base.copy()
+    df["Date"] = ts.strftime("%Y-%m-%d %H:%M")
+    monkeypatch.setattr(ps, "load_intraday_ohlcv", lambda symbol, curr_date, tf: df.copy())
+
+    s = ps.detect_price_structure("BTC-USD", "2026-08-20", "4h")
+    assert s.pattern is not None
+    assert ":" in s.pattern.p1["date"]           # intraday stamp, not a bare date
+
+    chart = ps.build_price_chart("BTC-USD", "2026-08-20", timeframe="4h")
+    assert chart["timeframe"] == "4h"
+
+    section = ps.build_price_structure_section("BTC-USD", "2026-08-20", "4h")
+    assert "4 horas" in section
+    plan = ps.build_actionable_plan("BTC-USD", "2026-08-20", "4h")
+    assert "4 horas" in plan.timeframe
+
+
+@pytest.mark.unit
 def test_intraday_date_guard_no_future_bar(monkeypatch):
     """Detection on a past intraday date only sees bars up to it (criterion 4)."""
     df = _intraday_frame()

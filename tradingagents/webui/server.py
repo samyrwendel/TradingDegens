@@ -13,6 +13,7 @@ Routes:
     GET  /api/status/<run_id>  -> live run snapshot (progress, cost, result)
     GET  /api/run/<run_id>     -> alias of status (from history if needed)
     GET  /api/history          -> recent run summaries
+    GET  /api/chart            -> ?ticker=&date=&tf= -> recomputed chart + plan
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from tradingagents.webui.runner import AnalysisRunner
 
@@ -109,6 +110,18 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json(snap)
             elif path == "/api/history":
                 self._send_json({"runs": self.runner.history()})
+            elif path == "/api/chart":
+                qs = parse_qs(urlparse(self.path).query)
+                ticker = (qs.get("ticker", [""])[0] or "").strip()
+                date = (qs.get("date", [""])[0] or "").strip()
+                tf = (qs.get("tf", ["1d"])[0] or "1d").strip()
+                if not ticker:
+                    self._send_json({"error": "informe um ticker"}, 400)
+                else:
+                    try:
+                        self._send_json(self.runner.timeframe_view(ticker, date, tf))
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, 400)
             else:
                 self._send_json({"error": "não encontrado"}, 404)
         except Exception as exc:  # never leak a stack to the socket as HTML
