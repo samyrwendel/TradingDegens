@@ -21,15 +21,17 @@
 
   <main class="layout">
     <aside class="sidebar">
-      <section class="panel history-panel">
-        <h2 class="section-title">Histórico</h2>
+      <!-- No desktop é um painel fixo; no mobile vira faixa recolhível (open
+           controlado por JS ao cruzar o limiar de 900px — ver syncHistoryCollapse). -->
+      <details class="panel history-panel" id="historyPanel" open>
+        <summary class="section-title">Histórico</summary>
         <div class="h-tabs" id="historyTabs" role="tablist">
           <button type="button" class="h-tab is-active" data-filter="all">Todos</button>
           <button type="button" class="h-tab" data-filter="stock">Ações</button>
           <button type="button" class="h-tab" data-filter="crypto">Cripto</button>
         </div>
         <ul class="history" id="history"></ul>
-      </section>
+      </details>
     </aside>
 
     <div class="content">

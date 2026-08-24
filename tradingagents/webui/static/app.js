@@ -594,6 +594,8 @@ function drawPriceChart(canvas, chart, a) {
   let v0 = _view ? Math.max(0, Math.min(_view.v0, n - 8)) : 0;
   let v1 = _view ? Math.max(v0 + 8, Math.min(_view.v1, n)) : n;
   const vis = v1 - v0;
+  // expõe a janela visível pra depuração/telemetria (e deixa o zoom observável)
+  canvas.dataset.v0 = v0; canvas.dataset.v1 = v1; canvas.dataset.n = n;
 
   const zones = planZones(a);
   const price = a && a.price != null ? a.price : null;
@@ -792,24 +794,61 @@ function bindChartZoom(canvas) {
     _view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
     redraw();
   }, { passive: false });
+  // Ponteiros ativos (mouse OU toques). 1 dedo = arrasta/move; 2 dedos = pinça = zoom.
+  // No touch a roda não existe, então a pinça é o único jeito de aproximar — por isso
+  // ela precisa funcionar já a partir da visão cheia (_view null).
+  const pts = new Map();
   let drag = null;
+  let pinch = null;
+  const fracX = (clientX) => {
+    const rect = canvas.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - rect.left - 8) / (rect.width - 66)));
+  };
   canvas.addEventListener("pointerdown", (e) => {
-    if (!_view) return;
-    drag = { x: e.clientX, v0: _view.v0, v1: _view.v1 };
-    canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing";
+    if (!N()) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      const { v0, v1 } = cur();
+      pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, v0, v1, frac: fracX((a.x + b.x) / 2) };
+      drag = null;
+    } else if (pts.size === 1 && _view) {
+      drag = { x: e.clientX, v0: _view.v0, v1: _view.v1 };
+      canvas.style.cursor = "grabbing";
+    }
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const rect = canvas.getBoundingClientRect();
-    const vis = drag.v1 - drag.v0;
-    const dC = Math.round((e.clientX - drag.x) / (rect.width - 66) * vis);
-    let nv0 = Math.max(0, Math.min(drag.v0 - dC, N() - vis));
-    _view = { v0: nv0, v1: nv0 + vis };
-    redraw();
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const vis = pinch.v1 - pinch.v0;
+      const factor = pinch.dist / dist;      // dedos afastam -> factor<1 -> aproxima (zoom in)
+      let nv = Math.max(8, Math.min(N(), Math.round(vis * factor)));
+      const anchor = pinch.v0 + pinch.frac * vis;
+      let nv0 = Math.max(0, Math.min(Math.round(anchor - pinch.frac * nv), N() - nv));
+      _view = (nv >= N()) ? null : { v0: nv0, v1: nv0 + nv };
+      redraw();
+      return;
+    }
+    if (drag) {
+      const rect = canvas.getBoundingClientRect();
+      const vis = drag.v1 - drag.v0;
+      const dC = Math.round((e.clientX - drag.x) / (rect.width - 66) * vis);
+      let nv0 = Math.max(0, Math.min(drag.v0 - dC, N() - vis));
+      _view = { v0: nv0, v1: nv0 + vis };
+      redraw();
+    }
   });
-  const end = () => { drag = null; canvas.style.cursor = _view ? "grab" : "default"; };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
+  const drop = (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinch = null;
+    if (pts.size === 0) { drag = null; canvas.style.cursor = _view ? "grab" : "default"; }
+  };
+  canvas.addEventListener("pointerup", drop);
+  canvas.addEventListener("pointercancel", drop);
   canvas.addEventListener("dblclick", () => { _view = null; redraw(); });
 }
 
@@ -820,6 +859,18 @@ window.addEventListener("resize", () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => drawPriceChart($("priceChart"), _lastChart, _lastActionable), 150);
 });
+
+// Histórico: painel fixo no desktop, faixa recolhível no mobile. matchMedia só
+// dispara ao CRUZAR o limiar de 900px, então o jitter de viewport do celular
+// (barra de endereço sumindo em scroll) não fecha um painel que o usuário abriu.
+const _histMq = window.matchMedia("(max-width: 900px)");
+function syncHistoryCollapse() {
+  const p = document.getElementById("historyPanel");
+  if (p) p.open = !_histMq.matches;
+}
+syncHistoryCollapse();
+if (_histMq.addEventListener) _histMq.addEventListener("change", syncHistoryCollapse);
+else if (_histMq.addListener) _histMq.addListener(syncHistoryCollapse);
 
 // ---- polling & actions ----------------------------------------------------
 async function poll(runId) {

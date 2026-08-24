@@ -17,6 +17,10 @@
 
 * { box-sizing: border-box; }
 
+/* trava de segurança: nada rola pro lado no celular, e mídia nunca estoura */
+html { overflow-x: hidden; }
+img, canvas, svg, video { max-width: 100%; }
+
 body {
   margin: 0;
   background: radial-gradient(1200px 600px at 80% -10%, #16233b 0%, var(--bg) 55%);
@@ -240,25 +244,64 @@ details.section[open] > summary::before { content: "▾"; }
 .history .h-meta { color: var(--muted); font-size: 12.5px; font-family: var(--mono); margin-left: auto; white-space: nowrap; }
 .history .empty { color: var(--muted); border: none; background: none; cursor: default; padding: 4px 0; }
 
+/* Histórico como <details>: no desktop parece um cabeçalho comum (sem seta,
+   sempre aberto via JS); no mobile ganha a seta e vira faixa recolhível. */
+.history-panel > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.history-panel > summary::-webkit-details-marker { display: none; }
+
 .tz { color: var(--muted); text-transform: none; letter-spacing: 0; font-size: 11px; }
 .tz-note { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; }
 
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; border-top: 1px solid var(--border); }
 
-/* stack the two columns before they get cramped; history moves on top */
+/* stack the two columns before they get cramped; history vira faixa no topo */
 @media (max-width: 900px) {
   main.layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; order: 2; }
+  .sidebar { position: static; order: 1; }
+  .content { order: 2; }
   .sidebar .history { max-height: 320px; }
-  .content { order: 1; }
+  /* faixa recolhível: seta indica que abre/fecha; some o respiro do heading */
+  .history-panel > summary { margin: 0; }
+  .history-panel > summary::after { content: "▸"; margin-left: auto; color: var(--muted); font-size: 13px; }
+  .history-panel[open] > summary::after { content: "▾"; }
 }
 
 @media (max-width: 720px) {
+  /* menos padding lateral = mais largura útil no telefone */
+  main { padding: 14px 12px 40px; }
+  .panel { padding: 16px 14px; }
+
   .theses { grid-template-columns: 1fr; }
   .launcher form { flex-direction: column; align-items: stretch; }
   .field input { min-width: 0; width: 100%; }
-  #priceChart { height: 300px; }
+  #runBtn { width: 100%; }
   .act-grid { grid-template-columns: 1fr; }
+
+  /* cabeçalho do veredito empilha: ticker+veredito na 1ª linha, preço na 2ª,
+     calendário + Atualizar embaixo (nada estoura numa linha só) */
+  .result-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .head-nav { justify-content: flex-start; }
+  .verdict { font-size: 21px; padding: 8px 15px; }
+
+  /* altura do gráfico proporcional à tela, não 380px fixo */
+  #priceChart { height: 46vh; min-height: 240px; max-height: 340px; }
+
+  /* tabela larga rola dentro do próprio bloco, nunca empurra o body pro lado */
+  .md table { display: block; overflow-x: auto; max-width: 100%; }
+
+  /* dica de mouse (roda/arrasta) não faz sentido no telefone e cobre o gráfico */
+  .chart-zoom-hint { display: none; }
+}
+
+/* topo: em telas bem estreitas o pill "rede Tailscale" desce em vez de espremer */
+@media (max-width: 560px) {
+  .topbar { flex-wrap: wrap; gap: 6px 12px; padding: 14px 14px; }
+  .brand { gap: 12px; }
+}
+
+/* no touch, a dica de mouse (roda/arrasta) não faz sentido e ainda cobre o gráfico */
+@media (hover: none) and (pointer: coarse) {
+  .chart-zoom-hint { display: none; }
 }
 
 /* setup strip — SÓ o que o gráfico não desenha: estado, horizonte, timeframe.
