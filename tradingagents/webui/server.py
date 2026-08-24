@@ -53,6 +53,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        # HTML nunca é cacheado: sem isso o navegador servia a página antiga com
+        # os ?v= velhos e o usuário via "ainda não funciona" depois de um deploy.
+        # (os assets já têm cache-buster por mtime, então podem ser cacheados.)
+        if "text/html" in content_type:
+            self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 
