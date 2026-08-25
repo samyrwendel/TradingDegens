@@ -99,8 +99,9 @@ Feche com um veredito curto e operável do método: **AGIR ou AGUARDAR**, o **ti
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER** or deliverable,"
-                    " prefix your response with PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER** so the team knows to stop."
+                    " Deliver only your MODULE READING (leitura) — an input to the debate."
+                    " The single final transaction decision belongs to the portfolio manager,"
+                    " so do NOT emit a 'PROPOSTA FINAL DE TRANSAÇÃO': that would compete with the canonical verdict."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}",

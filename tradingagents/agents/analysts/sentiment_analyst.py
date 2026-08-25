@@ -85,8 +85,9 @@ def create_sentiment_analyst(llm):
                 (
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
-                    " If you or any other assistant has the PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER** or deliverable,"
-                    " prefix your response with PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER** so the team knows to stop."
+                    " Deliver only your MODULE READING (leitura) — an input to the debate."
+                    " The single final transaction decision belongs to the portfolio manager,"
+                    " so do NOT emit a 'PROPOSTA FINAL DE TRANSAÇÃO': that would compete with the canonical verdict."
                     # No tool-calling here: the data is pre-fetched into the
                     # prompt, so tool-range wording would only invite a
                     # hallucinated tool call (#1130).

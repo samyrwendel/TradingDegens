@@ -175,10 +175,14 @@ class TraderProposal(BaseModel):
 def render_trader_proposal(proposal: TraderProposal) -> str:
     """Render a TraderProposal to markdown (pt-BR).
 
-    The trailing ``PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR/MANTER/VENDER**`` line
-    is the pt-BR successor to the old English ``FINAL TRANSACTION PROPOSAL``
-    marker; the report reads fully in Portuguese and the machine-facing action
-    comes from ``proposal.action`` (structured output), not from grepping text.
+    The trader is ONE reading among several (técnico, Erick, juiz do debate); its
+    action feeds the risk debate and the portfolio manager, who owns THE final
+    decision. So the trailing line is labelled ``LEITURA DO TRADER`` — a module
+    input, explicitly NOT a competing "proposta final" — because four modules each
+    claiming a final decision left an automated consumer unable to tell which one
+    binds. The single binding verdict is the portfolio manager's (``final_decision``
+    in the run result). The machine-facing action still comes from
+    ``proposal.action`` (structured output), not from grepping text.
     """
     action = proposal.action.value
     action_pt = _ACTION_PT.get(action, action)
@@ -195,7 +199,8 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
         parts.extend(["", f"**Tamanho da Posição**: {proposal.position_sizing}"])
     parts.extend([
         "",
-        f"PROPOSTA FINAL DE TRANSAÇÃO: **{action_pt.upper()}**",
+        f"LEITURA DO TRADER (insumo pro juízo de risco, não é o veredito): "
+        f"**{action_pt.upper()}**",
     ])
     return "\n".join(parts)
 

@@ -467,7 +467,20 @@ def detect_price_structure(
     lows, highs = _swings(df, _method_k(method))
     struct.buy_regions = _buy_regions(df, lows, mas, fmt)
     struct.active_region = _active_region(df, mas, fmt)
-    struct.pattern = _pattern_123(df, lows, highs, fmt)
+    # The 1-2-3 reversal is a pure price-SWING structure — it is not "on the EMA" or
+    # "on the MMS"; the MA family the method picks only governs the buy REGIONS above.
+    # Detect the pattern on the CANONICAL swing horizon (the default method's k)
+    # regardless of `method`, so the report text (always canonical), the chart
+    # annotation and the actionable plan can never disagree on the trigger. Before
+    # this, an Erick run (k=3) drew the tighter-swing 1-2-3 on the chart (e.g. AAOI
+    # gatilho 91,50) while the report text — built canonical (k=5) — read 160,87; the
+    # reader saw two triggers for "the" pattern and a stale "acionado".
+    canonical_k = _method_k(_DEFAULT_METHOD)
+    if _method_k(method) == canonical_k:
+        p_lows, p_highs = lows, highs
+    else:
+        p_lows, p_highs = _swings(df, canonical_k)
+    struct.pattern = _pattern_123(df, p_lows, p_highs, fmt)
     return struct
 
 

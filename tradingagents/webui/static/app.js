@@ -458,13 +458,13 @@ function renderResult(snap) {
     html += `<details class="section" open><summary>🪙 Derivativos — taxa de financiamento <span class="orig">(funding)</span> · contratos em aberto <span class="orig">(open interest)</span> · liquidações <span class="orig">(liquidations)</span> (fonte nomeada)</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.derivatives_report)}</div></div></details>`;
   }
-  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa)", r.research_manager || r.investment_plan);
+  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan);
   html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report);
   html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
   html += section("💬 Sentimento", r.sentiment_report);
   if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);
-  html += section("🎯 Plano do Trader", r.trader_plan);
-  html += section("🛡️ Decisão de Risco (veredito final na íntegra)", r.risk_decision || r.final_trade_decision);
+  html += section("🎯 Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan);
+  html += section("🛡️ Decisão de Risco (veredito final na íntegra — a única decisão)", r.risk_decision || r.final_trade_decision);
   $("sections").innerHTML = html;
 
   mountAskBox($("askSingle"), snap.run_id);

@@ -21,6 +21,7 @@ from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
+from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.webui import ask as ask_module, timeutil
 from tradingagents.webui.compare import (
     build_column,
@@ -195,6 +196,13 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
     risk = final_state.get("risk_debate_state") or {}
     return {
         "verdict": signal,
+        # THE single canonical decision of the run (bug: four modules — técnico,
+        # Erick, juiz, trader — each stated a "final" action, so an automated
+        # consumer could not tell which one is binding). It is the risk/portfolio
+        # decision that already becomes ``signal``, exposed here as the pt-BR enum
+        # (COMPRAR/AUMENTAR/MANTER/REDUZIR/VENDER). The module texts are READINGS
+        # that feed this; only this field (and the verdict badge) is the veredito.
+        "final_decision": RATING_PT.get(signal, signal),
         # Sources that degraded (failed after the auto-retry) — the UI names them,
         # says the analysis ran without them, and offers a "reavaliar" control.
         "degraded": list(final_state.get("degraded_sources") or []),

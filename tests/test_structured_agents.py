@@ -41,9 +41,12 @@ class TestRenderTraderProposal:
         md = render_trader_proposal(p)
         assert "**Ação**: MANTER — Hold" in md
         assert "**Raciocínio**: Balanced setup; no edge." in md
-        # The trailing proposal line is the pt-BR successor to the old English
-        # FINAL TRANSACTION PROPOSAL marker; the report reads fully in Portuguese.
-        assert "PROPOSTA FINAL DE TRANSAÇÃO: **MANTER**" in md
+        # The trader is one READING among several; its action feeds the risk debate
+        # and the portfolio manager, who owns THE final decision. So the trailing line
+        # is labelled a LEITURA (input), never a competing "proposta final" (bug: four
+        # modules each stated a final decision, leaving a consumer unsure which binds).
+        assert "LEITURA DO TRADER (insumo pro juízo de risco, não é o veredito): **MANTER**" in md
+        assert "PROPOSTA FINAL DE TRANSAÇÃO" not in md
 
     def test_optional_fields_included_when_present(self):
         p = TraderProposal(
@@ -58,7 +61,7 @@ class TestRenderTraderProposal:
         assert "**Preço de Entrada**: 189.5" in md
         assert "**Stop Loss**: 178.0" in md
         assert "**Tamanho da Posição**: 6% of portfolio" in md
-        assert "PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR**" in md
+        assert "LEITURA DO TRADER (insumo pro juízo de risco, não é o veredito): **COMPRAR**" in md
 
     def test_optional_fields_omitted_when_absent(self):
         p = TraderProposal(action=TraderAction.SELL, reasoning="Guidance cut.")
@@ -66,7 +69,7 @@ class TestRenderTraderProposal:
         assert "Preço de Entrada" not in md
         assert "Stop Loss" not in md
         assert "Tamanho da Posição" not in md
-        assert "PROPOSTA FINAL DE TRANSAÇÃO: **VENDER**" in md
+        assert "LEITURA DO TRADER (insumo pro juízo de risco, não é o veredito): **VENDER**" in md
 
 
 @pytest.mark.unit
@@ -188,7 +191,7 @@ class TestTraderAgent:
         plan = result["trader_investment_plan"]
         assert "**Ação**: COMPRAR — Buy" in plan
         assert "**Preço de Entrada**: 189.5" in plan
-        assert "PROPOSTA FINAL DE TRANSAÇÃO: **COMPRAR**" in plan
+        assert "LEITURA DO TRADER (insumo pro juízo de risco, não é o veredito): **COMPRAR**" in plan
         # The same rendered markdown is also added to messages for downstream agents.
         assert plan in result["messages"][0].content
 

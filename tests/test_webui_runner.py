@@ -128,6 +128,26 @@ def test_extract_result_surfaces_degraded_sources():
     assert r["degraded"] == fs["degraded_sources"]
 
 
+def test_extract_result_exposes_single_canonical_final_decision():
+    """One binding decision per run in a single field — the pt-BR enum of the
+    risk/portfolio verdict (bug: four modules each stated a 'final' action)."""
+    cases = {
+        "Buy": "COMPRAR", "Overweight": "AUMENTAR", "Hold": "MANTER",
+        "Underweight": "REDUZIR", "Sell": "VENDER",
+    }
+    for signal, pt in cases.items():
+        r = extract_result(FINAL_STATE, signal)
+        assert r["final_decision"] == pt
+        # It IS the verdict — never a competing value.
+        assert r["verdict"] == signal
+
+
+def test_extract_result_final_decision_falls_back_to_signal():
+    """An unexpected signal string degrades to itself, never crashes."""
+    r = extract_result({}, "Weird")
+    assert r["final_decision"] == "Weird"
+
+
 def test_runner_completes_and_extracts(tmp_path):
     store = HistoryStore(tmp_path)
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},

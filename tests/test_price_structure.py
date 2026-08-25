@@ -195,8 +195,9 @@ def test_actionable_plan_method_aware(synth):
 
 @pytest.mark.unit
 def test_chart_markers_method_aware(synth):
-    """As velas e AS DUAS famílias de média sempre são desenhadas; só os MARCADORES
-    (região/1-2-3) seguem o método — então o Erick pode marcar EMA."""
+    """As velas e AS DUAS famílias de média sempre são desenhadas; só os marcadores
+    de REGIÃO de compra seguem o método (Erick marca EMA). O 1-2-3 é canônico e
+    igual pros dois — ver test_123_pattern_is_method_independent."""
     ch_p = ps.build_price_chart("SYN", CURR, method="padrao")
     ch_e = ps.build_price_chart("SYN", CURR, method="erick")
     # o payload de candles/médias é o mesmo (só marcadores mudam)
@@ -205,6 +206,79 @@ def test_chart_markers_method_aware(synth):
     regs_e = ch_e["markers"]["buy_regions"]
     for r in regs_e:
         assert r["ma_label"].startswith("EMA")
+
+
+def _jiggle_frame() -> pd.DataFrame:
+    """A series whose MAJOR swings sit ~8 bars apart but with small +/- jiggles every
+    ~3 bars, so the tight (Erick, k=3) swing horizon registers many extra pivots the
+    canonical (Padrão, k=5) horizon smooths away. That divergence is exactly what let
+    an Erick run draw a different 1-2-3 than the canonical report text (AAOI: chart
+    gatilho 91,50 vs texto 160,87)."""
+    import math
+    closes: list[float] = []
+    for blk in range(9):
+        base = 100 + (blk % 2) * 40             # alternate 100 / 140 major swing
+        for i in range(8):
+            closes.append(base + (i - 4) * 3 + 6 * math.sin(i * 1.1))
+    dates = pd.bdate_range("2025-01-01", periods=len(closes))
+    c = pd.Series(closes, dtype=float)
+    return pd.DataFrame({
+        "Date": dates.strftime("%Y-%m-%d"),
+        "Open": c.shift(1).fillna(c).values,
+        "High": (c * 1.01).values,
+        "Low": (c * 0.99).values,
+        "Close": c.values,
+        "Volume": [1000] * len(c),
+    })
+
+
+@pytest.mark.unit
+def test_123_pattern_is_method_independent(synth):
+    """The 1-2-3 is a pure price-SWING structure, not "on the EMA" or "on the MMS";
+    it must be IDENTICAL across methods so the report text (always canonical), the
+    chart annotation and the actionable plan can never disagree on the trigger. Bug:
+    an Erick run drew the tighter-swing 1-2-3 on the chart while the report text read
+    the canonical one — two triggers for "the" pattern."""
+    p = ps.detect_price_structure("SYN", CURR, method="padrao").pattern
+    e = ps.detect_price_structure("SYN", CURR, method="erick").pattern
+    assert p is not None and e is not None
+    assert p.as_dict() == e.as_dict()
+    # chart + actionable key on the SAME canonical trigger whatever the method
+    ch_e = ps.build_price_chart("SYN", CURR, method="erick")
+    assert ch_e["markers"]["pattern_123"]["trigger"] == p.trigger
+    plan_e = ps.build_actionable_plan_dict("SYN", CURR, method="erick")
+    assert (plan_e.get("pattern") or {}).get("trigger") == p.trigger
+    # task 031 preserved: buy-region markers still key on the method's MA family
+    labels_e = {r["ma_label"] for r in ch_e["markers"]["buy_regions"]}
+    assert not labels_e or all(lbl.startswith("EMA") for lbl in labels_e)
+
+
+@pytest.mark.unit
+def test_123_uses_canonical_swings_even_when_method_is_erick(monkeypatch):
+    """Even on a series where the tight (k=3) and canonical (k=5) swing horizons
+    genuinely diverge, an Erick detection must feed the 1-2-3 the CANONICAL swings —
+    otherwise the chart's trigger drifts from the canonical report text (the AAOI
+    91,50 vs 160,87 bug)."""
+    df = _jiggle_frame()
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
+    seen: dict[str, list[int]] = {}
+    real = ps._pattern_123
+
+    def spy(frame, lows, highs, fmt="%Y-%m-%d"):
+        seen["lows"], seen["highs"] = list(lows), list(highs)
+        return real(frame, lows, highs, fmt)
+
+    monkeypatch.setattr(ps, "_pattern_123", spy)
+    ps.detect_price_structure("SYN", CURR, method="erick")
+
+    prep = ps._prep("SYN", CURR)
+    canon_lows, canon_highs = ps._swings(prep, ps._method_k(ps._DEFAULT_METHOD))
+    tight_lows, tight_highs = ps._swings(prep, 3)
+    # the guard is real only if the two horizons actually differ on this frame
+    assert (list(canon_lows), list(canon_highs)) != (list(tight_lows), list(tight_highs))
+    # ...and the pattern was fed the CANONICAL swings, not Erick's tight ones
+    assert seen["lows"] == list(canon_lows)
+    assert seen["highs"] == list(canon_highs)
 
 
 @pytest.mark.unit
