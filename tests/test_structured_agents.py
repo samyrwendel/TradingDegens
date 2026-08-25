@@ -71,6 +71,36 @@ class TestRenderTraderProposal:
         assert "Tamanho da Posição" not in md
         assert "LEITURA DO TRADER (insumo pro juízo de risco, não é o veredito): **VENDER**" in md
 
+    def test_sell_suppresses_long_skeleton(self):
+        """The template-reuse bug: a SELL with a long entry/stop (Entrada 100/Stop 98,
+        stop BELOW entry) must NOT render a long skeleton — it is suppressed with a
+        note, since a sell/redução has no long entry/stop."""
+        p = TraderProposal(action=TraderAction.SELL, reasoning="Reduce into strength.",
+                           entry_price=100.0, stop_loss=98.0)
+        md = render_trader_proposal(p)
+        assert "Preço de Entrada" not in md
+        assert "Stop Loss" not in md
+        assert "Sem níveis de long numa venda/redução" in md
+
+    def test_sell_renders_coherent_short_levels(self):
+        """A SELL with a coherent short shape (invalidation ABOVE the reference) is
+        rendered with sell-appropriate labels, never 'Preço de Entrada'/'Stop Loss'."""
+        p = TraderProposal(action=TraderAction.SELL, reasoning="Short the failed breakout.",
+                           entry_price=113.0, stop_loss=125.0)
+        md = render_trader_proposal(p)
+        assert "**Referência de saída**: 113.0" in md
+        assert "**Invalidação (stop acima de)**: 125.0" in md
+        assert "Preço de Entrada" not in md
+
+    def test_hold_carries_no_entry_stop(self):
+        """A HOLD opens no position, so any entry/stop the model emits is dropped."""
+        p = TraderProposal(action=TraderAction.HOLD, reasoning="Wait for the trigger.",
+                           entry_price=110.0, stop_loss=100.0)
+        md = render_trader_proposal(p)
+        assert "Preço de Entrada" not in md
+        assert "Stop Loss" not in md
+        assert "Referência de saída" not in md
+
 
 @pytest.mark.unit
 class TestNullishFloatCoercion:

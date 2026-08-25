@@ -155,21 +155,84 @@ class TraderProposal(BaseModel):
     )
     entry_price: float | None = Field(
         default=None,
-        description="Optional entry price target in the instrument's quote currency.",
+        description=(
+            "Optional level in the instrument's quote currency, DIRECTION-AWARE. "
+            "For a Buy it is the long entry (with a stop BELOW it). For a Sell/reduce "
+            "it is the exit/reference level — NOT a long entry. For a Hold, leave null. "
+            "Never copy a long entry/stop skeleton onto a Sell."
+        ),
     )
     stop_loss: float | None = Field(
         default=None,
-        description="Optional stop-loss price in the instrument's quote currency.",
+        description=(
+            "Optional protective level in the quote currency, DIRECTION-AWARE. For a "
+            "Buy the stop sits BELOW the entry; for a Sell/reduce the invalidation "
+            "sits ABOVE the reference. For a Hold, leave null. A Sell must NOT carry a "
+            "stop below its entry (that is a long skeleton)."
+        ),
     )
     position_sizing: str | None = Field(
         default=None,
-        description="Optional sizing guidance, e.g. '5% of portfolio'.",
+        description=(
+            "Optional sizing guidance, e.g. '5% of portfolio' for a Buy or "
+            "'reduce to 3%' / 'trim 50%' for a Sell/reduce."
+        ),
     )
 
     @field_validator("entry_price", "stop_loss", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+
+def _trade_levels_md(action: str, entry: float | None, stop: float | None) -> list[str]:
+    """Direction-aware trade levels for the rendered proposal.
+
+    A BUY is a long: entry with a protective stop BELOW it. A SELL is a
+    reduction/short: the protective/invalidation level sits ABOVE the reference.
+    The classic template-reuse bug was a SELL rendered with a long skeleton
+    (``Entrada 100 / Stop 98`` on a sell at ~113) — structurally a long. So the
+    levels are only rendered when they are COHERENT with the direction; a mismatched
+    pair (long stop on a sell, or an inverted long) is suppressed with an explicit
+    note instead of a misleading skeleton. A HOLD opens no position → no levels.
+    Returns markdown lines already carrying their leading blank separators.
+    """
+    def line(label: str, value: float) -> list[str]:
+        return ["", f"**{label}**: {value}"]
+
+    if action == "Sell":
+        # reduction/short: a coherent protective level sits ABOVE the reference price.
+        if entry is not None and stop is not None and stop <= entry:
+            return [
+                "",
+                "_Sem níveis de long numa venda/redução: entrada/stop de compra não "
+                "se aplicam aqui. Os níveis operáveis (saída/realização) vêm do plano "
+                "do veredito._",
+            ]
+        out: list[str] = []
+        if entry is not None:
+            out += line("Referência de saída", entry)
+        if stop is not None:
+            out += line("Invalidação (stop acima de)", stop)
+        return out
+
+    if action == "Buy":
+        # long: a coherent protective stop sits BELOW the entry.
+        if entry is not None and stop is not None and stop >= entry:
+            return [
+                "",
+                "_Níveis de long incoerentes (stop ≥ entrada) omitidos — numa compra "
+                "o stop fica ABAIXO da entrada._",
+            ]
+        out = []
+        if entry is not None:
+            out += line("Preço de Entrada", entry)
+        if stop is not None:
+            out += line("Stop Loss", stop)
+        return out
+
+    # Hold: opens no position, so it carries no directional entry/stop.
+    return []
 
 
 def render_trader_proposal(proposal: TraderProposal) -> str:
@@ -183,6 +246,9 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
     binds. The single binding verdict is the portfolio manager's (``final_decision``
     in the run result). The machine-facing action still comes from
     ``proposal.action`` (structured output), not from grepping text.
+
+    Trade levels are DIRECTION-AWARE (see :func:`_trade_levels_md`): a sell/redução
+    never renders a long entry/stop skeleton.
     """
     action = proposal.action.value
     action_pt = _ACTION_PT.get(action, action)
@@ -191,10 +257,7 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
         "",
         f"**Raciocínio**: {proposal.reasoning}",
     ]
-    if proposal.entry_price is not None:
-        parts.extend(["", f"**Preço de Entrada**: {proposal.entry_price}"])
-    if proposal.stop_loss is not None:
-        parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
+    parts.extend(_trade_levels_md(action, proposal.entry_price, proposal.stop_loss))
     if proposal.position_sizing:
         parts.extend(["", f"**Tamanho da Posição**: {proposal.position_sizing}"])
     parts.extend([

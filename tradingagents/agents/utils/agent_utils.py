@@ -150,6 +150,8 @@ def build_instrument_context(
     ticker: str,
     asset_type: str = "stock",
     identity: Mapping[str, str] | None = None,
+    reference_price: float | None = None,
+    as_of: str | None = None,
 ) -> str:
     """Describe the exact instrument so agents preserve identity and ticker.
 
@@ -157,6 +159,11 @@ def build_instrument_context(
     :func:`resolve_instrument_identity`), the company name and business
     classification are injected so agents anchor to the real company rather
     than pattern-matching the price chart to a wrong one (#814).
+
+    When ``reference_price`` is provided, a single frozen as_of price is injected so
+    EVERY module anchors the same number for any current-price / market-cap statement,
+    instead of each reading its own live quote (the cross-module 113,15/112,68/113,24/
+    ~119 drift).
     """
     is_crypto = asset_type == "crypto"
     instrument_label = "asset" if is_crypto else "instrument"
@@ -192,6 +199,14 @@ def build_instrument_context(
         context += (
             " Treat it as a crypto asset rather than a company, and do not "
             "assume company fundamentals are available."
+        )
+
+    if reference_price is not None:
+        stamp = f" (as_of {as_of})" if as_of else ""
+        context += (
+            f" Reference price for this run{stamp}: {reference_price}. Use THIS single "
+            "price for any current-price or market-cap statement across all modules; "
+            "do not substitute a different live quote. Market cap = this price × shares."
         )
     return context
 

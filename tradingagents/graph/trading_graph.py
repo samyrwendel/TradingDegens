@@ -395,7 +395,9 @@ class TradingAgentsGraph:
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
 
-    def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
+    def resolve_instrument_context(
+        self, ticker: str, asset_type: str = "stock", trade_date: str | None = None
+    ) -> str:
         """Resolve ticker identity once and return the full instrument context.
 
         Deterministic yfinance lookup (cached, fail-open) injected into a
@@ -403,9 +405,27 @@ class TradingAgentsGraph:
         hallucinating one from the price chart (#814). Both the propagate()
         path and the CLI call this so the resolved identity reaches the whole
         graph regardless of entry point.
+
+        When ``trade_date`` is given, a single frozen reference price (the
+        date-guarded daily close — the SAME the chart/verdict use) is resolved and
+        injected too, so every module anchors ONE price instead of drifting off its
+        own live quote. Fail-open: a price hiccup just omits the reference line.
         """
         identity = resolve_instrument_identity(ticker)
-        return build_instrument_context(ticker, asset_type, identity)
+        reference_price = None
+        if trade_date and asset_type != "crypto":
+            try:
+                from tradingagents.dataflows.fundamentals_anchors import (
+                    as_of_reference_price,
+                )
+
+                reference_price = as_of_reference_price(ticker, trade_date)
+            except Exception:  # noqa: BLE001 — never block on the price enrichment
+                reference_price = None
+        return build_instrument_context(
+            ticker, asset_type, identity,
+            reference_price=reference_price, as_of=trade_date,
+        )
 
     def _run_signature(self, asset_type: str, timeframe: str = "1d") -> str:
         """Graph-shape inputs that must invalidate a checkpoint if changed.
@@ -493,7 +513,9 @@ class TradingAgentsGraph:
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
-        instrument_context = self.resolve_instrument_context(company_name, asset_type)
+        instrument_context = self.resolve_instrument_context(
+            company_name, asset_type, trade_date
+        )
         init_agent_state = self.propagator.create_initial_state(
             company_name,
             trade_date,

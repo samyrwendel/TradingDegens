@@ -33,6 +33,9 @@ def create_trader(llm):
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     "Anchor your reasoning in the analysts' reports and the research plan. "
+                    "Any price levels MUST match the direction: a Buy has an entry with the stop "
+                    "BELOW it; a Sell/reduce has an exit/reference with invalidation ABOVE it (never "
+                    "a long entry/stop skeleton on a sell); a Hold carries no entry/stop. "
                     + NO_EXTERNAL_TOOLS
                     + get_language_instruction()
                 ),

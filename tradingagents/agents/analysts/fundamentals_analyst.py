@@ -8,6 +8,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
 )
+from tradingagents.agents.utils.fundamentals_coverage import (
+    ensure_fundamentals_anchors_coverage,
+)
 
 
 def create_fundamentals_analyst(llm):
@@ -61,6 +64,13 @@ def create_fundamentals_analyst(llm):
 
         if len(result.tool_calls) == 0:
             report = result.content
+            # Deterministic anchors: one frozen reference price (+ market cap, 52w
+            # low/high) and TTM cash-flow aggregates summed from the quarterly table,
+            # so the module stops drifting off yfinance's live info and the debate
+            # cites numbers that reconcile with the table. Appended once the analyst
+            # has written its final answer (no pending tool call).
+            symbol = str(state["company_of_interest"])
+            report = ensure_fundamentals_anchors_coverage(report, symbol, current_date)
 
         return {
             "messages": [result],

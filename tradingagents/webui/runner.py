@@ -229,6 +229,9 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         # (price @ analysis, horizon, timeframe, buy/realize/pullback zones), all
         # from the same cached series — "sem nível definido", never a fake number.
         "actionable": {},
+        # THE single frozen reference price (date-guarded daily close); the runner
+        # fills it from ``actionable`` so cover/UI/consumers share one price.
+        "as_of_price": None,
     }
 
 
@@ -626,6 +629,10 @@ class AnalysisRunner:
             run.result["actionable"] = fetch_actionable_plan(
                 run.ticker, run.date, run.timeframe, method
             )
+            # THE single frozen reference price of the run (date-guarded daily close,
+            # the same one the chart/verdict/fundamentals-anchor use). One canonical
+            # field so the cover, UI and automated consumers never disagree on price.
+            run.result["as_of_price"] = (run.result.get("actionable") or {}).get("price")
             run.result["timeframe"] = run.timeframe
             run.result["verdict_timeframe"] = run.timeframe
             run.result["timeframes"] = timeframes_for_asset(run.asset_type)
