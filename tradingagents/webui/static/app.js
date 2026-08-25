@@ -346,6 +346,9 @@ function renderResult(snap) {
   _openRunId = snap.run_id || "";
   const rb = document.getElementById("refreshBtn");
   if (rb) rb.classList.toggle("hidden", !_openTicker);
+  // Exportar PDF só faz sentido com conteúdo real: escondido no estado de erro (abaixo).
+  const ex = document.getElementById("exportPdfBtn");
+  if (ex) ex.classList.remove("hidden");
   renderAssetTimeline(_openTicker, snap.run_id);
   renderConfrontControl(snap);
   clearInterval(pollTimer); pollTimer = null;
@@ -360,6 +363,7 @@ function renderResult(snap) {
     $("headPrice").classList.add("hidden");
     $("verdictTf").classList.add("hidden");
     $("degradedBanner").classList.add("hidden");
+    $("exportPdfBtn").classList.add("hidden");  // nada de análise pra exportar num run com erro
     $("confrontCtl").classList.add("hidden");   // não confrontar a partir de um run com erro
     // Reanálise segue disponível: uma falha (fonte fora do ar, transitório) é
     // justamente quando o usuário quer rerodar escolhendo método/TF, sem redigitar.
@@ -600,6 +604,73 @@ function renderCompare(snap) {
 
   scrollToOpen(panel);
   loadHistory();
+}
+
+// ---- Exportar PDF (imprimir → salvar como PDF) -----------------------------
+// SEM lib: usa o print-to-PDF do navegador. Os botões só chamam window.print();
+// toda a preparação (abrir relatórios colapsados, nome de arquivo) roda nos
+// eventos globais beforeprint/afterprint — assim funciona pelo botão, pelo
+// Ctrl+P nativo E pelo page.pdf() do Playwright (que dispara before/afterprint).
+let _printRestore = null;
+
+// Nome de arquivo sugerido (o navegador usa o <title>): TradingDegens_MSFT_4h_2026-08-25.
+function pdfFileName() {
+  const t = (_openTicker || "analise").toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
+  const tf = (_verdictTf || _tf || "").replace(/[^A-Za-z0-9]/g, "");
+  const d = (_openDate || "").slice(0, 10);
+  return ["TradingDegens", t, tf, d].filter(Boolean).join("_");
+}
+
+// Painel de análise VISÍVEL agora (resultado único ou comparação). Só um está
+// visível por vez; o outro carrega .hidden.
+function visibleAnalysisPanel() {
+  const cmp = $("comparePanel");
+  if (cmp && !cmp.classList.contains("hidden")) return cmp;
+  const res = $("resultPanel");
+  if (res && !res.classList.contains("hidden")) return res;
+  return null;
+}
+
+// beforeprint: abre TODOS os <details> do painel visível (pra o PDF conter a
+// análise completa), carimba o <title> pro nome do arquivo, e guarda o estado
+// pra restaurar no afterprint.
+function preparePrint() {
+  if (_printRestore) return;                 // já preparado (evento duplo)
+  const panel = visibleAnalysisPanel();
+  if (!panel) return;                        // nada de análise na tela → imprime como está
+  document.body.classList.add("printing");
+  const details = Array.from(panel.querySelectorAll("details"));
+  const prevOpen = details.map((d) => d.open);
+  details.forEach((d) => { d.open = true; });
+  const prevTitle = document.title;
+  document.title = pdfFileName();
+  _printRestore = () => {
+    details.forEach((d, i) => { d.open = prevOpen[i]; });
+    document.title = prevTitle;
+    document.body.classList.remove("printing");
+    _printRestore = null;
+  };
+}
+
+function restorePrint() {
+  if (_printRestore) _printRestore();
+}
+
+function bindExportPdf() {
+  window.addEventListener("beforeprint", preparePrint);
+  window.addEventListener("afterprint", restorePrint);
+  // matchMedia é o fallback de restauração em navegadores que não emitem
+  // afterprint depois do diálogo (garante que os <details> voltem ao estado).
+  if (window.matchMedia) {
+    const mq = window.matchMedia("print");
+    const onChange = (e) => { if (!e.matches) restorePrint(); };
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  }
+  const single = $("exportPdfBtn");
+  if (single) single.addEventListener("click", () => window.print());
+  const cmp = $("exportPdfCmpBtn");
+  if (cmp) cmp.addEventListener("click", () => window.print());
 }
 
 // ---- Q&A ancorado sobre a análise aberta (task 027) ------------------------
@@ -2540,6 +2611,7 @@ function init() {
   bindReeval();
   bindConfront();
   bindReanalyzeBar();
+  bindExportPdf();
   loadHistory().then(openLatestRun);
   startHistoryAutoRefresh();
 }

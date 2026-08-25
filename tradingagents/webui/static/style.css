@@ -1019,3 +1019,97 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 @media (max-width: 640px) {
   .owner-login-row input { min-width: 0; width: 100%; }
 }
+
+/* ---- Botão "Exportar PDF" (imprimir → salvar como PDF) --------------------- */
+.export-pdf-btn {
+  padding: 8px 14px;
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.export-pdf-btn:hover { color: var(--text); border-color: var(--accent); background: var(--panel-2); }
+.cmp-export { margin-left: auto; }   /* empurra o botão pra direita do cmp-head */
+
+/* ===========================================================================
+   IMPRESSÃO → PDF (task 016). O "Salvar como PDF" do navegador; zero lib.
+   Estratégia: tema CLARO na impressão (branco/texto escuro) pra legibilidade em
+   qualquer impressora e independente da opção "imprimir cores de fundo"; cores de
+   veredito/tese preservadas com print-color-adjust. O JS abre os <details> antes
+   de imprimir (beforeprint) e restaura depois. Só a análise VISÍVEL sai — o outro
+   painel já carrega .hidden. Uma coluna (retrato), sem corte feio nos blocos.
+   =========================================================================== */
+@media print {
+  /* recolore o app pro branco reaproveitando as variáveis (o chrome todo usa var()) */
+  :root {
+    --bg: #ffffff; --panel: #ffffff; --panel-2: #ffffff;
+    --border: #c9ced8; --text: #0b0d12; --muted: #454b59;
+    --accent: #1a56db; --dim: #5b6270;
+    --green: #157347; --red: #c1121f; --yellow: #8a6100;
+    /* algumas superfícies usam var(--fg / --line / --line-strong) com fallback
+       ESCURO — recolore-as pro claro também (senão o ticker/bordas somem no branco) */
+    --fg: #0b0d12; --line: #c9ced8; --line-strong: #b3b9c4;
+  }
+  @page { margin: 12mm; }
+  html, body {
+    background: #fff !important; color: #0b0d12 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  /* fora da impressão: topo, config, launcher, progresso, faixa de reanálise,
+     histórico lateral, Q&A, rodapé, navegação/ações, dicas e seletores do gráfico */
+  .topbar, .config-panel, .launcher, .progress-panel, .reanalyze-bar,
+  .sidebar, .ask-box, footer,
+  .head-nav, .tf-selector, .reeval-btn, .confront-ctl, .refresh-btn,
+  .chart-zoom-hint, .chart-degrade, .degraded-banner,
+  .cmp-col-actions, .cmp-open, .export-pdf-btn { display: none !important; }
+
+  /* página inteira, sem colunas laterais nem molduras escuras */
+  .layout, .content, .result-stage { display: block !important; }
+  .panel {
+    background: #fff !important; border: none !important; box-shadow: none !important;
+    padding: 0 !important; margin: 0 0 8px !important;
+  }
+  .stage-main, .stage-rail { width: auto !important; max-width: none !important; }
+
+  /* uma coluna no retrato — teses e colunas do confronto empilham (sem corte feio) */
+  .theses { display: block !important; }
+  .thesis { margin-bottom: 10px; }
+  .cmp-cols { display: block !important; }
+  .cmp-col { width: 100% !important; margin-bottom: 16px; }
+
+  /* superfícies e texto legíveis no branco */
+  details.section, .thesis, .chart-card, .actionable, .meta-judge, .cmp-col {
+    background: #fff !important; border: 1px solid #c9ced8 !important;
+  }
+  .section-body { background: #fff !important; }
+  .md, .md p, .md li, .md td { color: #14181f !important; }
+  .md h1, .md h2, .md h3, .md h4, .md strong, .md th { color: #000 !important; }
+  .md code, .md pre { background: #f0f1f4 !important; color: #14181f !important; }
+  .md th { background: #eceef2 !important; }
+
+  /* cores de FUNÇÃO preservadas (veredito/teses/meta-juiz) mesmo com fundo branco */
+  .verdict, .verdict-tf, .thesis.bull, .thesis.bear, .mj-head,
+  .cmp-verdict-row .verdict, .chart-legend {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  /* o gráfico (canvas) TEM que aparecer — nunca escondido; altura fixa que cabe */
+  .chart-card { display: block !important; }
+  .chart-wrap { width: 100% !important; }
+  #priceChart, .cmp-canvas { width: 100% !important; height: 300px !important; display: block !important; }
+
+  /* quebras de página sensatas: não parte o bloco no meio */
+  details.section, .thesis, .chart-card, .mj-sec, .cmp-col, .meta-judge,
+  .actionable, .chart-wrap { break-inside: avoid; page-break-inside: avoid; }
+  .result-head, .cmp-head, .section-title { break-after: avoid; page-break-after: avoid; }
+
+  /* cinto+suspensório: garante o conteúdo dos <details> abertos visível na impressão */
+  details[open] > *:not(summary) { display: block !important; }
+}

@@ -199,6 +199,9 @@
               <button type="button" class="confront-btn" id="confrontBtn" title="Meta-juiz sobre as duas análises">⚖️ Confrontar</button>
             </div>
             <button type="button" class="refresh-btn hidden" id="refreshBtn" title="Roda de novo com os dados de hoje">↻ Atualizar</button>
+            <!-- Exportar PDF: abre o diálogo de impressão do navegador já formatado
+                 (só a análise, relatórios expandidos) → "Salvar como PDF". Sem lib. -->
+            <button type="button" class="export-pdf-btn hidden" id="exportPdfBtn" title="Exportar esta análise como PDF (imprimir → salvar como PDF)">⤓ Exportar PDF</button>
           </div>
         </div>
         <div class="result-meta" id="resultMeta"></div>
@@ -269,6 +272,8 @@
         <div class="cmp-head">
           <div class="asset-name" id="cmpAsset">—</div>
           <div class="result-meta" id="cmpMeta"></div>
+          <!-- Exportar PDF da comparação (as duas colunas + meta-juiz). -->
+          <button type="button" class="export-pdf-btn cmp-export" id="exportPdfCmpBtn" title="Exportar a comparação como PDF (imprimir → salvar como PDF)">⤓ Exportar PDF</button>
         </div>
         <div class="meta-judge" id="metaJudge"></div>
         <div class="cmp-cols" id="cmpCols"></div>
