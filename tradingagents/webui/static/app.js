@@ -1014,8 +1014,13 @@ function bindReeval() {
 // só o TF muda. Reusa o método (Erick/Padrão) marcado no launcher.
 function reevaluate(tf) {
   if (!_openTicker) return;
-  const et = $("erickToggle");
-  const method = et && et.checked ? "erick" : "padrao";
+  // O método da reavaliação é o da análise ABERTA (_openMethod), não o checkbox do
+  // launcher: abrir uma análise Erick pelo histórico/confronto NÃO marca o checkbox,
+  // então reavaliar (aqui e no reavaliar-com-fontes) tem que continuar Erick — mesma
+  // verdade que a troca de TF do gráfico (switchTimeframe usa _openMethod). Com uma
+  // análise aberta _openMethod sempre existe (o guard acima garante); cai em 'padrao'
+  // só na ausência de análise aberta.
+  const method = _openMethod || "padrao";
   $("resultPanel").classList.add("hidden");
   $("steps").innerHTML = "";
   renderProgress({
