@@ -15,6 +15,48 @@ let _prevRunningIds = new Set();     // ids que apareciam "running" na última l
 const _finishedFlags = new Map();    // run_id -> "done" | "error" (terminou em 2º plano)
 let _historyTimer = null;            // atualização lenta da lista (marcadores vivos)
 
+// ---- BYOK: config de LLM do usuário (traga sua chave) -----------------------
+// A chave vive SÓ no navegador (localStorage) e viaja por header X-LLM-Key —
+// nunca em querystring, nunca gravada no servidor. Sem chave, o servidor usa a
+// env dele (fallback). O restante (provider/modelo/base_url) vai no corpo do POST.
+const _LLM_CFG_KEY = "td_llm_cfg";
+let _llmCfg = {};              // { provider, apiKey, deepModel, quickModel, baseUrl }
+let _llmMeta = null;           // catálogo de providers vindo de /api/config
+
+function loadLlmCfg() {
+  try { _llmCfg = JSON.parse(localStorage.getItem(_LLM_CFG_KEY) || "{}") || {}; }
+  catch (e) { _llmCfg = {}; }
+  return _llmCfg;
+}
+function saveLlmCfg(cfg) {
+  _llmCfg = cfg || {};
+  try { localStorage.setItem(_LLM_CFG_KEY, JSON.stringify(_llmCfg)); } catch (e) { /* quota */ }
+}
+
+// Header + campos de corpo pra uma requisição que roda LLM (analyze/compare/ask).
+// A chave SÓ no header; provider/modelo/base_url só quando o usuário definiu.
+function llmRequestParts() {
+  const c = _llmCfg || {};
+  const headers = { "Content-Type": "application/json" };
+  if (c.apiKey) headers["X-LLM-Key"] = c.apiKey;
+  const body = {};
+  if (c.provider) body.llm_provider = c.provider;
+  if (c.deepModel) body.deep_think_llm = c.deepModel;
+  if (c.quickModel) body.quick_think_llm = c.quickModel;
+  if (c.baseUrl) body.backend_url = c.baseUrl;
+  return { headers, body };
+}
+
+// POST que carrega a config BYOK. Drop-in pros fetch de /api/analyze|compare|ask.
+function apiPost(url, payload) {
+  const { headers, body } = llmRequestParts();
+  return fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...(payload || {}), ...body }),
+  });
+}
+
 // The engine emits the canonical English 5-tier rating (Buy / Overweight / Hold
 // / Underweight / Sell). On screen we show the *practical meaning* in pt-BR —
 // what to actually do — and keep the original jargon in gray beside it for
@@ -579,11 +621,7 @@ async function askQuestion(runId, question, thread, form) {
   const btn = form && form.querySelector(".ask-send");
   if (btn) btn.disabled = true;
   try {
-    const res = await fetch("/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ run_id: runId, question }),
-    });
+    const res = await apiPost("/api/ask", { run_id: runId, question });
     const data = await res.json().catch(() => ({}));
     entry.pending = false;
     if (!res.ok || data.error) {
@@ -636,10 +674,7 @@ async function confront(a, b) {
   if (!a || !b) return;
   $("formError").textContent = "";
   try {
-    const res = await fetch("/api/compare", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ a, b }),
-    });
+    const res = await apiPost("/api/compare", { a, b });
     const snap = await res.json();
     if (!res.ok) { $("formError").textContent = snap.error || "falha ao confrontar"; return; }
     // Par Padrão × Erick já pronto (mesmo frame/data): confronto direto, reusa as
@@ -730,11 +765,7 @@ function runReanalyze(method, tf) {
     status: "running", ticker: _openTicker, elapsed: 0, cost: null,
     progress: { phase: "Inicializando", label: boot, percent: 2, plan: [], reached: [] },
   });
-  fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ticker: _openTicker, date, method: m, compare, timeframe: tf || "1d" }),
-  })
+  apiPost("/api/analyze", { ticker: _openTicker, date, method: m, compare, timeframe: tf || "1d" })
     .then((r) => r.json())
     .then((data) => {
       if (data && data.run_id) { watchRun(data.run_id); loadHistory(); }
@@ -1027,11 +1058,7 @@ function reevaluate(tf) {
     status: "running", ticker: _openTicker, elapsed: 0, cost: null,
     progress: { phase: "Inicializando", label: `Reavaliando no ${TF_LABEL[tf] || tf}…`, percent: 2, plan: [], reached: [] },
   });
-  fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ticker: _openTicker, date: _openDate || "", method, timeframe: tf }),
-  })
+  apiPost("/api/analyze", { ticker: _openTicker, date: _openDate || "", method, timeframe: tf })
     .then((r) => r.json())
     .then((data) => {
       if (data && data.run_id) { watchRun(data.run_id); loadHistory(); }
@@ -1622,11 +1649,7 @@ async function startAnalysis(ev) {
   $("comparePanel").classList.add("hidden");
   $("steps").innerHTML = "";
   try {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker, date, method, compare }),
-    });
+    const res = await apiPost("/api/analyze", { ticker, date, method, compare });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");
     const boot = compare ? "Comparando Padrão × Erick…" : "Subindo o motor…";
@@ -1866,6 +1889,8 @@ async function applyConfig() {
     if (cfg.today) { _todayManaus = cfg.today; $("date").value = cfg.today; }
     $("tzLabel").textContent = "(" + TZ_LABEL + ")";
     $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
+    if (cfg.llm) { _llmMeta = cfg.llm; renderConfigPanel(); }
+    updateConfigBadge();
   } catch (e) {
     // fallback: browser-local date if the server is unreachable at boot
     $("date").value = new Date().toLocaleDateString("en-CA");
@@ -1904,8 +1929,142 @@ async function fetchTickerSuggest(term) {
   } catch (e) { /* fonte fora do ar: segue sem sugestão */ }
 }
 
+// ---- BYOK: painel de configuração (provedor + chave) ------------------------
+function _providerMeta(id) {
+  const list = (_llmMeta && _llmMeta.providers) || [];
+  return list.find((p) => p.id === id) || null;
+}
+
+// Preenche o <select> de provedores e reflete a config salva nos campos.
+function renderConfigPanel() {
+  const sel = $("cfgProvider");
+  if (!sel || !_llmMeta) return;
+  const list = _llmMeta.providers || [];
+  const cur = _llmCfg.provider || _llmMeta.default_provider || "openai";
+  sel.innerHTML = list.map((p) =>
+    `<option value="${escapeHtml(p.id)}"${p.id === cur ? " selected" : ""}>${escapeHtml(p.label)}</option>`
+  ).join("");
+  $("cfgKey").value = _llmCfg.apiKey || "";
+  $("cfgQuick").value = _llmCfg.quickModel || "";
+  $("cfgDeep").value = _llmCfg.deepModel || "";
+  $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
+  syncProviderFields(cur);
+  updateConfigBadge();
+}
+
+// Mostra o campo Base URL só pros provedores que precisam (Ollama/self-host),
+// atualiza placeholders de modelo com o padrão do provedor e a nota de fallback.
+function syncProviderFields(provId) {
+  const p = _providerMeta(provId);
+  const needsBase = !!(p && p.needs_base_url);
+  $("cfgBaseUrlField").classList.toggle("hidden", !needsBase);
+  if (p) {
+    $("cfgQuick").placeholder = p.default_quick || "(nome do modelo)";
+    $("cfgDeep").placeholder = p.default_deep || "(nome do modelo)";
+  }
+  const st = $("cfgStatus");
+  if (st && !st.dataset.sticky) {
+    if (p && p.key_optional) st.textContent = "provedor local — chave opcional";
+    else if (p && p.server_key) st.textContent = "servidor tem chave de fallback pra este provedor";
+    else st.textContent = "";
+  }
+}
+
+// Rótulo do botão da engrenagem: mostra se está com chave própria ou a do servidor.
+function updateConfigBadge() {
+  const lbl = $("configBtnLabel");
+  if (!lbl) return;
+  if (_llmCfg.apiKey) {
+    const prov = _llmCfg.provider || (_llmMeta && _llmMeta.default_provider) || "";
+    lbl.textContent = prov ? `chave: ${prov}` : "chave própria";
+    $("configBtn").classList.add("has-key");
+  } else {
+    lbl.textContent = "Chaves";
+    $("configBtn").classList.remove("has-key");
+  }
+  // Linha "ativo" dentro do painel.
+  const act = $("cfgActive");
+  if (act) {
+    if (_llmCfg.apiKey) {
+      const prov = _llmCfg.provider || (_llmMeta && _llmMeta.default_provider) || "?";
+      act.textContent = `Ativo: sua chave · ${prov}` +
+        (_llmCfg.quickModel ? ` · ${_llmCfg.quickModel}` : "");
+    } else if (_llmMeta) {
+      act.textContent = `Ativo: chave do servidor · ${_llmMeta.default_provider} · ${_llmMeta.default_quick || ""}`;
+    } else {
+      act.textContent = "";
+    }
+  }
+}
+
+function _readConfigForm() {
+  const provId = $("cfgProvider").value;
+  const p = _providerMeta(provId);
+  return {
+    provider: provId,
+    apiKey: $("cfgKey").value.trim(),
+    quickModel: $("cfgQuick").value.trim(),
+    deepModel: $("cfgDeep").value.trim(),
+    baseUrl: (p && p.needs_base_url) ? $("cfgBaseUrl").value.trim() : "",
+  };
+}
+
+function setCfgStatus(msg, kind) {
+  const st = $("cfgStatus");
+  if (!st) return;
+  st.textContent = msg || "";
+  st.className = "cfg-status" + (kind ? " " + kind : "");
+  st.dataset.sticky = msg ? "1" : "";
+}
+
+function bindConfig() {
+  const toggle = () => $("configPanel").classList.toggle("hidden");
+  $("configBtn").addEventListener("click", toggle);
+  $("configClose").addEventListener("click", () => $("configPanel").classList.add("hidden"));
+  $("cfgProvider").addEventListener("change", (e) => { setCfgStatus(""); syncProviderFields(e.target.value); });
+  $("cfgSave").addEventListener("click", () => {
+    saveLlmCfg(_readConfigForm());
+    setCfgStatus("salvo ✓", "ok");
+    updateConfigBadge();
+  });
+  $("cfgClear").addEventListener("click", () => {
+    saveLlmCfg({});
+    renderConfigPanel();
+    setCfgStatus("agora usa a chave do servidor", "ok");
+  });
+  $("cfgTest").addEventListener("click", testKey);
+}
+
+// "Testar chave": UMA chamada barata ao /api/test-key com a config do formulário
+// (não precisa salvar antes). Diz ✅ válida / ❌ erro — sem rodar análise.
+async function testKey() {
+  const form = _readConfigForm();
+  const btn = $("cfgTest");
+  btn.disabled = true;
+  setCfgStatus("testando…", "");
+  const headers = { "Content-Type": "application/json" };
+  if (form.apiKey) headers["X-LLM-Key"] = form.apiKey;
+  const body = { llm_provider: form.provider };
+  if (form.quickModel) body.quick_think_llm = form.quickModel;
+  if (form.baseUrl) body.backend_url = form.baseUrl;
+  try {
+    const res = await fetch("/api/test-key", {
+      method: "POST", headers, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.ok) setCfgStatus(`✅ válida — ${data.provider} · ${data.model || ""}`, "ok");
+    else setCfgStatus(`❌ ${data.error || "chave inválida"}`, "err");
+  } catch (e) {
+    setCfgStatus("❌ erro de rede", "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function init() {
+  loadLlmCfg();
   applyConfig();
+  bindConfig();
   $("analyzeForm").addEventListener("submit", startAnalysis);
   $("ticker").addEventListener("input", () => {
     const t = $("ticker").value.trim().toUpperCase();

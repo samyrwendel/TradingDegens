@@ -12,6 +12,12 @@ Routes:
     POST /api/analyze          -> {ticker, date[, compare]} -> {run_id}
     POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
     POST /api/ask              -> {run_id, question} -> grounded Q&A over a run
+    POST /api/test-key         -> {} + X-LLM-Key header -> {ok, provider, model}
+
+BYOK (traga sua chave): /analyze, /compare, /ask e /test-key aceitam a chave do
+usuário no header ``X-LLM-Key`` (nunca em querystring) e provider/modelo/base_url
+no corpo do POST. A chave é usada só em memória pra aquela run e nunca é
+persistida/logada; sem chave, cai na env do servidor (ver runner.apply_llm_overrides).
     GET  /api/status/<run_id>  -> live run snapshot (progress, cost, result)
     GET  /api/run/<run_id>     -> alias of status (from history if needed)
     GET  /api/runs?status=running -> live in-process runs (em andamento)
@@ -97,6 +103,38 @@ class _Handler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
 
+    # -- BYOK -----------------------------------------------------------------
+    def _llm_overrides(self, body: dict) -> dict:
+        """Overrides de LLM da requisição (BYOK): a CHAVE vem no header
+        ``X-LLM-Key`` (nunca em querystring — não vaza em log de acesso); provider,
+        modelos e base_url vêm no corpo do POST. Só campos preenchidos entram.
+
+        A chave é usada em memória pra montar o client daquela run e NUNCA é
+        gravada/logada/persistida — o ``log_message`` do handler é no-op e o record
+        do histórico é montado por campos nomeados, sem a config/chave."""
+        ov: dict = {}
+        key = (self.headers.get("X-LLM-Key") or "").strip()
+        if key:
+            ov["api_key"] = key
+        prov = (body.get("llm_provider") or "").strip()
+        if prov:
+            ov["provider"] = prov.lower()
+        for bkey, okey in (("deep_think_llm", "deep_model"),
+                           ("quick_think_llm", "quick_model"),
+                           ("backend_url", "base_url")):
+            val = (body.get(bkey) or "").strip()
+            if val:
+                ov[okey] = val
+        return ov
+
+    def _redact_key(self, text: str) -> str:
+        """Redige a chave BYOK (header ``X-LLM-Key``) de um texto de erro antes de
+        devolvê-lo — o SDK do provedor pode ecoar a chave numa exceção."""
+        key = (self.headers.get("X-LLM-Key") or "").strip()
+        if key and text:
+            return text.replace(key, "***")
+        return text
+
     # -- routing --------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         path = urlparse(self.path).path
@@ -172,13 +210,19 @@ class _Handler(BaseHTTPRequestHandler):
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
                     return
+                # BYOK: a chave/provider/modelo do usuário viajam por header+corpo e
+                # valem só pra ESTA run (chave do usuário > env do servidor).
+                overrides = self._llm_overrides(body)
                 # "comparar Padrão × Erick" (Fase 3): roda as duas leituras + meta-juiz.
                 if body.get("compare"):
-                    run_id = self.runner.start_compare(ticker, date, timeframe=timeframe)
+                    run_id = self.runner.start_compare(
+                        ticker, date, timeframe=timeframe, overrides=overrides
+                    )
                     self._send_json({"run_id": run_id})
                     return
                 run_id = self.runner.start(
-                    ticker, date, method=method or "padrao", timeframe=timeframe
+                    ticker, date, method=method or "padrao", timeframe=timeframe,
+                    overrides=overrides,
                 )
                 self._send_json({"run_id": run_id})
             elif path == "/api/compare":
@@ -187,7 +231,7 @@ class _Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 a = (body.get("a") or "").strip()
                 b = (body.get("b") or "").strip()
-                self._send_json(self.runner.confront(a, b))
+                self._send_json(self.runner.confront(a, b, overrides=self._llm_overrides(body)))
             elif path == "/api/ask":
                 # Q&A ancorado (task 027): pergunta em linguagem natural sobre uma
                 # run JÁ computada; responde com os NÍVEIS reais dela (price_structure)
@@ -198,17 +242,23 @@ class _Handler(BaseHTTPRequestHandler):
                 if not run_id:
                     self._send_json({"error": "informe o run_id"}, 400)
                     return
-                answer = self.runner.ask(run_id, question)
+                answer = self.runner.ask(run_id, question, overrides=self._llm_overrides(body))
                 if answer is None:
                     self._send_json({"error": "execução desconhecida"}, 404)
                 else:
                     self._send_json(answer)
+            elif path == "/api/test-key":
+                # BYOK: valida a chave/config efetiva com UMA chamada barata, sem
+                # rodar análise. A chave vem no header X-LLM-Key; a resposta diz só
+                # ok/erro (erro já redigido da chave), nunca ecoa a chave.
+                body = self._read_json_body()
+                self._send_json(self.runner.test_key(self._llm_overrides(body)))
             else:
                 self._send_json({"error": "não encontrado"}, 404)
         except ValueError as exc:
-            self._send_json({"error": str(exc)}, 400)
+            self._send_json({"error": self._redact_key(str(exc))}, 400)
         except Exception as exc:
-            self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+            self._send_json({"error": self._redact_key(f"{type(exc).__name__}: {exc}")}, 500)
 
     def log_message(self, fmt, *args) -> None:  # keep the journal readable
         pass

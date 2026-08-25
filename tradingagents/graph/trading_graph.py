@@ -89,6 +89,13 @@ class TradingAgentsGraph:
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
 
+        # BYOK: a per-run LLM API key may ride in the config dict (the webui injects
+        # the key a user brought). It must feed the LLM clients but NEVER enter the
+        # shared global config (set_config keeps a process-wide singleton that other
+        # runs read) or be persisted — pull it out into an instance attr first, so
+        # two concurrent users can't clobber each other's key through the global.
+        self._llm_api_key = self._pop_llm_api_key(self.config)
+
         # Update the interface's config
         set_config(self.config)
 
@@ -155,10 +162,30 @@ class TradingAgentsGraph:
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
 
+    @staticmethod
+    def _pop_llm_api_key(config: Any) -> str | None:
+        """BYOK: remove and return a per-run ``llm_api_key`` from ``config``.
+
+        Called before :func:`set_config` so the key feeds the LLM clients (as an
+        explicit kwarg) but never lands in the process-wide global config that other
+        runs read, and is never written to any persisted record. Mutating the dict
+        here is intended — the caller passes a per-run copy."""
+        if isinstance(config, dict):
+            return config.pop("llm_api_key", None) or None
+        return None
+
     def _get_provider_kwargs(self) -> dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
         kwargs = {}
         provider = self.config.get("llm_provider", "").lower()
+
+        # BYOK: forward the per-run key (pulled out of config in __init__) as an
+        # explicit client kwarg. It takes precedence over the server env key and,
+        # for key-required providers, satisfies the "key present" check without one.
+        # getattr guards callers that build the graph without __init__ (tests).
+        llm_api_key = getattr(self, "_llm_api_key", None)
+        if llm_api_key:
+            kwargs["api_key"] = llm_api_key
 
         if provider == "google":
             thinking_level = self.config.get("google_thinking_level")

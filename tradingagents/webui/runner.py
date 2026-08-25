@@ -11,6 +11,7 @@ run analyses at once.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -47,6 +48,81 @@ _DEFAULT_TIMEFRAME = "1d"
 
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
 _MAX_QUESTION_CHARS = 500
+
+
+# --- BYOK: chave de API por-usuário (provider/model/base_url/api_key por-run) ----
+# A chave vive no navegador do usuário e chega por requisição; o servidor a usa só
+# em memória pra montar o client daquela run e NUNCA grava/loga/persiste (ver
+# _persist / store: o record é montado por campos nomeados, sem a config/chave). O
+# fallback (sem chave do usuário) é a env do servidor. Sem estado global: cada run
+# monta sua própria config efetiva; o TradingAgentsGraph tira a chave da config
+# antes do set_config global, então dois usuários não misturam chave.
+
+def _redact_secret(text: str, secret: str | None) -> str:
+    """Troca toda ocorrência de ``secret`` em ``text`` por ``***`` (segurança BYOK).
+
+    Aplicada a qualquer erro/trace ANTES de sair do processo, pra um SDK de
+    provedor que ecoe a chave numa exceção jamais vazá-la num run record, no
+    histórico ou numa resposta de API."""
+    if not secret:
+        return text or ""
+    return (text or "").replace(secret, "***")
+
+
+def _provider_default_models(provider: str) -> tuple[str | None, str | None]:
+    """(deep, quick) padrão do provedor pelo catálogo de modelos.
+
+    Usado quando o usuário troca de provedor mas deixa o modelo em branco: manter
+    o modelo OpenAI do servidor numa chave Anthropic só daria 404. Retorna
+    ``(None, None)`` pra provedores custom-only (ollama/openrouter/
+    openai_compatible) — ali o usuário precisa nomear o modelo."""
+    try:
+        from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+    except Exception:
+        return None, None
+    opts = MODEL_OPTIONS.get((provider or "").lower())
+    if not isinstance(opts, dict):
+        return None, None
+    deep_list = opts.get("deep") or []
+    quick_list = opts.get("quick") or []
+    deep = deep_list[0][1] if deep_list else None
+    quick = quick_list[0][1] if quick_list else None
+    return deep, quick
+
+
+def apply_llm_overrides(base_config: dict[str, Any],
+                        overrides: dict[str, Any] | None) -> dict[str, Any]:
+    """Config efetiva = base_config + overrides BYOK da requisição (dict novo).
+
+    Chaves reconhecidas (todas opcionais): ``provider``, ``deep_model``,
+    ``quick_model``, ``base_url``, ``api_key``. Vazio/ausente cai no config do
+    servidor (usuário sem chave roda na env do servidor — a chave que o grafo lê
+    quando ``llm_api_key`` está ausente). Trocar de provedor sem nomear modelo
+    puxa o padrão do catálogo daquele provedor, pra o modelo casar com a chave.
+    O dict retornado nunca é persistido; a ``api_key`` fica só em memória."""
+    config = dict(base_config)
+    ov = overrides or {}
+    provider = (ov.get("provider") or "").strip().lower()
+    if provider:
+        prev_provider = (config.get("llm_provider") or "").lower()
+        config["llm_provider"] = provider
+        if provider != prev_provider:
+            deep, quick = _provider_default_models(provider)
+            if deep:
+                config["deep_think_llm"] = deep
+            if quick:
+                config["quick_think_llm"] = quick
+    if ov.get("deep_model"):
+        config["deep_think_llm"] = ov["deep_model"]
+    if ov.get("quick_model"):
+        config["quick_think_llm"] = ov["quick_model"]
+    if ov.get("base_url"):
+        config["backend_url"] = ov["base_url"]
+    if ov.get("api_key"):
+        # Consumida pelo TradingAgentsGraph (que a tira do config antes do global)
+        # e pelo _answer_llm; jamais entra no record persistido.
+        config["llm_api_key"] = ov["api_key"]
+    return config
 
 
 def select_analysts_for_asset(asset_type: str, include_erick: bool = False) -> list[str]:
@@ -208,12 +284,17 @@ class _Run:
     """In-memory state for a single analysis run."""
 
     def __init__(self, run_id: str, ticker: str, date: str, asset_type: str,
-                 selected_analysts: list[str], timeframe: str = _DEFAULT_TIMEFRAME):
+                 selected_analysts: list[str], timeframe: str = _DEFAULT_TIMEFRAME,
+                 overrides: dict[str, Any] | None = None):
         self.run_id = run_id
         self.ticker = ticker
         self.date = date
         self.asset_type = asset_type
         self.selected_analysts = selected_analysts
+        # BYOK: overrides de LLM da requisição (provider/model/base_url/api_key).
+        # SÓ em memória, nunca persistido — o record em _persist é montado por
+        # campos nomeados, sem tocar nisto.
+        self.overrides = overrides or {}
         # Reference frame the market analyst reads for THIS run (task 012). Stamped
         # on the verdict and used as the chart's opening frame.
         self.timeframe = timeframe or _DEFAULT_TIMEFRAME
@@ -309,12 +390,15 @@ class _CompareRun:
     UI renders side by side.
     """
 
-    def __init__(self, run_id, ticker, date, asset_type, timeframe):
+    def __init__(self, run_id, ticker, date, asset_type, timeframe,
+                 overrides: dict[str, Any] | None = None):
         self.run_id = run_id
         self.ticker = ticker
         self.date = date
         self.asset_type = asset_type
         self.timeframe = timeframe
+        # BYOK: overrides de LLM da requisição, propagados a cada lado do confronto.
+        self.overrides = overrides or {}
         self.status = "running"
         self.error: str | None = None
         self.result: dict[str, Any] | None = None
@@ -391,7 +475,8 @@ class AnalysisRunner:
         return detect_asset_type(ticker).value
 
     def start(self, ticker: str, date: str, method: str = "padrao",
-              timeframe: str = _DEFAULT_TIMEFRAME) -> str:
+              timeframe: str = _DEFAULT_TIMEFRAME,
+              overrides: dict[str, Any] | None = None) -> str:
         """Kick off an analysis; returns a run_id to poll immediately.
 
         ``method="erick"`` adds the on-demand Erick-method analyst to the run
@@ -426,7 +511,8 @@ class AnalysisRunner:
             asset_type, include_erick=(method == "erick")
         )
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
-        run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe)
+        run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe,
+                   overrides=overrides)
         with self._lock:
             self._runs[run_id] = run
         threading.Thread(target=self._worker, args=(run,), daemon=True).start()
@@ -450,7 +536,10 @@ class AnalysisRunner:
         """
         final_status = "error"
         try:
-            config = dict(self.base_config)
+            # Config efetiva da run: base do servidor + overrides BYOK (chave do
+            # usuário tem prioridade; sem chave, cai na env do servidor). O grafo
+            # tira ``llm_api_key`` do dict antes do set_config global.
+            config = apply_llm_overrides(self.base_config, run.overrides)
             progress_cb = ProgressCallbackHandler(run.tracker)
             graph = self._graph_factory(
                 config, run.selected_analysts, [run.usage_cb, progress_cb]
@@ -483,8 +572,11 @@ class AnalysisRunner:
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server
-            run.error = f"{type(exc).__name__}: {exc}"
-            run.result = {"trace": traceback.format_exc()[-3000:]}
+            # BYOK: redige a chave do usuário de erro/trace antes de qualquer
+            # persistência ou resposta — um SDK pode ecoar a chave numa exceção.
+            secret = run.overrides.get("api_key")
+            run.error = _redact_secret(f"{type(exc).__name__}: {exc}", secret)
+            run.result = {"trace": _redact_secret(traceback.format_exc()[-3000:], secret)}
         run.finished_at = time.time()
         run.finished_stamp = timeutil.stamp()
         return final_status
@@ -519,7 +611,8 @@ class AnalysisRunner:
 
     # ----------------------------------------------------- compare (Fase 3) ----
     def start_compare(self, ticker: str, date: str,
-                      timeframe: str = _DEFAULT_TIMEFRAME) -> str:
+                      timeframe: str = _DEFAULT_TIMEFRAME,
+                      overrides: dict[str, Any] | None = None) -> str:
         """Kick off a Padrão × Erick comparison; returns a run_id to poll.
 
         Runs both readings (reusing a cached prior run for either side when one
@@ -543,7 +636,8 @@ class AnalysisRunner:
                 f"(disponíveis: {', '.join(allowed)})"
             )
         run_id = timeutil.run_id_stamp() + "-cmp" + uuid.uuid4().hex[:4]
-        crun = _CompareRun(run_id, ticker, date, asset_type, timeframe)
+        crun = _CompareRun(run_id, ticker, date, asset_type, timeframe,
+                           overrides=overrides)
         with self._lock:
             self._runs[run_id] = crun
         threading.Thread(target=self._compare_worker, args=(crun,), daemon=True).start()
@@ -601,7 +695,7 @@ class AnalysisRunner:
         selected = select_analysts_for_asset(crun.asset_type, include_erick=want_erick)
         sub_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         sub = _Run(sub_id, crun.ticker, crun.date, crun.asset_type, selected,
-                   timeframe=crun.timeframe)
+                   timeframe=crun.timeframe, overrides=crun.overrides)
         # Not registered in ``_runs``: the compare run's coarse progress already
         # covers it, so it should not appear as a second live item. It is still
         # persisted below, so it shows in history and is reusable afterwards.
@@ -682,7 +776,8 @@ class AnalysisRunner:
             }
         return self.store.get(run_id)
 
-    def confront(self, id_a: str, id_b: str) -> dict[str, Any]:
+    def confront(self, id_a: str, id_b: str,
+                 overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         """Confront two analyses of the same ticker — ALWAYS Padrão × Erick on the
         same timeframe/date (Samyr's rule, task 024). Never 'método contra ele mesmo'.
 
@@ -722,6 +817,7 @@ class AnalysisRunner:
             run_id = self.start_compare(
                 ta, rec_a.get("date") or "",
                 timeframe=col_a.get("timeframe") or _DEFAULT_TIMEFRAME,
+                overrides=overrides,
             )
             return {"run_id": run_id, "rerouted": True, "ticker": ta,
                     "status": "running"}
@@ -750,7 +846,8 @@ class AnalysisRunner:
         return crun.snapshot()
 
     # ------------------------------------------------------- Q&A ancorado ----
-    def ask(self, run_id: str, question: str) -> dict[str, Any] | None:
+    def ask(self, run_id: str, question: str,
+            overrides: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """Responde uma pergunta ANCORADA nos dados JÁ computados de uma run.
 
         Não re-roda a análise nem toca em dado externo: monta o contexto
@@ -769,7 +866,7 @@ class AnalysisRunner:
 
         messages, meta = ask_module.build_messages(record, question)
         usage_cb = UsageMetadataCallbackHandler()
-        llm = self._answer_llm([usage_cb])
+        llm = self._answer_llm([usage_cb], overrides)
         reply = llm.invoke(messages)
         answer = getattr(reply, "content", reply)
         # Alguns provedores devolvem o conteúdo em "partes" (lista) em vez de texto.
@@ -783,20 +880,26 @@ class AnalysisRunner:
             "question": question,
             "answer": str(answer).strip(),
             "cost": cost_breakdown(usage_cb.usage_metadata),
-            "model": self.base_config.get("quick_think_llm"),
+            "model": apply_llm_overrides(self.base_config, overrides).get("quick_think_llm"),
             "mode": meta.get("mode"),
             "grounded": bool(meta.get("has_numbers")),
             "timeframe": meta.get("timeframe"),
             "as_of": meta.get("as_of"),
         }
 
-    def _answer_llm(self, callbacks: list):
+    def _answer_llm(self, callbacks: list, overrides: dict[str, Any] | None = None):
         """Chat client BARATO pra responder perguntas (``quick_think_llm``), com os
-        mesmos knobs de provedor da run e os callbacks de uso pra medir o custo."""
+        mesmos knobs de provedor da run e os callbacks de uso pra medir o custo.
+
+        BYOK: usa a config efetiva (chave/provider/modelo do usuário têm prioridade;
+        sem chave, cai na env do servidor). A ``api_key`` vai como kwarg explícito
+        do client — jamais entra em estado global ou é persistida."""
         from tradingagents.llm_clients import create_llm_client
-        cfg = self.base_config
+        cfg = apply_llm_overrides(self.base_config, overrides)
         kwargs: dict[str, Any] = {"callbacks": callbacks}
         provider = (cfg.get("llm_provider") or "openai").lower()
+        if cfg.get("llm_api_key"):
+            kwargs["api_key"] = cfg["llm_api_key"]
         temperature = cfg.get("temperature")
         if temperature is not None and temperature != "":
             kwargs["temperature"] = float(temperature)
@@ -816,6 +919,37 @@ class AnalysisRunner:
             **kwargs,
         )
         return client.get_llm()
+
+    def test_key(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Valida a chave/config efetiva com UMA chamada barata (sem rodar análise).
+
+        Monta o client do modelo BARATO com a config efetiva (chave do usuário >
+        env do servidor) e faz um único ``invoke`` mínimo. ``ok`` diz se a chave
+        autenticou; em erro, a mensagem é REDIGIDA da chave. Não persiste nada e
+        não usa estado global — a ``api_key`` é kwarg do client, só em memória.
+        ``max_retries=0`` pra uma chave inválida falhar na hora (401), sem espera."""
+        from tradingagents.llm_clients import create_llm_client
+        cfg = apply_llm_overrides(self.base_config, overrides)
+        provider = (cfg.get("llm_provider") or "openai").lower()
+        model = cfg.get("quick_think_llm")
+        secret = cfg.get("llm_api_key")
+        kwargs: dict[str, Any] = {"max_retries": 0}
+        if secret:
+            kwargs["api_key"] = secret
+        info = {"provider": provider, "model": model,
+                "using_user_key": bool(secret)}
+        try:
+            client = create_llm_client(
+                provider=provider, model=model,
+                base_url=cfg.get("backend_url"), **kwargs,
+            )
+            llm = client.get_llm()
+            reply = llm.invoke("ping")
+            _ = getattr(reply, "content", reply)  # força a resolução da resposta
+            return {"ok": True, **info}
+        except Exception as exc:
+            return {"ok": False, **info,
+                    "error": _redact_secret(f"{type(exc).__name__}: {exc}", secret)}
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -916,6 +1050,52 @@ class AnalysisRunner:
             "now": timeutil.stamp(),
             "tz": timeutil.TZ_NAME,
             "tz_label": timeutil.TZ_LABEL,
+            # BYOK: o front usa isto pra montar a config de chaves. NUNCA devolve
+            # a chave em si — só o provider/modelo padrão do servidor (o fallback)
+            # e SE existe env de fallback pro provider default (sem revelar valor).
+            "llm": self._llm_config_info(),
+        }
+
+    # Provedores oferecidos na UI de config (BYOK). ``needs_base_url`` marca os que
+    # exigem endpoint (Ollama/self-host); ``key_optional`` os que rodam sem chave
+    # (Ollama local). Os defaults de modelo saem do catálogo (_provider_default_models).
+    _BYOK_PROVIDERS = (
+        ("openai", "OpenAI", False, False),
+        ("anthropic", "Anthropic (Claude)", False, False),
+        ("openrouter", "OpenRouter", False, False),
+        ("ollama", "Ollama / Llama (local)", True, True),
+        ("google", "Google (Gemini)", False, False),
+        ("deepseek", "DeepSeek", False, False),
+        ("xai", "xAI (Grok)", False, False),
+        ("openai_compatible", "OpenAI-compatível (self-host)", True, True),
+    )
+
+    def _llm_config_info(self) -> dict[str, Any]:
+        """Metadados de LLM pro front (BYOK) — sem jamais expor chave alguma."""
+        from tradingagents.llm_clients.api_key_env import get_api_key_env
+        cfg = self.base_config
+        default_provider = (cfg.get("llm_provider") or "openai").lower()
+        providers = []
+        for pid, label, needs_base_url, key_optional in self._BYOK_PROVIDERS:
+            deep, quick = _provider_default_models(pid)
+            key_env = get_api_key_env(pid)
+            providers.append({
+                "id": pid,
+                "label": label,
+                "needs_base_url": needs_base_url,
+                "key_optional": key_optional,
+                "default_deep": deep,
+                "default_quick": quick,
+                # Presença (não o valor) da env de fallback no servidor: deixa o
+                # front dizer "sem chave → usa a do servidor" só quando é verdade.
+                "server_key": bool(key_env and os.environ.get(key_env)),
+            })
+        return {
+            "default_provider": default_provider,
+            "default_deep": cfg.get("deep_think_llm"),
+            "default_quick": cfg.get("quick_think_llm"),
+            "default_base_url": cfg.get("backend_url"),
+            "providers": providers,
         }
 
     def timeframe_view(self, ticker: str, date: str, timeframe: str,

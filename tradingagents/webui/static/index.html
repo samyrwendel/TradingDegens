@@ -16,8 +16,56 @@
         <p class="tagline">Multi-agente • debate alta × baixa • veredito com custo</p>
       </div>
     </div>
-    <div class="net-note" id="netNote">rede Tailscale</div>
+    <div class="top-right">
+      <button type="button" class="config-btn" id="configBtn"
+              title="Provedor e chave de API (traga a sua)">⚙️ <span id="configBtnLabel">Chaves</span></button>
+      <div class="net-note" id="netNote">rede Tailscale</div>
+    </div>
   </header>
+
+  <!-- BYOK: cada usuário traz a própria chave (OpenAI/Anthropic/OpenRouter/Ollama…).
+       A chave fica só no navegador (localStorage) e viaja por header X-LLM-Key —
+       nunca em querystring, nunca gravada/logada no servidor. Sem chave → usa a env
+       do servidor (fallback). Só provider/modelo/base_url vão no corpo do POST. -->
+  <section class="panel config-panel hidden" id="configPanel">
+    <div class="config-head">
+      <h2 class="section-title">🔑 Provedor &amp; chave de API</h2>
+      <button type="button" class="config-close" id="configClose" aria-label="Fechar">✕</button>
+    </div>
+    <p class="config-note">
+      Sua chave fica <b>só neste navegador</b> e vai na requisição por header —
+      o servidor nunca a grava nem loga. Sem chave, cai na chave do servidor.
+    </p>
+    <div class="config-grid">
+      <div class="field">
+        <label for="cfgProvider">Provedor</label>
+        <select id="cfgProvider"></select>
+      </div>
+      <div class="field">
+        <label for="cfgKey">Chave de API <span class="orig">(mascarada)</span></label>
+        <input id="cfgKey" type="password" autocomplete="off" placeholder="sk-…" />
+      </div>
+      <div class="field cfg-baseurl hidden" id="cfgBaseUrlField">
+        <label for="cfgBaseUrl">Base URL <span class="orig">(endpoint)</span></label>
+        <input id="cfgBaseUrl" type="text" autocomplete="off" placeholder="http://localhost:11434/v1" />
+      </div>
+      <div class="field">
+        <label for="cfgQuick">Modelo rápido <span class="orig">(quick)</span></label>
+        <input id="cfgQuick" type="text" autocomplete="off" placeholder="(padrão do provedor)" />
+      </div>
+      <div class="field">
+        <label for="cfgDeep">Modelo pesado <span class="orig">(deep)</span></label>
+        <input id="cfgDeep" type="text" autocomplete="off" placeholder="(padrão do provedor)" />
+      </div>
+    </div>
+    <div class="config-actions">
+      <button type="button" id="cfgTest" class="cfg-test">Testar chave</button>
+      <button type="button" id="cfgSave" class="cfg-save">Salvar</button>
+      <button type="button" id="cfgClear" class="cfg-clear">Usar a do servidor</button>
+      <span class="cfg-status" id="cfgStatus"></span>
+    </div>
+    <p class="config-active" id="cfgActive"></p>
+  </section>
 
   <main class="layout">
     <aside class="sidebar">

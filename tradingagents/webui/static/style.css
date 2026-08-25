@@ -885,3 +885,54 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 @media (min-width: 1900px) {
   .result-stage { grid-template-columns: minmax(0, 1fr) 400px; }
 }
+
+/* ---- BYOK: botão da engrenagem + painel de config (provedor + chave) -------- */
+.top-right { display: flex; align-items: center; gap: 10px; }
+.config-btn {
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 12px; font-size: var(--fs-12); cursor: pointer;
+  font-family: var(--font); line-height: 1.6;
+}
+.config-btn:hover { border-color: var(--accent); color: var(--text); }
+.config-btn.has-key { border-color: var(--green); color: var(--green); }
+
+.config-panel { border-bottom: 1px solid var(--border); }
+.config-head { display: flex; align-items: center; justify-content: space-between; }
+.config-head .section-title { margin: 4px 0 6px; }
+.config-close {
+  background: none; border: none; color: var(--muted); font-size: var(--fs-16);
+  cursor: pointer; padding: 4px 8px; line-height: 1;
+}
+.config-close:hover { color: var(--text); }
+.config-note { color: var(--muted); font-size: var(--fs-12); margin: 0 0 12px; max-width: 62ch; }
+.config-grid { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.config-grid .field select,
+.config-grid .field input {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 8px 11px; font-size: var(--fs-14); min-width: 220px;
+  font-family: var(--font);
+}
+.config-grid .field select:focus,
+.config-grid .field input:focus { outline: none; border-color: var(--accent); }
+.config-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px;
+}
+.config-actions button {
+  border-radius: 8px; padding: 0 16px; height: 34px; font-size: var(--fs-13, var(--fs-14));
+  cursor: pointer; font-weight: var(--fw-med); font-family: var(--font); border: 1px solid var(--border);
+}
+.cfg-save { background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none; }
+.cfg-test { background: var(--panel-2); color: var(--text); }
+.cfg-test:hover { border-color: var(--accent); }
+.cfg-clear { background: none; color: var(--muted); }
+.cfg-clear:hover { color: var(--text); border-color: var(--accent); }
+.config-actions button:disabled { opacity: .55; cursor: not-allowed; }
+.cfg-status { font-size: var(--fs-13, var(--fs-14)); color: var(--muted); }
+.cfg-status.ok { color: var(--green); }
+.cfg-status.err { color: var(--red); }
+.config-active { color: var(--muted); font-size: var(--fs-12); margin: 12px 0 0; }
+@media (max-width: 640px) {
+  .config-grid .field select,
+  .config-grid .field input { min-width: 0; width: 100%; }
+  .config-grid .field { width: 100%; }
+}

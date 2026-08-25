@@ -298,10 +298,13 @@ class OpenAIClient(BaseLLMClient):
             if base_url:
                 llm_kwargs["base_url"] = base_url
 
-            # API key: required unless key_optional; keyless local servers get a
-            # placeholder. The env-var name is the single source in api_key_env.
+            # API key precedence: an explicit key passed to the client (BYOK — the
+            # per-run key a webui user brings) wins over the server's env var, and
+            # its mere presence satisfies the "required" check below. The env-var
+            # name is the single source in api_key_env.
             api_key_env = get_api_key_env(self.provider)
-            api_key = os.environ.get(api_key_env) if api_key_env else None
+            explicit_key = self.kwargs.get("api_key")
+            api_key = explicit_key or (os.environ.get(api_key_env) if api_key_env else None)
             if api_key:
                 llm_kwargs["api_key"] = api_key
             elif spec.key_optional:

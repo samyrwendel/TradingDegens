@@ -221,7 +221,7 @@ def _runner_with(tmp_path, record):
 def test_ask_returns_answer_and_meta(tmp_path, monkeypatch):
     runner = _runner_with(tmp_path, _single_record())
     fake = _FakeLLM()
-    monkeypatch.setattr(runner, "_answer_llm", lambda cbs: fake)
+    monkeypatch.setattr(runner, "_answer_llm", lambda cbs, ov=None: fake)
     out = runner.ask("r-single", "onde seria o recuo à média?")
     assert out["answer"] == "Resposta ancorada: EMA 8 em 136,93."
     assert out["mode"] == "single"
@@ -233,7 +233,7 @@ def test_ask_returns_answer_and_meta(tmp_path, monkeypatch):
 
 def test_ask_unknown_run_is_none(tmp_path, monkeypatch):
     runner = _runner_with(tmp_path, _single_record())
-    monkeypatch.setattr(runner, "_answer_llm", lambda cbs: _FakeLLM())
+    monkeypatch.setattr(runner, "_answer_llm", lambda cbs, ov=None: _FakeLLM())
     assert runner.ask("nao-existe", "qualquer coisa") is None
 
 
@@ -246,6 +246,6 @@ def test_ask_empty_question_raises(tmp_path):
 def test_ask_joins_list_content_parts(tmp_path, monkeypatch):
     runner = _runner_with(tmp_path, _single_record())
     parts = [{"text": "parte 1 "}, {"text": "parte 2"}]
-    monkeypatch.setattr(runner, "_answer_llm", lambda cbs: _FakeLLM(parts))
+    monkeypatch.setattr(runner, "_answer_llm", lambda cbs, ov=None: _FakeLLM(parts))
     out = runner.ask("r-single", "e aí?")
     assert out["answer"] == "parte 1 parte 2"
