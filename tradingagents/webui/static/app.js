@@ -1697,19 +1697,19 @@ function renderAssetTimeline(ticker, currentId) {
 let _todayManaus = "";
 let _historyFilter = "all";
 
-// Reanalisa o ativo que está aberto, na data de hoje (Manaus, vinda do servidor).
-// Preenche o formulário e dispara o mesmo caminho da análise manual — nenhum
-// fluxo paralelo, pra não divergir do que o botão principal faz.
+// Reanalisa o ativo ABERTO na data de hoje (Manaus), PRESERVANDO o método da
+// análise aberta (_openMethod). Abrir uma Erick pelo histórico/confronto NÃO marca
+// o checkbox do launcher, então re-submeter o form (startAnalysis lê o checkbox)
+// re-rodava a Erick como Padrão — o MESMO bug do reavaliar (task 037), que o fix
+// da 037 não cobriu aqui. "Atualizar" agora compartilha runReanalyze() — a única
+// função de "rodar o ativo aberto" — pra o método não se perder de novo num quarto
+// botão. Semântica original mantida: DATA = hoje, TF = diário (1d).
 function bindRefresh() {
   const rb = document.getElementById("refreshBtn");
   if (!rb) return;
   rb.addEventListener("click", () => {
     if (!_openTicker) return;
-    $("ticker").value = _openTicker;
-    if (_todayManaus) $("date").value = _todayManaus;
-    $("analyzeForm").requestSubmit
-      ? $("analyzeForm").requestSubmit()
-      : startAnalysis(new Event("submit"));
+    runReanalyze(_openMethod || "padrao", "1d");
   });
 }
 let _allRuns = [];
