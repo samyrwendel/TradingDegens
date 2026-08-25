@@ -932,6 +932,19 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .cfg-status.err { color: var(--red); }
 .config-active { color: var(--muted); font-size: var(--fs-12); margin: 12px 0 0; }
 
+/* Resultado do "Testar modelo": uma linha por modelo (rápido/pesado). */
+.model-test { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.model-test .mt-row {
+  font-size: var(--fs-13, var(--fs-14)); color: var(--muted);
+  line-height: 1.45; word-break: break-word;
+}
+.model-test .mt-row.ok { color: var(--text); }
+.model-test .mt-row.err { color: var(--red); }
+.model-test .mt-row code {
+  font-family: var(--font-mono, monospace); font-size: var(--fs-12);
+  background: var(--panel-2); padding: 1px 5px; border-radius: 5px;
+}
+
 /* Combobox pesquisável dos modelos (BYOK): input + lista filtrada sobreposta.
    Filtra ~400 modelos do OpenRouter em tempo real (casa id E nome). */
 .combo { position: relative; width: 100%; }

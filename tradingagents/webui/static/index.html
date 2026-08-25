@@ -95,10 +95,14 @@
     </p>
     <div class="config-actions">
       <button type="button" id="cfgTest" class="cfg-test">Testar chave</button>
+      <button type="button" id="cfgTestModel" class="cfg-test">Testar modelo</button>
       <button type="button" id="cfgSave" class="cfg-save">Salvar</button>
       <button type="button" id="cfgClear" class="cfg-clear">Limpar minha chave</button>
       <span class="cfg-status" id="cfgStatus"></span>
     </div>
+    <!-- Resultado do "Testar modelo": uma linha por modelo (rápido/pesado) com
+         ✅ latência + trecho, ou ❌ mensagem humana. Preenchido por renderModelTest. -->
+    <div class="model-test hidden" id="cfgModelTest" aria-live="polite"></div>
     <p class="config-active" id="cfgActive"></p>
   </section>
 

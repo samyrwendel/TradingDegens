@@ -2166,6 +2166,8 @@ function bindConfig() {
   });
   // "Testar chave" agora é reforço manual do mesmo fluxo (testa + lista).
   $("cfgTest").addEventListener("click", refreshModels);
+  // "Testar modelo": pinga o rápido E o pesado escolhidos e mostra a latência.
+  $("cfgTestModel").addEventListener("click", testModel);
   $("ownerLoginBtn").addEventListener("click", ownerLogin);
   $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
   $("ownerLogoutBtn").addEventListener("click", ownerLogout);
@@ -2394,6 +2396,80 @@ async function refreshModels() {
 function scheduleModels() {
   clearTimeout(_modelsTimer);
   _modelsTimer = setTimeout(refreshModels, 500);
+}
+
+// Latência legível: <1s em ms, senão em s com uma casa (vírgula pt-BR).
+function fmtLatency(ms) {
+  if (ms == null) return "";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1).replace(".", ",")} s` : `${ms} ms`;
+}
+
+// "Testar modelo": pinga o modelo RÁPIDO e o PESADO escolhidos com um prompt trivial
+// (POST /api/test-model) e mostra ✅ latência de cada (ou ❌ mensagem humana), SEM
+// rodar a análise. A chave viaja só no header X-LLM-Key; nada dela aparece na tela.
+let _modelTestAbort = null;
+async function testModel() {
+  const form = _readConfigForm();
+  // Mesmo gate do analyze: sem login do dono e sem chave própria não há o que testar.
+  if (!_isOwner && !(form.apiKey || "").length) {
+    renderModelTest({ error: "Informe sua chave nas Configurações (⚙️) antes de testar o modelo." });
+    return;
+  }
+  const btn = $("cfgTestModel");
+  if (_modelTestAbort) _modelTestAbort.abort();
+  _modelTestAbort = new AbortController();
+  if (btn) btn.disabled = true;
+  const box = $("cfgModelTest");
+  if (box) { box.classList.remove("hidden"); box.innerHTML = '<div class="mt-row">pingando o modelo rápido e o pesado…</div>'; }
+  const headers = { "Content-Type": "application/json" };
+  if (form.apiKey) headers["X-LLM-Key"] = form.apiKey;
+  const body = { llm_provider: form.provider };
+  if (form.quickModel) body.quick_think_llm = form.quickModel;
+  if (form.deepModel) body.deep_think_llm = form.deepModel;
+  if (form.baseUrl) body.backend_url = form.baseUrl;
+  try {
+    const res = await fetch("/api/test-model", {
+      method: "POST", headers, credentials: "same-origin",
+      body: JSON.stringify(body), signal: _modelTestAbort.signal,
+    });
+    const data = await res.json();
+    renderModelTest(data);
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    renderModelTest({ error: "erro de rede ao testar o modelo" });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Desenha o resultado do teste: uma linha por modelo (⚡ rápido / 🧠 pesado) com
+// ✅ latência + trecho, ou ❌ mensagem humana. `sample`/`error` vêm do modelo →
+// sempre escapados (anti-XSS). Erro de topo (need_key/rede) vira uma linha só.
+function renderModelTest(data) {
+  const box = $("cfgModelTest");
+  if (!box) return;
+  box.classList.remove("hidden");
+  const models = (data && data.models) || [];
+  if ((!models.length) && data && data.error) {
+    box.innerHTML = `<div class="mt-row err">❌ ${escapeHtml(String(data.error))}</div>`;
+    return;
+  }
+  if (!models.length) {
+    box.innerHTML = '<div class="mt-row err">❌ não deu pra testar o modelo</div>';
+    return;
+  }
+  box.innerHTML = models.map((m) => {
+    const icon = m.role === "deep" ? "🧠" : "⚡";
+    const label = escapeHtml(String(m.label || m.role || ""));
+    const name = escapeHtml(String(m.model || "(padrão do provedor)"));
+    if (m.ok) {
+      const sample = m.sample ? ` — “${escapeHtml(String(m.sample))}”` : "";
+      return `<div class="mt-row ok">${icon} ${label} <code>${name}</code>: `
+        + `✅ <b>${escapeHtml(fmtLatency(m.latency_ms))}</b>${sample}</div>`;
+    }
+    return `<div class="mt-row err">${icon} ${label} <code>${name}</code>: `
+      + `❌ ${escapeHtml(String(m.error || "falhou"))}</div>`;
+  }).join("");
 }
 
 function init() {

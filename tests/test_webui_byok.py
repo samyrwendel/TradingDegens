@@ -281,6 +281,106 @@ def test_test_key_error_is_redacted(tmp_path, monkeypatch):
     assert "***" in out["error"]
 
 
+# ---------------------------------------- test_model (pinga rápido + pesado) ----
+def test_test_model_pings_quick_and_deep(tmp_path, monkeypatch):
+    """Pinga os DOIS modelos (rápido/pesado) com a chave do usuário e devolve a
+    latência real de cada — sem rodar análise nem tocar estado global."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    seen = []
+
+    def fake_create(provider, model, base_url=None, **kwargs):
+        seen.append((model, kwargs))
+        return _FakeClient(_FakeLLM())
+
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
+    out = runner.test_model({"provider": "openai", "api_key": "sk-x",
+                             "quick_model": "gpt-quick", "deep_model": "gpt-deep"})
+    assert out["ok"] is True
+    assert out["using_user_key"] is True
+    roles = {m["role"]: m for m in out["models"]}
+    assert set(roles) == {"quick", "deep"}
+    assert roles["quick"]["model"] == "gpt-quick"
+    assert roles["deep"]["model"] == "gpt-deep"
+    for m in out["models"]:
+        assert m["ok"] is True
+        assert isinstance(m["latency_ms"], int) and m["latency_ms"] >= 0
+        assert m["sample"] == "pong"   # _FakeLLM devolve content "pong"
+    # os DOIS foram pingados, cada um com a chave do usuário (kwarg, nunca global)
+    assert [s[0] for s in seen] == ["gpt-quick", "gpt-deep"]
+    assert all(s[1].get("api_key") == "sk-x" for s in seen)
+
+
+def test_test_model_error_is_human_and_redacted(tmp_path, monkeypatch):
+    """Modelo ruim → mensagem humana, sem stack e SEM a chave (redigida). O rápido
+    ainda responde ✅, o pesado falha ❌ — cada item com seu próprio veredito."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    secret = "sk-SECRET-123"
+
+    def fake_create(provider, model, base_url=None, **kwargs):
+        if model == "bad-deep":
+            # erro que ecoa a chave e NÃO casa o mapa (404) → fallback redigido
+            return _FakeClient(_FakeLLM(raise_exc=RuntimeError(f"404 model not found {secret}")))
+        return _FakeClient(_FakeLLM())
+
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
+    out = runner.test_model({"provider": "openrouter", "api_key": secret,
+                             "quick_model": "good-quick", "deep_model": "bad-deep"})
+    assert out["ok"] is False
+    roles = {m["role"]: m for m in out["models"]}
+    assert roles["quick"]["ok"] is True
+    assert roles["deep"]["ok"] is False
+    # a chave não vaza em NENHUM lugar do retorno; o erro cru foi redigido
+    assert secret not in json.dumps(out, default=str)
+    assert "***" in roles["deep"]["error"]
+
+
+def test_test_model_invalid_key_is_humanized(tmp_path, monkeypatch):
+    """401 vira a frase acionável (mapa da 041), com error_code estável."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+
+    def fake_create(provider, model, base_url=None, **kwargs):
+        return _FakeClient(_FakeLLM(raise_exc=RuntimeError("401 invalid api key")))
+
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
+    out = runner.test_model({"provider": "openai", "api_key": "sk-bad",
+                             "quick_model": "q", "deep_model": "d"})
+    assert out["ok"] is False
+    quick = next(m for m in out["models"] if m["role"] == "quick")
+    assert quick["error_code"] == "invalid_key"
+    assert "Configurações" in quick["error"]
+
+
+def test_test_model_refused_without_key_and_owner(tmp_path):
+    """Público explícito sem chave própria não pinga nada (need_key, models vazio) —
+    a chave do servidor é só do dono, jamais gasta num teste público."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    out = runner.test_model({"allow_server_key": False})
+    assert out["ok"] is False
+    assert out["error_code"] == "need_key"
+    assert out["models"] == []
+
+
+def test_test_model_no_model_named(tmp_path, monkeypatch):
+    """Provider custom-only sem modelo nomeado → item de erro claro, não estoura."""
+    base = dict(_base_config(tmp_path))
+    base["quick_think_llm"] = None
+    base["deep_think_llm"] = None
+    runner = AnalysisRunner(base_config=base, store=HistoryStore(tmp_path),
+                            graph_factory=_factory())
+
+    def fake_create(provider, model, base_url=None, **kwargs):  # não deve ser chamado
+        raise AssertionError("não devia criar client sem modelo")
+
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
+    out = runner.test_model({"api_key": "sk-x"})
+    assert out["ok"] is False
+    assert all(m["ok"] is False and m["error_code"] == "no_model" for m in out["models"])
+
+
 # ------------------------------------------------ config_info advertises BYOK ---
 def test_config_info_exposes_providers_without_leaking_keys(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-server-secret")
@@ -380,5 +480,31 @@ def test_http_test_key_endpoint(tmp_path, monkeypatch):
         with urllib.request.urlopen(req, timeout=5) as resp:
             out = json.loads(resp.read())
         assert out["ok"] is True and out["using_user_key"] is True
+    finally:
+        httpd.shutdown()
+
+
+def test_http_test_model_endpoint(tmp_path, monkeypatch):
+    """/api/test-model: chave só no header, pinga os dois modelos, chave nunca no
+    corpo da resposta."""
+    httpd, base = _make_server(tmp_path, _factory(), base_config=_base_config(tmp_path))
+
+    def fake_create(provider, model, base_url=None, **kwargs):
+        return _FakeClient(_FakeLLM())
+
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
+    try:
+        req = urllib.request.Request(
+            base + "/api/test-model",
+            data=json.dumps({"llm_provider": "openai",
+                             "quick_think_llm": "q", "deep_think_llm": "d"}).encode(),
+            headers={"Content-Type": "application/json", "X-LLM-Key": "sk-abc"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            out = json.loads(resp.read())
+        assert out["ok"] is True and out["using_user_key"] is True
+        assert len(out["models"]) == 2
+        assert {m["role"] for m in out["models"]} == {"quick", "deep"}
+        assert "sk-abc" not in json.dumps(out, default=str)
     finally:
         httpd.shutdown()

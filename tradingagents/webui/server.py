@@ -13,6 +13,8 @@ Routes:
     POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
     POST /api/ask              -> {run_id, question} -> grounded Q&A over a run
     POST /api/test-key         -> {} + X-LLM-Key header -> {ok, provider, model}
+    POST /api/test-model       -> {provider,base_url,quick,deep} + X-LLM-Key ->
+                                  {ok, models:[{role,latency_ms,sample|error}]}
     POST /api/models           -> {provider,base_url} + X-LLM-Key -> {models:[...]}
     POST /api/login            -> {password} -> cookie de sessão HttpOnly (dono)
     POST /api/logout           -> encerra a sessão do dono
@@ -365,6 +367,14 @@ class _Handler(BaseHTTPRequestHandler):
                 # ok/erro (erro já redigido da chave), nunca ecoa a chave.
                 body = self._read_json_body()
                 self._send_json(self.runner.test_key(self._llm_overrides(body)))
+            elif path == "/api/test-model":
+                # BYOK: pinga o modelo RÁPIDO e o PESADO escolhidos com um prompt
+                # trivial e devolve a latência de cada — confirma que o modelo
+                # responde SEM rodar a análise de 12min. Chave no header X-LLM-Key
+                # (nunca querystring/log); só ok/latency/sample/erro voltam, jamais
+                # a chave. Erro → mensagem humana (reusa o mapa da 041).
+                body = self._read_json_body()
+                self._send_json(self.runner.test_model(self._llm_overrides(body)))
             elif path == "/api/models":
                 # Proxy: lista os modelos que a chave/provider dá acesso, pra popular
                 # os dropdowns do BYOK. Chave no header X-LLM-Key (nunca querystring/

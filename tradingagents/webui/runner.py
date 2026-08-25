@@ -55,6 +55,12 @@ _DEFAULT_TIMEFRAME = "1d"
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
 _MAX_QUESTION_CHARS = 500
 
+# "Testar modelo" (/api/test-model): prompt mínimo (poucos tokens, custo desprezível)
+# só pra confirmar que o modelo responde e medir a latência — NÃO é análise. E teto
+# do trecho da resposta exibido, pra não jogar um texto grande na UI de config.
+_MODEL_TEST_PROMPT = "Responda apenas: ok"
+_MODEL_TEST_SAMPLE_CHARS = 120
+
 logger = logging.getLogger(__name__)
 
 
@@ -1051,6 +1057,79 @@ class AnalysisRunner:
             return {"ok": False, **info,
                     "error": human["message"] if human else raw,
                     "error_code": human["code"] if human else None}
+
+    def _ping_model(self, provider: str, model: str | None, secret: str | None,
+                    base_url: str | None) -> dict[str, Any]:
+        """Pinga UM modelo com um prompt trivial e mede a latência REAL do ``invoke``.
+
+        Uma chamada minúscula (``_MODEL_TEST_PROMPT``, poucos tokens) — confirma que o
+        modelo responde e cronometra a resposta, SEM rodar análise nem persistir nada.
+        ``max_retries=0`` pra um modelo inexistente/chave inválida falhar na hora, sem
+        espera. Sucesso → ``ok`` + ``latency_ms`` + ``sample`` (trecho curto); erro →
+        mensagem humana (mapa da 041) já REDIGIDA da chave. Nunca loga/expõe a chave."""
+        from tradingagents.llm_clients import create_llm_client
+        info: dict[str, Any] = {"model": model}
+        if not model:
+            # provider sem modelo nomeado (custom-only): não há o que pingar.
+            return {**info, "ok": False,
+                    "error": "Escolha um modelo antes de testar.",
+                    "error_code": "no_model"}
+        kwargs: dict[str, Any] = {"max_retries": 0}
+        if secret:
+            kwargs["api_key"] = secret
+        try:
+            client = create_llm_client(
+                provider=provider, model=model, base_url=base_url, **kwargs,
+            )
+            llm = client.get_llm()
+            started = time.perf_counter()
+            reply = llm.invoke(_MODEL_TEST_PROMPT)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            content = getattr(reply, "content", reply)
+            # Alguns provedores devolvem o conteúdo em "partes" (lista) em vez de texto.
+            if isinstance(content, list):
+                content = "".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part)
+                    for part in content
+                )
+            sample = " ".join(str(content).split())[:_MODEL_TEST_SAMPLE_CHARS]
+            return {**info, "ok": True, "latency_ms": latency_ms, "sample": sample}
+        except Exception as exc:
+            raw = _redact_secret(f"{type(exc).__name__}: {exc}", secret)
+            human = humanize_provider_error(raw, provider)
+            return {**info, "ok": False,
+                    "error": human["message"] if human else raw,
+                    "error_code": human["code"] if human else None}
+
+    def test_model(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Pinga o modelo RÁPIDO e o PESADO escolhidos e devolve latência de cada.
+
+        O ``/api/test-key`` só valida a chave (e lista modelos); aqui a pergunta é
+        outra — "o modelo que escolhi responde, e quão rápido?", SEM esperar os 12+
+        min da análise. Manda ``_MODEL_TEST_PROMPT`` (trivial) pra cada modelo com a
+        config efetiva (chave do usuário > env do servidor) e mede a latência real.
+        Testa os dois porque podem ser modelos/velocidades diferentes (o caso do
+        brief: OpenRouter/GLM lento). Não cria run, não persiste, chave só em memória
+        e nunca logada/ecoada. Requisição pública sem chave própria → ``need_key``."""
+        cfg = apply_llm_overrides(self.base_config, overrides)
+        provider = (cfg.get("llm_provider") or "openai").lower()
+        quick = cfg.get("quick_think_llm")
+        deep = cfg.get("deep_think_llm")
+        secret = cfg.get("llm_api_key")
+        base_url = cfg.get("backend_url")
+        # Público explícito sem chave própria não testa — a chave do servidor é só do
+        # dono, jamais exposta (nem gasta) num "testar" público. Não pinga nada.
+        if not secret and (overrides or {}).get("allow_server_key") is False:
+            return {"ok": False, "provider": provider, "using_user_key": False,
+                    "error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE, "models": []}
+        # Rápido primeiro (o mais provável de responder), pesado depois. Cada item traz
+        # role/label pra UI rotular ("⚡ rápido" / "🧠 pesado") sem adivinhar.
+        models = []
+        for role, label, model in (("quick", "rápido", quick), ("deep", "pesado", deep)):
+            res = self._ping_model(provider, model, secret, base_url)
+            models.append({"role": role, "label": label, **res})
+        return {"ok": all(m["ok"] for m in models), "provider": provider,
+                "using_user_key": bool(secret), "models": models}
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
