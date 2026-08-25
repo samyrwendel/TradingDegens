@@ -422,7 +422,7 @@ function compareColumn(c, slot) {
     ? `<div class="cmp-chart-card">` +
         `<div class="chart-legend cmp-chart-legend">${chartLegendHtml(ch, c.actionable)}</div>` +
         `<div class="chart-wrap">` +
-          `<span class="chart-zoom-hint">roda=zoom · shift+roda=vertical · arrasta=move · 2 cliques=reseta</span>` +
+          `<span class="chart-zoom-hint">roda=zoom · arrasta régua=zoom vertical · arrasta=move · 2 cliques=reseta</span>` +
           `<canvas id="cmpChart${slot}" class="cmp-canvas"></canvas>` +
         `</div></div>`
     : "";
@@ -1472,7 +1472,8 @@ function bindChartZoom(canvas) {
   const pts = new Map();
   let drag = null;
   let pinch = null;
-  let vdrag = null;   // pan VERTICAL: arrastar na faixa dos rótulos de preço (eixo direito)
+  let vzoom = null;   // zoom VERTICAL: arrastar na régua de preço (eixo direito) escala _vview
+  const VZOOM_SENS = 2.6;   // sensibilidade do arraste-na-régua (altura cheia ~ fator e^±2.6)
   const fracX = (clientX) => {
     const rect = canvas.getBoundingClientRect();
     return Math.min(1, Math.max(0, (clientX - rect.left - PAD_L) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP)));
@@ -1490,8 +1491,9 @@ function bindChartZoom(canvas) {
       const rect = canvas.getBoundingClientRect();
       const inAxis = (e.clientX - rect.left) >= (rect.width - PAD_R - 2); // faixa dos rótulos
       if (inAxis && canvas._yGeom) {
-        // arrastar no eixo de preço = pan vertical (move a janela _vview)
-        vdrag = { y: e.clientY, lo: canvas._yGeom.lo, hi: canvas._yGeom.hi };
+        // arrastar na régua de preço = ZOOM vertical (comprime/expande _vview em torno
+        // do centro). Cima = aproxima (velas crescem); baixo = afasta. Como TradingView.
+        vzoom = { y: e.clientY, lo: canvas._yGeom.lo, hi: canvas._yGeom.hi };
         canvas.style.cursor = "ns-resize";
         drag = null;
       } else if (canvas._view) {
@@ -1515,12 +1517,21 @@ function bindChartZoom(canvas) {
       redraw();
       return;
     }
-    if (vdrag) {
+    if (vzoom) {
       const rect = canvas.getBoundingClientRect();
       const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
-      const range = vdrag.hi - vdrag.lo;
-      const shift = (e.clientY - vdrag.y) / plotH * range;   // arrastar pra baixo = janela sobe
-      canvas._vview = { lo: vdrag.lo + shift, hi: vdrag.hi + shift };
+      const range = vzoom.hi - vzoom.lo;
+      const center = (vzoom.lo + vzoom.hi) / 2;               // âncora = centro do range agarrado
+      const dy = e.clientY - vzoom.y;                         // >0 arrasta pra baixo
+      const factor = Math.exp(dy / plotH * VZOOM_SENS);       // cima<0=comprime; baixo>0=expande
+      const nr = range * factor;
+      const autoRange = canvas._autoY ? (canvas._autoY.hi - canvas._autoY.lo) : range;
+      if (nr >= autoRange) {
+        canvas._vview = null;                                 // expandiu além do auto = solta pra autoescala
+      } else {
+        const r = Math.max(nr, Math.max(autoRange * 0.01, 1e-9));  // piso: não colapsa a escala
+        canvas._vview = { lo: center - r / 2, hi: center + r / 2 };
+      }
       redraw();
       return;
     }
@@ -1536,7 +1547,7 @@ function bindChartZoom(canvas) {
   const drop = (e) => {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
-    if (pts.size === 0) { drag = null; vdrag = null; canvas.style.cursor = canvas._view ? "grab" : "default"; }
+    if (pts.size === 0) { drag = null; vzoom = null; canvas.style.cursor = canvas._view ? "grab" : "default"; }
   };
   canvas.addEventListener("pointerup", drop);
   canvas.addEventListener("pointercancel", drop);
