@@ -43,6 +43,22 @@ TFS = ["1w", "1d", "4h", "1h", "15m"]
 TF_PT = {"1w": "semanal", "1d": "diário", "4h": "4h", "1h": "1h", "15m": "15m"}
 ASSETS = [("AAPL", "ação"), ("BTC-USD", "cripto")]
 
+# CI-safe Chromium flags. In the full pytest process, heavy earlier tests (a
+# subprocess spawn — e.g. the debate text-sanity validator shelling out to
+# aspell — or pandas/BLAS thread pools) leave headless Chromium's GPU/compositor
+# path unable to paint: elements resolve in the DOM but never become "visible",
+# so clicks time out. Forcing the software path and dropping the /dev/shm
+# compositor keeps this browser suite order-independent (it otherwise passes
+# alone but flakes in a full run).
+_CHROMIUM_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-gpu-compositing",
+    "--disable-features=VizDisplayCompositor",
+]
+
 
 @pytest.fixture
 def live_server(tmp_path):
@@ -148,7 +164,7 @@ def test_full_method_timeframe_matrix(live_server):
     pela barra + a rota do launcher (default Padrão). Imprime a tabela de resultados."""
     rows = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _route_stub(page)
         try:
@@ -190,7 +206,7 @@ def test_reanalyze_from_erick_preserves_erick(live_server):
     """Estando numa análise ERICK, a barra DESTACA Erick (is-open) e reanalisar Erick
     mantém Erick em TODOS os TFs — a classe de bug do 037/039 não volta."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _route_stub(page)
         try:
@@ -215,7 +231,7 @@ def test_compare_always_padrao_x_erick(live_server):
     """Comparar SEMPRE sai como Padrão × Erick (compare=true), mesmo estando aberto
     num Erick — nunca método × ele-mesmo — em todos os TFs, ação e cripto."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _route_stub(page)
         try:
@@ -236,7 +252,7 @@ def test_launcher_has_no_method_controls(live_server):
     """O launcher ficou limpo: some o checkbox de método/comparar e o botão Atualizar
     separado — método vive só na barra (zero botão morto)."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         try:
             page.goto(live_server)
@@ -258,7 +274,7 @@ def test_bar_renders_and_clicks_on_mobile_390(live_server):
     """Sem regressão no mobile 390: a barra renderiza os 3 métodos + 5 TFs e o clique
     dispara o POST correto (layout empilha, mas tudo continua clicável)."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 390, "height": 850})
         _route_stub(page)
         try:

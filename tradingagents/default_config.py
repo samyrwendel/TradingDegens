@@ -15,6 +15,12 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
+    "TRADINGAGENTS_DEBATE_REPORT_CLIP_CHARS":  "debate_report_clip_chars",
+    "TRADINGAGENTS_DEBATE_HISTORY_CLIP_CHARS": "debate_history_clip_chars",
+    "TRADINGAGENTS_DEBATE_SANITY_CHECK":       "debate_sanity_check",
+    "TRADINGAGENTS_DEBATE_SANITY_REGEN":       "debate_sanity_regen",
+    "TRADINGAGENTS_DEBATE_SANITY_INVENTED_RATE_DEGRADE": "debate_sanity_invented_rate_degrade",
+    "TRADINGAGENTS_DEBATE_SANITY_INVENTED_RATE_SUSPECT": "debate_sanity_invented_rate_suspect",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
@@ -113,6 +119,17 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    # Debate turn text-sanity guard (spec 3b, 25/08). Long stock debates on the
+    # cheap quick-think model degrade into garbled pt-BR (invented words, leaked
+    # format codes). These bound the per-turn input context and validate the
+    # output, regenerating a degraded turn once. See
+    # tradingagents/agents/utils/{text_sanity,debate_utils}.py.
+    "debate_report_clip_chars": 6000,   # max chars of each report injected per debate/risk turn (0 = no clip)
+    "debate_history_clip_chars": 8000,  # max chars of accumulated debate history injected per turn (0 = no clip)
+    "debate_sanity_check": True,        # run the text-sanity validator on each debate/risk turn
+    "debate_sanity_regen": True,        # regenerate a turn flagged 'degraded' (one retry)
+    "debate_sanity_invented_rate_degrade": 0.02,   # invented-word rate that forces regeneration
+    "debate_sanity_invented_rate_suspect": 0.012,  # invented-word rate that only marks the turn
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.

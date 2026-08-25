@@ -2,19 +2,29 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
 )
+from tradingagents.agents.utils.debate_utils import (
+    clip_report,
+    degraded_note,
+    invoke_debate_turn,
+)
+from tradingagents.dataflows.config import get_config
 
 
 def create_bull_researcher(llm):
     def bull_node(state) -> dict:
+        config = get_config()
+        report_clip = config.get("debate_report_clip_chars", 0)
+        history_clip = config.get("debate_history_clip_chars", 0)
+
         investment_debate_state = state["investment_debate_state"]
-        history = investment_debate_state.get("history", "")
+        history = clip_report(investment_debate_state.get("history", ""), history_clip)
         bull_history = investment_debate_state.get("bull_history", "")
 
         current_response = investment_debate_state.get("current_response", "")
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        market_research_report = clip_report(state["market_report"], report_clip)
+        sentiment_report = clip_report(state["sentiment_report"], report_clip)
+        news_report = clip_report(state["news_report"], report_clip)
+        fundamentals_report = clip_report(state["fundamentals_report"], report_clip)
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
@@ -44,18 +54,24 @@ Last bear argument: {current_response}
 Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
 """ + get_language_instruction()
 
-        response = llm.invoke(prompt)
+        content, report = invoke_debate_turn(
+            llm, prompt, speaker="Bull Researcher", config=config
+        )
 
-        argument = f"Analista de Alta (bull): {response.content}"
+        argument = f"Analista de Alta (bull): {content}"
 
         new_investment_debate_state = {
-            "history": history + "\n" + argument,
+            "history": investment_debate_state.get("history", "") + "\n" + argument,
             "bull_history": bull_history + "\n" + argument,
             "bear_history": investment_debate_state.get("bear_history", ""),
             "current_response": argument,
             "count": investment_debate_state["count"] + 1,
         }
 
-        return {"investment_debate_state": new_investment_debate_state}
+        result = {"investment_debate_state": new_investment_debate_state}
+        note = degraded_note("Bull Researcher", report)
+        if note:
+            result["degraded_sources"] = [note]
+        return result
 
     return bull_node

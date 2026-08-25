@@ -2,21 +2,31 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
 )
+from tradingagents.agents.utils.debate_utils import (
+    clip_report,
+    degraded_note,
+    invoke_debate_turn,
+)
+from tradingagents.dataflows.config import get_config
 
 
 def create_neutral_debator(llm):
     def neutral_node(state) -> dict:
+        config = get_config()
+        report_clip = config.get("debate_report_clip_chars", 0)
+        history_clip = config.get("debate_history_clip_chars", 0)
+
         risk_debate_state = state["risk_debate_state"]
-        history = risk_debate_state.get("history", "")
+        history = clip_report(risk_debate_state.get("history", ""), history_clip)
         neutral_history = risk_debate_state.get("neutral_history", "")
 
         current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
         current_conservative_response = risk_debate_state.get("current_conservative_response", "")
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        market_research_report = clip_report(state["market_report"], report_clip)
+        sentiment_report = clip_report(state["sentiment_report"], report_clip)
+        news_report = clip_report(state["news_report"], report_clip)
+        fundamentals_report = clip_report(state["fundamentals_report"], report_clip)
         instrument_context = get_instrument_context_from_state(state)
 
         trader_decision = state["trader_investment_plan"]
@@ -36,12 +46,14 @@ Here is the current conversation history: {history} Here is the last response fr
 
 Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
 
-        response = llm.invoke(prompt)
+        content, report = invoke_debate_turn(
+            llm, prompt, speaker="Neutral Analyst", config=config
+        )
 
-        argument = f"Neutral Analyst: {response.content}"
+        argument = f"Neutral Analyst: {content}"
 
         new_risk_debate_state = {
-            "history": history + "\n" + argument,
+            "history": risk_debate_state.get("history", "") + "\n" + argument,
             "aggressive_history": risk_debate_state.get("aggressive_history", ""),
             "conservative_history": risk_debate_state.get("conservative_history", ""),
             "neutral_history": neutral_history + "\n" + argument,
@@ -54,6 +66,10 @@ Engage actively by analyzing both sides critically, addressing weaknesses in the
             "count": risk_debate_state["count"] + 1,
         }
 
-        return {"risk_debate_state": new_risk_debate_state}
+        result = {"risk_debate_state": new_risk_debate_state}
+        note = degraded_note("Neutral Analyst", report)
+        if note:
+            result["degraded_sources"] = [note]
+        return result
 
     return neutral_node
