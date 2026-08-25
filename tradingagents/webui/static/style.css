@@ -136,15 +136,8 @@ main.layout {
   cursor: pointer; height: 36px;
 }
 #runBtn:disabled { opacity: .55; cursor: not-allowed; }
-/* toggle "método Erick" (sob demanda) no launcher — alinhado à altura do botão */
-.method-toggle {
-  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-  height: 36px; padding: 0 12px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
-  color: var(--text); font-size: var(--fs-12); white-space: nowrap; user-select: none;
-}
-.method-toggle input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
-.method-toggle:hover { border-color: var(--accent); }
+/* método Erick/Comparar NÃO mora mais no launcher (task 018): vive só na barra de
+   reanálise (.re-methods). O launcher é ATIVO + DATA + [Analisar] (roda Padrão). */
 
 /* seção do método Erick no resultado: destaque sutil sem gritar */
 details.section.erick { border-color: #2e5c7d; }
@@ -546,6 +539,16 @@ details.section[open] > summary::before { content: "▾"; }
 /* Comparar é o atalho que mais faltava — CTA cheio pra ser achado de relance */
 .re-method.compare { border: none; color: #fff; background: linear-gradient(180deg, #3b82f6, #2563eb); }
 .re-method.compare:hover { box-shadow: 0 0 0 1px var(--accent) inset; }
+/* método ABERTO agora (absorve o antigo "Atualizar"): anel de destaque — clicá-lo
+   reanalisa hoje preservando o método. Vale pros três (padrao/erick/compare). */
+.re-method.is-open { box-shadow: 0 0 0 2px var(--accent) inset; color: #fff; }
+.re-method.padrao.is-open, .re-method.erick.is-open { background: var(--panel-2); border-color: var(--accent); }
+/* "hoje": deixa explícito que a reanálise usa a data de hoje (semântica do Atualizar) */
+.re-today {
+  margin-left: 4px; padding: 1px 7px; border-radius: 999px;
+  font-size: var(--fs-10); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .04em;
+  color: var(--accent); background: var(--panel-2); border: 1px solid var(--border);
+}
 
 /* history */
 .history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -767,25 +770,8 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .history .h-ticker .tk-sym { font-family: var(--mono); }
 .history .h-ticker .tk-co { font-family: inherit; font-weight: var(--fw-med); font-size: var(--fs-10); color: var(--muted); white-space: normal; }
 
-/* Atualizar: reanalisa o ativo aberto com os dados de hoje. */
-.refresh-btn {
-  margin-left: auto;
-  padding: 8px 14px;
-  font: inherit;
-  font-size: var(--fs-12);
-  color: var(--muted, #8b93a7);
-  background: transparent;
-  border: 1px solid var(--line, #2a2a2a);
-  border-radius: 8px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color .12s, border-color .12s, background .12s;
-}
-.refresh-btn:hover {
-  color: var(--fg, #e6e9f0);
-  border-color: var(--accent, #4c9aff);
-  background: var(--panel-2, #1a1a1a);
-}
+/* "Atualizar" (reanalisar hoje) foi absorvido pela barra de reanálise (task 018):
+   o método aberto fica destacado (.re-method.is-open) e clicá-lo roda na data de hoje. */
 
 /* Contador de análises do ativo na lista lateral */
 .h-count {
@@ -1066,7 +1052,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
      histórico lateral, Q&A, rodapé, navegação/ações, dicas e seletores do gráfico */
   .topbar, .config-panel, .launcher, .progress-panel, .reanalyze-bar,
   .sidebar, .ask-box, footer,
-  .head-nav, .tf-selector, .reeval-btn, .confront-ctl, .refresh-btn,
+  .head-nav, .tf-selector, .reeval-btn, .confront-ctl,
   .chart-zoom-hint, .chart-degrade, .degraded-banner,
   .cmp-col-actions, .cmp-open, .export-pdf-btn { display: none !important; }
 

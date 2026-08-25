@@ -134,14 +134,9 @@
             <label for="date">Data <span class="tz" id="tzLabel"></span></label>
             <input id="date" name="date" type="date" />
           </div>
-          <label class="method-toggle" title="Adiciona o analista que decide pelo método do Erick: recuo à média (EMA 8/21), saída antes da reversão e peso relativo do trade">
-            <input type="checkbox" id="erickToggle" />
-            <span>🧭 método Erick</span>
-          </label>
-          <label class="method-toggle" title="Roda as DUAS leituras (Padrão e método Erick) e confronta com um meta-juiz: onde concordam e onde divergem (a divergência é o sinal). Reusa cache; custo ~2 pipelines.">
-            <input type="checkbox" id="compareToggle" />
-            <span>⚖️ comparar Padrão × Erick</span>
-          </label>
+          <!-- Método vive num lugar SÓ: a barra de reanálise [Padrão][Erick][Comparar]
+               (abaixo, com um resultado na tela). O launcher só ABRE o ativo — roda
+               Padrão por padrão; daí é 1 clique pra trocar de método/TF sem redigitar. -->
           <button type="submit" id="runBtn">Analisar</button>
         </form>
         <p class="hint" id="assetHint"></p>
@@ -169,15 +164,15 @@
         <ol class="cmp-steps hidden" id="compareSteps"></ol>
       </section>
 
-      <!-- Reanalisar SEM redigitar (task 023): faixa do ativo ABERTO (clicado no
-           histórico ou já na tela) — vale tanto pra análise simples quanto pra
-           comparação, por isso fica FORA dos dois painéis (o de comparação esconde
-           o de resultado). Traz o ticker JÁ preenchido + escolha EXPLÍCITA de método
-           (Padrão / Erick / Comparar) + timeframe, e roda direto. Reusa os endpoints
-           de /api/analyze — não reescreve o motor. "Atualizar" e "Confrontar" seguem
-           funcionando; isto só tira a escolha de método de dentro do launcher e
-           elimina a redigitação. Visível só com um resultado/comparação na tela
-           (escondida enquanto uma análise roda). Populada por JS. -->
+      <!-- Reanalisar SEM redigitar (task 023 · consolidado na 018): faixa do ativo
+           ABERTO (clicado no histórico ou já na tela) — vale tanto pra análise simples
+           quanto pra comparação, por isso fica FORA dos dois painéis (o de comparação
+           esconde o de resultado). É o ÚNICO lugar do método: ticker JÁ preenchido +
+           escolha EXPLÍCITA (Padrão / Erick / Comparar) + timeframe, sempre na data de
+           HOJE — absorve o antigo botão "Atualizar" (o método aberto fica destacado, e
+           clicá-lo = reanalisar hoje preservando o método). Reusa os endpoints de
+           /api/analyze — não reescreve o motor. Visível só com um resultado/comparação
+           na tela (escondida enquanto uma análise roda). Populada por JS. -->
       <div class="reanalyze-bar hidden" id="reanalyzeBar"></div>
 
       <section class="panel result-panel hidden" id="resultPanel">
@@ -198,7 +193,6 @@
               <select id="confrontSelect" class="confront-select" aria-label="Confrontar com outra análise deste ativo"></select>
               <button type="button" class="confront-btn" id="confrontBtn" title="Meta-juiz sobre as duas análises">⚖️ Confrontar</button>
             </div>
-            <button type="button" class="refresh-btn hidden" id="refreshBtn" title="Roda de novo com os dados de hoje">↻ Atualizar</button>
             <!-- Exportar PDF: abre o diálogo de impressão do navegador já formatado
                  (só a análise, relatórios expandidos) → "Salvar como PDF". Sem lib. -->
             <button type="button" class="export-pdf-btn hidden" id="exportPdfBtn" title="Exportar esta análise como PDF (imprimir → salvar como PDF)">⤓ Exportar PDF</button>

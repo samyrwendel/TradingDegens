@@ -11,6 +11,7 @@ let TZ_LABEL = "GMT-4 (Manaus)";
 let _watchedRunId = "";              // run cujo progresso está na tela agora
 let _openRunId = "";                 // run simples aberto (lado A de um confronto manual)
 let _openMethod = "padrao";          // método da análise aberta (Erick EMA 8/21 / Padrão MMS) — troca de TF mantém a estrutura do método
+let _openView = "padrao";            // o que a barra de reanálise destaca: "padrao" | "erick" | "compare" (compare = view de comparação aberta). Clicar o destaque = "Atualizar" (reanalisa hoje preservando o método).
 let _prevRunningIds = new Set();     // ids que apareciam "running" na última lista
 const _finishedFlags = new Map();    // run_id -> "done" | "error" (terminou em 2º plano)
 let _historyTimer = null;            // atualização lenta da lista (marcadores vivos)
@@ -344,8 +345,6 @@ function renderResult(snap) {
   }
   _openTicker = snap.ticker || "";
   _openRunId = snap.run_id || "";
-  const rb = document.getElementById("refreshBtn");
-  if (rb) rb.classList.toggle("hidden", !_openTicker);
   // Exportar PDF só faz sentido com conteúdo real: escondido no estado de erro (abaixo).
   const ex = document.getElementById("exportPdfBtn");
   if (ex) ex.classList.remove("hidden");
@@ -367,6 +366,11 @@ function renderResult(snap) {
     $("confrontCtl").classList.add("hidden");   // não confrontar a partir de um run com erro
     // Reanálise segue disponível: uma falha (fonte fora do ar, transitório) é
     // justamente quando o usuário quer rerodar escolhendo método/TF, sem redigitar.
+    // Método aberto: preserva o que o run errado carregava (history traz r.method);
+    // sem isso, sem destaque (não inventa método num run que falhou).
+    _openMethod = snap.method === "erick" ? "erick" : (snap.method === "padrao" ? "padrao" : _openMethod);
+    _openView = snap.method === "compare" ? "compare"
+      : (snap.method === "erick" ? "erick" : (snap.method === "padrao" ? "padrao" : ""));
     _openDate = snap.date || "";
     _assetType = snap.asset_type || "";
     // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
@@ -400,6 +404,7 @@ function renderResult(snap) {
   // método da análise aberta: a estrutura (recuo/1-2-3) é EMA 8/21 no Erick, MMS no
   // Padrão. Trocar de TF precisa recalcular na mesma família — daí guardar o método.
   _openMethod = (r.erick_report && r.erick_report.trim()) ? "erick" : "padrao";
+  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick)
   $("verdictBadge").className = verdictClass(r.verdict);
   $("verdictBadge").innerHTML = verdictHtml(r.verdict);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
@@ -582,6 +587,7 @@ function renderCompare(snap) {
   _openTicker = snap.ticker || "";
   _openDate = snap.date || "";
   _assetType = snap.asset_type || "";
+  _openView = "compare";   // a barra destaca "Comparar" enquanto a comparação está aberta
   // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
   // dois; frame sem candle degrada honesto sob demanda). Só o fallback — a fonte
   // da verdade é result.timeframes do backend.
@@ -827,19 +833,28 @@ function renderReanalyzeBar() {
     const title = on ? `Reanalisar no ${label}` : "Frame indisponível para este ativo (o backend não inventa candle)";
     return `<button type="button" class="${cls}" data-retf="${tf}" ${on ? "" : "disabled"} title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
   }).join("");
+  // O método aberto ganha destaque (is-open): é o antigo "Atualizar" embutido —
+  // clicá-lo reanalisa HOJE preservando o método. Padrão/Erick/Comparar num lugar só.
+  const methods = [
+    ["padrao", "Padrão", "Reanalisa com a leitura Padrão no timeframe escolhido, na data de hoje"],
+    ["erick", "🧭 Erick", "Reanalisa com o método Erick — recuo à média, saída antes da reversão, peso do trade — na data de hoje"],
+    ["compare", "⚖️ Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+  ];
+  const mBtns = methods.map(([m, label, title]) => {
+    const open = m === _openView;
+    const cls = ["re-method", m, open ? "is-open" : ""].filter(Boolean).join(" ");
+    const t = open ? `${title} · leitura aberta agora — clique = atualizar hoje` : title;
+    return `<button type="button" class="${cls}" data-method="${m}"${open ? ' aria-current="true"' : ""} title="${escapeHtml(t)}">${escapeHtml(label)}</button>`;
+  }).join("");
   bar.innerHTML =
-    `<div class="re-lead"><span class="re-icon">🔁</span>Reanalisar <b class="re-ticker">${escapeHtml(_openTicker)}</b></div>` +
+    `<div class="re-lead"><span class="re-icon">🔁</span>Reanalisar <b class="re-ticker">${escapeHtml(_openTicker)}</b> <span class="re-today">hoje</span></div>` +
     `<div class="re-grp">` +
       `<span class="re-glabel">tempo</span>` +
       `<div class="re-tfs" role="group" aria-label="Timeframe da reanálise">${tfBtns}</div>` +
     `</div>` +
     `<div class="re-grp re-grp-methods">` +
       `<span class="re-glabel">método</span>` +
-      `<div class="re-methods">` +
-        `<button type="button" class="re-method padrao" data-method="padrao" title="Reanalisa com a leitura Padrão no timeframe escolhido">Padrão</button>` +
-        `<button type="button" class="re-method erick" data-method="erick" title="Reanalisa com o método Erick — recuo à média, saída antes da reversão, peso do trade">🧭 Erick</button>` +
-        `<button type="button" class="re-method compare" data-method="compare" title="Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal">⚖️ Comparar</button>` +
-      `</div>` +
+      `<div class="re-methods">${mBtns}</div>` +
     `</div>`;
   bar.classList.remove("hidden");
 }
@@ -1152,15 +1167,13 @@ function bindReeval() {
 
 // Reavaliação REAL: roda uma nova análise no timeframe escolhido (o analista de
 // mercado lê a estrutura daquele frame); o veredito pode mudar. Mesma (ticker,data),
-// só o TF muda. Reusa o método (Erick/Padrão) marcado no launcher.
+// só o TF muda. Reusa o método da análise ABERTA (_openMethod).
 function reevaluate(tf) {
   if (!_openTicker) return;
-  // O método da reavaliação é o da análise ABERTA (_openMethod), não o checkbox do
-  // launcher: abrir uma análise Erick pelo histórico/confronto NÃO marca o checkbox,
-  // então reavaliar (aqui e no reavaliar-com-fontes) tem que continuar Erick — mesma
-  // verdade que a troca de TF do gráfico (switchTimeframe usa _openMethod). Com uma
-  // análise aberta _openMethod sempre existe (o guard acima garante); cai em 'padrao'
-  // só na ausência de análise aberta.
+  // O método da reavaliação é o da análise ABERTA (_openMethod): abrir uma Erick pelo
+  // histórico/confronto tem que continuar Erick ao reavaliar (aqui e no reavaliar-com-
+  // fontes) — mesma verdade que a troca de TF do gráfico (switchTimeframe usa _openMethod).
+  // Com uma análise aberta _openMethod sempre existe; cai em 'padrao' só na ausência dela.
   const method = _openMethod || "padrao";
   $("resultPanel").classList.add("hidden");
   $("steps").innerHTML = "";
@@ -1802,10 +1815,10 @@ async function startAnalysis(ev) {
   const ticker = $("ticker").value.trim();
   const date = $("date").value;
   if (!ticker) { $("formError").textContent = "Informe um ticker."; return; }
-  const et = $("erickToggle");
-  const ct = $("compareToggle");
-  const compare = !!(ct && ct.checked);
-  const method = et && et.checked ? "erick" : "padrao";
+  // O launcher só ABRE o ativo: roda sempre Padrão (o método vive na barra de
+  // reanálise, um lugar só). Sem checkbox aqui → nada de método fantasma no POST.
+  const method = "padrao";
+  const compare = false;
   $("runBtn").disabled = true;
   $("resultPanel").classList.add("hidden");
   $("comparePanel").classList.add("hidden");
@@ -1818,8 +1831,7 @@ async function startAnalysis(ev) {
       return;
     }
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");
-    const boot = compare ? "Comparando Padrão × Erick…" : "Subindo o motor…";
-    renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: boot, percent: 2, plan: [], reached: [] } });
+    renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: "Subindo o motor…", percent: 2, plan: [], reached: [] } });
     watchRun(data.run_id);
     loadHistory();   // o novo run aparece na lista como "em andamento" na hora
   } catch (e) {
@@ -1886,21 +1898,10 @@ function renderAssetTimeline(ticker, currentId) {
 let _todayManaus = "";
 let _historyFilter = "all";
 
-// Reanalisa o ativo ABERTO na data de hoje (Manaus), PRESERVANDO o método da
-// análise aberta (_openMethod). Abrir uma Erick pelo histórico/confronto NÃO marca
-// o checkbox do launcher, então re-submeter o form (startAnalysis lê o checkbox)
-// re-rodava a Erick como Padrão — o MESMO bug do reavaliar (task 037), que o fix
-// da 037 não cobriu aqui. "Atualizar" agora compartilha runReanalyze() — a única
-// função de "rodar o ativo aberto" — pra o método não se perder de novo num quarto
-// botão. Semântica original mantida: DATA = hoje, TF = diário (1d).
-function bindRefresh() {
-  const rb = document.getElementById("refreshBtn");
-  if (!rb) return;
-  rb.addEventListener("click", () => {
-    if (!_openTicker) return;
-    runReanalyze(_openMethod || "padrao", "1d");
-  });
-}
+// "Atualizar" (reanalisar hoje preservando o método) foi ABSORVIDO pela barra de
+// reanálise (task 018): o método aberto fica destacado (is-open) e clicá-lo roda na
+// data de hoje via runReanalyze() — a ÚNICA função de "rodar o ativo aberto". Sem
+// botão separado que re-submetesse o form e perdesse o método (a classe do bug 037/039).
 let _allRuns = [];
 
 function bindHistoryTabs() {
@@ -2607,7 +2608,6 @@ function init() {
   });
   $("netNote").textContent = "acesse por " + location.host;
   bindHistoryTabs();
-  bindRefresh();
   bindReeval();
   bindConfront();
   bindReanalyzeBar();
