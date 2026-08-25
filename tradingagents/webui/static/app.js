@@ -1287,6 +1287,9 @@ function drawPriceChart(canvas, chart, a) {
   if (vview && vview.hi > vview.lo) { lo = vview.lo; hi = vview.hi; }
   canvas._yGeom = { padT, plotH, lo, hi };
   canvas.dataset.plo = lo; canvas.dataset.phi = hi;
+  // escala vertical observável (px por unidade de preço): sobe quando o zoom v
+  // comprime a janela — é o que estica corpo/pavio das velas na altura.
+  canvas.dataset.ppp = plotH / (hi - lo);
 
   // Velas/médias/marcadores ocupam a largura MENOS o respiro à direita (plotWx),
   // deixando um gap até a régua; gridlines/bandas/linhas de nível ainda vão até o
@@ -1383,8 +1386,13 @@ function drawPriceChart(canvas, chart, a) {
     ctx.fillText(d.slice(8, 10) + "/" + d.slice(5, 7), x(i), padT + plotH + 5);
   }
 
-  // candles
-  const cw = Math.max(1, Math.min((plotWx / vis) * 0.7, 14));
+  // candles — a LARGURA distorce com o zoom h: acompanha o passo por vela
+  // (plotWx/vis) a 70%, então poucas velas na janela = velas largas, muitas = finas.
+  // Piso de 1px pra não sumir no zoom-out extremo; SEM teto (o teto travava a
+  // distorção ao aproximar). A ALTURA distorce sozinha via y() (usa _vview/_yGeom):
+  // ao comprimir o eixo, a mesma variação open→close/high→low ocupa mais pixels.
+  const cw = Math.max(1, (plotWx / vis) * 0.7);
+  canvas.dataset.cw = cw;   // largura da vela observável (distorção h)
   candles.forEach((c, i) => {
     if (i < v0 || i >= v1) return;
     if (c.o == null || c.c == null) return;
