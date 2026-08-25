@@ -49,17 +49,27 @@ def _get_json(url: str, headers: dict, timeout: float,
     return json.loads(raw)
 
 
-def fetch_provider_models(provider: str, api_key: str | None,
-                          base_url: str | None = None, *, timeout: float = 8.0,
-                          limit: int = 400, urlopen: Callable | None = None) -> list[str]:
-    """Ids dos modelos do provider. Levanta em falha de rede/auth/parse.
+def _price_per_million(raw) -> float | None:
+    """Preço USD por 1M tokens a partir do valor por-token do provider (string ou
+    número). OpenRouter manda ``pricing.prompt``/``completion`` em USD/token; aqui
+    vira USD/1M pra caber no rótulo. Valor ausente/inválido/"0" vira None."""
+    if raw in (None, "", "0"):
+        return None
+    try:
+        per_token = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if per_token <= 0:
+        return None
+    return per_token * 1_000_000
 
-    ``urlopen`` é injetável (default ``urllib.request.urlopen``) pra teste. A chave
-    é usada só aqui, em memória — o caller não deve logá-la."""
+
+def _raw_models(provider: str, api_key: str | None, base_url: str | None,
+                timeout: float, opener: Callable) -> list[dict]:
+    """Lista crua de dicts do provider (id + name/pricing quando existirem)."""
     provider = (provider or "").strip().lower()
     key = (api_key or "").strip()
     base = (base_url or "").strip().rstrip("/")
-    opener = urlopen or urllib.request.urlopen
 
     if provider == "ollama":
         # /api/tags fica na RAIZ (não no /v1 OpenAI-compatível) — tira o sufixo /v1.
@@ -67,30 +77,64 @@ def fetch_provider_models(provider: str, api_key: str | None,
         if root.endswith("/v1"):
             root = root[:-3].rstrip("/")
         data = _get_json(root + "/api/tags", {}, timeout, opener)
-        models = [m.get("name") for m in (data.get("models") or []) if m.get("name")]
-    elif provider == "anthropic":
+        # Ollama usa ``name`` como id; sem catálogo de preço.
+        return [{"id": m.get("name")} for m in (data.get("models") or []) if m.get("name")]
+    if provider == "anthropic":
         url = (base or "https://api.anthropic.com/v1") + "/models"
         headers = {"anthropic-version": "2023-06-01"}
         if key:
             headers["x-api-key"] = key
         data = _get_json(url, headers, timeout, opener)
-        models = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
-    else:
-        # OpenAI-compatível (openai/openrouter/deepseek/xai/… ou custom via base_url).
-        endpoint = base or _OPENAI_COMPAT_BASE.get(provider)
-        if not endpoint:
-            raise ValueError(
-                f"provider '{provider}' precisa de um base_url para listar modelos"
-            )
-        headers = {}
-        if key:
-            headers["Authorization"] = f"Bearer {key}"
-        data = _get_json(endpoint.rstrip("/") + "/models", headers, timeout, opener)
-        models = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
+        return list(data.get("data") or [])
+    # OpenAI-compatível (openai/openrouter/deepseek/xai/… ou custom via base_url).
+    endpoint = base or _OPENAI_COMPAT_BASE.get(provider)
+    if not endpoint:
+        raise ValueError(
+            f"provider '{provider}' precisa de um base_url para listar modelos"
+        )
+    headers = {}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    data = _get_json(endpoint.rstrip("/") + "/models", headers, timeout, opener)
+    return list(data.get("data") or [])
 
-    # únicos, chat-primeiro, cortados no teto (datalist não precisa de milhares).
-    seen: dict[str, None] = {}
-    for m in models:
-        if m and m not in seen:
-            seen[m] = None
-    return sorted(seen.keys(), key=_rank)[:limit]
+
+def fetch_provider_model_infos(provider: str, api_key: str | None,
+                               base_url: str | None = None, *, timeout: float = 8.0,
+                               limit: int = 400,
+                               urlopen: Callable | None = None) -> list[dict]:
+    """Modelos do provider como dicts ``{id, name, price_in, price_out}``.
+
+    ``name`` é o rótulo amigável (OpenRouter ``name`` / Anthropic ``display_name``;
+    cai no id quando não vem). ``price_in``/``price_out`` são USD por 1M tokens (ou
+    None). Serve o combobox pesquisável do BYOK (casa id E nome, mostra preço).
+    Levanta em falha de rede/auth/parse. A chave é usada só aqui, em memória."""
+    opener = urlopen or urllib.request.urlopen
+    raw = _raw_models(provider, api_key, base_url, timeout, opener)
+
+    seen: dict[str, dict] = {}
+    for m in raw:
+        mid = m.get("id") if isinstance(m, dict) else None
+        if not mid or mid in seen:
+            continue
+        name = (m.get("name") or m.get("display_name") or "").strip() if isinstance(m, dict) else ""
+        pricing = m.get("pricing") if isinstance(m, dict) else None
+        price_in = price_out = None
+        if isinstance(pricing, dict):
+            price_in = _price_per_million(pricing.get("prompt"))
+            price_out = _price_per_million(pricing.get("completion"))
+        seen[mid] = {"id": mid, "name": name or mid,
+                     "price_in": price_in, "price_out": price_out}
+    # chat-primeiro, cortado no teto (o front pagina/filtra; não precisa de milhares).
+    infos = sorted(seen.values(), key=lambda i: _rank(i["id"]))
+    return infos[:limit]
+
+
+def fetch_provider_models(provider: str, api_key: str | None,
+                          base_url: str | None = None, *, timeout: float = 8.0,
+                          limit: int = 400, urlopen: Callable | None = None) -> list[str]:
+    """Ids dos modelos do provider (compat: só os ids, chat-primeiro). Levanta em
+    falha de rede/auth/parse. ``urlopen`` é injetável pra teste."""
+    infos = fetch_provider_model_infos(provider, api_key, base_url,
+                                       timeout=timeout, limit=limit, urlopen=urlopen)
+    return [i["id"] for i in infos]

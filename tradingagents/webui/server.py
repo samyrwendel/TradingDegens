@@ -49,7 +49,7 @@ from tradingagents.webui.errors import (
     NEED_KEY_MESSAGE,
     humanize_provider_error,
 )
-from tradingagents.webui.models_list import fetch_provider_models
+from tradingagents.webui.models_list import fetch_provider_model_infos
 from tradingagents.webui.runner import AnalysisRunner
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -167,7 +167,9 @@ class _Handler(BaseHTTPRequestHandler):
             env_var = get_api_key_env(provider)
             key = os.environ.get(env_var) if env_var else None
         try:
-            models = fetch_provider_models(provider, key, base_url or None)
+            # Devolve id + nome + preço (USD/1M) pra o combobox pesquisável casar
+            # tanto no id quanto no nome e mostrar o custo — sem jamais expor a chave.
+            models = fetch_provider_model_infos(provider, key, base_url or None)
             return {"ok": True, "provider": provider, "models": models,
                     "count": len(models)}
         except Exception as exc:

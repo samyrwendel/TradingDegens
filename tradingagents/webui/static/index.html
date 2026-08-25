@@ -69,17 +69,24 @@
       </div>
       <div class="field">
         <label for="cfgQuick">Modelo rápido <span class="orig">(quick)</span></label>
-        <!-- input + datalist: vira dropdown com os modelos reais da chave, mas
-             segue aceitando digitar um id (fallback se o provider não listar). -->
-        <input id="cfgQuick" type="text" autocomplete="off" list="cfgQuickList"
-               placeholder="(padrão do provedor)" />
-        <datalist id="cfgQuickList"></datalist>
+        <!-- combobox pesquisável: digita e a lista real da chave FILTRA em tempo
+             real, casando id E nome (ex.: "glm 5.2" acha z-ai/glm-5.2). Aceita id
+             livre não listado (fallback). Teclado: ↑/↓ move, Enter escolhe, Esc fecha. -->
+        <div class="combo" data-combo="cfgQuick">
+          <input id="cfgQuick" type="text" autocomplete="off" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false" aria-controls="cfgQuickOpts"
+                 placeholder="(padrão do provedor)" />
+          <ul class="combo-list hidden" id="cfgQuickOpts" role="listbox"></ul>
+        </div>
       </div>
       <div class="field">
         <label for="cfgDeep">Modelo pesado <span class="orig">(deep)</span></label>
-        <input id="cfgDeep" type="text" autocomplete="off" list="cfgDeepList"
-               placeholder="(padrão do provedor)" />
-        <datalist id="cfgDeepList"></datalist>
+        <div class="combo" data-combo="cfgDeep">
+          <input id="cfgDeep" type="text" autocomplete="off" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false" aria-controls="cfgDeepOpts"
+                 placeholder="(padrão do provedor)" />
+          <ul class="combo-list hidden" id="cfgDeepOpts" role="listbox"></ul>
+        </div>
       </div>
     </div>
     <p class="config-note byok-note hidden" id="byokOptionalNote">

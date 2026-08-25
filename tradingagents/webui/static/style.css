@@ -931,10 +931,40 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .cfg-status.ok { color: var(--green); }
 .cfg-status.err { color: var(--red); }
 .config-active { color: var(--muted); font-size: var(--fs-12); margin: 12px 0 0; }
+
+/* Combobox pesquisável dos modelos (BYOK): input + lista filtrada sobreposta.
+   Filtra ~400 modelos do OpenRouter em tempo real (casa id E nome). */
+.combo { position: relative; width: 100%; }
+.combo input { width: 100%; }
+.combo-list {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  margin: 0; padding: 4px; list-style: none;
+  max-height: 264px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--panel-2); border: 1px solid var(--accent); border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .55);
+}
+.combo-opt {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 7px 9px; border-radius: 6px; cursor: pointer;
+}
+.combo-opt:hover, .combo-opt.is-active { background: rgba(110, 168, 254, .16); }
+.combo-id {
+  font-family: var(--mono); font-size: var(--fs-13, var(--fs-14));
+  color: var(--text); word-break: break-all;
+}
+.combo-name { color: var(--muted); font-size: var(--fs-12); }
+.combo-price {
+  margin-left: auto; color: var(--green); font-size: var(--fs-12);
+  font-family: var(--mono); white-space: nowrap;
+}
+.combo-empty { padding: 8px 9px; color: var(--muted); font-size: var(--fs-12); }
+
 @media (max-width: 640px) {
   .config-grid .field select,
   .config-grid .field input { min-width: 0; width: 100%; }
   .config-grid .field { width: 100%; }
+  .combo-list { max-height: 240px; }
+  .combo-price { margin-left: 0; }
 }
 
 /* ---- Banner de erro humano (sem stack trace) ------------------------------- */

@@ -11,7 +11,10 @@ import urllib.request
 
 import pytest
 
-from tradingagents.webui.models_list import fetch_provider_models
+from tradingagents.webui.models_list import (
+    fetch_provider_model_infos,
+    fetch_provider_models,
+)
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
@@ -86,6 +89,33 @@ def test_fetch_custom_provider_requires_base_url():
                               urlopen=_fake_urlopen({"data": []}))
 
 
+# --------------------------------------------------- infos (id + nome + preço) --
+def test_fetch_infos_parses_name_and_price_per_million():
+    # OpenRouter manda name + pricing por-token (USD); vira USD/1M no combobox.
+    payload = {"data": [{
+        "id": "z-ai/glm-5.2", "name": "Z.AI: GLM 5.2",
+        "pricing": {"prompt": "0.0000006", "completion": "0.0000022"},
+    }]}
+    out = fetch_provider_model_infos("openrouter", "sk-or",
+                                     urlopen=_fake_urlopen(payload))
+    assert out == [{"id": "z-ai/glm-5.2", "name": "Z.AI: GLM 5.2",
+                    "price_in": 0.6, "price_out": 2.2}]
+
+
+def test_fetch_infos_name_falls_back_to_id_and_price_optional():
+    # Provider sem name/pricing (ex.: OpenAI /models): name = id, preços None.
+    out = fetch_provider_model_infos("openai", "k",
+                                     urlopen=_fake_urlopen({"data": [{"id": "gpt-5.5"}]}))
+    assert out == [{"id": "gpt-5.5", "name": "gpt-5.5",
+                    "price_in": None, "price_out": None}]
+
+
+def test_fetch_infos_ranks_chat_first():
+    op = _fake_urlopen({"data": [{"id": "text-embedding-3"}, {"id": "gpt-5.5"}]})
+    out = fetch_provider_model_infos("openai", "k", urlopen=op)
+    assert out[0]["id"] == "gpt-5.5"
+
+
 # ------------------------------------------------------------- HTTP endpoint ---
 def _make_server(tmp_path):
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path),
@@ -114,16 +144,18 @@ def test_http_models_lists_with_header_key(tmp_path, monkeypatch):
 
     def fake_fetch(provider, api_key, base_url=None, **kw):
         seen.update(provider=provider, api_key=api_key, base_url=base_url)
-        return ["gpt-5.5", "gpt-5.4-mini"]
+        return [{"id": "gpt-5.5", "name": "gpt-5.5", "price_in": None, "price_out": None},
+                {"id": "gpt-5.4-mini", "name": "gpt-5.4-mini", "price_in": None, "price_out": None}]
 
     # o server importa o símbolo no seu namespace: patcha lá
-    monkeypatch.setattr("tradingagents.webui.server.fetch_provider_models", fake_fetch)
+    monkeypatch.setattr("tradingagents.webui.server.fetch_provider_model_infos", fake_fetch)
     httpd, base = _make_server(tmp_path)
     try:
         code, body = _post(base, "/api/models", {"llm_provider": "openai"},
                            headers={"X-LLM-Key": "sk-SECRET-XYZ"})
         assert code == 200 and body["ok"] is True
-        assert "gpt-5.5" in body["models"] and body["count"] == 2
+        ids = [m["id"] for m in body["models"]]
+        assert "gpt-5.5" in ids and body["count"] == 2
         # a chave chegou ao fetcher pelo HEADER (não pela querystring/URL)
         assert seen["api_key"] == "sk-SECRET-XYZ"
     finally:
@@ -132,8 +164,9 @@ def test_http_models_lists_with_header_key(tmp_path, monkeypatch):
 
 def test_http_models_key_not_in_querystring(tmp_path, monkeypatch):
     # a URL da requisição não pode conter a chave em hipótese alguma
-    monkeypatch.setattr("tradingagents.webui.server.fetch_provider_models",
-                        lambda *a, **k: ["gpt-5.5"])
+    monkeypatch.setattr("tradingagents.webui.server.fetch_provider_model_infos",
+                        lambda *a, **k: [{"id": "gpt-5.5", "name": "gpt-5.5",
+                                          "price_in": None, "price_out": None}])
     httpd, base = _make_server(tmp_path)
     try:
         req = urllib.request.Request(
@@ -153,7 +186,7 @@ def test_http_models_error_is_humanized_and_redacted(tmp_path, monkeypatch):
         raise urllib.error.HTTPError("https://api.openai.com/v1/models", 401,
                                      f"Unauthorized: invalid api key {secret}", {}, None)
 
-    monkeypatch.setattr("tradingagents.webui.server.fetch_provider_models", boom)
+    monkeypatch.setattr("tradingagents.webui.server.fetch_provider_model_infos", boom)
     httpd, base = _make_server(tmp_path)
     try:
         code, body = _post(base, "/api/models", {"llm_provider": "openai"},

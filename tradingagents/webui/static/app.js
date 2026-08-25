@@ -2129,12 +2129,15 @@ function setCfgStatus(msg, kind) {
 }
 
 function bindConfig() {
+  // Comboboxes pesquisáveis dos modelos (rápido/pesado) — sobre os inputs do HTML.
+  _modelCombos.cfgQuick = new ModelCombo("cfgQuick", "cfgQuickOpts");
+  _modelCombos.cfgDeep = new ModelCombo("cfgDeep", "cfgDeepOpts");
   const toggle = () => {
     const panel = $("configPanel");
     panel.classList.toggle("hidden");
-    // Ao ABRIR com uma chave já salva, popula os dropdowns na hora (dropdown vazio
+    // Ao ABRIR com uma chave já salva, popula os dropdowns na hora (lista vazia
     // num retorno é confuso). Guardado por _canListModels — não bate à toa.
-    if (!panel.classList.contains("hidden") && !($("cfgQuickList").children.length)) {
+    if (!panel.classList.contains("hidden") && !_modelItems.length) {
       refreshModels();
     }
   };
@@ -2175,22 +2178,169 @@ function handleNeedKey(msg) {
   scrollToOpen($("configPanel"));
 }
 
-// Popula os dois datalists (rápido/pesado) com os modelos reais da chave.
+// ---- Combobox pesquisável de modelos (quick/deep) ---------------------------
+// Com OpenRouter a chave dá acesso a ~400 modelos: um <select>/<datalist> sem
+// busca é inutilizável (o Samyr não achou z-ai/glm-5.2). Aqui o campo vira um
+// input que FILTRA a lista em tempo real, casando id E nome (ex.: "glm 5.2" acha
+// z-ai/glm-5.2). Teclado ↑/↓/Enter/Esc, texto livre aceito (fallback), mobile ok.
+const MODEL_LIST_MAX = 60;        // teto de opções exibidas (a lista é filtrada)
+const _modelCombos = {};          // { cfgQuick: ModelCombo, cfgDeep: ModelCombo }
+let _modelItems = [];             // última lista carregada (infos), reidrata combos
+
+// Match token-a-token, case-insensitive, por substring em id + nome. Cada palavra
+// digitada precisa aparecer em algum lugar (id ou nome) — não precisa ser prefixo
+// nem estar em ordem. "glm 5.2" → z-ai/glm-5.2; "deepseek flash" → deepseek/…-flash.
+function filterModels(items, query) {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return items;
+  const toks = q.split(/\s+/).filter(Boolean);
+  return items.filter((it) => {
+    const hay = (it.id + " " + (it.name || "")).toLowerCase();
+    return toks.every((t) => hay.includes(t));
+  });
+}
+
+// Rótulo curto de preço (USD por 1M tokens) quando o provider manda — ajuda a
+// escolher sem sair da tela. Sem preço → string vazia (só o id/nome aparecem).
+function _priceLabel(it) {
+  const fmt = (v) => (v == null ? null : (v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(3)}`));
+  const i = fmt(it.price_in), o = fmt(it.price_out);
+  if (i && o) return `${i}/${o} ·1M`;
+  if (i) return `${i} in ·1M`;
+  return "";
+}
+
+class ModelCombo {
+  constructor(inputId, listId) {
+    this.input = $(inputId);
+    this.list = $(listId);
+    this.items = [];        // [{id, name, price_in, price_out}]
+    this.view = [];         // itens filtrados exibidos agora
+    this.active = -1;       // índice destacado (navegação por teclado)
+    this.open = false;
+    this._blurTimer = null;
+    this._bind();
+  }
+
+  setItems(items) {
+    this.items = Array.isArray(items) ? items : [];
+    if (this.open) this._filter(this.input.value);   // reidrata se já está aberto
+  }
+
+  _bind() {
+    this.input.addEventListener("input", () => this._openWith(this.input.value));
+    this.input.addEventListener("focus", () => this._openWith(this.input.value));
+    this.input.addEventListener("keydown", (e) => this._onKey(e));
+    // Fecha ao sair, mas com atraso pra o mousedown na opção rodar antes.
+    this.input.addEventListener("blur", () => {
+      this._blurTimer = setTimeout(() => this._close(), 150);
+    });
+    // mousedown (não click) dispara ANTES do blur fechar a lista.
+    this.list.addEventListener("mousedown", (e) => {
+      const li = e.target.closest("[data-val]");
+      if (!li) return;
+      e.preventDefault();                 // não rouba o foco do input
+      this._choose(li.getAttribute("data-val"));
+    });
+  }
+
+  _openWith(q) {
+    if (!this.items.length) { this._close(); return; }   // nada carregado ainda
+    this._filter(q);
+    this._show();
+  }
+
+  _filter(q) {
+    this.view = filterModels(this.items, q).slice(0, MODEL_LIST_MAX);
+    this.active = -1;
+    this._render();
+  }
+
+  _render() {
+    if (!this.view.length) {
+      this.list.innerHTML =
+        `<li class="combo-empty" aria-disabled="true">nenhum modelo casa — Enter usa o texto digitado</li>`;
+      return;
+    }
+    this.list.innerHTML = this.view.map((it, i) => {
+      const price = _priceLabel(it);
+      const name = (it.name && it.name !== it.id)
+        ? `<span class="combo-name">${escapeHtml(it.name)}</span>` : "";
+      const priceEl = price ? `<span class="combo-price">${escapeHtml(price)}</span>` : "";
+      return `<li class="combo-opt${i === this.active ? " is-active" : ""}" role="option"` +
+             ` data-val="${escapeHtml(it.id)}" id="${this.list.id}-o${i}"` +
+             ` aria-selected="${i === this.active}">` +
+             `<span class="combo-id">${escapeHtml(it.id)}</span>${name}${priceEl}</li>`;
+    }).join("");
+  }
+
+  _show() {
+    this.open = true;
+    this.list.classList.remove("hidden");
+    this.input.setAttribute("aria-expanded", "true");
+  }
+
+  _close() {
+    this.open = false;
+    this.active = -1;
+    this.list.classList.add("hidden");
+    this.input.setAttribute("aria-expanded", "false");
+    this.input.removeAttribute("aria-activedescendant");
+  }
+
+  _move(delta) {
+    if (!this.open) this._openWith(this.input.value);
+    if (!this.view.length) return;
+    this.active = (this.active + delta + this.view.length) % this.view.length;
+    this._render();
+    const el = this.list.children[this.active];
+    if (el) {
+      el.scrollIntoView({ block: "nearest" });
+      this.input.setAttribute("aria-activedescendant", el.id);
+    }
+  }
+
+  _onKey(e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); this._move(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); this._move(-1); }
+    else if (e.key === "Enter") {
+      if (this.open && this.active >= 0 && this.view[this.active]) {
+        e.preventDefault();
+        this._choose(this.view[this.active].id);
+      } else {
+        this._close();                    // texto livre: aceita o que está digitado
+      }
+    } else if (e.key === "Escape") {
+      if (this.open) { e.preventDefault(); e.stopPropagation(); this._close(); }
+    }
+  }
+
+  _choose(val) {
+    this.input.value = val;
+    clearTimeout(this._blurTimer);
+    this._close();
+    this.input.focus();
+  }
+}
+
+// Alimenta os dois comboboxes (rápido/pesado) com os modelos reais da chave.
+// Aceita objetos {id,name,price_*} (endpoint atual) ou ids soltos (compat).
 function fillModelLists(models) {
-  const opts = (models || []).map((m) => `<option value="${escapeHtml(m)}"></option>`).join("");
-  const q = $("cfgQuickList"); const d = $("cfgDeepList");
-  if (q) q.innerHTML = opts;
-  if (d) d.innerHTML = opts;
+  _modelItems = (models || [])
+    .map((m) => (typeof m === "string"
+      ? { id: m, name: m, price_in: null, price_out: null } : m))
+    .filter((m) => m && m.id);
+  for (const k of Object.keys(_modelCombos)) _modelCombos[k].setItems(_modelItems);
 }
 
 // Pré-seleciona defaults sensatos do provider quando o campo está vazio e o modelo
 // existe na lista (senão deixa o usuário escolher/digitar).
-function preselectDefaults(models) {
+function preselectDefaults() {
   const p = _providerMeta($("cfgProvider").value);
   if (!p) return;
-  const set = new Set(models || []);
-  if (!$("cfgQuick").value && p.default_quick && set.has(p.default_quick)) $("cfgQuick").value = p.default_quick;
-  if (!$("cfgDeep").value && p.default_deep && set.has(p.default_deep)) $("cfgDeep").value = p.default_deep;
+  const ids = new Set(_modelItems.map((m) => m.id));
+  if (!$("cfgQuick").value && p.default_quick && ids.has(p.default_quick)) $("cfgQuick").value = p.default_quick;
+  if (!$("cfgDeep").value && p.default_deep && ids.has(p.default_deep)) $("cfgDeep").value = p.default_deep;
 }
 
 // Provider dá pra listar agora? (evita bater no backend sem chave onde ela é obrigatória)
@@ -2228,7 +2378,7 @@ async function refreshModels() {
     if (seq !== _modelsSeq) return;   // resposta velha: a chave já mudou
     if (data.ok) {
       fillModelLists(data.models);
-      preselectDefaults(data.models);
+      preselectDefaults();
       setCfgStatus(`✅ chave válida — ${data.count} modelos carregados`, "ok");
     } else {
       fillModelLists([]);
