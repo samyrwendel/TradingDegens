@@ -503,7 +503,7 @@ function compareColumn(c, slot) {
     ? `<div class="cmp-chart-card">` +
         `<div class="chart-legend cmp-chart-legend">${chartLegendHtml(ch, c.actionable)}</div>` +
         `<div class="chart-wrap">` +
-          `<span class="chart-zoom-hint">roda=zoom · arrasta régua=zoom vertical · arrasta=move · 2 cliques=reseta</span>` +
+          `<span class="chart-zoom-hint">roda=zoom · régua direita=zoom vertical · régua de baixo=zoom horizontal · arrasta=move 2 eixos · 2 cliques=reseta</span>` +
           `<canvas id="cmpChart${slot}" class="cmp-canvas"></canvas>` +
         `</div></div>`
     : "";
@@ -1539,7 +1539,9 @@ function bindChartZoom(canvas) {
   let drag = null;
   let pinch = null;
   let vzoom = null;   // zoom VERTICAL: arrastar na régua de preço (eixo direito) escala _vview
-  const VZOOM_SENS = 2.6;   // sensibilidade do arraste-na-régua (altura cheia ~ fator e^±2.6)
+  let hzoom = null;   // zoom HORIZONTAL: arrastar na régua de tempo (eixo de baixo) escala _view
+  const VZOOM_SENS = 2.6;   // sensibilidade do arraste-na-régua vertical (altura cheia ~ fator e^±2.6)
+  const HZOOM_SENS = 2.6;   // sensibilidade do arraste-na-régua horizontal (largura cheia ~ e^±2.6)
   const fracX = (clientX) => {
     const rect = canvas.getBoundingClientRect();
     return Math.min(1, Math.max(0, (clientX - rect.left - PAD_L) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP)));
@@ -1552,18 +1554,32 @@ function bindChartZoom(canvas) {
       const [a, b] = [...pts.values()];
       const { v0, v1 } = cur();
       pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, v0, v1, frac: fracX((a.x + b.x) / 2) };
-      drag = null;
+      drag = null; vzoom = null; hzoom = null;   // 2 dedos = pinça; solta os gestos de 1 ponteiro
     } else if (pts.size === 1) {
       const rect = canvas.getBoundingClientRect();
-      const inAxis = (e.clientX - rect.left) >= (rect.width - PAD_R - 2); // faixa dos rótulos
+      const inAxis = (e.clientX - rect.left) >= (rect.width - PAD_R - 2);   // régua de preço (direita)
+      const inXAxis = (e.clientY - rect.top) >= (rect.height - PAD_B - 2);  // régua de tempo (baixo)
       if (inAxis && canvas._yGeom) {
         // arrastar na régua de preço = ZOOM vertical (comprime/expande _vview em torno
         // do centro). Cima = aproxima (velas crescem); baixo = afasta. Como TradingView.
+        // Prioridade: régua direita ganha do canto inferior-direito (evita conflito).
         vzoom = { y: e.clientY, lo: canvas._yGeom.lo, hi: canvas._yGeom.hi };
         canvas.style.cursor = "ns-resize";
         drag = null;
-      } else if (canvas._view) {
-        drag = { x: e.clientX, v0: canvas._view.v0, v1: canvas._view.v1 };
+      } else if (inXAxis) {
+        // arrastar na régua de tempo = ZOOM horizontal (comprime/expande _view em torno
+        // do centro). Esquerda = aproxima (menos candles, mais largos); direita = afasta.
+        const { v0, v1 } = cur();
+        hzoom = { x: e.clientX, v0, v1 };
+        canvas.style.cursor = "ew-resize";
+        drag = null;
+      } else if (canvas._view || canvas._vview) {
+        // corpo do gráfico com algum zoom ativo = PAN livre 2D (h e/ou v juntos, mantendo o zoom).
+        drag = {
+          x: e.clientX, y: e.clientY,
+          v: canvas._view ? { v0: canvas._view.v0, v1: canvas._view.v1 } : null,
+          vv: canvas._vview ? { lo: canvas._vview.lo, hi: canvas._vview.hi } : null,
+        };
         canvas.style.cursor = "grabbing";
       }
     }
@@ -1601,19 +1617,47 @@ function bindChartZoom(canvas) {
       redraw();
       return;
     }
+    if (hzoom) {
+      const rect = canvas.getBoundingClientRect();
+      const plotW = Math.max(1, rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP);
+      const vis0 = hzoom.v1 - hzoom.v0;
+      const center = (hzoom.v0 + hzoom.v1) / 2;               // âncora = centro da janela agarrada
+      const dx = e.clientX - hzoom.x;                         // <0 arrasta pra esquerda
+      const factor = Math.exp(dx / plotW * HZOOM_SENS);       // esquerda<0=comprime; direita>0=expande
+      let nv = Math.max(8, Math.min(N(), Math.round(vis0 * factor)));  // piso ~8 candles; teto = total
+      if (nv >= N()) {
+        canvas._view = null;                                  // expandiu além do total = visão cheia
+      } else {
+        const nv0 = Math.max(0, Math.min(Math.round(center - nv / 2), N() - nv));
+        canvas._view = { v0: nv0, v1: nv0 + nv };
+      }
+      redraw();
+      return;
+    }
     if (drag) {
       const rect = canvas.getBoundingClientRect();
-      const vis = drag.v1 - drag.v0;
-      const dC = Math.round((e.clientX - drag.x) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP) * vis);
-      let nv0 = Math.max(0, Math.min(drag.v0 - dC, N() - vis));
-      canvas._view = { v0: nv0, v1: nv0 + vis };
+      // PAN horizontal: desliza a janela de candles (só quando há zoom h ativo)
+      if (drag.v) {
+        const vis = drag.v.v1 - drag.v.v0;
+        const dC = Math.round((e.clientX - drag.x) / (rect.width - PAD_L - PAD_R - PLOT_RIGHT_GAP) * vis);
+        const nv0 = Math.max(0, Math.min(drag.v.v0 - dC, N() - vis));
+        canvas._view = { v0: nv0, v1: nv0 + vis };
+      }
+      // PAN vertical: desliza a janela de preço (só quando há zoom v ativo). dy>0
+      // (arrasta pra baixo) sobe a janela → o preço agarrado acompanha o cursor.
+      if (drag.vv) {
+        const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
+        const range = drag.vv.hi - drag.vv.lo;
+        const dPrice = (e.clientY - drag.y) / plotH * range;
+        canvas._vview = { lo: drag.vv.lo + dPrice, hi: drag.vv.hi + dPrice };
+      }
       redraw();
     }
   });
   const drop = (e) => {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
-    if (pts.size === 0) { drag = null; vzoom = null; canvas.style.cursor = canvas._view ? "grab" : "default"; }
+    if (pts.size === 0) { drag = null; vzoom = null; hzoom = null; canvas.style.cursor = (canvas._view || canvas._vview) ? "grab" : "default"; }
   };
   canvas.addEventListener("pointerup", drop);
   canvas.addEventListener("pointercancel", drop);
