@@ -242,6 +242,50 @@ def test_run_result_carries_timeframe_ladder(tmp_path):
     assert snap["result"]["timeframes"] == ["1w", "1d", "4h", "1h", "15m"]
 
 
+# ------------------------------------------- name resolution / search (035) ---
+def test_start_resolves_name_to_symbol(tmp_path, monkeypatch):
+    """Typing a company NAME resolves to the symbol before the run (Microsoft->MSFT)."""
+    monkeypatch.setattr(runner_module, "resolve_ticker_query",
+                        lambda term: "MSFT" if term == "Microsoft" else None)
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    run_id = runner.start("Microsoft", "2026-08-22")
+    snap = _wait(runner, run_id)
+    assert snap["ticker"] == "MSFT"
+
+
+def test_start_keeps_plain_symbol_untouched(tmp_path, monkeypatch):
+    """A plain ticker passes through as-is (resolver returns None for a symbol)."""
+    monkeypatch.setattr(runner_module, "resolve_ticker_query", lambda term: None)
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    run_id = runner.start("AAPL", "2026-08-22")
+    snap = _wait(runner, run_id)
+    assert snap["ticker"] == "AAPL"
+
+
+def test_runner_search_and_names_delegate(tmp_path, monkeypatch):
+    """The runner exposes search + batch name resolution for the UI (fail-open)."""
+    monkeypatch.setattr(runner_module, "fetch_symbol_search",
+                        lambda term, limit=8: [{"symbol": "MSFT", "name": "Microsoft Corporation"}])
+    monkeypatch.setattr(runner_module, "fetch_symbol_names",
+                        lambda symbols: {"MSFT": "Microsoft Corporation"})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    assert runner.search_symbols("micro")[0]["symbol"] == "MSFT"
+    assert runner.resolve_names(["MSFT"]) == {"MSFT": "Microsoft Corporation"}
+
+
+def test_resolve_ticker_query_symbol_is_offline(monkeypatch):
+    """A plain ticker must resolve to None WITHOUT any network call (the search seam
+    would fail the test if reached)."""
+    import tradingagents.dataflows.symbol_search as ss
+    monkeypatch.setattr(ss, "_yahoo_search",
+                        lambda *a, **k: pytest.fail("plain ticker must not hit the network"))
+    assert runner_module.resolve_ticker_query("AAPL") is None
+    assert runner_module.resolve_ticker_query("BTC-USD") is None
+
+
 def test_timeframe_view_recomputes_for_crypto(tmp_path, monkeypatch):
     """A valid crypto frame recomputes chart + plan on that frame (no network here:
     the two builders are stubbed)."""

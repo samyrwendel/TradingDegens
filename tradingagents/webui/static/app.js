@@ -261,7 +261,16 @@ function renderResult(snap) {
   // Run de comparação (Padrão × Erick): view própria, lado a lado.
   if ((snap.result || {}).compare) { renderCompare(snap); return; }
   const nameEl = document.getElementById("assetName");
-  if (nameEl) nameEl.textContent = snap.ticker || "—";
+  if (nameEl) {
+    // Cabeçalho no formato TICKER ( Nome ) — o nome resolve async (cacheado);
+    // enquanto não resolve, mostra só o ticker (nunca inventa nome).
+    nameEl.innerHTML = snap.ticker ? tickerLabelHtml(snap.ticker) : "—";
+    if (snap.ticker) {
+      ensureNames([snap.ticker]).then((ch) => {
+        if (ch && _openTicker === snap.ticker) nameEl.innerHTML = tickerLabelHtml(snap.ticker);
+      });
+    }
+  }
   _openTicker = snap.ticker || "";
   _openRunId = snap.run_id || "";
   const rb = document.getElementById("refreshBtn");
@@ -1697,15 +1706,41 @@ function bindHistoryTabs() {
     if (!btn) return;
     _historyFilter = btn.dataset.filter || "all";
     tabs.querySelectorAll(".h-tab").forEach((b) => b.classList.toggle("is-active", b === btn));
-    loadHistory();
+    paintHistory();   // troca de aba re-pinta do cache, sem re-buscar o histórico
   });
+}
+
+// Nome da empresa/ativo por símbolo — TICKER ( Nome ). Resolve async via /api/names
+// (Yahoo search, cacheado no backend); aqui um cache de sessão evita re-perguntar.
+// "" = resolvido-vazio (fonte não trouxe nome) → mostra só o ticker, nunca inventa.
+const _nameCache = new Map();   // SÍMBOLO(MAIÚSCULA) -> nome
+
+async function ensureNames(tickers) {
+  const need = [...new Set((tickers || []).map((t) => (t || "").toUpperCase()).filter(Boolean))]
+    .filter((t) => !_nameCache.has(t));
+  if (!need.length) return false;
+  try {
+    const res = await fetch("/api/names?symbols=" + encodeURIComponent(need.join(",")));
+    const data = await res.json();
+    const names = data.names || {};
+    need.forEach((t) => _nameCache.set(t, names[t] || ""));
+  } catch (e) {
+    need.forEach((t) => _nameCache.set(t, ""));   // fonte fora do ar = só ticker
+  }
+  return true;
+}
+
+function tickerLabelHtml(ticker) {
+  const t = (ticker || "").toUpperCase();
+  const n = _nameCache.get(t);
+  const sym = `<span class="tk-sym">${escapeHtml(t || "?")}</span>`;
+  return n ? `${sym} <span class="tk-co">( ${escapeHtml(n)} )</span>` : sym;
 }
 
 async function loadHistory() {
   try {
     const res = await fetch("/api/history");
     const data = await res.json();
-    const ul = $("history");
     const runs = data.runs || [];
 
     // Detecta runs que terminaram em SEGUNDO PLANO: estavam "em andamento" na
@@ -1721,58 +1756,68 @@ async function loadHistory() {
     });
     _prevRunningIds = runningIds;
 
-    if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
-    // Duas famílias só: cripto e ações (metais entram em ações). O usuário
-    // escolhe pela aba — Todos / Ações / Cripto —, sem cabeçalho empilhado.
     _allRuns = runs;
-    // A lateral é a LISTA DE ATIVOS, não o log de execuções: um item por ticker,
-    // com o veredito mais recente. O histórico daquele ativo (dias atrás) aparece
-    // como calendário dentro da análise aberta.
-    const item = (r, n) => {
-      const running = r.status === "running";
-      const v = (r.verdict || r.status || "").toString();
-      const badge = n > 1 ? `<span class="h-count" title="${n} análises">${n}</span>` : "";
-      // marcador de término em 2º plano (só em run já concluído, some ao abrir)
-      const flag = !running && _finishedFlags.get(r.run_id);
-      const flagHtml = flag
-        ? `<span class="h-flag ${flag}">${flag === "error" ? "⚠ erro" : "✓ pronto"}</span>`
-        : "";
-      let vHtml, vClass, meta;
-      if (running) {
-        const p = r.progress || {};
-        vHtml = `<span class="run-dot"></span>${p.percent || 0}%`;
-        vClass = "running";
-        meta = `${escapeHtml(p.phase || "processando")} · ${Math.round(r.elapsed || 0)}s`;
-      } else {
-        vHtml = verdictHtml(v);
-        vClass = verdictClass(v).replace("verdict", "").trim();
-        const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
-        meta = `${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s`;
-      }
-      return `<li data-id="${escapeHtml(r.run_id)}" class="${running ? "is-running" : ""}">` +
-        `<span class="h-ticker">${escapeHtml(r.ticker || "?")}${badge}${flagHtml}</span>` +
-        `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : v)}">${vHtml}</span>` +
-        `<span class="h-meta">${meta}</span>` +
-        `</li>`;
-    };
-    const filtered = _historyFilter === "all"
-      ? runs
-      : runs.filter((r) => (r.asset_type === "crypto") === (_historyFilter === "crypto"));
-    // um por ticker (o mais recente; a API já devolve do mais novo pro mais velho)
-    const seen = new Map();
-    filtered.forEach((r) => {
-      const k = (r.ticker || "?").toUpperCase();
-      if (!seen.has(k)) seen.set(k, { run: r, n: 0 });
-      seen.get(k).n += 1;
-    });
-    ul.innerHTML = seen.size
-      ? [...seen.values()].map(({ run, n }) => item(run, n)).join("")
-      : '<li class="empty">Nenhuma análise nesta aba.</li>';
-    [...ul.children].forEach((li) => {
-      const id = li.getAttribute("data-id");
-      if (id) li.addEventListener("click", () => openRun(id));
-    });
+    paintHistory();
   } catch (e) { /* ignore */ }
+}
+
+// Pinta a lista lateral a partir de `_allRuns` (sem re-buscar): usada pelo refresh,
+// pela troca de aba e pela re-pintura quando os nomes resolvem async.
+function paintHistory() {
+  const ul = $("history");
+  if (!ul) return;
+  const runs = _allRuns || [];
+  if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
+  // A lateral é a LISTA DE ATIVOS, não o log de execuções: um item por ticker,
+  // com o veredito mais recente. O histórico daquele ativo (dias atrás) aparece
+  // como calendário dentro da análise aberta.
+  const item = (r, n) => {
+    const running = r.status === "running";
+    const v = (r.verdict || r.status || "").toString();
+    const badge = n > 1 ? `<span class="h-count" title="${n} análises">${n}</span>` : "";
+    // marcador de término em 2º plano (só em run já concluído, some ao abrir)
+    const flag = !running && _finishedFlags.get(r.run_id);
+    const flagHtml = flag
+      ? `<span class="h-flag ${flag}">${flag === "error" ? "⚠ erro" : "✓ pronto"}</span>`
+      : "";
+    let vHtml, vClass, meta;
+    if (running) {
+      const p = r.progress || {};
+      vHtml = `<span class="run-dot"></span>${p.percent || 0}%`;
+      vClass = "running";
+      meta = `${escapeHtml(p.phase || "processando")} · ${Math.round(r.elapsed || 0)}s`;
+    } else {
+      vHtml = verdictHtml(v);
+      vClass = verdictClass(v).replace("verdict", "").trim();
+      const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
+      meta = `${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s`;
+    }
+    return `<li data-id="${escapeHtml(r.run_id)}" class="${running ? "is-running" : ""}">` +
+      `<span class="h-ticker">${tickerLabelHtml(r.ticker)}${badge}${flagHtml}</span>` +
+      `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : v)}">${vHtml}</span>` +
+      `<span class="h-meta">${meta}</span>` +
+      `</li>`;
+  };
+  const filtered = _historyFilter === "all"
+    ? runs
+    : runs.filter((r) => (r.asset_type === "crypto") === (_historyFilter === "crypto"));
+  // um por ticker (o mais recente; a API já devolve do mais novo pro mais velho)
+  const seen = new Map();
+  filtered.forEach((r) => {
+    const k = (r.ticker || "?").toUpperCase();
+    if (!seen.has(k)) seen.set(k, { run: r, n: 0 });
+    seen.get(k).n += 1;
+  });
+  ul.innerHTML = seen.size
+    ? [...seen.values()].map(({ run, n }) => item(run, n)).join("")
+    : '<li class="empty">Nenhuma análise nesta aba.</li>';
+  [...ul.children].forEach((li) => {
+    const id = li.getAttribute("data-id");
+    if (id) li.addEventListener("click", () => openRun(id));
+  });
+  // Resolve os nomes que faltam e re-pinta UMA vez quando chegam (cacheado → o
+  // segundo ensureNames não muda nada e o loop para).
+  ensureNames([...seen.keys()]).then((changed) => { if (changed) paintHistory(); });
 }
 
 async function openRun(runId) {
@@ -1811,12 +1856,45 @@ async function applyConfig() {
   }
 }
 
+// Autocomplete do campo ATIVO: busca por sigla OU nome (/api/search, Yahoo keyless).
+// Debounce curto pra não bater a cada tecla; preenche o <datalist> com SÍMBOLO —
+// Nome. Fonte fora do ar = sem sugestão (o campo segue aceitando o que foi digitado;
+// nome vira símbolo no servidor ao Analisar). Nunca bloqueia.
+let _suggestTimer = null;
+let _suggestSeq = 0;
+function scheduleTickerSuggest(term) {
+  clearTimeout(_suggestTimer);
+  const q = (term || "").trim();
+  if (q.length < 2) { const dl = $("tickerSuggest"); if (dl) dl.innerHTML = ""; return; }
+  _suggestTimer = setTimeout(() => fetchTickerSuggest(q), 220);
+}
+async function fetchTickerSuggest(term) {
+  const seq = ++_suggestSeq;
+  try {
+    const res = await fetch("/api/search?q=" + encodeURIComponent(term));
+    const data = await res.json();
+    if (seq !== _suggestSeq) return;   // resposta velha: uma mais nova já saiu
+    const dl = $("tickerSuggest");
+    if (!dl) return;
+    const results = (data.results || []).slice(0, 8);
+    // value = SÍMBOLO (é o que o campo recebe ao escolher); label mostra o nome +
+    // seed do cache de nomes, pra o cabeçalho/chip já sair com o nome.
+    dl.innerHTML = results.map((r) => {
+      const sym = (r.symbol || "").toUpperCase();
+      if (sym && r.name && !_nameCache.has(sym)) _nameCache.set(sym, r.name);
+      const label = r.name ? `${sym} — ${r.name}` : sym;
+      return `<option value="${escapeHtml(r.symbol || "")}" label="${escapeHtml(label)}"></option>`;
+    }).join("");
+  } catch (e) { /* fonte fora do ar: segue sem sugestão */ }
+}
+
 function init() {
   applyConfig();
   $("analyzeForm").addEventListener("submit", startAnalysis);
   $("ticker").addEventListener("input", () => {
     const t = $("ticker").value.trim().toUpperCase();
     $("assetHint").innerHTML = /-(USD|USDT)$|^BTC|^ETH/.test(t) ? `Detectado: cripto — inclui taxa de financiamento <span class="orig">(funding)</span>, contratos em aberto <span class="orig">(open interest)</span> e liquidações <span class="orig">(liquidations)</span>.` : "";
+    scheduleTickerSuggest($("ticker").value.trim());
   });
   $("netNote").textContent = "acesse por " + location.host;
   bindHistoryTabs();

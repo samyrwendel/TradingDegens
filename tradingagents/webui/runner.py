@@ -167,6 +167,43 @@ def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIME
         return {}
 
 
+def fetch_symbol_search(term: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Autocomplete candidates for a name-or-ticker term (fail-open -> [])."""
+    try:
+        from tradingagents.dataflows.symbol_search import search_symbols
+        return search_symbols(term, limit=limit)
+    except Exception:
+        return []
+
+
+def fetch_symbol_names(symbols: list[str]) -> dict[str, str]:
+    """Batch symbol -> display name for the history chips (fail-open -> {})."""
+    try:
+        from tradingagents.dataflows.symbol_search import resolve_names
+        return resolve_names(symbols)
+    except Exception:
+        return {}
+
+
+def resolve_ticker_query(term: str) -> str | None:
+    """A typed name-or-ticker -> the symbol to analyse (fail-open).
+
+    A plain ticker (``looks_like_symbol``) passes through with NO network call and is
+    never hijacked; a name ("Microsoft"/"Bitcoin") is resolved to its symbol via
+    Yahoo search. ``None`` when the term is already a symbol, or Yahoo is down.
+    """
+    try:
+        from tradingagents.dataflows.symbol_search import (
+            looks_like_symbol,
+            resolve_query_to_symbol,
+        )
+        if not term or looks_like_symbol(term):
+            return None
+        return resolve_query_to_symbol(term)
+    except Exception:
+        return None
+
+
 class _Run:
     """In-memory state for a single analysis run."""
 
@@ -365,10 +402,15 @@ class AnalysisRunner:
         an intraday frame on an equity is rejected here, mirroring ``/api/chart``.
         Each (ticker, date, timeframe) is a distinct, cacheable run whose verdict
         may differ; only the technical read changes, the fundamental thesis holds.
+
+        ``ticker`` may be a company NAME ("Microsoft", "Bitcoin"): it is resolved to
+        the symbol via Yahoo search first (a plain ticker passes through untouched,
+        no network); if Yahoo is down the raw term is kept and the data path decides.
         """
-        ticker = (ticker or "").strip().upper()
-        if not ticker:
+        raw = (ticker or "").strip()
+        if not raw:
             raise ValueError("ticker vazio")
+        ticker = (resolve_ticker_query(raw) or raw).strip().upper()
         # Default to *today in Manaus*, not the process/UTC date: at 21:30 Manaus
         # it is already the next day in UTC and the run would carry tomorrow.
         date = (date or "").strip() or timeutil.today()
@@ -483,10 +525,14 @@ class AnalysisRunner:
         Runs both readings (reusing a cached prior run for either side when one
         exists for the same ticker/date/timeframe) and confronts them with the
         meta-judge. Cost is up to two pipelines — a cached side costs nothing.
+
+        ``ticker`` may be a company name — resolved to its symbol first (see
+        :meth:`start`), so "Microsoft" and "MSFT" both confront the same run.
         """
-        ticker = (ticker or "").strip().upper()
-        if not ticker:
+        raw = (ticker or "").strip()
+        if not raw:
             raise ValueError("ticker vazio")
+        ticker = (resolve_ticker_query(raw) or raw).strip().upper()
         date = (date or "").strip() or timeutil.today()
         asset_type = self.detect_asset_type(ticker)
         timeframe = (timeframe or _DEFAULT_TIMEFRAME).strip() or _DEFAULT_TIMEFRAME
@@ -850,6 +896,14 @@ class AnalysisRunner:
         seen = {r["run_id"] for r in live}
         persisted = [r for r in self.store.recent(limit) if r.get("run_id") not in seen]
         return live + persisted
+
+    def search_symbols(self, term: str, limit: int = 8) -> list[dict[str, Any]]:
+        """Autocomplete candidates for a name-or-ticker term (fail-open)."""
+        return fetch_symbol_search(term, limit)
+
+    def resolve_names(self, symbols: list[str]) -> dict[str, str]:
+        """Batch symbol -> display name for the UI chips/header (fail-open)."""
+        return fetch_symbol_names(symbols)
 
     def config_info(self) -> dict[str, Any]:
         """Client bootstrap: the authoritative *Manaus* today + tz for the UI.

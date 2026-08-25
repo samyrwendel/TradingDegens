@@ -38,8 +38,10 @@
       <section class="panel launcher">
         <form id="analyzeForm" autocomplete="off">
           <div class="field">
-            <label for="ticker">Ativo <span class="orig">(ticker)</span></label>
-            <input id="ticker" name="ticker" placeholder="AAPL · BTC-USD · 0700.HK" required />
+            <label for="ticker">Ativo <span class="orig">(sigla ou nome)</span></label>
+            <input id="ticker" name="ticker" placeholder="AAPL · Microsoft · BTC-USD · Bitcoin"
+                   list="tickerSuggest" autocomplete="off" required />
+            <datalist id="tickerSuggest"></datalist>
           </div>
           <div class="field">
             <label for="date">Data <span class="tz" id="tzLabel"></span></label>

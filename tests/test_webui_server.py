@@ -137,6 +137,31 @@ def test_unknown_run_is_404(server):
     raise AssertionError("expected HTTP 404")
 
 
+# ------------------------------------------- nome + busca (task 035) -----------
+def test_search_endpoint_returns_candidates(server, monkeypatch):
+    """GET /api/search?q= returns name-or-ticker candidates (stubbed, no network)."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_symbol_search",
+                        lambda term, limit=8: [{"symbol": "MSFT", "name": "Microsoft Corporation",
+                                                "type": "EQUITY", "exchange": "NMS"}])
+    status, body = _get(server, "/api/search?q=Microsoft")
+    assert status == 200
+    assert body["query"] == "Microsoft"
+    assert body["results"][0]["symbol"] == "MSFT"
+    assert body["results"][0]["name"] == "Microsoft Corporation"
+
+
+def test_names_endpoint_batch_resolves(server, monkeypatch):
+    """GET /api/names?symbols=A,B resolves each symbol's name for the chips."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_symbol_names",
+                        lambda symbols: {"MSFT": "Microsoft Corporation", "BTC-USD": "Bitcoin USD"})
+    status, body = _get(server, "/api/names?symbols=MSFT,BTC-USD")
+    assert status == 200
+    assert body["names"]["MSFT"] == "Microsoft Corporation"
+    assert body["names"]["BTC-USD"] == "Bitcoin USD"
+
+
 # ------------------------------------------------- timeframe selector (005) -----
 def test_chart_endpoint_recomputes_timeframe(server, monkeypatch):
     """GET /api/chart recomputes the chart + plan on the requested frame."""

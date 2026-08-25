@@ -122,6 +122,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"runs": self.runner.active_runs()})
             elif path == "/api/history":
                 self._send_json({"runs": self.runner.history()})
+            elif path == "/api/search":
+                # Autocomplete do campo ATIVO: termo (nome OU sigla) -> símbolos
+                # candidatos com o nome. Keyless (Yahoo search via yfinance), fail-open.
+                qs = parse_qs(urlparse(self.path).query)
+                term = (qs.get("q", [""])[0] or "").strip()
+                self._send_json({"query": term, "results": self.runner.search_symbols(term)})
+            elif path == "/api/names":
+                # Resolução em lote símbolo -> nome pros chips do histórico/cabeçalho.
+                qs = parse_qs(urlparse(self.path).query)
+                raw = (qs.get("symbols", [""])[0] or "").strip()
+                symbols = [s for s in (x.strip() for x in raw.split(",")) if s]
+                self._send_json({"names": self.runner.resolve_names(symbols)})
             elif path == "/api/chart":
                 qs = parse_qs(urlparse(self.path).query)
                 ticker = (qs.get("ticker", [""])[0] or "").strip()
