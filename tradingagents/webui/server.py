@@ -13,11 +13,19 @@ Routes:
     POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
     POST /api/ask              -> {run_id, question} -> grounded Q&A over a run
     POST /api/test-key         -> {} + X-LLM-Key header -> {ok, provider, model}
+    POST /api/login            -> {password} -> cookie de sessão HttpOnly (dono)
+    POST /api/logout           -> encerra a sessão do dono
 
 BYOK (traga sua chave): /analyze, /compare, /ask e /test-key aceitam a chave do
 usuário no header ``X-LLM-Key`` (nunca em querystring) e provider/modelo/base_url
 no corpo do POST. A chave é usada só em memória pra aquela run e nunca é
-persistida/logada; sem chave, cai na env do servidor (ver runner.apply_llm_overrides).
+persistida/logada.
+
+Gating da chave do servidor (task 042): o público (sem sessão do dono) DEVE trazer
+a própria chave — sem ela a run é recusada (403 need_key), nunca cai na env. Só o
+DONO logado (senha em ``TRADINGDEGENS_OWNER_TOKEN``, verificada server-side em
+:mod:`tradingagents.webui.auth`) usa a chave env do servidor sem colar nada. A
+chave do servidor nunca é enviada ao cliente.
     GET  /api/status/<run_id>  -> live run snapshot (progress, cost, result)
     GET  /api/run/<run_id>     -> alias of status (from history if needed)
     GET  /api/runs?status=running -> live in-process runs (em andamento)
@@ -29,10 +37,13 @@ from __future__ import annotations
 
 import json
 import os
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from tradingagents.webui.auth import OwnerAuth
+from tradingagents.webui.errors import NEED_KEY_CODE, NEED_KEY_MESSAGE
 from tradingagents.webui.runner import AnalysisRunner
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -48,13 +59,16 @@ _CONTENT_TYPES = {
 class _Handler(BaseHTTPRequestHandler):
     server_version = "TradingDegensWeb/1.0"
     runner: AnalysisRunner  # injected on the server instance
+    auth: OwnerAuth         # injected on the server instance
 
     # -- helpers --------------------------------------------------------------
-    def _send_json(self, obj, status: int = 200) -> None:
+    def _send_json(self, obj, status: int = 200, cookies: list[str] | None = None) -> None:
         body = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for cookie in cookies or []:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -125,7 +139,37 @@ class _Handler(BaseHTTPRequestHandler):
             val = (body.get(bkey) or "").strip()
             if val:
                 ov[okey] = val
+        # Só o DONO logado destrava a chave do servidor: marca allow_server_key
+        # SEMPRE (True pro dono, False pro público) — assim o runner recusa a
+        # requisição pública sem chave própria e nunca cai na env do servidor.
+        ov["allow_server_key"] = self._is_owner()
         return ov
+
+    # -- login do dono ---------------------------------------------------------
+    def _session_id(self) -> str | None:
+        """Id de sessão do cookie ``td_session`` (ou None)."""
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return None
+        try:
+            jar = SimpleCookie(raw)
+        except Exception:
+            return None
+        morsel = jar.get(self.auth.cookie_name)
+        return morsel.value if morsel else None
+
+    def _is_owner(self) -> bool:
+        """Requisição autenticada como dono? (sessão válida server-side)."""
+        return self.auth.is_valid(self._session_id())
+
+    def _gate_or_403(self, body: dict) -> bool:
+        """True se a requisição pode rodar LLM (dono logado OU trouxe chave própria).
+        Senão, responde 403 com mensagem clara e retorna False (não cria run)."""
+        has_key = bool((self.headers.get("X-LLM-Key") or "").strip())
+        if has_key or self._is_owner():
+            return True
+        self._send_json({"error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE}, 403)
+        return False
 
     def _redact_key(self, text: str) -> str:
         """Redige a chave BYOK (header ``X-LLM-Key``) de um texto de erro antes de
@@ -146,7 +190,12 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/api/health":
                 self._send_json({"ok": True, "service": "tradingdegens-web"})
             elif path == "/api/config":
-                self._send_json(self.runner.config_info())
+                info = self.runner.config_info()
+                # Estado do login do dono (server-side): a UI mostra "usando a chave
+                # do servidor" só quando é o dono; nunca envia a chave em si.
+                info["owner"] = self._is_owner()
+                info["owner_login_enabled"] = self.auth.enabled()
+                self._send_json(info)
             elif path.startswith("/api/status/") or path.startswith("/api/run/"):
                 run_id = path.rsplit("/", 1)[-1]
                 snap = self.runner.status(run_id)
@@ -195,6 +244,29 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
+            if path == "/api/login":
+                # Login do dono: senha (env TRADINGDEGENS_OWNER_TOKEN) verificada
+                # server-side em tempo-constante; cria sessão e devolve cookie
+                # HttpOnly. Nunca ecoa a senha nem a chave do servidor.
+                body = self._read_json_body()
+                if not self.auth.enabled():
+                    self._send_json({"ok": False, "error": "login do dono não configurado"}, 400)
+                    return
+                if not self.auth.verify_password(body.get("password")):
+                    self._send_json({"ok": False, "error": "senha incorreta"}, 401)
+                    return
+                sid = self.auth.create_session()
+                # HttpOnly: JS não lê (anti-XSS). SameSite=Strict: não vaza cross-site.
+                cookie = (f"{self.auth.cookie_name}={sid}; HttpOnly; SameSite=Strict; "
+                          f"Path=/; Max-Age=2592000")
+                self._send_json({"ok": True, "owner": True}, cookies=[cookie])
+                return
+            if path == "/api/logout":
+                self.auth.destroy(self._session_id())
+                cleared = (f"{self.auth.cookie_name}=; HttpOnly; SameSite=Strict; "
+                           f"Path=/; Max-Age=0")
+                self._send_json({"ok": True, "owner": False}, cookies=[cleared])
+                return
             if path == "/api/analyze":
                 body = self._read_json_body()
                 ticker = (body.get("ticker") or "").strip()
@@ -209,6 +281,10 @@ class _Handler(BaseHTTPRequestHandler):
                 timeframe = (body.get("timeframe") or "1d").strip() or "1d"
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
+                    return
+                # Gating: público sem chave própria e sem sessão do dono não roda —
+                # nunca cai na chave do servidor (responde 403 claro, sem criar run).
+                if not self._gate_or_403(body):
                     return
                 # BYOK: a chave/provider/modelo do usuário viajam por header+corpo e
                 # valem só pra ESTA run (chave do usuário > env do servidor).
@@ -229,6 +305,8 @@ class _Handler(BaseHTTPRequestHandler):
                 # Manual confront (task 018): meta-judge over two EXISTING runs of
                 # the same ticker (no pipeline re-run). Returns a ready snapshot.
                 body = self._read_json_body()
+                if not self._gate_or_403(body):
+                    return
                 a = (body.get("a") or "").strip()
                 b = (body.get("b") or "").strip()
                 self._send_json(self.runner.confront(a, b, overrides=self._llm_overrides(body)))
@@ -264,9 +342,13 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def make_server(host: str, port: int, runner: AnalysisRunner | None = None) -> ThreadingHTTPServer:
+def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
+                auth: OwnerAuth | None = None) -> ThreadingHTTPServer:
     runner = runner or AnalysisRunner()
-    handler = type("BoundHandler", (_Handler,), {"runner": runner})
+    # OwnerAuth lê a senha do dono da env (TRADINGDEGENS_OWNER_TOKEN) uma vez, na
+    # subida; sem senha configurada, o login fica desabilitado e todos são público.
+    auth = auth or OwnerAuth()
+    handler = type("BoundHandler", (_Handler,), {"runner": runner, "auth": auth})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
     return httpd

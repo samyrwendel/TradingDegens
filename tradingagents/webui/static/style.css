@@ -955,3 +955,24 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 }
 .error-card .err-action:hover { filter: brightness(1.08); }
 .error-card .err-hint { font-size: var(--fs-12); color: var(--muted); }
+
+/* ---- Login do dono (destrava a chave do servidor) -------------------------- */
+.config-btn.is-owner { border-color: var(--green); color: var(--green); }
+.owner-box {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  margin: 4px 0 14px; background: var(--panel-2);
+}
+.owner-lead { font-size: var(--fs-12); color: var(--muted); display: block; margin-bottom: 8px; }
+.owner-login-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.owner-login-row input {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 8px 11px; font-size: var(--fs-14); min-width: 200px; font-family: var(--font);
+}
+.owner-login-row input:focus { outline: none; border-color: var(--accent); }
+.owner-loggedin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.owner-badge { font-size: var(--fs-14); color: var(--green); font-weight: var(--fw-med); }
+.byok-note { margin: 0 0 10px; color: var(--muted); }
+.byok-optional { opacity: .78; }
+@media (max-width: 640px) {
+  .owner-login-row input { min-width: 0; width: 100%; }
+}

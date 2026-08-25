@@ -22,6 +22,10 @@ let _historyTimer = null;            // atualização lenta da lista (marcadores
 const _LLM_CFG_KEY = "td_llm_cfg";
 let _llmCfg = {};              // { provider, apiKey, deepModel, quickModel, baseUrl }
 let _llmMeta = null;           // catálogo de providers vindo de /api/config
+// Login do dono: destrava a chave do SERVIDOR (público usa a própria). Estado vem
+// do servidor (cookie de sessão HttpOnly) — nunca de fachada no cliente.
+let _isOwner = false;
+let _ownerLoginEnabled = false;
 
 function loadLlmCfg() {
   try { _llmCfg = JSON.parse(localStorage.getItem(_LLM_CFG_KEY) || "{}") || {}; }
@@ -48,11 +52,13 @@ function llmRequestParts() {
 }
 
 // POST que carrega a config BYOK. Drop-in pros fetch de /api/analyze|compare|ask.
+// credentials:'same-origin' garante o cookie de sessão do dono na requisição.
 function apiPost(url, payload) {
   const { headers, body } = llmRequestParts();
   return fetch(url, {
     method: "POST",
     headers,
+    credentials: "same-origin",
     body: JSON.stringify({ ...(payload || {}), ...body }),
   });
 }
@@ -1684,6 +1690,10 @@ async function startAnalysis(ev) {
   try {
     const res = await apiPost("/api/analyze", { ticker, date, method, compare });
     const data = await res.json();
+    if (res.status === 403 && data.error_code === "need_key") {
+      handleNeedKey(data.error);
+      return;
+    }
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");
     const boot = compare ? "Comparando Padrão × Erick…" : "Subindo o motor…";
     renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: boot, percent: 2, plan: [], reached: [] } });
@@ -1916,12 +1926,14 @@ async function openRun(runId) {
 async function applyConfig() {
   // The authoritative "today" is Manaus-on-the-server, not the browser clock.
   try {
-    const res = await fetch("/api/config");
+    const res = await fetch("/api/config", { credentials: "same-origin" });
     const cfg = await res.json();
     if (cfg.tz_label) TZ_LABEL = cfg.tz_label;
     if (cfg.today) { _todayManaus = cfg.today; $("date").value = cfg.today; }
     $("tzLabel").textContent = "(" + TZ_LABEL + ")";
     $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
+    _isOwner = !!cfg.owner;
+    _ownerLoginEnabled = !!cfg.owner_login_enabled;
     if (cfg.llm) { _llmMeta = cfg.llm; renderConfigPanel(); }
     updateConfigBadge();
   } catch (e) {
@@ -1982,7 +1994,30 @@ function renderConfigPanel() {
   $("cfgDeep").value = _llmCfg.deepModel || "";
   $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
   syncProviderFields(cur);
+  renderOwnerBox();
   updateConfigBadge();
+}
+
+// Seção de login do dono + visibilidade do BYOK conforme o estado do servidor.
+function renderOwnerBox() {
+  const box = $("ownerBox");
+  if (!box) return;
+  // Sem login configurado no servidor: ninguém vira dono → só BYOK, esconde a caixa.
+  if (!_ownerLoginEnabled) { box.classList.add("hidden"); }
+  else {
+    box.classList.remove("hidden");
+    $("ownerLoggedOut").classList.toggle("hidden", _isOwner);
+    $("ownerLoggedIn").classList.toggle("hidden", !_isOwner);
+  }
+  // Dono logado: a chave do servidor já roda; a config própria vira OPCIONAL.
+  const note = $("byokOptionalNote");
+  if (_isOwner) {
+    $("byokGrid").classList.add("byok-optional");
+    if (note) note.classList.remove("hidden");
+  } else {
+    $("byokGrid").classList.remove("byok-optional");
+    if (note) note.classList.add("hidden");
+  }
 }
 
 // Mostra o campo Base URL só pros provedores que precisam (Ollama/self-host),
@@ -2006,28 +2041,71 @@ function syncProviderFields(provId) {
 // Rótulo do botão da engrenagem: mostra se está com chave própria ou a do servidor.
 function updateConfigBadge() {
   const lbl = $("configBtnLabel");
-  if (!lbl) return;
-  if (_llmCfg.apiKey) {
+  const btn = $("configBtn");
+  if (!lbl || !btn) return;
+  btn.classList.remove("has-key", "is-owner");
+  if (_isOwner) {
+    lbl.textContent = "dono";                       // usa a chave do servidor
+    btn.classList.add("is-owner");
+  } else if (_llmCfg.apiKey) {
     const prov = _llmCfg.provider || (_llmMeta && _llmMeta.default_provider) || "";
     lbl.textContent = prov ? `chave: ${prov}` : "chave própria";
-    $("configBtn").classList.add("has-key");
+    btn.classList.add("has-key");
   } else {
-    lbl.textContent = "Chaves";
-    $("configBtn").classList.remove("has-key");
+    lbl.textContent = "Chaves";                     // público sem chave → precisa configurar
   }
   // Linha "ativo" dentro do painel.
   const act = $("cfgActive");
   if (act) {
-    if (_llmCfg.apiKey) {
+    if (_isOwner && !_llmCfg.apiKey) {
+      const m = _llmMeta ? ` · ${_llmMeta.default_provider} · ${_llmMeta.default_quick || ""}` : "";
+      act.textContent = `Ativo: chave do servidor (dono)${m}`;
+    } else if (_llmCfg.apiKey) {
       const prov = _llmCfg.provider || (_llmMeta && _llmMeta.default_provider) || "?";
       act.textContent = `Ativo: sua chave · ${prov}` +
         (_llmCfg.quickModel ? ` · ${_llmCfg.quickModel}` : "");
-    } else if (_llmMeta) {
-      act.textContent = `Ativo: chave do servidor · ${_llmMeta.default_provider} · ${_llmMeta.default_quick || ""}`;
     } else {
-      act.textContent = "";
+      act.textContent = "Sem chave — informe a sua acima ou entre como dono para rodar.";
     }
   }
+}
+
+// Login do dono: envia a senha ao servidor (verificação server-side), que devolve
+// um cookie de sessão HttpOnly. Recarrega o estado via /api/config.
+async function ownerLogin() {
+  const pass = $("ownerPass").value;
+  const btn = $("ownerLoginBtn");
+  const st = $("ownerStatus");
+  btn.disabled = true;
+  st.textContent = "entrando…"; st.className = "cfg-status";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      credentials: "same-origin", body: JSON.stringify({ password: pass }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      $("ownerPass").value = "";
+      st.textContent = "";
+      await applyConfig();          // recarrega owner/estado do servidor
+      renderConfigPanel();
+    } else {
+      st.textContent = "❌ " + (data.error || "senha incorreta");
+      st.className = "cfg-status err";
+    }
+  } catch (e) {
+    st.textContent = "❌ erro de rede"; st.className = "cfg-status err";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function ownerLogout() {
+  try {
+    await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+  } catch (e) { /* segue */ }
+  await applyConfig();
+  renderConfigPanel();
 }
 
 function _readConfigForm() {
@@ -2063,9 +2141,19 @@ function bindConfig() {
   $("cfgClear").addEventListener("click", () => {
     saveLlmCfg({});
     renderConfigPanel();
-    setCfgStatus("agora usa a chave do servidor", "ok");
+    setCfgStatus(_isOwner ? "usando a chave do servidor" : "chave própria limpa", "ok");
   });
   $("cfgTest").addEventListener("click", testKey);
+  $("ownerLoginBtn").addEventListener("click", ownerLogin);
+  $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
+  $("ownerLogoutBtn").addEventListener("click", ownerLogout);
+}
+
+// Erro de "precisa de chave" (403 need_key): abre a config e aponta o caminho.
+function handleNeedKey(msg) {
+  $("formError").textContent = msg || "Informe sua chave nas Configurações (⚙️).";
+  $("configPanel").classList.remove("hidden");
+  scrollToOpen($("configPanel"));
 }
 
 // "Testar chave": UMA chamada barata ao /api/test-key com a config do formulário
@@ -2082,7 +2170,7 @@ async function testKey() {
   if (form.baseUrl) body.backend_url = form.baseUrl;
   try {
     const res = await fetch("/api/test-key", {
-      method: "POST", headers, body: JSON.stringify(body),
+      method: "POST", headers, credentials: "same-origin", body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.ok) setCfgStatus(`✅ válida — ${data.provider} · ${data.model || ""}`, "ok");

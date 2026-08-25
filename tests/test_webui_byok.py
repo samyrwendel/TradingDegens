@@ -340,7 +340,10 @@ def test_http_analyze_reads_key_from_header(tmp_path):
         httpd.shutdown()
 
 
-def test_http_analyze_without_header_uses_env(tmp_path):
+def test_http_analyze_without_header_is_refused_for_public(tmp_path):
+    """Sem chave própria e sem login do dono, a run é RECUSADA (403) — nunca cai na
+    env do servidor (o fallback automático foi removido na task 042). O acesso à
+    chave do servidor é coberto em test_webui_auth.py (dono logado)."""
     captured = []
     httpd, base = _make_server(tmp_path, _capturing_factory(captured),
                                base_config=_base_config(tmp_path))
@@ -350,14 +353,13 @@ def test_http_analyze_without_header_uses_env(tmp_path):
             data=json.dumps({"ticker": "AAPL", "date": "2026-08-22"}).encode(),
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            run_id = json.loads(resp.read())["run_id"]
-        for _ in range(200):
-            _, snap = _get(base, "/api/status/" + run_id)
-            if snap["status"] != "running":
-                break
-            time.sleep(0.02)
-        assert "llm_api_key" not in captured[0]  # fallback env do servidor
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("esperava 403")
+        except urllib.error.HTTPError as e:
+            assert e.code == 403
+            assert json.loads(e.read())["error_code"] == "need_key"
+        assert captured == []  # nenhuma run criada; nunca tocou a env
     finally:
         httpd.shutdown()
 

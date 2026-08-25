@@ -17,6 +17,14 @@ fallback genérico (mensagem curta + tipo do erro, já redigida)."""
 
 from __future__ import annotations
 
+# Recusa quando a requisição não é do dono logado E não trouxe chave própria — o
+# público precisa de BYOK; só o dono usa a chave do servidor. Nunca cai na env.
+NEED_KEY_CODE = "need_key"
+NEED_KEY_MESSAGE = (
+    "Informe sua chave de API nas Configurações (⚙️) para rodar. "
+    "Só o dono logado usa a chave do servidor."
+)
+
 # provider id -> rótulo amigável pra frase (o resto capitaliza o id cru).
 _PROVIDER_LABELS = {
     "openai": "OpenAI",

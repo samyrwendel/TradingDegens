@@ -28,7 +28,11 @@ from tradingagents.webui.compare import (
     detect_method,
     deterministic_meta,
 )
-from tradingagents.webui.errors import humanize_provider_error
+from tradingagents.webui.errors import (
+    NEED_KEY_CODE,
+    NEED_KEY_MESSAGE,
+    humanize_provider_error,
+)
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
 from tradingagents.webui.store import HistoryStore
@@ -567,6 +571,17 @@ class AnalysisRunner:
         # Config efetiva computada fora do try pra estar disponível no except mesmo
         # se a construção do grafo falhar (o provider vira parte da mensagem humana).
         config = apply_llm_overrides(self.base_config, run.overrides)
+        # Gating da chave do servidor (defesa em profundidade — o server já recusa
+        # antes de criar a run): requisição PÚBLICA (allow_server_key=False, que o
+        # server marca explicitamente pra quem não é dono) sem chave própria NÃO roda
+        # e NUNCA cai na env do servidor. Chamador interno confiável (sem o flag) roda.
+        if not config.get("llm_api_key") and run.overrides.get("allow_server_key") is False:
+            run.error = NEED_KEY_MESSAGE
+            run.error_code = NEED_KEY_CODE
+            run.result = None
+            run.finished_at = time.time()
+            run.finished_stamp = timeutil.stamp()
+            return "error"
         try:
             # Config efetiva da run: base do servidor + overrides BYOK (chave do
             # usuário tem prioridade; sem chave, cai na env do servidor). O grafo
@@ -915,6 +930,15 @@ class AnalysisRunner:
         if record is None:
             return None
 
+        # Gating da chave do servidor (idem análise): requisição pública explícita
+        # sem chave própria não roda a pergunta — nunca usa a env.
+        if (not apply_llm_overrides(self.base_config, overrides).get("llm_api_key")
+                and (overrides or {}).get("allow_server_key") is False):
+            return {
+                "run_id": record.get("run_id") or run_id, "question": question,
+                "error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE,
+            }
+
         messages, meta = ask_module.build_messages(record, question)
         usage_cb = UsageMetadataCallbackHandler()
         llm = self._answer_llm([usage_cb], overrides)
@@ -1001,6 +1025,12 @@ class AnalysisRunner:
         provider = (cfg.get("llm_provider") or "openai").lower()
         model = cfg.get("quick_think_llm")
         secret = cfg.get("llm_api_key")
+        # Requisição pública explícita sem chave própria não tem o que testar — a
+        # chave do servidor é só do dono, jamais exposta a um "testar" público.
+        if not secret and (overrides or {}).get("allow_server_key") is False:
+            return {"ok": False, "provider": provider, "model": model,
+                    "using_user_key": False,
+                    "error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE}
         kwargs: dict[str, Any] = {"max_retries": 0}
         if secret:
             kwargs["api_key"] = secret

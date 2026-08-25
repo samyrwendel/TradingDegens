@@ -8,10 +8,10 @@ import urllib.request
 
 import pytest
 
+from tests.test_webui_runner import FINAL_STATE, _blocking_factory, _factory, _FakeGraph
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
-from tests.test_webui_runner import FINAL_STATE, _FakeGraph, _blocking_factory, _factory
 
 
 def _dual_factory():
@@ -69,8 +69,12 @@ def _get(base, path):
 
 def _post(base, path, payload):
     data = json.dumps(payload).encode()
+    # Gating BYOK/owner (task 042): endpoints de LLM exigem chave própria OU sessão
+    # do dono. Estes testes de roteamento mandam uma chave dummy (o motor é falso e
+    # a ignora) só pra passar do gate — o que se testa aqui é o roteamento/fluxo.
     req = urllib.request.Request(
-        base + path, data=data, headers={"Content-Type": "application/json"}
+        base + path, data=data,
+        headers={"Content-Type": "application/json", "X-LLM-Key": "sk-test"},
     )
     with urllib.request.urlopen(req, timeout=5) as resp:
         return resp.status, json.loads(resp.read())

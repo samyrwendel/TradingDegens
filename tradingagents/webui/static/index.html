@@ -34,9 +34,27 @@
     </div>
     <p class="config-note">
       Sua chave fica <b>só neste navegador</b> e vai na requisição por header —
-      o servidor nunca a grava nem loga. Sem chave, cai na chave do servidor.
+      o servidor nunca a grava nem loga. <b>Só o dono logado</b> usa a chave do servidor.
     </p>
-    <div class="config-grid">
+
+    <!-- Login do dono: destrava a chave do servidor (verificado server-side). O
+         público usa a própria chave (BYOK). Renderizado por JS conforme estado. -->
+    <div class="owner-box" id="ownerBox">
+      <div class="owner-loggedout hidden" id="ownerLoggedOut">
+        <span class="owner-lead">É o dono? Entre pra usar a chave do servidor sem colar nada.</span>
+        <div class="owner-login-row">
+          <input id="ownerPass" type="password" autocomplete="off" placeholder="senha do dono" />
+          <button type="button" id="ownerLoginBtn" class="cfg-test">Entrar</button>
+          <span class="cfg-status" id="ownerStatus"></span>
+        </div>
+      </div>
+      <div class="owner-loggedin hidden" id="ownerLoggedIn">
+        <span class="owner-badge">✅ Dono logado — usando a chave do servidor.</span>
+        <button type="button" id="ownerLogoutBtn" class="cfg-clear">Sair</button>
+      </div>
+    </div>
+
+    <div class="config-grid" id="byokGrid">
       <div class="field">
         <label for="cfgProvider">Provedor</label>
         <select id="cfgProvider"></select>
@@ -58,10 +76,14 @@
         <input id="cfgDeep" type="text" autocomplete="off" placeholder="(padrão do provedor)" />
       </div>
     </div>
+    <p class="config-note byok-note hidden" id="byokOptionalNote">
+      Opcional: como dono, você já roda com a chave do servidor. Preencha só se quiser
+      usar outra chave nesta sessão.
+    </p>
     <div class="config-actions">
       <button type="button" id="cfgTest" class="cfg-test">Testar chave</button>
       <button type="button" id="cfgSave" class="cfg-save">Salvar</button>
-      <button type="button" id="cfgClear" class="cfg-clear">Usar a do servidor</button>
+      <button type="button" id="cfgClear" class="cfg-clear">Limpar minha chave</button>
       <span class="cfg-status" id="cfgStatus"></span>
     </div>
     <p class="config-active" id="cfgActive"></p>
