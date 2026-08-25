@@ -101,7 +101,7 @@ def _raw_models(provider: str, api_key: str | None, base_url: str | None,
 
 def fetch_provider_model_infos(provider: str, api_key: str | None,
                                base_url: str | None = None, *, timeout: float = 8.0,
-                               limit: int = 400,
+                               limit: int = 2000,
                                urlopen: Callable | None = None) -> list[dict]:
     """Modelos do provider como dicts ``{id, name, price_in, price_out}``.
 
@@ -125,14 +125,19 @@ def fetch_provider_model_infos(provider: str, api_key: str | None,
             price_out = _price_per_million(pricing.get("completion"))
         seen[mid] = {"id": mid, "name": name or mid,
                      "price_in": price_in, "price_out": price_out}
-    # chat-primeiro, cortado no teto (o front pagina/filtra; não precisa de milhares).
+    # Ordena chat-primeiro (só UX). O ``limit`` é uma trava de segurança contra um
+    # provider patológico com dezenas de milhares — NÃO uma paginação: o front é
+    # combobox pesquisável (filtra a lista TODA, mostra 60), então capar embaixo
+    # escondia famílias inteiras. Bug real: OpenRouter tem 418 modelos e o _rank
+    # empurrava a família z-ai/ (não está nos _CHAT_HINTS) pro fim, então o corte
+    # em 400 sumia com z-ai/glm-5.2. Teto alto (2000) = catálogo completo passa.
     infos = sorted(seen.values(), key=lambda i: _rank(i["id"]))
     return infos[:limit]
 
 
 def fetch_provider_models(provider: str, api_key: str | None,
                           base_url: str | None = None, *, timeout: float = 8.0,
-                          limit: int = 400, urlopen: Callable | None = None) -> list[str]:
+                          limit: int = 2000, urlopen: Callable | None = None) -> list[str]:
     """Ids dos modelos do provider (compat: só os ids, chat-primeiro). Levanta em
     falha de rede/auth/parse. ``urlopen`` é injetável pra teste."""
     infos = fetch_provider_model_infos(provider, api_key, base_url,

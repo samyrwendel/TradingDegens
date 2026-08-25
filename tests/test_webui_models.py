@@ -116,6 +116,31 @@ def test_fetch_infos_ranks_chat_first():
     assert out[0]["id"] == "gpt-5.5"
 
 
+def test_fetch_infos_does_not_cut_family_beyond_400(subtests):
+    """Regressão: com 418 modelos (o caso real do OpenRouter), a família z-ai/ era
+    empurrada pro fim por _rank (não está nos _CHAT_HINTS) e o corte antigo em 400 a
+    sumia inteira. Agora o catálogo COMPLETO passa — z-ai/glm-5.2 sobrevive."""
+    data = [
+        {"id": "openai/gpt-5.5", "name": "OpenAI: GPT-5.5"},          # rank 0 (chat)
+        {"id": "anthropic/claude-sonnet-5", "name": "Claude Sonnet 5"},  # rank 0
+        {"id": "z-ai/glm-5.2", "name": "Z.AI: GLM 5.2",              # rank 1, sorta por ÚLTIMO
+         "pricing": {"prompt": "0.0000006", "completion": "0.0000022"}},
+    ]
+    # 415 fillers sem chat-hint que sortam ANTES de z-ai (a… < z…) → 418 no total.
+    for i in range(415):
+        data.append({"id": f"acme/filler-{i:03d}", "name": f"Filler {i}"})
+    out = fetch_provider_model_infos("openrouter", "sk-or",
+                                     urlopen=_fake_urlopen({"data": data}))
+    ids = [i["id"] for i in out]
+    with subtests.test("nada é cortado — os 418 modelos vêm"):
+        assert len(out) == 418
+    with subtests.test("z-ai/glm-5.2 sobrevive ao ranking + cap"):
+        assert "z-ai/glm-5.2" in ids
+    with subtests.test("preço da família z-ai foi parseado (USD/1M)"):
+        z = next(i for i in out if i["id"] == "z-ai/glm-5.2")
+        assert z["price_in"] == 0.6 and z["price_out"] == 2.2
+
+
 # ------------------------------------------------------------- HTTP endpoint ---
 def _make_server(tmp_path):
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path),
