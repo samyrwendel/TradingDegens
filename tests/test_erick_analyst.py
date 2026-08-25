@@ -133,11 +133,32 @@ def test_section_crypto_cites_intraday_entry_exit_and_weight(monkeypatch):
     assert "Tático × estrutural" in section
 
 
-def test_section_stock_declares_daily_and_no_keyless_intraday(monkeypatch):
+def test_section_stock_reads_intraday_like_crypto(monkeypatch):
+    """An equity now has keyless intraday (yfinance), so the Erick section reads the
+    4h swing frame for a stock too — no longer a daily-only 'no intraday for stocks'
+    fallback (fork brief 25/08 item 6)."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     section = build_erick_method_section("BE", "2026-08-24", "stock")
+    assert "4 horas" in section          # swing frame, same as crypto
+    assert "não existe para ação" not in section  # the stale claim is gone
+    assert "**Peso relativo do trade:**" in section
+
+
+def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
+    """When the equity intraday source has no candle (empty 4h/15m chart) the read
+    falls back to the daily and DECLARES the degrade — never fabricates a bar."""
+    def chart(s, d, timeframe="1d"):
+        # 4h/15m empty (out of window); daily has a real read.
+        if timeframe == "1d":
+            return _fake_uptrend_at_media_chart()
+        return {"candles": [], "ema": {}}
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    section = build_erick_method_section("BE", "2019-01-15", "stock")
     assert "diário" in section
+    assert "indisponível" in section.lower()
     assert "**Peso relativo do trade:**" in section
 
 

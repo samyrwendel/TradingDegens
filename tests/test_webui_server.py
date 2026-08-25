@@ -152,9 +152,27 @@ def test_chart_endpoint_recomputes_timeframe(server, monkeypatch):
     assert body["timeframes"] == ["1w", "1d", "4h", "1h", "15m"]
 
 
-def test_chart_endpoint_rejects_intraday_for_stock(server):
+def test_chart_endpoint_recomputes_intraday_for_stock(server, monkeypatch):
+    """GET /api/chart?tf=15m now works for an EQUITY too (yfinance keyless intraday):
+    it recomputes on the requested frame instead of rejecting with 400."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_price_chart",
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "candles": [{"d": "x"}]})
+    monkeypatch.setattr(rm, "fetch_actionable_plan",
+                        lambda t, d, tf="1d", method="padrao": {"timeframe": tf, "setup_state": "ativo"})
+    status, body = _get(server, "/api/chart?ticker=AAPL&date=2026-08-22&tf=15m")
+    assert status == 200
+    assert body["asset_type"] == "stock"
+    assert body["timeframe"] == "15m"
+    assert body["price_chart"]["timeframe"] == "15m"
+    assert body["timeframes"] == ["1w", "1d", "4h", "1h", "15m"]
+
+
+def test_chart_endpoint_rejects_unknown_frame(server):
+    """A frame no asset offers (``3m``) is still a 400 — the ladder is the single
+    source of truth and does not include it."""
     try:
-        _get(server, "/api/chart?ticker=AAPL&date=2026-08-22&tf=15m")
+        _get(server, "/api/chart?ticker=AAPL&date=2026-08-22&tf=3m")
     except urllib.error.HTTPError as e:
         assert e.code == 400
         return
@@ -184,10 +202,30 @@ def test_analyze_accepts_timeframe_and_stamps_verdict(server, monkeypatch):
     assert snap["result"]["verdict_timeframe"] == "4h"
 
 
-def test_analyze_rejects_intraday_timeframe_for_stock(server):
+def test_analyze_accepts_intraday_timeframe_for_stock(server, monkeypatch):
+    """POST /api/analyze with an equity intraday frame now runs (yfinance keyless):
+    the snapshot carries verdict_timeframe=15m instead of a 400."""
+    import tradingagents.webui.runner as rm
+    monkeypatch.setattr(rm, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
+    monkeypatch.setattr(rm, "fetch_actionable_plan", lambda t, d, tf="1d", method="padrao": {})
+    monkeypatch.setattr(rm, "fetch_derivatives_report", lambda t, d: "")
+    status, body = _post(server, "/api/analyze",
+                         {"ticker": "AAPL", "date": "2026-08-22", "timeframe": "15m"})
+    assert status == 200
+    run_id = body["run_id"]
+    for _ in range(200):
+        s, snap = _get(server, f"/api/status/{run_id}")
+        if snap["status"] in ("done", "error"):
+            break
+        time.sleep(0.02)
+    assert snap["status"] == "done"
+    assert snap["verdict_timeframe"] == "15m"
+
+
+def test_analyze_rejects_unknown_timeframe_for_stock(server):
     try:
         _post(server, "/api/analyze",
-              {"ticker": "AAPL", "date": "2026-08-22", "timeframe": "15m"})
+              {"ticker": "AAPL", "date": "2026-08-22", "timeframe": "3m"})
     except urllib.error.HTTPError as e:
         assert e.code == 400
         return

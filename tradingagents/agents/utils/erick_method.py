@@ -29,12 +29,14 @@ from tradingagents.dataflows.price_structure import (
 
 logger = logging.getLogger(__name__)
 
-# Frame primário do método por tipo de ativo. Cripto tem candle real de exchange
-# (keyless) no intradiário — o método vive no 4h/15m. Ação não tem feed
-# intradiário keyless, então cai no diário e a leitura declara isso.
-_CRYPTO_FRAME = "4h"
-_CRYPTO_FINE_FRAME = "15m"
-_STOCK_FRAME = "1d"
+# O método vive no intradiário — 4h de swing + 15m de timing fino — para QUALQUER
+# ativo: cripto lê o candle real da exchange, ação lê o intradiário keyless do
+# yfinance (15m/1h nativos, 4h reamostrado por pregão). Quando a fonte não tem
+# candle pro símbolo/data (ação fora da janela intradiária do yfinance, ou feed
+# fora do ar) a leitura cai no diário e DECLARA o degradê — nunca inventa barra.
+_SWING_FRAME = "4h"
+_FINE_FRAME = "15m"
+_FALLBACK_FRAME = "1d"
 
 _FRAME_LABEL = {
     "15m": "15 minutos (intradiário)",
@@ -181,9 +183,10 @@ def _saida(plan: dict, read: dict) -> str:
 
 
 def _fine_timing(symbol: str, curr_date: str) -> str | None:
-    """Linha de timing fino no 15m (só cripto). Fail-open -> None."""
+    """Linha de timing fino no 15m (cripto ou ação — a fonte keyless intradiária
+    existe pros dois agora). Fail-open -> None quando não há candle."""
     try:
-        plan = build_actionable_plan_dict(symbol, curr_date, _CRYPTO_FINE_FRAME)
+        plan = build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
     except Exception:  # noqa: BLE001
         return None
     state = (plan or {}).get("setup_state")
@@ -202,19 +205,20 @@ def _fine_timing(symbol: str, curr_date: str) -> str | None:
 def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> str:
     """Seção markdown pt-BR do método Erick — determinística e ancorada em dado.
 
-    Cripto lê no 4h (frame de swing do método) + timing fino no 15m; ação cai no
-    diário e declara que o intradiário keyless não existe pra ela. Nunca inventa
-    nível: sem candle, diz que a leitura intradiária está indisponível.
+    O método lê no 4h (frame de swing) + timing fino no 15m para QUALQUER ativo —
+    cripto no candle da exchange, ação no intradiário keyless do yfinance. Se a
+    fonte não tem candle pro símbolo/data, cai no diário e declara o degradê. Nunca
+    inventa nível: sem candle, diz que a leitura intradiária está indisponível.
     """
-    is_crypto = asset_type == "crypto"
-    frame = _CRYPTO_FRAME if is_crypto else _STOCK_FRAME
+    frame = _SWING_FRAME
     chart = build_price_chart(symbol, curr_date, timeframe=frame)
     read = _ema_read(chart)
 
-    # Cripto com feed intradiário fora do ar: cai no diário, declarando o degradê.
+    # Fonte intradiária sem candle pro símbolo/data (ação fora da janela do yfinance,
+    # ou feed cripto fora do ar): cai no diário, declarando o degradê.
     degraded_note = ""
-    if read is None and is_crypto:
-        frame = _STOCK_FRAME
+    if read is None:
+        frame = _FALLBACK_FRAME
         chart = build_price_chart(symbol, curr_date, timeframe=frame)
         read = _ema_read(chart)
         degraded_note = ("\n\n> Fonte intradiária indisponível agora — leitura caiu no "
@@ -224,14 +228,10 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
     head = "## 🧭 Método Erick — leitura do setup"
 
     if read is None:
-        extra = ("" if is_crypto else
-                 " O intradiário keyless (15m/4h) não existe para ação — o método é "
-                 "intradiário, então aqui só o diário/semanal serve de referência de fundo.")
         return (
             f"{head}\n\n"
             f"**Timeframe da leitura:** {frame_label}\n\n"
             f"Sem candle suficiente para a leitura de EMA neste frame — nada inventado."
-            f"{extra}"
         )
 
     decision = _decide(read)
@@ -254,7 +254,7 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
         f"**Peso relativo do trade:** {decision['peso']} — {decision['peso_racional']}.",
     ]
 
-    fine = _fine_timing(symbol, curr_date) if is_crypto else None
+    fine = _fine_timing(symbol, curr_date)
     if fine:
         lines += ["", fine]
 

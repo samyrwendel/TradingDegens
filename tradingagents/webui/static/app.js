@@ -285,7 +285,10 @@ function renderResult(snap) {
     // justamente quando o usuário quer rerodar escolhendo método/TF, sem redigitar.
     _openDate = snap.date || "";
     _assetType = snap.asset_type || "";
-    _timeframes = _assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"];
+    // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
+  // dois; frame sem candle degrada honesto sob demanda). Só o fallback — a fonte
+  // da verdade é result.timeframes do backend.
+  _timeframes = ["1w", "1d", "4h", "1h", "15m"];
     _verdictTf = snap.verdict_timeframe || "1d";
     _reTf = _timeframes.includes(_verdictTf) ? _verdictTf : "1d";
     renderReanalyzeBar();
@@ -314,15 +317,15 @@ function renderResult(snap) {
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
 
-  // Estado do seletor de timeframe do ativo aberto. A escada vem do backend
-  // (result.timeframes); runs antigas do histórico não a têm, então cai no
-  // padrão por tipo de ativo. Toda análise começa exibindo o diário.
+  // Estado do seletor de timeframe do ativo aberto. Operabilidade é propriedade do
+  // ATIVO HOJE, não um congelado da run: ação e cripto têm a escada intradiária
+  // inteira agora, então uma run ANTIGA (salva quando ação só tinha 1w/1d) também
+  // ganha os botões intradiários ao reabrir. O backend (/api/chart) é o árbitro
+  // real e degrada honesto por símbolo/data. Toda análise começa exibindo o diário.
   _openDate = snap.date || "";
   _assetType = snap.asset_type || "";
   _tf = r.timeframe || "1d";
-  _timeframes = Array.isArray(r.timeframes) && r.timeframes.length
-    ? r.timeframes
-    : (_assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"]);
+  _timeframes = ["1w", "1d", "4h", "1h", "15m"];
   // TF em que o VEREDITO foi computado (carimbo do cabeçalho). Runs antigas não
   // têm o campo → cai no frame do gráfico. É diferente de _tf: _tf pode ser
   // trocado só pra olhar o gráfico, o carimbo fixa o frame do veredito real.
@@ -485,7 +488,10 @@ function renderCompare(snap) {
   _openTicker = snap.ticker || "";
   _openDate = snap.date || "";
   _assetType = snap.asset_type || "";
-  _timeframes = _assetType === "crypto" ? ["1w", "1d", "4h", "1h", "15m"] : ["1w", "1d"];
+  // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
+  // dois; frame sem candle degrada honesto sob demanda). Só o fallback — a fonte
+  // da verdade é result.timeframes do backend.
+  _timeframes = ["1w", "1d", "4h", "1h", "15m"];
   const cmpTf = (a && (a.verdict_timeframe || a.timeframe)) ||
     (b && (b.verdict_timeframe || b.timeframe)) || "1d";
   _verdictTf = cmpTf;
@@ -657,13 +663,14 @@ function renderReanalyzeBar() {
   if (!bar) return;
   if (!_openTicker) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
   const enabled = new Set(_timeframes || ["1d"]);
-  // TF escolhido não operável no ativo (ex.: intradiário em ação) cai no do veredito.
+  // TF fora da escada operável do ativo cai no do veredito (defesa; hoje ação e
+  // cripto têm a escada inteira, mas o backend continua sendo a fonte da verdade).
   if (!enabled.has(_reTf)) _reTf = enabled.has(_verdictTf) ? _verdictTf : "1d";
   const tfBtns = ALL_TFS.map(([tf, label]) => {
     const on = enabled.has(tf);
     const active = tf === _reTf;
     const cls = ["re-tf", active ? "is-active" : "", on ? "" : "is-off"].filter(Boolean).join(" ");
-    const title = on ? `Reanalisar no ${label}` : "Intradiário indisponível para ação (só cripto tem candle real de exchange)";
+    const title = on ? `Reanalisar no ${label}` : "Frame indisponível para este ativo (o backend não inventa candle)";
     return `<button type="button" class="${cls}" data-retf="${tf}" ${on ? "" : "disabled"} title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
   }).join("");
   bar.innerHTML =
@@ -827,9 +834,9 @@ const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
 // elemento <canvas> (canvas._chart/_actionable/_view/_vview/_yGeom/_autoY), pra que o
 // gráfico principal e os dois da comparação sejam independentes.
 let _tf = "1d";               // timeframe atualmente exibido no gráfico principal
-let _timeframes = ["1d"];     // frames operáveis do ativo aberto (cripto = escada)
+let _timeframes = ["1d"];     // frames operáveis do ativo aberto (ação e cripto = escada inteira)
 let _openDate = "";           // data da análise aberta (recomputa por timeframe)
-let _assetType = "";          // tipo do ativo aberto (cripto habilita intradiário)
+let _assetType = "";          // tipo do ativo aberto (define a fonte do intradiário)
 let _verdictTf = "1d";        // timeframe em que o veredito ABERTO foi computado (carimbo)
 
 // paddings do gráfico, compartilhados entre o desenho e a interação de zoom/pan
@@ -842,8 +849,9 @@ const PAD_L = 8, PAD_R = 58, PAD_T = 12, PAD_B = 22;
 const PLOT_RIGHT_GAP = 16;
 
 // Todos os frames do seletor, na ordem exibida. Um frame fora de `_timeframes`
-// (intradiário em ação) é renderizado DESABILITADO — o backend nunca inventa
-// candle pra ele; a UI só deixa claro que não é operável.
+// é renderizado DESABILITADO — o backend nunca inventa candle. Hoje ação e cripto
+// têm a escada inteira operável; o mecanismo de desabilitar segue valendo como
+// defesa caso o backend devolva uma escada reduzida.
 const ALL_TFS = [["1w", "Semanal"], ["1d", "Diário"], ["4h", "4h"], ["1h", "1h"], ["15m", "15m"]];
 const TF_LABEL = { "1w": "Semanal", "1d": "Diário", "4h": "4h", "1h": "1h", "15m": "15m" };
 
@@ -914,8 +922,9 @@ function renderChartCard(chart, ticker, actionable) {
 // ---- timeframe selector ----------------------------------------------------
 // Botões semanal · diário · 4h · 1h · 15m. Clicar recalcula região, 1-2-3 e faixas
 // NAQUELE tempo gráfico (via /api/chart), redesenha o gráfico e marca o frame ativo.
-// O semanal é reamostrado do diário, então vale pra ação e cripto; os intradiários
-// fora de `_timeframes` (ação) ficam desabilitados — o backend não inventa candle.
+// O semanal é reamostrado do diário; o intradiário (4h/1h/15m) vale pra ação e
+// cripto — cada frame tem fonte real keyless (exchange na cripto, yfinance na
+// ação) e degrada honesto sob demanda quando não há candle pra aquele símbolo/data.
 function renderTfSelector() {
   const el = $("tfSelector");
   if (!el) return;
@@ -927,7 +936,7 @@ function renderTfSelector() {
       .filter(Boolean).join(" ");
     const title = on
       ? `Recalcular no ${label}`
-      : "Intradiário indisponível para ação (só cripto tem candle real de exchange)";
+      : "Frame indisponível para este ativo (o backend não inventa candle)";
     return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
       `title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
   }).join("");

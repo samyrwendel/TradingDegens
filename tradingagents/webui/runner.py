@@ -33,15 +33,16 @@ from tradingagents.webui.store import HistoryStore
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
 _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 
-# The chart's timeframe selector, by asset type, ordered widest→narrowest
-# (semanal · diário · 4h · 1h · 15m). The weekly frame is resampled in memory from
-# the daily series, so it is operable for BOTH stocks and crypto. Crypto also gets
-# the intraday ladder (real keyless exchange candles); an equity has no keyless
-# intraday feed, so those buttons show disabled ("indisponível para ação") rather
-# than inventing a bar. Daily (``_DEFAULT_TIMEFRAME``) stays the frame every
-# analysis is first computed on — the selector re-derives the others on demand.
+# The chart's timeframe selector, ordered widest→narrowest (semanal · diário · 4h
+# · 1h · 15m). The weekly frame is resampled in memory from the daily series; the
+# intraday ladder is a real keyless candle for BOTH asset types now — crypto from
+# the exchange (native), equity from yfinance (15m/1h native, 4h resampled per
+# session). A frame with no source for a given symbol/date degrades honestly
+# on demand ("intradiário indisponível") rather than inventing a bar, so the
+# buttons are operable for every asset. Daily (``_DEFAULT_TIMEFRAME``) stays the
+# frame every analysis is first computed on — the selector re-derives the rest.
 _CRYPTO_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
-_STOCK_TIMEFRAMES = ("1w", "1d")
+_STOCK_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
 _DEFAULT_TIMEFRAME = "1d"
 
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
@@ -64,9 +65,10 @@ def select_analysts_for_asset(asset_type: str, include_erick: bool = False) -> l
 
 
 def timeframes_for_asset(asset_type: str) -> list[str]:
-    """Operable chart timeframes for an asset type (crypto has the intraday ladder;
-    an equity only the daily). The single source of truth the UI selector and the
-    ``/api/chart`` validation both read, so they can never disagree."""
+    """Operable chart timeframes for an asset type — the full intraday ladder for
+    both crypto and equity (each frame has a real keyless source; a symbol/date with
+    no candle degrades honestly on demand). The single source of truth the UI
+    selector and the ``/api/chart`` validation both read, so they never disagree."""
     return list(_CRYPTO_TIMEFRAMES if asset_type == "crypto" else _STOCK_TIMEFRAMES)
 
 
@@ -868,19 +870,22 @@ class AnalysisRunner:
 
         Backs the ``/api/chart`` endpoint the timeframe selector calls: the region,
         1-2-3 and bands are re-detected on the chosen frame's own series (daily from
-        the cached yfinance series; 4h/1h/15m from the keyless exchange for crypto).
-        ``method`` keeps the structure family consistent with the open analysis
-        (Erick EMA 8/21 / Padrão MMS) when the user flips timeframe. Everything reuses
-        the DA-058 caches, so flipping back to a frame already fetched costs zero
-        network.
+        the cached yfinance series; 4h/1h/15m from the keyless intraday source —
+        the exchange for crypto, yfinance for an equity). ``method`` keeps the
+        structure family consistent with the open analysis (Erick EMA 8/21 / Padrão
+        MMS) when the user flips timeframe. Everything reuses the DA-058 caches, so
+        flipping back to a frame already fetched costs zero network.
 
         Honesty guards:
 
-        * an unsupported frame for the asset (e.g. ``15m`` on an equity) is a
-          ``ValueError`` — the UI already disables those buttons;
-        * a crypto intraday **source outage** (feed down → no candle) is NOT
-          fabricated: the view degrades to the daily frame and flags ``degraded``
-          with a pt-BR ``notice`` so the UI can say so plainly.
+        * an unsupported frame (e.g. a ``3m`` that no asset offers) is a
+          ``ValueError`` — the UI only renders the operable ladder;
+        * an intraday **source outage** (feed down → empty candles, ``sem_dado``
+          plan) is NOT fabricated: the view degrades to the daily frame and flags
+          ``degraded`` with a pt-BR ``notice`` so the UI can say so plainly;
+        * a frame the source genuinely has no candle for (``intradiario_indisponivel``
+          — e.g. an equity backtest beyond yfinance's ~60-day intraday window) is
+          left on the requested frame with an honest "indisponível" plan, not swapped.
         """
         ticker = (ticker or "").strip().upper()
         date = (date or "").strip() or timeutil.today()
@@ -901,9 +906,11 @@ class AnalysisRunner:
         notice: str | None = None
         requested = timeframe
         has_candles = bool((chart or {}).get("candles"))
-        # A crypto intraday frame that came back empty means the exchange feed is
-        # down (a non-crypto frame would have been rejected above; a genuine
-        # "intradiário indisponível para ação" plan is expected and left alone).
+        # An intraday frame that came back empty with a ``sem_dado`` plan means the
+        # feed is momentarily down → degrade to the daily. A genuine
+        # "intradiario_indisponivel" plan (the source truly has no candle for this
+        # symbol/date, e.g. an out-of-window equity backtest) is expected and left
+        # on the requested frame — the UI shows "indisponível", nothing is invented.
         if timeframe != _DEFAULT_TIMEFRAME and not has_candles \
                 and (plan or {}).get("setup_state") != "intradiario_indisponivel":
             degraded = True

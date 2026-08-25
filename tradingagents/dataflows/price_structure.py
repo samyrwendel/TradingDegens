@@ -56,8 +56,9 @@ _MA_WINDOWS = (20, 50, 200)
 _EMA_WINDOWS = (8, 21, 50)
 
 # Timeframes this detector runs on. The daily/weekly frames come from the cached
-# yfinance series; the intraday frames (15m/1h/4h) come from the keyless-exchange
-# loader and only exist for crypto (see :mod:`.intraday`).
+# yfinance series; the intraday frames (15m/1h/4h) come from the keyless intraday
+# loader — the exchange for crypto, yfinance for an equity (see :mod:`.intraday`) —
+# and degrade honestly when the source has no candle for a symbol/date.
 _DEFAULT_TIMEFRAME = "1d"
 
 # Human labels for the timeframe stamped on sections/plans (pt-BR).
@@ -265,9 +266,10 @@ def _load_frame(symbol: str, curr_date: str, timeframe: str) -> pd.DataFrame:
     * daily — the cached yfinance series (:func:`load_ohlcv`);
     * weekly — that same daily series resampled in memory (:func:`_resample_weekly`),
       so it needs no separate feed and is operable for stocks and crypto alike;
-    * intraday (15m/1h/4h) — the keyless-exchange loader, which raises
-      :class:`IntradayUnavailableError` for a non-crypto symbol so the caller
-      declares it unavailable instead of inventing a bar.
+    * intraday (15m/1h/4h) — the keyless intraday loader (exchange for crypto,
+      yfinance for an equity), which raises :class:`IntradayUnavailableError` when
+      the source has no candle for the symbol/date so the caller declares it
+      unavailable instead of inventing a bar.
     """
     if _is_intraday(timeframe):
         return load_intraday_ohlcv(symbol, curr_date, timeframe)
@@ -505,9 +507,10 @@ def build_price_structure_section(
         logger.info("intraday unavailable for %s (%s): %s", symbol, timeframe, exc)
         return (
             f"{heading}\n\n"
-            f"Intradiário indisponível para ação: não há candle {tf} keyless para "
-            f"{symbol}. Nenhum valor inventado — o intradiário só é reproduzido "
-            "onde existe candle real de exchange (cripto)."
+            f"Intradiário {tf} indisponível agora para {symbol}: a fonte keyless não "
+            "retornou candles (data fora da janela intradiária da fonte ou fonte fora "
+            "do ar). Nenhum valor inventado — o intradiário só aparece quando há candle "
+            "real (cripto na exchange, ação no yfinance)."
         )
     except Exception as exc:  # noqa: BLE001 — never break the report over enrichment
         logger.warning("price-structure detection failed for %s: %s", symbol, exc)
@@ -661,7 +664,7 @@ _HORIZON = {
     "aguardar_rompimento": "aguardar rompimento (dias a semanas) · alvo em semanas a meses",
     "sem_setup": "sem gatilho de preço definido — sem horizonte operável",
     "sem_dado": "sem dado suficiente para definir horizonte",
-    "intradiario_indisponivel": "intradiário indisponível para ação — sem candle real de exchange",
+    "intradiario_indisponivel": "intradiário indisponível agora — a fonte não retornou candle real",
 }
 
 
@@ -743,7 +746,8 @@ def build_actionable_plan(
     each method's own zones. Reuses :func:`detect_price_structure` (buy regions, live
     region, 1-2-3) and the same swings — nothing is recomputed from scratch and no
     number is fabricated. Propagates nothing: a data failure yields a ``sem_dado``
-    plan with ``None`` levels; a non-crypto intraday request yields an explicit
+    plan with ``None`` levels; an intraday request the source has no candle for
+    (e.g. an equity backtest beyond yfinance's intraday window) yields an explicit
     ``intradiario_indisponivel`` plan — never a fake read.
     """
     tf_ref = _plan_timeframe_ref(timeframe)
