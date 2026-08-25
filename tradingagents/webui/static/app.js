@@ -2129,10 +2129,27 @@ function setCfgStatus(msg, kind) {
 }
 
 function bindConfig() {
-  const toggle = () => $("configPanel").classList.toggle("hidden");
+  const toggle = () => {
+    const panel = $("configPanel");
+    panel.classList.toggle("hidden");
+    // Ao ABRIR com uma chave já salva, popula os dropdowns na hora (dropdown vazio
+    // num retorno é confuso). Guardado por _canListModels — não bate à toa.
+    if (!panel.classList.contains("hidden") && !($("cfgQuickList").children.length)) {
+      refreshModels();
+    }
+  };
   $("configBtn").addEventListener("click", toggle);
   $("configClose").addEventListener("click", () => $("configPanel").classList.add("hidden"));
-  $("cfgProvider").addEventListener("change", (e) => { setCfgStatus(""); syncProviderFields(e.target.value); });
+  // Trocar de provider invalida os modelos: limpa as listas e redispara a busca.
+  $("cfgProvider").addEventListener("change", (e) => {
+    setCfgStatus("");
+    syncProviderFields(e.target.value);
+    fillModelLists([]); $("cfgQuick").value = ""; $("cfgDeep").value = "";
+    refreshModels();
+  });
+  // Ao DIGITAR/COLAR a chave: testa e puxa os modelos automaticamente (debounce).
+  $("cfgKey").addEventListener("input", scheduleModels);
+  $("cfgKey").addEventListener("paste", () => setTimeout(refreshModels, 0));
   $("cfgSave").addEventListener("click", () => {
     saveLlmCfg(_readConfigForm());
     setCfgStatus("salvo ✓", "ok");
@@ -2141,9 +2158,11 @@ function bindConfig() {
   $("cfgClear").addEventListener("click", () => {
     saveLlmCfg({});
     renderConfigPanel();
+    fillModelLists([]);
     setCfgStatus(_isOwner ? "usando a chave do servidor" : "chave própria limpa", "ok");
   });
-  $("cfgTest").addEventListener("click", testKey);
+  // "Testar chave" agora é reforço manual do mesmo fluxo (testa + lista).
+  $("cfgTest").addEventListener("click", refreshModels);
   $("ownerLoginBtn").addEventListener("click", ownerLogin);
   $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
   $("ownerLogoutBtn").addEventListener("click", ownerLogout);
@@ -2156,30 +2175,75 @@ function handleNeedKey(msg) {
   scrollToOpen($("configPanel"));
 }
 
-// "Testar chave": UMA chamada barata ao /api/test-key com a config do formulário
-// (não precisa salvar antes). Diz ✅ válida / ❌ erro — sem rodar análise.
-async function testKey() {
+// Popula os dois datalists (rápido/pesado) com os modelos reais da chave.
+function fillModelLists(models) {
+  const opts = (models || []).map((m) => `<option value="${escapeHtml(m)}"></option>`).join("");
+  const q = $("cfgQuickList"); const d = $("cfgDeepList");
+  if (q) q.innerHTML = opts;
+  if (d) d.innerHTML = opts;
+}
+
+// Pré-seleciona defaults sensatos do provider quando o campo está vazio e o modelo
+// existe na lista (senão deixa o usuário escolher/digitar).
+function preselectDefaults(models) {
+  const p = _providerMeta($("cfgProvider").value);
+  if (!p) return;
+  const set = new Set(models || []);
+  if (!$("cfgQuick").value && p.default_quick && set.has(p.default_quick)) $("cfgQuick").value = p.default_quick;
+  if (!$("cfgDeep").value && p.default_deep && set.has(p.default_deep)) $("cfgDeep").value = p.default_deep;
+}
+
+// Provider dá pra listar agora? (evita bater no backend sem chave onde ela é obrigatória)
+function _canListModels(form) {
+  if (_isOwner) return true;                       // dono usa a env do servidor
+  if (form.provider === "openrouter") return true; // catálogo público
+  if (form.provider === "ollama") return !!form.baseUrl;
+  return (form.apiKey || "").length >= 8;          // demais: precisa da chave
+}
+
+let _modelsTimer = null;
+let _modelsAbort = null;
+let _modelsSeq = 0;
+
+// Testa a chave E puxa a lista de modelos numa tacada (POST /api/models). Cancela a
+// requisição anterior se a chave/provider mudar de novo. Sucesso ✅ N modelos +
+// popula os dropdowns; falha ❌ mensagem humana (041) e cai no texto livre.
+async function refreshModels() {
   const form = _readConfigForm();
-  const btn = $("cfgTest");
-  btn.disabled = true;
-  setCfgStatus("testando…", "");
+  if (!_canListModels(form)) { setCfgStatus("", ""); return; }
+  const seq = ++_modelsSeq;
+  if (_modelsAbort) _modelsAbort.abort();
+  _modelsAbort = new AbortController();
+  setCfgStatus("testando chave e carregando modelos…", "");
   const headers = { "Content-Type": "application/json" };
   if (form.apiKey) headers["X-LLM-Key"] = form.apiKey;
   const body = { llm_provider: form.provider };
-  if (form.quickModel) body.quick_think_llm = form.quickModel;
   if (form.baseUrl) body.backend_url = form.baseUrl;
   try {
-    const res = await fetch("/api/test-key", {
-      method: "POST", headers, credentials: "same-origin", body: JSON.stringify(body),
+    const res = await fetch("/api/models", {
+      method: "POST", headers, credentials: "same-origin",
+      body: JSON.stringify(body), signal: _modelsAbort.signal,
     });
     const data = await res.json();
-    if (data.ok) setCfgStatus(`✅ válida — ${data.provider} · ${data.model || ""}`, "ok");
-    else setCfgStatus(`❌ ${data.error || "chave inválida"}`, "err");
+    if (seq !== _modelsSeq) return;   // resposta velha: a chave já mudou
+    if (data.ok) {
+      fillModelLists(data.models);
+      preselectDefaults(data.models);
+      setCfgStatus(`✅ chave válida — ${data.count} modelos carregados`, "ok");
+    } else {
+      fillModelLists([]);
+      setCfgStatus(`❌ ${data.error || "não deu pra listar os modelos"}`, "err");
+    }
   } catch (e) {
-    setCfgStatus("❌ erro de rede", "err");
-  } finally {
-    btn.disabled = false;
+    if (e.name === "AbortError" || seq !== _modelsSeq) return;
+    setCfgStatus("❌ erro de rede ao listar modelos", "err");
   }
+}
+
+// Debounce pra não disparar a cada tecla ao digitar/colar a chave.
+function scheduleModels() {
+  clearTimeout(_modelsTimer);
+  _modelsTimer = setTimeout(refreshModels, 500);
 }
 
 function init() {

@@ -69,11 +69,17 @@
       </div>
       <div class="field">
         <label for="cfgQuick">Modelo rápido <span class="orig">(quick)</span></label>
-        <input id="cfgQuick" type="text" autocomplete="off" placeholder="(padrão do provedor)" />
+        <!-- input + datalist: vira dropdown com os modelos reais da chave, mas
+             segue aceitando digitar um id (fallback se o provider não listar). -->
+        <input id="cfgQuick" type="text" autocomplete="off" list="cfgQuickList"
+               placeholder="(padrão do provedor)" />
+        <datalist id="cfgQuickList"></datalist>
       </div>
       <div class="field">
         <label for="cfgDeep">Modelo pesado <span class="orig">(deep)</span></label>
-        <input id="cfgDeep" type="text" autocomplete="off" placeholder="(padrão do provedor)" />
+        <input id="cfgDeep" type="text" autocomplete="off" list="cfgDeepList"
+               placeholder="(padrão do provedor)" />
+        <datalist id="cfgDeepList"></datalist>
       </div>
     </div>
     <p class="config-note byok-note hidden" id="byokOptionalNote">

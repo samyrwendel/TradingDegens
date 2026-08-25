@@ -13,6 +13,7 @@ Routes:
     POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
     POST /api/ask              -> {run_id, question} -> grounded Q&A over a run
     POST /api/test-key         -> {} + X-LLM-Key header -> {ok, provider, model}
+    POST /api/models           -> {provider,base_url} + X-LLM-Key -> {models:[...]}
     POST /api/login            -> {password} -> cookie de sessão HttpOnly (dono)
     POST /api/logout           -> encerra a sessão do dono
 
@@ -43,7 +44,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from tradingagents.webui.auth import OwnerAuth
-from tradingagents.webui.errors import NEED_KEY_CODE, NEED_KEY_MESSAGE
+from tradingagents.webui.errors import (
+    NEED_KEY_CODE,
+    NEED_KEY_MESSAGE,
+    humanize_provider_error,
+)
+from tradingagents.webui.models_list import fetch_provider_models
 from tradingagents.webui.runner import AnalysisRunner
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -144,6 +150,32 @@ class _Handler(BaseHTTPRequestHandler):
         # requisição pública sem chave própria e nunca cai na env do servidor.
         ov["allow_server_key"] = self._is_owner()
         return ov
+
+    # -- listagem de modelos (BYOK) -------------------------------------------
+    def _list_models(self, body: dict) -> dict:
+        """Lista os modelos do provider pra popular os dropdowns. Usa a chave do
+        header (BYOK); dono logado sem chave própria usa a env do servidor (só os
+        NOMES voltam). Nunca grava/loga a chave; erro humanizado + redigido."""
+        provider = ((body.get("llm_provider") or body.get("provider") or "")
+                    .strip().lower())
+        base_url = (body.get("backend_url") or body.get("base_url") or "").strip()
+        key = (self.headers.get("X-LLM-Key") or "").strip()
+        if not key and self._is_owner():
+            # dono sem chave própria: usa a env do servidor só pra LISTAR (nunca
+            # devolve a chave — só os nomes dos modelos).
+            from tradingagents.llm_clients.api_key_env import get_api_key_env
+            env_var = get_api_key_env(provider)
+            key = os.environ.get(env_var) if env_var else None
+        try:
+            models = fetch_provider_models(provider, key, base_url or None)
+            return {"ok": True, "provider": provider, "models": models,
+                    "count": len(models)}
+        except Exception as exc:
+            raw = self._redact_key(f"{type(exc).__name__}: {exc}")
+            human = humanize_provider_error(raw, provider)
+            return {"ok": False, "provider": provider, "models": [],
+                    "error": human["message"] if human else raw,
+                    "error_code": human["code"] if human else None}
 
     # -- login do dono ---------------------------------------------------------
     def _session_id(self) -> str | None:
@@ -331,6 +363,12 @@ class _Handler(BaseHTTPRequestHandler):
                 # ok/erro (erro já redigido da chave), nunca ecoa a chave.
                 body = self._read_json_body()
                 self._send_json(self.runner.test_key(self._llm_overrides(body)))
+            elif path == "/api/models":
+                # Proxy: lista os modelos que a chave/provider dá acesso, pra popular
+                # os dropdowns do BYOK. Chave no header X-LLM-Key (nunca querystring/
+                # log); dono logado sem chave própria usa a env do servidor (só os
+                # NOMES voltam, nunca a chave). Falha → mensagem humana + fallback.
+                self._send_json(self._list_models(self._read_json_body()))
             else:
                 self._send_json({"error": "não encontrado"}, 404)
         except ValueError as exc:
