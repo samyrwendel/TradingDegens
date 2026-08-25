@@ -295,6 +295,29 @@ function section(title, mdText) {
     `<div class="section-body"><div class="md">${renderMarkdown(mdText)}</div></div></details>`;
 }
 
+// Banner de erro HUMANO: mensagem acionável em pt-BR (nunca stack, nunca chave).
+// Erros de chave/crédito (no_credit/invalid_key) ganham um botão que abre o painel
+// de Configurações; os demais só a mensagem + dica de tentar de novo.
+const _CFG_ERROR_CODES = new Set(["no_credit", "invalid_key"]);
+function errorCardHtml(message, code) {
+  const msg = message || "Falha ao rodar a análise.";
+  const wantsConfig = _CFG_ERROR_CODES.has(code);
+  const action = wantsConfig
+    ? `<button type="button" class="err-action" data-act="open-config">⚙️ Abrir Configurações</button>`
+    : `<span class="err-hint">Você pode tentar de novo pelos botões de método/timeframe acima.</span>`;
+  return `<div class="error-card ${escapeHtml(code || "error")}">` +
+    `<div class="err-title">⚠️ Não deu pra concluir</div>` +
+    `<div class="err-msg">${escapeHtml(msg)}</div>` +
+    `<div class="err-foot">${action}</div></div>`;
+}
+function bindErrorCard(container) {
+  const btn = container && container.querySelector('[data-act="open-config"]');
+  if (btn) btn.addEventListener("click", () => {
+    $("configPanel").classList.remove("hidden");
+    scrollToOpen($("configPanel"));
+  });
+}
+
 function renderResult(snap) {
   // este run passa a ser o "aberto" na tela: enquanto for ele, um término dele
   // NÃO vira aviso "pronto" (o usuário já está vendo o resultado).
@@ -345,15 +368,25 @@ function renderResult(snap) {
     renderReanalyzeBar();
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
-    $("resultMeta").innerHTML = `<span>${escapeHtml(snap.error || "falha")}</span>`;
+    $("resultMeta").innerHTML = "";
     $("bull").innerHTML = ""; $("bear").innerHTML = "";
     $("bullLead").textContent = ""; $("bearLead").textContent = "";
-    $("sections").innerHTML = section("Rastreamento do erro", "```\n" + ((snap.result && snap.result.trace) || "") + "\n```");
+    // O banner ocupa o lugar do RESULTADO: esconde as teses vazias (Alta/Baixa) —
+    // sem dado, mostrá-las é ruído. A faixa de reanálise segue visível acima.
+    const railTheses = document.querySelector(".rail-theses");
+    if (railTheses) railTheses.classList.add("hidden");
+    // Banner de erro HUMANO (sem stack, sem chave): a mensagem acionável do backend
+    // + botão pra abrir ⚙️ Configurações quando é problema de chave/crédito.
+    $("sections").innerHTML = errorCardHtml(snap.error, snap.error_code);
+    bindErrorCard($("sections"));
     mountAskBox($("askSingle"), "");  // run com erro não tem dado pra ancorar pergunta
     return;
   }
 
   const r = snap.result || {};
+  // reexibe as teses (podem ter sido escondidas por um render de erro anterior).
+  const railThesesOk = document.querySelector(".rail-theses");
+  if (railThesesOk) railThesesOk.classList.remove("hidden");
   // método da análise aberta: a estrutura (recuo/1-2-3) é EMA 8/21 no Erick, MMS no
   // Padrão. Trocar de TF precisa recalcular na mesma família — daí guardar o método.
   _openMethod = (r.erick_report && r.erick_report.trim()) ? "erick" : "padrao";

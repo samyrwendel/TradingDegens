@@ -936,3 +936,22 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .config-grid .field input { min-width: 0; width: 100%; }
   .config-grid .field { width: 100%; }
 }
+
+/* ---- Banner de erro humano (sem stack trace) ------------------------------- */
+.error-card {
+  background: var(--red-dim); border: 1px solid var(--red);
+  border-radius: 10px; padding: 16px 18px; margin: 12px 0;
+}
+.error-card.no_credit { background: var(--yellow-dim); border-color: var(--yellow-border); }
+.error-card .err-title {
+  font-size: var(--fs-14); font-weight: var(--fw-bold); color: var(--text); margin-bottom: 6px;
+}
+.error-card .err-msg { font-size: var(--fs-14); color: var(--text); line-height: 1.5; }
+.error-card .err-foot { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.error-card .err-action {
+  background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none;
+  border-radius: 8px; padding: 0 16px; height: 34px; font-size: var(--fs-14);
+  font-weight: var(--fw-med); cursor: pointer; font-family: var(--font);
+}
+.error-card .err-action:hover { filter: brightness(1.08); }
+.error-card .err-hint { font-size: var(--fs-12); color: var(--muted); }

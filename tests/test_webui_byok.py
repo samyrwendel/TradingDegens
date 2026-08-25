@@ -184,14 +184,15 @@ def test_user_key_never_persisted_to_disk(tmp_path):
 
 
 def test_user_key_redacted_from_error(tmp_path):
-    """Se o motor estourar com a chave na mensagem, o erro sai redigido."""
+    """Se o motor estourar com a chave num erro NÃO reconhecido, ela sai redigida
+    (o fallback genérico ``Tipo: msg`` passa pelo _redact_secret)."""
     secret = "sk-LEAKY-KEY-123"
 
     def boom_factory():
         def make(config, selected, callbacks):
-            # simula um SDK que ecoa a chave na exceção
+            # erro sem padrão conhecido, mas que ecoa a chave -> tem que ser redigido
             return _FakeGraph(callbacks, FINAL_STATE, "Buy",
-                              raise_exc=RuntimeError(f"401 invalid api key {secret}"))
+                              raise_exc=RuntimeError(f"weird failure with {secret}"))
         return make
 
     runner = AnalysisRunner(base_config=_base_config(tmp_path),
@@ -270,7 +271,8 @@ def test_test_key_error_is_redacted(tmp_path, monkeypatch):
     secret = "sk-BADKEY-XYZ"
 
     def fake_create(provider, model, base_url=None, **kwargs):
-        return _FakeClient(_FakeLLM(raise_exc=RuntimeError(f"401 {secret}")))
+        # erro NÃO reconhecido que ecoa a chave -> exercita o fallback redigido
+        return _FakeClient(_FakeLLM(raise_exc=RuntimeError(f"weird glitch {secret}")))
 
     monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
     out = runner.test_key({"provider": "openai", "api_key": secret})

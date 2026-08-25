@@ -11,6 +11,7 @@ run analyses at once.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -27,6 +28,7 @@ from tradingagents.webui.compare import (
     detect_method,
     deterministic_meta,
 )
+from tradingagents.webui.errors import humanize_provider_error
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
 from tradingagents.webui.store import HistoryStore
@@ -48,6 +50,28 @@ _DEFAULT_TIMEFRAME = "1d"
 
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
 _MAX_QUESTION_CHARS = 500
+
+logger = logging.getLogger(__name__)
+
+
+def _clean_error(exc: Exception, provider: str, secret: str | None) -> str:
+    """Erro cru de LLM → mensagem humana em pt-BR, SEM stack nem chave.
+
+    O texto técnico (redigido da chave) vai só pro log do servidor; a UI recebe a
+    frase acionável quando o erro é reconhecido (429 sem crédito, 401 chave
+    inválida, rate limit, timeout), ou um fallback curto ``Tipo: msg`` (redigido)
+    quando não é. Nunca inclui traceback nem a chave do usuário."""
+    raw = _redact_secret(f"{type(exc).__name__}: {exc}", secret)
+    human = humanize_provider_error(raw, provider)
+    return human["message"] if human else raw
+
+
+def _error_code(exc: Exception, provider: str, secret: str | None) -> str | None:
+    """``code`` estável do erro (no_credit/invalid_key/rate_limit/unavailable) pra
+    UI escolher o call-to-action, ou ``None`` se não reconhecido."""
+    raw = _redact_secret(f"{type(exc).__name__}: {exc}", secret)
+    human = humanize_provider_error(raw, provider)
+    return human["code"] if human else None
 
 
 # --- BYOK: chave de API por-usuário (provider/model/base_url/api_key por-run) ----
@@ -300,6 +324,8 @@ class _Run:
         self.timeframe = timeframe or _DEFAULT_TIMEFRAME
         self.status = "running"           # running | done | error
         self.error: str | None = None
+        # code estável do erro (no_credit/invalid_key/rate_limit/unavailable) pra UI.
+        self.error_code: str | None = None
         self.result: dict[str, Any] | None = None
         self.started_at = time.time()
         self.finished_at: float | None = None
@@ -319,6 +345,7 @@ class _Run:
             "asset_type": self.asset_type,
             "status": self.status,
             "error": self.error,
+            "error_code": self.error_code,
             "verdict_timeframe": self.timeframe,
             "progress": self.tracker.snapshot(),
             "cost": self.cost(),
@@ -401,6 +428,7 @@ class _CompareRun:
         self.overrides = overrides or {}
         self.status = "running"
         self.error: str | None = None
+        self.error_code: str | None = None
         self.result: dict[str, Any] | None = None
         self.started_at = time.time()
         self.finished_at: float | None = None
@@ -423,6 +451,7 @@ class _CompareRun:
             "asset_type": self.asset_type,
             "status": self.status,
             "error": self.error,
+            "error_code": self.error_code,
             "verdict_timeframe": self.timeframe,
             "compare": True,
             "progress": self.tracker.snapshot(),
@@ -535,11 +564,13 @@ class AnalysisRunner:
         orchestrator runs two of these inline before persisting).
         """
         final_status = "error"
+        # Config efetiva computada fora do try pra estar disponível no except mesmo
+        # se a construção do grafo falhar (o provider vira parte da mensagem humana).
+        config = apply_llm_overrides(self.base_config, run.overrides)
         try:
             # Config efetiva da run: base do servidor + overrides BYOK (chave do
             # usuário tem prioridade; sem chave, cai na env do servidor). O grafo
             # tira ``llm_api_key`` do dict antes do set_config global.
-            config = apply_llm_overrides(self.base_config, run.overrides)
             progress_cb = ProgressCallbackHandler(run.tracker)
             graph = self._graph_factory(
                 config, run.selected_analysts, [run.usage_cb, progress_cb]
@@ -572,11 +603,18 @@ class AnalysisRunner:
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server
-            # BYOK: redige a chave do usuário de erro/trace antes de qualquer
-            # persistência ou resposta — um SDK pode ecoar a chave numa exceção.
+            # BYOK + erro humano: a UI recebe uma frase acionável em pt-BR (429 sem
+            # crédito, 401 chave inválida, rate limit, timeout) SEM stack e SEM a
+            # chave. O técnico cru (redigido da chave) vai só pro log do servidor.
             secret = run.overrides.get("api_key")
-            run.error = _redact_secret(f"{type(exc).__name__}: {exc}", secret)
-            run.result = {"trace": _redact_secret(traceback.format_exc()[-3000:], secret)}
+            provider = (config.get("llm_provider") or "").lower() if isinstance(config, dict) else ""
+            run.error = _clean_error(exc, provider, secret)
+            run.error_code = _error_code(exc, provider, secret)
+            run.result = None  # sem trace na UI (o técnico fica no log do servidor)
+            logger.warning(
+                "run %s falhou: %s", run.run_id,
+                _redact_secret(traceback.format_exc()[-3000:], secret),
+            )
         run.finished_at = time.time()
         run.finished_stamp = timeutil.stamp()
         return final_status
@@ -592,6 +630,7 @@ class AnalysisRunner:
                 "asset_type": run.asset_type,
                 "status": status,
                 "error": run.error,
+                "error_code": run.error_code,
                 "verdict": (run.result or {}).get("verdict") if status == "done" else None,
                 "verdict_timeframe": run.timeframe,
                 # Method for the manual-confront picker (task 018): reliable from the
@@ -674,8 +713,19 @@ class AnalysisRunner:
             crun.tracker.done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server
-            crun.error = f"{type(exc).__name__}: {exc}"
-            crun.result = {"trace": traceback.format_exc()[-3000:]}
+            # Erro humano no confronto (cada lado já roda por _execute, que trata os
+            # seus; este cobre falha do próprio orquestrador/meta-juiz). SEM stack
+            # nem chave na UI; técnico redigido só no log.
+            secret = crun.overrides.get("api_key")
+            provider = (apply_llm_overrides(self.base_config, crun.overrides)
+                        .get("llm_provider") or "").lower()
+            crun.error = _clean_error(exc, provider, secret)
+            crun.error_code = _error_code(exc, provider, secret)
+            crun.result = None
+            logger.warning(
+                "compare %s falhou: %s", crun.run_id,
+                _redact_secret(traceback.format_exc()[-3000:], secret),
+            )
         crun.finished_at = time.time()
         crun.finished_stamp = timeutil.stamp()
         self._persist_compare(crun, final_status)
@@ -745,6 +795,7 @@ class AnalysisRunner:
                 "asset_type": crun.asset_type,
                 "status": status,
                 "error": crun.error,
+                "error_code": crun.error_code,
                 "verdict": (crun.result or {}).get("verdict") if status == "done" else None,
                 "verdict_timeframe": crun.timeframe,
                 "method": "compare",  # not a single reading — excluded from confront picker
@@ -867,7 +918,24 @@ class AnalysisRunner:
         messages, meta = ask_module.build_messages(record, question)
         usage_cb = UsageMetadataCallbackHandler()
         llm = self._answer_llm([usage_cb], overrides)
-        reply = llm.invoke(messages)
+        try:
+            reply = llm.invoke(messages)
+        except Exception as exc:
+            # Mesmo tratamento humano da análise: a caixa de pergunta mostra a frase
+            # acionável (429 sem crédito, 401 chave inválida…), SEM stack nem chave.
+            secret = (overrides or {}).get("api_key")
+            provider = (apply_llm_overrides(self.base_config, overrides)
+                        .get("llm_provider") or "").lower()
+            logger.warning(
+                "ask %s falhou: %s", run_id,
+                _redact_secret(f"{type(exc).__name__}: {exc}", secret),
+            )
+            return {
+                "run_id": record.get("run_id") or run_id,
+                "question": question,
+                "error": _clean_error(exc, provider, secret),
+                "error_code": _error_code(exc, provider, secret),
+            }
         answer = getattr(reply, "content", reply)
         # Alguns provedores devolvem o conteúdo em "partes" (lista) em vez de texto.
         if isinstance(answer, list):
@@ -948,8 +1016,11 @@ class AnalysisRunner:
             _ = getattr(reply, "content", reply)  # força a resolução da resposta
             return {"ok": True, **info}
         except Exception as exc:
+            raw = _redact_secret(f"{type(exc).__name__}: {exc}", secret)
+            human = humanize_provider_error(raw, provider)
             return {"ok": False, **info,
-                    "error": _redact_secret(f"{type(exc).__name__}: {exc}", secret)}
+                    "error": human["message"] if human else raw,
+                    "error_code": human["code"] if human else None}
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -967,6 +1038,7 @@ class AnalysisRunner:
             "asset_type": record.get("asset_type"),
             "status": record.get("status"),
             "error": record.get("error"),
+            "error_code": record.get("error_code"),
             "verdict_timeframe": record.get("verdict_timeframe")
                 or (record.get("result") or {}).get("verdict_timeframe")
                 or _DEFAULT_TIMEFRAME,
