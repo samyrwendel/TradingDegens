@@ -117,6 +117,13 @@ class ProgressTracker:
             self._phase = "Concluído"
             self._label = "Análise concluída"
 
+    def mark_cancelled(self) -> None:
+        """PARAR/PAUSAR (task 026): estado honesto — congela o progresso onde parou e
+        rotula "interrompida pelo usuário" (não conclui, não vira erro)."""
+        with self._lock:
+            self._phase = "Interrompida"
+            self._label = "Interrompida pelo usuário"
+
     def snapshot(self) -> dict[str, Any]:
         """JSON-serialisable progress view for the status endpoint."""
         with self._lock:
@@ -382,3 +389,47 @@ class ThinkingCallbackHandler(BaseCallbackHandler):
     # alguns wrappers de chat emitem on_chat_model_end em vez de on_llm_end
     def on_chat_model_end(self, response, **kwargs) -> None:   # pragma: no cover
         self.on_llm_end(response, **kwargs)
+
+
+# ── PARAR/PAUSAR a análise em andamento (task 026) ──────────────────────────────
+# Sem processo isolado (a 025 resolveu o freeze na raiz — o ReDoS — mantendo a run
+# num thread in-process), o cancelamento é COOPERATIVO: um callback com raise_error
+# levanta :class:`RunCancelled` no próximo limite de execução (início de nó/LLM/tool
+# ou próximo token em streaming), e o LangGraph propaga a exceção pra fora do
+# ``propagate()`` — a run encerra em poucos segundos, sem thread órfão nem lock, sem
+# reintroduzir o congelamento. Não mata uma chamada LLM não-streaming já em voo (não
+# dá, no modelo in-process) — mas essa termina e o cancelamento pega no próximo limite.
+class RunCancelled(Exception):
+    """Sinal de que o usuário mandou PARAR/PAUSAR a run — não é erro."""
+
+
+class CancelCallbackHandler(BaseCallbackHandler):
+    """Levanta :class:`RunCancelled` assim que o ``threading.Event`` de cancelamento
+    é setado. ``raise_error = True`` faz o langchain RE-LEVANTAR (senão engoliria a
+    exceção do handler), abortando o grafo no próximo limite."""
+
+    raise_error = True   # sem isto o langchain engole a exceção do handler
+
+    def __init__(self, cancel_event) -> None:
+        super().__init__()
+        self._cancel = cancel_event
+
+    def _check(self) -> None:
+        if self._cancel.is_set():
+            raise RunCancelled()
+
+    def on_chain_start(self, serialized, inputs, **kwargs) -> None:
+        self._check()
+
+    def on_llm_start(self, serialized, prompts, **kwargs) -> None:
+        self._check()
+
+    def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
+        self._check()
+
+    def on_tool_start(self, serialized, input_str, **kwargs) -> None:
+        self._check()
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        # streaming: pega o cancelamento no meio de uma geração longa (poucos segundos)
+        self._check()

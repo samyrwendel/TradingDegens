@@ -70,6 +70,18 @@ class ActiveRunStore:
         with self._lock, contextlib.suppress(OSError):
             self._path(run_id).unlink()
 
+    def get(self, run_id: str) -> dict[str, Any] | None:
+        """Descriptor for a single in-flight run, or ``None``. Used by the in-session
+        "Retomar" of a PAUSED run (task 026) — read the one descriptor kept on pause."""
+        with self._lock:
+            path = self._path(run_id)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    rec = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                return None
+        return rec if isinstance(rec, dict) and rec.get("run_id") else None
+
     def list_pending(self) -> list[dict[str, Any]]:
         """Every descriptor still on disk — the interrupted runs to recover."""
         out: list[dict[str, Any]] = []

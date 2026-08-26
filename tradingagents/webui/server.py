@@ -586,6 +586,32 @@ class _Handler(BaseHTTPRequestHandler):
                     overrides=overrides, reuse=reuse,
                 )
                 self._send_json({"run_id": run_id})
+            elif path.startswith("/api/run/") and path.endswith("/cancel"):
+                # PARAR/PAUSAR a run em andamento (task 026): mesmo portão do analyze
+                # (dono OU chave própria — quem pode iniciar pode interromper). Corpo
+                # {"pause": true} = PAUSAR (retomável, mantém checkpoint da 022); default
+                # PARAR. Cancelamento cooperativo — active_runs cai a 0 em poucos segundos.
+                body = self._read_json_body()
+                if not self._gate_or_403(body):
+                    return
+                run_id = path[len("/api/run/"):-len("/cancel")]
+                res = self.runner.cancel(run_id, keep_resume=bool(body.get("pause")))
+                if res is None:
+                    self._send_json({"error": "execução desconhecida ou já encerrada"}, 404)
+                else:
+                    self._send_json({"ok": True, **res})
+            elif path.startswith("/api/run/") and path.endswith("/resume"):
+                # RETOMAR uma run PAUSADA (task 026): mesmo portão. Continua do checkpoint
+                # da 022 (reaproveita as etapas já concluídas), não recomeça do zero.
+                body = self._read_json_body()
+                if not self._gate_or_403(body):
+                    return
+                run_id = path[len("/api/run/"):-len("/resume")]
+                res = self.runner.resume(run_id)
+                if res is None:
+                    self._send_json({"error": "nada pra retomar (run não resumível ou desconhecida)"}, 404)
+                else:
+                    self._send_json({"ok": True, **res})
             elif path == "/api/compare":
                 # Manual confront (task 018): meta-judge over two EXISTING runs of
                 # the same ticker (no pipeline re-run). Returns a ready snapshot.

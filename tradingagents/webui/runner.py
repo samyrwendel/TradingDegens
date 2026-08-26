@@ -42,8 +42,10 @@ from tradingagents.webui.errors import (
 )
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import (
+    CancelCallbackHandler,
     ProgressCallbackHandler,
     ProgressTracker,
+    RunCancelled,
     ThinkingCallbackHandler,
     ThinkingTracker,
 )
@@ -423,7 +425,13 @@ class _Run:
         # Method label (padrao/erick), reliable from the analyst selection — feeds
         # the resume descriptor and the cross-run reuse key.
         self.method = "erick" if "erick" in (selected_analysts or []) else "padrao"
-        self.status = "running"           # running | done | error
+        self.status = "running"           # running | done | error | cancelled
+        # PARAR/PAUSAR (task 026): o cancelamento é cooperativo — o CancelCallbackHandler
+        # levanta RunCancelled quando este Event é setado, abortando o grafo no próximo
+        # limite. ``pause_keep_resume`` diz ao worker se MANTÉM (Pausar) ou APAGA (Parar)
+        # o descritor de retomada da 022.
+        self.cancel_event = threading.Event()
+        self.pause_keep_resume = False
         # Reúso honesto (DA-058): True quando ESTE run devolveu, íntegras, as etapas
         # de um run idêntico já concluído — sem re-rodar o pipeline (custo zero).
         self.reused = False
@@ -458,6 +466,9 @@ class _Run:
             "error": self.error,
             "error_code": self.error_code,
             "verdict_timeframe": self.timeframe,
+            # PARAR/PAUSAR (task 026): quando a run foi cancelada, diz se foi um PAUSAR
+            # (retomável) ou um PARAR — a UI mostra a mensagem certa. False no resto.
+            "paused": self.pause_keep_resume,
             # Honest reuse marker (DA-058): the whole analysis came back intact from
             # an identical prior run; the UI badges it "reaproveitado", cost is zero.
             "reused": self.reused,
@@ -706,12 +717,18 @@ class AnalysisRunner:
         # so any poller that sees a terminal status also sees both the result and
         # the persisted history row (no read-before-write race).
         final_status = self._execute(run)
-        self._persist(run, final_status)
+        # PARAR/PAUSAR (task 026): uma run cancelada não vai pro histórico (não é uma
+        # análise concluída nem um erro) — só encerra e libera a UI. Um PAUSAR
+        # (pause_keep_resume) MANTÉM o descritor da 022 pra o "Retomar"/boot-resume
+        # continuar do último nó; um PARAR apaga como um terminal normal.
+        if final_status != "cancelled":
+            self._persist(run, final_status)
         run.status = final_status
         # Terminal reached in-process → drop the resume descriptor so the next boot
         # doesn't re-run a finished analysis. (A kill before here leaves it behind,
-        # which is exactly what makes the run recoverable.)
-        self.active.remove(run.run_id)
+        # which is exactly what makes the run recoverable.) PAUSAR é a exceção: guarda.
+        if not (final_status == "cancelled" and run.pause_keep_resume):
+            self.active.remove(run.run_id)
 
     def _execute(self, run: _Run) -> str:
         """Run the analysis pipeline for ``run`` in the CURRENT thread.
@@ -749,8 +766,12 @@ class AnalysisRunner:
             # tira ``llm_api_key`` do dict antes do set_config global.
             progress_cb = ProgressCallbackHandler(run.tracker)
             thinking_cb = ThinkingCallbackHandler(run.thinking)
+            # PARAR/PAUSAR (task 026): o callback levanta RunCancelled no próximo limite
+            # quando o usuário cancela — aborta o grafo em poucos segundos, sem órfão.
+            cancel_cb = CancelCallbackHandler(run.cancel_event)
             graph = self._graph_factory(
-                config, run.selected_analysts, [run.usage_cb, progress_cb, thinking_cb]
+                config, run.selected_analysts,
+                [run.usage_cb, progress_cb, thinking_cb, cancel_cb],
             )
             final_state, signal = graph.propagate(
                 run.ticker, run.date, asset_type=run.asset_type,
@@ -820,6 +841,15 @@ class AnalysisRunner:
                 run.result.get("pre_judge_findings"))
             run.tracker.mark_done()
             final_status = "done"
+        except RunCancelled:
+            # Usuário mandou PARAR/PAUSAR (task 026): estado HONESTO — não é erro, não
+            # fingir concluída. Sem result/erro; a UI mostra "interrompida pelo usuário".
+            # O worker decide manter (Pausar) ou apagar (Parar) o descritor de retomada.
+            run.error = None
+            run.error_code = None
+            run.result = None
+            run.tracker.mark_cancelled()
+            final_status = "cancelled"
         except Exception as exc:  # surface, never crash the server
             # BYOK + erro humano: a UI recebe uma frase acionável em pt-BR (429 sem
             # crédito, 401 chave inválida, rate limit, timeout) SEM stack e SEM a
@@ -1066,6 +1096,49 @@ class AnalysisRunner:
         with self._lock:
             return [rid for rid, r in self._runs.items()
                     if getattr(r, "status", "") == "running"]
+
+    def _run_is_resumable(self, run: _Run) -> bool:
+        """PAUSAR (retomável) só é honesto quando a run RETOMA sem a chave do usuário:
+        sem chave BYOK na requisição (cai na env do servidor) e com checkpoint ligado.
+        BYOK não é retomável — a chave não persiste no descritor da 022."""
+        return not run.overrides.get("api_key") and bool(self.checkpoint_enabled)
+
+    def cancel(self, run_id: str, *, keep_resume: bool = False) -> dict[str, Any] | None:
+        """PARAR (``keep_resume=False``) ou PAUSAR (``True``) uma run em andamento.
+
+        Cooperativo (task 026): seta o Event de cancelamento; o CancelCallbackHandler
+        levanta RunCancelled no próximo limite (nó/LLM/token), o grafo aborta e o worker
+        encerra com status ``cancelled`` em poucos segundos — ``active_runs`` cai a 0,
+        sem thread órfão nem freeze. PAUSAR só é honrado se a run é retomável (senão vira
+        PARAR honesto, sem prometer retomada). ``None`` se a run não existe, já terminou,
+        ou não é cancelável (ex.: comparação). Idempotente: cancelar de novo é no-op."""
+        with self._lock:
+            run = self._runs.get(run_id)
+        if run is None or not hasattr(run, "cancel_event"):
+            return None
+        if run.status != "running":
+            return None
+        paused = bool(keep_resume) and self._run_is_resumable(run)
+        run.pause_keep_resume = paused
+        run.cancel_event.set()
+        return {"run_id": run_id, "cancelled": True, "paused": paused,
+                "resumable": self._run_is_resumable(run)}
+
+    def resume(self, run_id: str) -> dict[str, Any] | None:
+        """RETOMAR uma run PAUSADA (task 026): re-enfileira a partir do descritor que o
+        Pausar guardou. Com o checkpoint da 022 (thread_id = ticker+data+forma-do-grafo),
+        o grafo CONTINUA do último nó concluído — reaproveita o que já rodou, não recomeça.
+        Só resumível (dono/servidor). ``None`` se não há descritor resumível pra esse id.
+        Idempotente: se já está rodando, é no-op."""
+        with self._lock:
+            cur = self._runs.get(run_id)
+        if cur is not None and getattr(cur, "status", "") == "running":
+            return {"run_id": run_id, "resuming": True}   # já rodando: no-op
+        desc = self.active.get(run_id)
+        if not desc or not desc.get("resumable"):
+            return None
+        self._reenqueue(desc)
+        return {"run_id": run_id, "resuming": True}
 
     # ----------------------------------------------------- compare (Fase 3) ----
     def start_compare(self, ticker: str, date: str,
@@ -1533,7 +1606,13 @@ class AnalysisRunner:
         with self._lock:
             run = self._runs.get(run_id)
         if run is not None:
-            return run.snapshot()
+            snap = run.snapshot()
+            # PARAR/PAUSAR (task 026): a UI decide os botões pelo snapshot — Parar
+            # sempre; Pausar só quando a run é retomável (não-BYOK + checkpoint).
+            if hasattr(run, "cancel_event"):
+                snap["cancellable"] = (run.status == "running")
+                snap["resumable"] = self._run_is_resumable(run)
+            return snap
         # fall back to persisted history for a run this process didn't start
         record = self.store.get(run_id)
         if record is None:

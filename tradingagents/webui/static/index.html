@@ -178,6 +178,13 @@
             <span id="progressCost">$0.0000</span>
           </div>
         </div>
+        <!-- Parar/Pausar a análise em andamento (task 026): visível durante a run.
+             Parar cancela limpo; Pausar (só run retomável) mantém o progresso pra
+             Retomar. Populados/alternados por JS conforme o snapshot. -->
+        <div class="progress-ctl hidden" id="progressCtl">
+          <button type="button" class="btn-ghost hidden" id="pauseRunBtn" title="Pausar mantendo o progresso — dá pra Retomar do último estágio">⏸ Pausar</button>
+          <button type="button" class="btn-secondary" id="stopRunBtn" title="Parar a análise em andamento">⏹ Parar análise</button>
+        </div>
         <div class="bar"><div class="bar-fill" id="barFill"></div></div>
         <ol class="steps" id="steps"></ol>
         <!-- Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação
@@ -189,6 +196,13 @@
              LLM — só revela o que o motor já gera. Rola dentro do painel no mobile. -->
         <div class="thinking-live hidden" id="thinkingLive"></div>
       </section>
+
+      <!-- Retomar uma análise PAUSADA (task 026): aparece quando o usuário pausou uma
+           run resumível; continua do último estágio (checkpoint da 022). Populado por JS. -->
+      <div class="resume-bar hidden" id="resumeBar">
+        <span class="resume-msg" id="resumeMsg">Análise pausada.</span>
+        <button type="button" class="btn-primary" id="resumeRunBtn">▶ Retomar</button>
+      </div>
 
       <!-- Reanalisar SEM redigitar (task 023 · consolidado na 018): faixa do ativo
            ABERTO (clicado no histórico ou já na tela) — vale tanto pra análise simples

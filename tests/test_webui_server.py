@@ -164,6 +164,117 @@ def test_health_stays_responsive_while_sanitizing_degraded_report(tmp_path, monk
         httpd.shutdown()
 
 
+def _cancellable_factory():
+    """Grafo cujo ``propagate`` LOOPA batendo nos callbacks (limites de nó) e nunca
+    termina sozinho — quando o usuário cancela, o CancelCallbackHandler que o runner
+    injeta levanta RunCancelled e o propagate aborta, como num grafo real (task 026)."""
+    import uuid as _uuid
+
+    class _Loop:
+        def __init__(self, callbacks):
+            self.callbacks = callbacks
+
+        def propagate(self, ticker, date, asset_type="stock", timeframe="1d"):
+            while True:
+                for cb in self.callbacks:
+                    cb.on_chain_start({}, {}, run_id=_uuid.uuid4())  # cancel_cb levanta quando setado
+                time.sleep(0.02)
+
+    return lambda config, selected, callbacks: _Loop(callbacks)
+
+
+def test_stop_cancels_run_cleanly_and_frees_active(tmp_path):
+    """Task 026 — botão Parar: com a run em andamento, POST cancel a interrompe em
+    poucos segundos com estado HONESTO 'cancelled' (não erro, sem result) e active_runs
+    volta a 0. Cooperativo — sem thread órfão nem freeze."""
+    httpd, base = _make_server(tmp_path, _cancellable_factory())
+    try:
+        _, started = _post(base, "/api/analyze", {"ticker": "AAPL", "date": "2020-01-02"})
+        run_id = started["run_id"]
+        deadline = time.time() + 3.0
+        health = {}
+        while time.time() < deadline:
+            _, health = _get(base, "/api/health")
+            if health.get("active_runs", 0) >= 1:
+                break
+            time.sleep(0.03)
+        assert run_id in health.get("runs", []), health
+
+        st, res = _post(base, "/api/run/" + run_id + "/cancel", {})
+        assert st == 200 and res["ok"] and res["cancelled"] and res["paused"] is False
+
+        deadline = time.time() + 5.0
+        snap = {}
+        while time.time() < deadline:
+            _, snap = _get(base, "/api/run/" + run_id)
+            if snap.get("status") == "cancelled":
+                break
+            time.sleep(0.05)
+        assert snap.get("status") == "cancelled", snap.get("status")
+        assert snap.get("result") is None and not snap.get("error")
+        # active_runs volta a 0 — a UI fica livre pra nova análise
+        _, health2 = _get(base, "/api/health")
+        assert health2["active_runs"] == 0
+    finally:
+        httpd.shutdown()
+
+
+def _wait_until(pred, timeout=5.0, step=0.03):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return True
+        time.sleep(step)
+    return False
+
+
+def test_pause_keeps_descriptor_and_resume_reenqueues(tmp_path):
+    """Task 026 — PAUSAR (run resumível de dono/servidor) MANTÉM o descritor da 022 e
+    o RETOMAR re-enfileira do checkpoint. Prova pausar→retomar no nível do runner."""
+    runner = AnalysisRunner(
+        base_config={"results_dir": str(tmp_path)},
+        store=HistoryStore(tmp_path),
+        graph_factory=_cancellable_factory(),
+    )
+    # run de dono/servidor (sem chave BYOK, usa a env) → resumível
+    rid = runner.start("AAPL", "2020-01-02", overrides={"allow_server_key": True})
+    assert _wait_until(lambda: rid in runner.active_run_ids()), "run não ficou ativa"
+
+    res = runner.cancel(rid, keep_resume=True)
+    assert res and res["paused"] is True and res["resumable"] is True
+    assert _wait_until(lambda: runner.status(rid)["status"] == "cancelled"), "não pausou"
+    # PAUSAR guarda o descritor (pra Retomar / boot-resume) — PARAR teria apagado
+    assert runner.active.get(rid) is not None
+
+    r2 = runner.resume(rid)
+    assert r2 and r2["resuming"] is True
+    assert _wait_until(lambda: runner.status(rid)["status"] == "running"), "não retomou"
+    runner.cancel(rid, keep_resume=False)   # limpa a run de teste
+
+
+def test_stop_does_not_keep_descriptor(tmp_path):
+    """PARAR (não-retomável) apaga o descritor — nada de boot-resume fantasma."""
+    runner = AnalysisRunner(
+        base_config={"results_dir": str(tmp_path)},
+        store=HistoryStore(tmp_path),
+        graph_factory=_cancellable_factory(),
+    )
+    rid = runner.start("AAPL", "2020-01-02", overrides={"allow_server_key": True})
+    assert _wait_until(lambda: rid in runner.active_run_ids())
+    runner.cancel(rid, keep_resume=False)   # PARAR
+    assert _wait_until(lambda: runner.status(rid)["status"] == "cancelled")
+    assert runner.active.get(rid) is None   # descritor apagado
+
+
+def test_cancel_unknown_run_is_404(server):
+    st = None
+    try:
+        _post(server, "/api/run/nao-existe/cancel", {})
+    except urllib.error.HTTPError as e:
+        st = e.code
+    assert st == 404
+
+
 def test_config_endpoint_reports_manaus(server):
     status, body = _get(server, "/api/config")
     assert status == 200

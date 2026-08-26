@@ -269,8 +269,106 @@ function scrollToOpen(panel) {
   if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// PARAR/PAUSAR (task 026): mostra/esconde os controles conforme o snapshot e liga os
+// cliques 1x. Parar aparece sempre que a run é cancelável; Pausar só quando retomável
+// (run de dono/servidor + checkpoint — BYOK não é retomável, some sem prometer nada).
+let _runCtlBound = false;
+function updateRunControls(snap) {
+  const ctl = $("progressCtl");
+  if (!ctl) return;
+  const alive = snap.status === "running" && snap.cancellable !== false;
+  ctl.classList.toggle("hidden", !alive);
+  const pauseBtn = $("pauseRunBtn");
+  if (pauseBtn) pauseBtn.classList.toggle("hidden", !(alive && snap.resumable));
+  const stopBtn = $("stopRunBtn");
+  if (alive) { if (stopBtn) stopBtn.disabled = false; if (pauseBtn) pauseBtn.disabled = false; }
+  if (!_runCtlBound) {
+    _runCtlBound = true;
+    if (stopBtn) stopBtn.addEventListener("click", () => stopRun(false));
+    if (pauseBtn) pauseBtn.addEventListener("click", () => stopRun(true));
+  }
+}
+
+// Parar (pause=false) ou Pausar (true) a run em andamento. Cooperativo: o servidor
+// sinaliza o worker e a run encerra em poucos segundos; o poll seguinte vê 'cancelled'
+// e libera a UI. Manda a chave própria (BYOK) no header, igual às outras chamadas.
+async function stopRun(pause) {
+  const runId = _watchedRunId;
+  if (!runId) return;
+  const stopBtn = $("stopRunBtn"), pauseBtn = $("pauseRunBtn");
+  if (stopBtn) stopBtn.disabled = true;
+  if (pauseBtn) pauseBtn.disabled = true;
+  $("progressLabel").textContent = pause ? "pausando…" : "parando…";
+  try {
+    const { headers } = llmRequestParts();
+    await fetch("/api/run/" + encodeURIComponent(runId) + "/cancel", {
+      method: "POST", credentials: "same-origin",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ pause: !!pause }),
+    });
+  } catch (e) {
+    if (stopBtn) stopBtn.disabled = false;
+    if (pauseBtn) pauseBtn.disabled = false;
+    $("formError").textContent = "não consegui " + (pause ? "pausar" : "parar") + " — tente de novo";
+  }
+}
+
+// Run interrompida pelo usuário (task 026): estado honesto, não é erro nem resultado.
+// Libera a UI (esconde progresso, reabilita o launcher). PARAR → aviso curto; PAUSAR →
+// oferece Retomar (continua do checkpoint da 022).
+function renderCancelled(snap) {
+  clearInterval(pollTimer); pollTimer = null;
+  clearActiveRun();
+  $("progressPanel").classList.add("hidden");
+  const ctl = $("progressCtl"); if (ctl) ctl.classList.add("hidden");
+  $("runBtn").disabled = false;
+  const rid = snap.run_id || _watchedRunId;
+  const resumeBar = $("resumeBar");
+  if (snap.paused && rid) {
+    $("formError").textContent = "";
+    if (resumeBar) {
+      $("resumeMsg").textContent = "Análise pausada — retome do último estágio (reaproveita o que já rodou).";
+      resumeBar.dataset.runId = rid;
+      resumeBar.classList.remove("hidden");
+    }
+  } else {
+    if (resumeBar) resumeBar.classList.add("hidden");
+    $("formError").textContent = "Análise interrompida pelo usuário.";
+  }
+}
+
+// Retomar a run pausada (task 026): POST resume; o servidor continua do checkpoint e
+// volta a rodar. Reengata o progresso ao vivo.
+async function resumeRun() {
+  const bar = $("resumeBar");
+  const runId = bar ? bar.dataset.runId : "";
+  if (!runId) return;
+  const btn = $("resumeRunBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const { headers } = llmRequestParts();
+    const res = await fetch("/api/run/" + encodeURIComponent(runId) + "/resume", {
+      method: "POST", credentials: "same-origin",
+      headers: { ...headers, "Content-Type": "application/json" }, body: "{}",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.run_id) {
+      if (bar) bar.classList.add("hidden");
+      watchRun(data.run_id);   // volta a acompanhar o progresso ao vivo
+    } else {
+      $("formError").textContent = (data && data.error) || "não deu pra retomar";
+    }
+  } catch (e) {
+    $("formError").textContent = "erro de rede ao retomar";
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function renderProgress(snap) {
   $("progressPanel").classList.remove("hidden");
+  // Controles PARAR/PAUSAR (task 026): visíveis enquanto a run está viva.
+  updateRunControls(snap);
   // a faixa de reanálise só faz sentido com um resultado/comparação na tela;
   // enquanto uma análise roda ela some (reaparece quando o resultado renderiza).
   const reBar = $("reanalyzeBar");
@@ -510,6 +608,9 @@ function renderResult(snap) {
   // NÃO vira aviso "pronto" (o usuário já está vendo o resultado).
   clearActiveRun();   // resultado na tela = nada de run vivo a reengatar
   _watchedRunId = snap.run_id || _watchedRunId;
+  // PARAR/PAUSAR (task 026): run cancelada não tem resultado — libera a UI com um aviso
+  // honesto (não é erro, não abre painel de resultado vazio). Vale pra todo caller.
+  if (snap.status === "cancelled") { renderCancelled(snap); return; }
   $("comparePanel").classList.add("hidden");
   // Run de comparação (Padrão × Erick): view própria, lado a lado.
   if ((snap.result || {}).compare) { renderCompare(snap); return; }
@@ -3210,6 +3311,7 @@ function init() {
   bindConfront();
   bindReanalyzeBar();
   bindExportPdf();
+  { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();
   // Ao abrir: se havia um run vivo sendo acompanhado, reengata o progresso; senão,
   // mostra a análise mais recente. Sem isso o refresh no meio de um run "esquecia".

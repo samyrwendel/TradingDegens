@@ -234,3 +234,75 @@ def test_thinking_hidden_when_absent(live_server):
             assert page.is_hidden("#thinkingLive")
         finally:
             browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
+def test_stop_pause_buttons_and_cancel_flow(live_server):
+    """Task 026 — botões Parar/Pausar na run em andamento. Parar sempre visível;
+    Pausar só quando a run é retomável; clicar Parar dispara o POST de cancelamento e,
+    quando o poll seguinte vê 'cancelled', a UI libera com aviso honesto (não erro)."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1000, "height": 820})
+        seen = {}
+
+        def handler(route):
+            url = route.request.url
+            if url.endswith("/cancel"):
+                seen["cancel"] = route.request.post_data
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"ok": True, "cancelled": True, "paused": False}))
+            elif url.endswith("/resume"):
+                seen["resume"] = route.request.post_data
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"ok": True, "run_id": "R-STOP", "resuming": True}))
+            else:
+                route.continue_()
+        page.route(re.compile(r"/api/"), handler)
+        try:
+            page.goto(live_server)
+            page.wait_for_selector("#analyzeForm", state="attached")
+
+            def seed(resumable):
+                page.evaluate("""(res) => {
+                  _watchedRunId = 'R-STOP';
+                  renderProgress({run_id:'R-STOP', ticker:'AAPL', status:'running',
+                    cancellable:true, resumable:res,
+                    progress:{percent:30, phase:'Analistas', label:'rodando…', plan:[], reached:[]},
+                    cost:{usd:0.01}, elapsed:12});
+                }""", resumable)
+
+            # BYOK (não retomável): Parar visível, Pausar oculto (sem promessa falsa)
+            seed(False)
+            assert page.is_visible("#stopRunBtn")
+            assert page.is_hidden("#pauseRunBtn")
+            # run de dono/servidor (retomável): Pausar aparece
+            seed(True)
+            assert page.is_visible("#pauseRunBtn")
+
+            # clicar Parar dispara o POST de cancelamento
+            seed(False)
+            with page.expect_request(lambda r: r.url.endswith("/api/run/R-STOP/cancel")
+                                     and r.method == "POST"):
+                page.click("#stopRunBtn")
+            assert json.loads(seen.get("cancel") or "{}") == {"pause": False}
+
+            # o poll seguinte vê 'cancelled' → UI liberada, aviso honesto, sem resultado
+            page.evaluate("() => renderResult({run_id:'R-STOP', status:'cancelled', paused:false})")
+            assert page.is_hidden("#progressPanel")
+            assert "interrompida" in page.inner_text("#formError").lower()
+            assert page.is_enabled("#runBtn")
+
+            # PAUSAR → Retomar: Pausar manda pause:true; a run pausada mostra a barra de
+            # Retomar; clicar Retomar dispara o POST /resume.
+            seed(True)
+            with page.expect_request(lambda r: r.url.endswith("/api/run/R-STOP/cancel")):
+                page.click("#pauseRunBtn")
+            assert json.loads(seen.get("cancel") or "{}") == {"pause": True}
+            page.evaluate("() => renderResult({run_id:'R-STOP', status:'cancelled', paused:true})")
+            assert page.is_visible("#resumeBar")
+            with page.expect_request(lambda r: r.url.endswith("/api/run/R-STOP/resume")):
+                page.click("#resumeRunBtn")
+            assert seen.get("resume") is not None
+        finally:
+            browser.close()

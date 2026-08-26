@@ -172,6 +172,13 @@ details.section.erick > summary { color: #9cc7f5; }
 .progress-label { color: var(--text); font-size: 14px; }
 .progress-meta { color: var(--muted); font-size: var(--fs-12); font-family: var(--mono); white-space: nowrap; }
 .progress-meta .dot { margin: 0 6px; }
+/* Controles PARAR/PAUSAR da run em andamento (task 026): à direita, discretos. */
+.progress-ctl { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
+.progress-ctl .btn-secondary, .progress-ctl .btn-ghost { padding: 4px 12px; font-size: var(--fs-12); }
+/* Barra de RETOMAR (task 026): aparece quando há uma análise pausada resumível. */
+.resume-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--radius); }
+.resume-bar .resume-msg { color: var(--text); font-size: var(--fs-12); line-height: var(--lh-12); }
 .bar { background: var(--panel-2); border-radius: 999px; height: 10px; overflow: hidden; border: 1px solid var(--border); }
 .bar-fill {
   height: 100%; width: 0; border-radius: 999px;
