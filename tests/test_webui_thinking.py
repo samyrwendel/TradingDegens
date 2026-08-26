@@ -81,3 +81,64 @@ def test_callback_without_node_is_noop():
     # end sem start correspondente (run_id desconhecido) → não quebra, não grava
     h.on_llm_end(_resp("texto órfão sem nó associado"), run_id="ghost")
     assert t.snapshot() == []
+
+
+# ── Atribuição por etapa (task 024, parte 1): qual LLM rodou cada etapa ──────────
+def test_callback_captures_real_model_from_metadata():
+    """O modelo REAL de cada etapa vem do metadata padrão do langchain
+    (ls_provider/ls_model_name) no start — o que rodou, não o configurado."""
+    t = ThinkingTracker()
+    h = ThinkingCallbackHandler(t)
+    h.on_chat_model_start(
+        {}, [],
+        metadata={"langgraph_node": "Portfolio Manager",
+                  "ls_provider": "anthropic", "ls_model_name": "claude-sonnet-5"},
+        run_id="r1")
+    h.on_llm_end(_resp("veredito final do gestor de portfólio com a decisão"), run_id="r1")
+    card = t.snapshot()[0]
+    assert card["provider"] == "anthropic" and card["model"] == "claude-sonnet-5"
+    rows = t.models_snapshot()
+    assert rows == [{
+        "node": "Portfolio Manager", "label": rows[0]["label"], "phase": "Risco",
+        "order": rows[0]["order"], "provider": "anthropic", "model": "claude-sonnet-5",
+    }]
+
+
+def test_model_falls_back_to_invocation_params():
+    """Sem ls_* no metadata, cai nos invocation_params (model/model_name)."""
+    t = ThinkingTracker()
+    h = ThinkingCallbackHandler(t)
+    h.on_llm_start(
+        {}, [],
+        metadata={"langgraph_node": "Market Analyst"},
+        invocation_params={"model": "gpt-5.4-mini"},
+        run_id="r2")
+    h.on_llm_end(_resp("leitura técnica do mercado com bastante detalhe"), run_id="r2")
+    card = t.snapshot()[0]
+    assert card["model"] == "gpt-5.4-mini" and card["provider"] is None
+
+
+def test_models_snapshot_ordered_and_only_real():
+    """models_snapshot vem na ordem do pipeline e só traz nós que de fato rodaram
+    (têm modelo) — nunca inventa atribuição pra etapa que não correu."""
+    t = ThinkingTracker()
+    # cross-provider (prova o formato da parte 2): analista openai, juiz anthropic
+    t.set_model("Portfolio Manager", "anthropic", "claude-sonnet-5")
+    t.set_model("Market Analyst", "openai", "gpt-5.4-mini")
+    t.set_model("tools_market", "openai", "gpt-5.4-mini")   # nó não mapeado → ignora
+    t.set_model("News Analyst", "google", None)             # sem modelo → não grava
+    rows = t.models_snapshot()
+    assert [(r["node"], r["provider"], r["model"]) for r in rows] == [
+        ("Market Analyst", "openai", "gpt-5.4-mini"),
+        ("Portfolio Manager", "anthropic", "claude-sonnet-5"),
+    ]
+
+
+def test_no_attribution_until_a_start_reports_a_model():
+    """Card sem atribuição ainda (só texto, sem start com modelo) → provider/model
+    None e models_snapshot vazio (honesto: não mostra selo do que não sabe)."""
+    t = ThinkingTracker()
+    t.set_by_node("Trader", "plano de execução do trader detalhado")
+    card = t.snapshot()[0]
+    assert card["provider"] is None and card["model"] is None
+    assert t.models_snapshot() == []

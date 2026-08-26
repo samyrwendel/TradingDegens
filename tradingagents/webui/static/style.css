@@ -235,6 +235,27 @@ details.section.erick > summary { color: #9cc7f5; }
 .tk-debate { border-color: var(--accent); }
 .tk-debate > .tk-sum { color: #cfe0ff; }
 
+/* Selo do LLM que rodou a etapa (atribuição por etapa, task 024): discreto, mono, ao
+   lado do rótulo do agente — responde "qual LLM fez esta etapa" ao vivo. Some quando
+   a atribuição ainda não chegou (nunca inventa). */
+.tk-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tk-model {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: 400; color: var(--muted); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; flex: none;
+}
+.tk-model:empty { display: none; }
+
+/* Atribuição POR ETAPA no rodapé de auditoria (task 024): lista colapsável de qual
+   provedor/modelo rodou cada etapa — o registro auditável do que de fato correu. */
+.audit-steps { margin-top: 6px; }
+.audit-steps > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-10); line-height: var(--lh-10); }
+.audit-steps-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.audit-steps-list li { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; font-size: var(--fs-10); line-height: var(--lh-10); }
+.audit-steps-list .as-step { color: var(--muted); }
+.audit-steps-list .as-model { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+
 /* Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação, cada
    uma com número, ícone de estado e rótulo. Estados: aguardando (apagada) ·
    rodando (accent, pulsa) · concluída (verde) · reusada do cache (âmbar/♻). */

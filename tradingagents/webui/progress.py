@@ -230,6 +230,25 @@ def _text_from_llm_response(response: Any) -> str:
         return ""
 
 
+def _model_from_kwargs(kwargs: dict[str, Any]) -> tuple[str | None, str | None]:
+    """(provider, model) REAL de uma chamada de LLM, lido do callback.
+
+    O langchain-core carimba ``metadata['ls_provider']`` e ``ls_model_name`` em toda
+    chamada de chat/LLM (params padrão do LangSmith); é a fonte do que de fato rodou.
+    Fallback nos ``invocation_params`` (``model``/``model_name``) pra clientes que não
+    populam o metadata. Nunca levanta — no pior caso devolve (None, None)."""
+    try:
+        meta = kwargs.get("metadata") or {}
+        provider = meta.get("ls_provider")
+        model = meta.get("ls_model_name")
+        if not model:
+            inv = kwargs.get("invocation_params") or {}
+            model = inv.get("model") or inv.get("model_name")
+        return provider, model
+    except Exception:
+        return None, None
+
+
 class ThinkingTracker:
     """Guarda o TEXTO produzido por cada nó, por agente, pra revelar o raciocínio ao
     vivo. Thread-safe: o callback escreve na thread do grafo, o snapshot é lido na
@@ -238,6 +257,11 @@ class ThinkingTracker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._texts: dict[str, str] = {}     # node -> último texto (recortado)
+        # Atribuição por etapa (task 024, parte 1): node -> {provider, model} que
+        # REALMENTE rodou aquela etapa, lido do callback do LLM (metadata ls_* do
+        # langchain) — o que rodou, não o configurado. Responde "qual LLM fez cada
+        # etapa" no card ao vivo e no rodapé de auditoria.
+        self._models: dict[str, dict[str, str | None]] = {}
 
     def set_by_node(self, node: str, text: str) -> None:
         if node not in _THINKING_INDEX or not text:
@@ -250,18 +274,46 @@ class ThinkingTracker:
         with self._lock:
             self._texts[node] = text
 
+    def set_model(self, node: str, provider: str | None, model: str | None) -> None:
+        """Registra o provedor/modelo que rodou ``node`` (real, do callback). Só grava
+        nós conhecidos e quando há ao menos o modelo — nunca inventa atribuição."""
+        if node not in _THINKING_INDEX or not model:
+            return
+        with self._lock:
+            self._models[node] = {"provider": provider, "model": model}
+
     def snapshot(self) -> list[dict[str, Any]]:
         """Cards com texto, na ordem do pipeline (estável — o front não reordena)."""
         with self._lock:
             items = []
             for node, txt in self._texts.items():
                 order, label, phase, debate = _THINKING_INDEX[node]
+                attr = self._models.get(node) or {}
                 items.append({
                     "id": node, "label": label, "phase": phase, "debate": debate,
                     "order": order, "len": len(txt), "text": txt,
+                    # atribuição por etapa: qual LLM rodou este card (None até o 1º start)
+                    "provider": attr.get("provider"), "model": attr.get("model"),
                 })
         items.sort(key=lambda it: it["order"])
         return items
+
+    def models_snapshot(self) -> list[dict[str, Any]]:
+        """Atribuição por etapa pra o rodapé de auditoria: lista ordenada de
+        {node, label, phase, provider, model} SÓ dos nós que de fato rodaram (têm
+        modelo capturado). É o registro auditável de qual LLM fez cada etapa."""
+        with self._lock:
+            rows = []
+            for node, attr in self._models.items():
+                if node not in _THINKING_INDEX:
+                    continue
+                order, label, phase, _debate = _THINKING_INDEX[node]
+                rows.append({
+                    "node": node, "label": label, "phase": phase, "order": order,
+                    "provider": attr.get("provider"), "model": attr.get("model"),
+                })
+        rows.sort(key=lambda r: r["order"])
+        return rows
 
 
 class ThinkingCallbackHandler(BaseCallbackHandler):
@@ -282,10 +334,19 @@ class ThinkingCallbackHandler(BaseCallbackHandler):
 
     def _remember(self, kwargs: dict[str, Any]) -> None:
         try:
-            node = (kwargs.get("metadata") or {}).get("langgraph_node")
+            meta = kwargs.get("metadata") or {}
+            node = meta.get("langgraph_node")
             rid = kwargs.get("run_id")
             if node and rid is not None:
                 self._node_by_run[rid] = node
+            # Atribuição por etapa (task 024): o modelo REAL desta chamada vem do
+            # metadata padrão do langchain (ls_model_name/ls_provider), com fallback
+            # nos invocation_params. Registra qual LLM rodou este nó — o que rodou, não
+            # o configurado. Defensivo: erro aqui nunca quebra a run.
+            if node:
+                provider, model = _model_from_kwargs(kwargs)
+                if model:
+                    self.tracker.set_model(node, provider, model)
         except Exception:
             pass
 

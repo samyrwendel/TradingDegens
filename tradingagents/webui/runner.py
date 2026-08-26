@@ -794,6 +794,11 @@ class AnalysisRunner:
                     "deep_think": config.get("deep_think_llm"),
                     "quick_think": config.get("quick_think_llm"),
                 },
+                # Atribuição POR ETAPA (task 024, parte 1): qual provedor+modelo REALMENTE
+                # rodou cada etapa (capturado dos callbacks do LLM, não inferido da
+                # config). Responde "qual LLM fez cada etapa" de forma auditável; vazio
+                # numa run reaproveitada (não rodou LLM) — honesto, sem inventar.
+                "models_by_step": run.thinking.models_snapshot(),
             }
             run.result["timeframe"] = run.timeframe
             run.result["verdict_timeframe"] = run.timeframe

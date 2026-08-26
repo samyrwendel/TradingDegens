@@ -30,15 +30,20 @@ except Exception:  # noqa: BLE001
 RUN_ID = "R-THINK-1"
 
 # Ordem do pipeline (subset): mercado, sentimento, debate bull. len é preenchido.
+# provider/model = atribuição por etapa (task 024): run MISTA (analistas openai, juiz
+# do debate anthropic) pra provar que cada card mostra o LLM que REALMENTE o rodou.
 _THINK = [
     {"id": "Market Analyst", "label": "📊 Mercado — preço e tempos gráficos",
      "phase": "Analistas", "debate": False, "order": 0,
+     "provider": "openai", "model": "gpt-5.4-mini",
      "text": "Leitura técnica: o preço testa a média de 21 e o volume confirma o movimento."},
     {"id": "Sentiment Analyst", "label": "💬 Sentimento",
      "phase": "Analistas", "debate": False, "order": 1,
+     "provider": "openai", "model": "gpt-5.4-mini",
      "text": "Sentimento levemente positivo nas redes, sem euforia — fluxo comprador moderado."},
     {"id": "Bull Researcher", "label": "🟢 Tese de Alta (bull)",
      "phase": "Debate", "debate": True, "order": 5,
+     "provider": "anthropic", "model": "claude-sonnet-5",
      "text": "Bull: momentum e earnings sustentam continuação; alvo na resistência anterior."},
 ]
 
@@ -130,6 +135,15 @@ def test_thinking_reports_appear_progressively(live_server):
             # debate em destaque (classe própria)
             assert page.query_selector("#thinkingLive .tk-card.tk-debate") is not None
 
+            # Atribuição POR ETAPA (task 024): cada card mostra o LLM que o rodou —
+            # run MISTA, analistas em openai, juiz do debate em anthropic (o REAL).
+            badges = page.evaluate(
+                "() => [...document.querySelectorAll('#thinkingLive .tk-card .tk-model')]"
+                ".map(s => s.textContent)"
+            )
+            assert "openai · gpt-5.4-mini" in badges[0], badges
+            assert "anthropic · claude-sonnet-5" in badges[2], badges
+
             # mobile 390: sem overflow horizontal (rola por dentro, não estoura a tela)
             over = page.evaluate("""() => {
               const b = document.getElementById('thinkingLive');
@@ -139,6 +153,51 @@ def test_thinking_reports_appear_progressively(live_server):
             }""")
             assert over["boxOver"] <= 1, over
             assert over["pageOver"] <= 1, over
+        finally:
+            browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
+def test_audit_footer_lists_models_by_step(live_server):
+    """Rodapé de auditoria (task 024): a lista "qual LLM fez cada etapa" renderiza o
+    provedor/modelo REAL por etapa; run mista mostra openai e anthropic em papéis
+    diferentes. Exercita a função de render direto (sem precisar de result completo)."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1000, "height": 820})
+        page.route(re.compile(r"/api/"), lambda r: r.fulfill(
+            status=200, content_type="application/json", body="{}")
+            if r.request.url.endswith("/api/history") else r.continue_())
+        try:
+            page.goto(live_server)
+            page.wait_for_selector("#analyzeForm", state="attached")
+            html = page.evaluate("""() => auditFooterHtml({
+              run_id: "R-AUD-1", collected_at: "2026-08-26T10:00:00-04:00",
+              pipeline_version: "9.9",
+              models: {provider: "openai", deep_think: "gpt-5.5", quick_think: "gpt-5.4-mini"},
+              models_by_step: [
+                {node:"Market Analyst", label:"📊 Mercado", phase:"Analistas", order:0,
+                 provider:"openai", model:"gpt-5.4-mini"},
+                {node:"Portfolio Manager", label:"🛡️ Decisão de Risco", phase:"Risco", order:100,
+                 provider:"anthropic", model:"claude-sonnet-5"},
+              ],
+            }, 123.45);""")
+            assert "qual LLM fez cada etapa (2)" in html, html
+            assert "openai · gpt-5.4-mini" in html and "anthropic · claude-sonnet-5" in html, html
+            assert "Mercado" in html and "Decisão de Risco" in html, html
+
+            # a lista de fato aparece no DOM quando injetada
+            container = page.evaluate("""() => {
+              const d = document.createElement('div');
+              d.innerHTML = auditFooterHtml({run_id:"x", models_by_step:[
+                {node:"Trader", label:"🎯 Trader", phase:"Execução", order:80,
+                 provider:"google", model:"gemini-2.5-pro"}]}, null);
+              document.body.appendChild(d);
+              const li = d.querySelectorAll('.audit-steps-list li');
+              return {count: li.length, txt: li[0] ? li[0].textContent : ""};
+            }""")
+            assert container["count"] == 1, container
+            assert "google · gemini-2.5-pro" in container["txt"], container
         finally:
             browser.close()
 

@@ -358,7 +358,9 @@ function renderThinking(items) {
       card.open = true;   // abre conforme chega — o Samyr quer VER o pensamento
       const sum = document.createElement("summary");
       sum.className = "tk-sum";
-      sum.textContent = it.label;
+      // rótulo do agente + selo do LLM que rodou esta etapa (atribuição, task 024)
+      sum.innerHTML = `<span class="tk-label">${escapeHtml(it.label)}</span>` +
+        `<span class="tk-model" data-tk-model></span>`;
       const body = document.createElement("div");
       body.className = "tk-body md";
       card.appendChild(sum);
@@ -369,6 +371,10 @@ function renderThinking(items) {
       );
       box.insertBefore(card, after || null);
     }
+    // Atribuição por etapa: qual LLM rodou este card (aparece assim que o 1º start
+    // reporta o modelo; some se ainda não veio). Atualiza a cada poll.
+    const modelSlot = card.querySelector("[data-tk-model]");
+    if (modelSlot) modelSlot.textContent = stepModelLabel(it);
     const body = card.querySelector(".tk-body");
     // re-renderiza só quando o texto mudou de tamanho (streaming/parcial→final)
     if (body && body.dataset.len !== String(it.len)) {
@@ -376,6 +382,13 @@ function renderThinking(items) {
       body.dataset.len = String(it.len);
     }
   });
+}
+
+// Rótulo do LLM que rodou uma etapa: "provider · model" (ex.: "openai · gpt-5.4-mini").
+// Vazio quando a atribuição ainda não chegou — nunca inventa (task 024, parte 1).
+function stepModelLabel(it) {
+  if (!it || !it.model) return "";
+  return it.provider ? `${it.provider} · ${it.model}` : it.model;
 }
 
 // Escapa um id pra usar em querySelector([data-tk="..."]) sem quebrar com caracteres
@@ -447,10 +460,25 @@ function auditFooterHtml(audit, asOfPrice) {
   ].filter(Boolean).join(" · ");
   const price = (asOfPrice !== null && asOfPrice !== undefined)
     ? ` · preço de referência ${escapeHtml(String(asOfPrice))}` : "";
+  // Atribuição POR ETAPA (task 024, parte 1): qual LLM rodou cada etapa (real, do
+  // callback). Detalhe colapsável — o resumo por camada fica na linha; o por-etapa
+  // abre embaixo. Só aparece quando o run trouxe a lista (vazia em reaproveitado).
+  const byStep = Array.isArray(audit.models_by_step) ? audit.models_by_step : [];
+  const byStepHtml = byStep.length
+    ? `<details class="audit-steps"><summary>qual LLM fez cada etapa (${byStep.length})</summary>` +
+      `<ul class="audit-steps-list">` +
+      byStep.map((s) => {
+        const lbl = stepModelLabel(s);
+        return `<li><span class="as-step">${escapeHtml(s.label || s.node || "—")}</span>` +
+          `<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span></li>`;
+      }).join("") +
+      `</ul></details>`
+    : "";
   return `<div class="audit-footer">` +
     `run ${escapeHtml(audit.run_id)} · coleta ${escapeHtml(audit.collected_at || "—")} · ` +
     `pipeline v${escapeHtml(audit.pipeline_version || "—")}${price}` +
     (models ? ` · modelos: ${models}` : "") +
+    byStepHtml +
     `</div>`;
 }
 
