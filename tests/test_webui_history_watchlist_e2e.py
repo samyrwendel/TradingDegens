@@ -124,6 +124,37 @@ def test_watchlist_layout_and_uniform_radius(live):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_price_is_third_line(live, monkeypatch):
+    # 3ª linha = PREÇO LIVE (task 010). Troca a fonte por um fake (sem rede) e checa
+    # que a linha aparece abaixo do nome, com valor + variação colorida.
+    import tradingagents.dataflows.live_price as lp
+    monkeypatch.setattr(lp, "fetch_live_price", lambda s: (
+        {"price": 267.12, "change_pct": -0.37, "currency": "USD"} if s.upper() == "MCD"
+        else {"price": 64230.5, "change_pct": 2.11, "currency": "USD"} if s.upper() == "BTC"
+        else None))
+    base, _store = live
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=_CHROMIUM_ARGS)
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        page.goto(base, wait_until="networkidle")
+        page.evaluate(_SEED_NAMES, {"MCD": "McDonald's Corp.", "BTC": "Bitcoin"})
+        # a 3ª linha nasce "—" e o refreshNewPrices preenche com o preço do fake
+        page.wait_for_selector('.history li[data-ticker="MCD"] .h-price .pval')
+        mcd = page.query_selector('.history li[data-ticker="MCD"]')
+        price = mcd.query_selector(".h-price .pval").inner_text()
+        assert "267.12" in price and price.startswith("$"), price
+        chg = mcd.query_selector(".h-price .pchg")
+        assert "0.37%" in chg.inner_text()
+        assert "down" in (chg.get_attribute("class") or "")   # variação negativa = vermelho
+
+        # o preço fica ABAIXO do nome da empresa (é a 3ª linha)
+        co_y = mcd.query_selector(".tk-co").bounding_box()["y"]
+        pr_y = mcd.query_selector(".h-price").bounding_box()["y"]
+        assert pr_y > co_y, (co_y, pr_y)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_remove_button_deletes_ticker(live):
     base, store = live
     with sync_playwright() as p:

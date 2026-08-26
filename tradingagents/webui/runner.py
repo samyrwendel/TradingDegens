@@ -59,6 +59,8 @@ _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 _CRYPTO_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
 _STOCK_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
 _DEFAULT_TIMEFRAME = "1d"
+# TTL do cache de preço LIVE da watchlist: "vivo" o bastante sem martelar a fonte.
+_PRICE_TTL = 45.0
 
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
 _MAX_QUESTION_CHARS = 500
@@ -554,6 +556,10 @@ class AnalysisRunner:
         self._meta_judge = meta_judge or (lambda p, e, at: deterministic_meta(p, e))
         self._runs: dict[str, Any] = {}
         self._lock = threading.Lock()
+        # Cache TTL curto do preço LIVE da watchlist (sym -> (monotonic_ts, payload)).
+        # Serve o /api/prices sem martelar a fonte nem rodar o pipeline.
+        self._price_cache: dict[str, Any] = {}
+        self._price_lock = threading.Lock()
 
     @staticmethod
     def _default_graph_factory(config, selected_analysts, callbacks):
@@ -1305,6 +1311,36 @@ class AnalysisRunner:
         lateral é por ativo). Runs em andamento (em memória) não são tocados —
         eles voltam à lista ao terminar. Retorna quantas foram removidas."""
         return self.store.delete_ticker(ticker)
+
+    def live_prices(self, tickers: list[str]) -> dict[str, Any]:
+        """Preço LIVE por ticker pra 3ª linha da watchlist: ``sym -> {price,
+        change_pct, currency}`` ou ``None`` quando a fonte cai (a UI mostra "—").
+
+        Cacheado ~45s por símbolo (``_PRICE_TTL``): só busca os que expiraram, então
+        chamadas repetidas dos tickers visíveis não martelam o yfinance. NUNCA roda
+        o pipeline — é só o quote rápido (``fetch_live_price``).
+        """
+        from tradingagents.dataflows.live_price import fetch_live_price
+
+        out: dict[str, Any] = {}
+        now = time.monotonic()
+        to_fetch: list[str] = []
+        with self._price_lock:
+            for raw in tickers:
+                key = (raw or "").strip().upper()
+                if not key or key in out or key in to_fetch:
+                    continue
+                hit = self._price_cache.get(key)
+                if hit and (now - hit[0]) < _PRICE_TTL:
+                    out[key] = hit[1]
+                else:
+                    to_fetch.append(key)
+        for key in to_fetch:
+            payload = fetch_live_price(key)
+            out[key] = payload
+            with self._price_lock:
+                self._price_cache[key] = (time.monotonic(), payload)
+        return out
 
     def search_symbols(self, term: str, limit: int = 8) -> list[dict[str, Any]]:
         """Autocomplete candidates for a name-or-ticker term (fail-open)."""

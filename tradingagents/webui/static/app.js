@@ -2073,6 +2073,80 @@ let _historyFilter = "all";
 // botão separado que re-submetesse o form e perdesse o método (a classe do bug 037/039).
 let _allRuns = [];
 
+// Preço LIVE da 3ª linha da watchlist (task 010): SÍMBOLO -> {price, change_pct,
+// currency} | null. Persistido entre repinturas da lista pra a linha NÃO piscar
+// "—" a cada refresh de 5s — o cache guarda o último preço e a lista repinta com
+// ele; o poller de preço atualiza só os spans no lugar (sem dança).
+const _priceCache = new Map();
+let _priceTimer = null;
+let _priceFetching = false;
+
+// Formata o preço conforme a magnitude (2 casas ≥1; mais casas pra fração de dólar)
+// com separador de milhar; "$" pra USD/desconhecido, senão o código da moeda.
+function fmtPrice(v, currency) {
+  const usd = !currency || currency === "USD";
+  const a = Math.abs(v);
+  const digits = a >= 1 ? 2 : (a >= 0.01 ? 4 : 6);
+  const num = v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return usd ? `$${num}` : `${num} ${escapeHtml(currency)}`;
+}
+
+// Linha de preço: valor + variação do dia (▲ verde / ▼ vermelho). Sem dado → "—".
+function priceLineHtml(p) {
+  if (!p || p.price == null) return `<span class="pdash">—</span>`;
+  let chg = "";
+  if (p.change_pct != null) {
+    const up = p.change_pct > 0, dn = p.change_pct < 0;
+    const cls = up ? "up" : (dn ? "down" : "flat");
+    const arrow = up ? "▲" : (dn ? "▼" : "·");
+    chg = ` <span class="pchg ${cls}">${arrow} ${Math.abs(p.change_pct).toFixed(2)}%</span>`;
+  }
+  return `<span class="pval">${fmtPrice(p.price, p.currency)}</span>${chg}`;
+}
+
+function currentHistoryTickers() {
+  return [...document.querySelectorAll(".history li[data-ticker]")]
+    .map((li) => li.getAttribute("data-ticker"))
+    .filter(Boolean);
+}
+
+// Busca o preço live dos tickers visíveis e aplica NOS SPANS, sem repintar a lista
+// (evita a "dança"). Reusa o cache do servidor (~45s) — chamadas repetidas são baratas.
+async function refreshPrices(tickers) {
+  const src = tickers && tickers.length ? tickers : currentHistoryTickers();
+  const uniq = [...new Set(src.map((t) => (t || "").toUpperCase()).filter(Boolean))];
+  if (!uniq.length || _priceFetching) return;
+  _priceFetching = true;
+  try {
+    const res = await fetch("/api/prices?tickers=" + encodeURIComponent(uniq.join(",")));
+    if (!res.ok) return;
+    const data = await res.json();
+    const prices = data.prices || {};
+    Object.keys(prices).forEach((k) => _priceCache.set(k.toUpperCase(), prices[k]));
+    document.querySelectorAll(".history .h-price[data-price-for]").forEach((el) => {
+      const t = (el.getAttribute("data-price-for") || "").toUpperCase();
+      if (_priceCache.has(t)) el.innerHTML = priceLineHtml(_priceCache.get(t));
+    });
+  } catch (e) { /* fonte fora do ar: mantém "—" ou o último preço em cache */ }
+  finally { _priceFetching = false; }
+}
+
+// Só busca os tickers AINDA sem preço em cache (novos na lista) — não re-bate a
+// fonte a cada repintura de 5s; o poller periódico cuida de atualizar os existentes.
+function refreshNewPrices() {
+  const missing = currentHistoryTickers().filter((t) => !_priceCache.has((t || "").toUpperCase()));
+  if (missing.length) refreshPrices(missing);
+}
+
+function startPriceAutoRefresh() {
+  if (_priceTimer) clearInterval(_priceTimer);
+  // atualiza os preços a cada 40s, só com a aba em primeiro plano (aba de fundo não
+  // martela a fonte); o retorno ao foco força um refresh imediato (onVisibleForeground).
+  _priceTimer = setInterval(() => {
+    if (document.visibilityState === "visible") refreshPrices();
+  }, 40000);
+}
+
 function bindHistoryTabs() {
   const tabs = document.getElementById("historyTabs");
   if (!tabs) return;
@@ -2178,6 +2252,9 @@ function paintHistory() {
     const rm = running ? "" :
       `<button type="button" class="h-remove" data-ticker="${escapeHtml(t)}" ` +
       `title="Remover ${escapeHtml(t)} do histórico" aria-label="Remover ${escapeHtml(t)}">×</button>`;
+    // 3ª linha (task 010): preço LIVE do ativo (+ variação do dia). Nasce do cache
+    // (ou "—") e o poller de preço atualiza no lugar. Cripto e ação.
+    const priceHtml = `<span class="h-price" data-price-for="${escapeHtml(t)}">${priceLineHtml(_priceCache.get(t))}</span>`;
     return `<li data-id="${escapeHtml(r.run_id)}" data-ticker="${escapeHtml(t)}" class="${running ? "is-running" : ""}">` +
       `<span class="h-ticker">` +
         `<span class="h-sym"><span class="tk-sym">${escapeHtml(t || "?")}</span>${badge}${flagHtml}</span>` +
@@ -2188,6 +2265,7 @@ function paintHistory() {
         `<span class="h-meta">${meta}</span>` +
       `</span>` +
       rm +
+      priceHtml +
       `</li>`;
   };
   const filtered = _historyFilter === "all"
@@ -2215,6 +2293,9 @@ function paintHistory() {
   // Resolve os nomes que faltam e re-pinta UMA vez quando chegam (cacheado → o
   // segundo ensureNames não muda nada e o loop para).
   ensureNames([...seen.keys()]).then((changed) => { if (changed) paintHistory(); });
+  // Busca o preço live dos tickers NOVOS (ainda sem cache) — a 3ª linha sai de "—"
+  // pro preço assim que a lista aparece; os existentes seguem no poller de 40s.
+  refreshNewPrices();
 }
 
 // Remove um ATIVO da lista lateral (a linha é por ticker): apaga do histórico
@@ -2825,12 +2906,14 @@ function init() {
   // reengata o run persistido. Contorna o throttle e retoma o progresso na hora.
   document.addEventListener("visibilitychange", onVisibleForeground);
   startHistoryAutoRefresh();
+  startPriceAutoRefresh();
 }
 
 function onVisibleForeground() {
   if (document.visibilityState !== "visible") return;
   if (_watchedRunId && pollTimer) watchRun(_watchedRunId);   // poll já + intervalo novo
   else resumeActiveRun();                                    // timer morreu: reengata o vivo
+  refreshPrices();                                           // preços live ao voltar pra aba
 }
 
 // A lista de fundo se atualiza devagar (5s), independente do run assistido: é o

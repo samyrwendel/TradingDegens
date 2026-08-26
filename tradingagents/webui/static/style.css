@@ -605,8 +605,8 @@ details.section[open] > summary::before { content: "▾"; }
 .history li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  column-gap: 10px;
+  align-items: start;
+  column-gap: 10px; row-gap: 2px;
   padding: 9px 4px;
   cursor: pointer;
   border: none;
@@ -614,6 +614,12 @@ details.section[open] > summary::before { content: "▾"; }
   background: none;
   transition: background .12s;
 }
+/* linha 1 (topo): ticker/nome à esquerda · veredito/data à direita · × */
+.history li .h-ticker { grid-row: 1; grid-column: 1; }
+.history li .h-right  { grid-row: 1; grid-column: 2; }
+.history li .h-remove { grid-row: 1; grid-column: 3; align-self: center; }
+/* linha de baixo: PREÇO LIVE ocupa a largura toda (não espreme com a data) */
+.history li .h-price  { grid-row: 2; grid-column: 1 / -1; }
 .history li:hover { background: var(--panel-2); }
 .history li:last-child { border-bottom: none; }
 
@@ -625,6 +631,18 @@ details.section[open] > summary::before { content: "▾"; }
   font-family: inherit; font-weight: var(--fw-med); font-size: var(--fs-12); line-height: var(--lh-12);
   color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
+/* 3ª linha (task 010): PREÇO LIVE + variação do dia. Preço em mono; a variação em
+   verde (sobe) / vermelho (desce); "—" cinza quando a fonte não respondeu. */
+.history .h-price {
+  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-14);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.history .h-price .pval { color: var(--text); font-weight: var(--fw-med); }
+.history .h-price .pchg { font-size: var(--fs-10); }
+.history .h-price .pchg.up { color: var(--green); }
+.history .h-price .pchg.down { color: var(--red); }
+.history .h-price .pchg.flat { color: var(--muted); }
+.history .h-price .pdash { color: var(--muted); }
 
 /* direita: veredito (cor da função) SOBRE a meta (data · custo · tempo) */
 .history .h-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; white-space: nowrap; }

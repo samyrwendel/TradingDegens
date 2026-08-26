@@ -251,6 +251,14 @@ class _Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 term = (qs.get("q", [""])[0] or "").strip()
                 self._send_json({"query": term, "results": self.runner.search_symbols(term)})
+            elif path == "/api/prices":
+                # Preço LIVE (3ª linha da watchlist): lote de tickers -> preço atual
+                # + variação do dia. Leve (fast_info, sem pipeline), cacheado ~45s;
+                # fonte caída por ticker -> null (a UI mostra "—"). Teto de sanidade.
+                qs = parse_qs(urlparse(self.path).query)
+                raw = (qs.get("tickers", [""])[0] or "").strip()
+                tickers = [t for t in (x.strip() for x in raw.split(",")) if t][:50]
+                self._send_json({"prices": self.runner.live_prices(tickers)})
             elif path == "/api/names":
                 # Resolução em lote símbolo -> nome pros chips do histórico/cabeçalho.
                 qs = parse_qs(urlparse(self.path).query)
