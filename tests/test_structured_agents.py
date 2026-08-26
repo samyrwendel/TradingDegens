@@ -449,7 +449,13 @@ class TestSentimentAnalystAgent:
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        sr = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        # The freetext content flows through; deterministic confidence (item 9) is
+        # applied on top — the stubbed sources are all placeholders (0/3), so the read
+        # is flagged non-informative.
+        assert plain in sr
+        assert "fontes com dados (determinístico)" in sr
+        assert "NÃO-informativo" in sr
 
     def test_falls_back_to_freetext_when_structured_call_fails(self):
         plain = "Fallback free-text sentiment."
@@ -458,4 +464,6 @@ class TestSentimentAnalystAgent:
         llm = MagicMock()
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        sr = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        assert plain in sr
+        assert "fontes com dados (determinístico)" in sr

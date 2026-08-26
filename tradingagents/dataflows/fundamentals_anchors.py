@@ -106,7 +106,8 @@ def price_snapshot(
     if daily is None or getattr(daily, "empty", True) or "Close" not in daily:
         return None
     d = daily.reset_index(drop=True)
-    close = float(d["Close"].iloc[-1])
+    close_series = d["Close"].astype(float)
+    close = float(close_series.iloc[-1])
     as_of = None
     if "Date" in d:
         as_of_ts = pd.to_datetime(d["Date"].iloc[-1], errors="coerce")
@@ -115,11 +116,19 @@ def price_snapshot(
     low_52w = float(window["Low"].min()) if "Low" in window else None
     high_52w = float(window["High"].max()) if "High" in window else None
     market_cap = round(close * float(shares)) if shares else None
+    # Canonical moving averages off the SAME date-guarded series the chart draws
+    # (MMS50/MMS200), so the report carries ONE value per average instead of the
+    # yfinance-live 50/200-day figures drifting from the chart (item 6: 126,48 vs
+    # 127,60 / 98,22 vs 97,81). None until the window has enough bars.
+    ma_50 = round(float(close_series.rolling(50).mean().iloc[-1]), 2) if len(d) >= 50 else None
+    ma_200 = round(float(close_series.rolling(200).mean().iloc[-1]), 2) if len(d) >= 200 else None
     return {
         "as_of": as_of,
         "price": round(close, 2),
         "low_52w": round(low_52w, 2) if low_52w is not None else None,
         "high_52w": round(high_52w, 2) if high_52w is not None else None,
+        "ma_50": ma_50,
+        "ma_200": ma_200,
         "shares": shares,
         "market_cap": market_cap,
     }
@@ -163,6 +172,12 @@ def render_anchors_section(
             lo_t = "n/d" if lo is None else f"{lo:,.2f}"
             hi_t = "n/d" if hi is None else f"{hi:,.2f}"
             lines.append(f"- **Mínima 52 semanas**: {lo_t} · **Máxima 52 semanas**: {hi_t}")
+        if snapshot.get("ma_50") is not None or snapshot.get("ma_200") is not None:
+            m50 = snapshot.get("ma_50")
+            m200 = snapshot.get("ma_200")
+            m50_t = "n/d" if m50 is None else f"{m50:,.2f}"
+            m200_t = "n/d" if m200 is None else f"{m200:,.2f}"
+            lines.append(f"- **Média 50 dias (MMS50)**: {m50_t} · **Média 200 dias (MMS200)**: {m200_t}")
     if has_ttm:
         quarters = ttm.get("quarters") or []
         q_txt = f" (soma de {', '.join(quarters)})" if quarters else ""

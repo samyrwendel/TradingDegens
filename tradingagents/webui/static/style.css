@@ -1099,3 +1099,30 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   /* cinto+suspensório: garante o conteúdo dos <details> abertos visível na impressão */
   details[open] > *:not(summary) { display: block !important; }
 }
+
+/* Rodapé de auditoria (item 10): metadados discretos pra rastrear regressão entre
+   runs — run_id, timestamp da coleta, versão do pipeline, modelos por camada. */
+.audit-footer {
+  margin: 14px 2px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #23304a);
+  color: var(--muted);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  word-break: break-word;
+}
+
+/* Selo de eixo (item 8): pílula discreta {eixo · horizonte} no cabeçalho da seção,
+   pra mostrar que os módulos são CAMADAS (não decisões concorrentes). */
+.axis-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border, #23304a);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  font-weight: 400;
+  white-space: nowrap;
+}

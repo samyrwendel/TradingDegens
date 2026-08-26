@@ -296,10 +296,38 @@ function renderProgress(snap) {
   });
 }
 
-function section(title, mdText) {
+// Selo de eixo (item 8): {eixo · horizonte} — mostra que o módulo opera numa
+// camada, não numa decisão concorrente. Vazio quando o run não trouxe axes.
+function axisTag(axis) {
+  if (!axis || !axis.eixo) return "";
+  const h = axis.horizonte ? ` · ${escapeHtml(axis.horizonte)}` : "";
+  return ` <span class="axis-tag">eixo ${escapeHtml(axis.eixo)}${h}</span>`;
+}
+
+function section(title, mdText, axis) {
   if (!mdText || !mdText.trim()) return "";
-  return `<details class="section"><summary>${escapeHtml(title)}</summary>` +
+  return `<details class="section"><summary>${escapeHtml(title)}${axisTag(axis)}</summary>` +
     `<div class="section-body"><div class="md">${renderMarkdown(mdText)}</div></div></details>`;
+}
+
+// Rodapé de auditoria (item 10): run_id + timestamp único da coleta + versão do
+// pipeline + modelo por camada de agente. Sem isto não dá pra atribuir regressão
+// entre runs. Só renderiza quando o run trouxe o bloco audit.
+function auditFooterHtml(audit, asOfPrice) {
+  if (!audit || !audit.run_id) return "";
+  const m = audit.models || {};
+  const models = [
+    m.provider ? `provedor ${escapeHtml(m.provider)}` : "",
+    m.deep_think ? `deep ${escapeHtml(m.deep_think)}` : "",
+    m.quick_think ? `quick ${escapeHtml(m.quick_think)}` : "",
+  ].filter(Boolean).join(" · ");
+  const price = (asOfPrice !== null && asOfPrice !== undefined)
+    ? ` · preço de referência ${escapeHtml(String(asOfPrice))}` : "";
+  return `<div class="audit-footer">` +
+    `run ${escapeHtml(audit.run_id)} · coleta ${escapeHtml(audit.collected_at || "—")} · ` +
+    `pipeline v${escapeHtml(audit.pipeline_version || "—")}${price}` +
+    (models ? ` · modelos: ${models}` : "") +
+    `</div>`;
 }
 
 // Banner de erro HUMANO: mensagem acionável em pt-BR (nunca stack, nunca chave).
@@ -448,8 +476,9 @@ function renderResult(snap) {
   // Modo Erick (sob demanda): a leitura do método vem primeiro e ABERTA — é o que
   // o Samyr pediu em destaque (recuo à média, saída, peso do trade). Só aparece
   // quando o método Erick foi acionado; a análise Padrão não a tem.
+  const axes = r.axes || {};
   if (r.erick_report && r.erick_report.trim()) {
-    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade</summary>` +
+    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${axisTag(axes.erick)}</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
   }
   // For crypto, the deterministic derivatives feed goes first and open — it is
@@ -458,13 +487,14 @@ function renderResult(snap) {
     html += `<details class="section" open><summary>🪙 Derivativos — taxa de financiamento <span class="orig">(funding)</span> · contratos em aberto <span class="orig">(open interest)</span> · liquidações <span class="orig">(liquidations)</span> (fonte nomeada)</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.derivatives_report)}</div></div></details>`;
   }
-  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan);
-  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report);
+  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
+  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico);
   html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
   html += section("💬 Sentimento", r.sentiment_report);
   if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);
-  html += section("🎯 Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan);
-  html += section("🛡️ Decisão de Risco (veredito final na íntegra — a única decisão)", r.risk_decision || r.final_trade_decision);
+  html += section("🎯 Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan, axes.trader);
+  html += section("🛡️ Decisão de Risco (veredito final na íntegra — a única decisão)", r.risk_decision || r.final_trade_decision, axes.veredito);
+  html += auditFooterHtml(r.audit, r.as_of_price);
   $("sections").innerHTML = html;
 
   mountAskBox($("askSingle"), snap.run_id);

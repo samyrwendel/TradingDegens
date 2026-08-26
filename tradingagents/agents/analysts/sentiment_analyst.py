@@ -35,6 +35,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_news,
 )
+from tradingagents.agents.utils.sentiment_confidence import (
+    annotate_report,
+    deterministic_confidence,
+)
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -115,6 +119,13 @@ def create_sentiment_analyst(llm):
             render_sentiment_report,
             "Sentiment Analyst",
         )
+
+        # Confidence is DETERMINISTIC (item 9): a function of how many of the three
+        # pre-fetched sources returned real data, not the LLM's self-judgement (which
+        # drifted between runs). ≤1 source → non-informative, flagged so the judge
+        # does not anchor to a low-confidence number built on nothing.
+        conf = deterministic_confidence(news_block, stocktwits_block, reddit_block)
+        report_text = annotate_report(report_text, conf)
 
         return {
             "messages": [AIMessage(content=report_text)],

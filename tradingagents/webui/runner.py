@@ -183,6 +183,34 @@ def timeframes_for_asset(asset_type: str) -> list[str]:
     return list(_CRYPTO_TIMEFRAMES if asset_type == "crypto" else _STOCK_TIMEFRAMES)
 
 
+def _pipeline_version() -> str:
+    """Installed pipeline version for the audit footer (fail-soft → 'unknown')."""
+    try:
+        from importlib.metadata import version
+
+        return version("tradingagents")
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+# Reading AXES (item 8) — each module operates on a different axis/horizon, so a
+# "semanal em alta + diário em baixa + reduzir + aguardar" spread is NOT a
+# contradiction, it is layers. Declaring the axis on every parecer kills the false
+# contradiction. Deterministic taxonomy: (eixo, horizonte) keyed by module.
+_MODULE_AXES: dict[str, tuple[str, str]] = {
+    "veredito": ("posição", "3-6 meses"),
+    "juiz": ("posição", "3-6 meses"),
+    "tecnico": ("estrutural", "swing (semanas)"),
+    "erick": ("tático", "intradia–swing"),
+    "trader": ("tático", "swing"),
+}
+
+
+def module_axes() -> dict[str, dict[str, str]]:
+    """Per-module reading axis + horizon (deterministic; item 8)."""
+    return {k: {"eixo": e, "horizonte": h} for k, (e, h) in _MODULE_AXES.items()}
+
+
 def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
     """Pull the display fields out of a completed run's final state.
 
@@ -232,6 +260,11 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         # THE single frozen reference price (date-guarded daily close); the runner
         # fills it from ``actionable`` so cover/UI/consumers share one price.
         "as_of_price": None,
+        # Audit footer (run_id + collection timestamp + pipeline version + models per
+        # tier); the runner fills it on completion so a run is reproducible/auditable.
+        "audit": {},
+        # Reading axes per module (eixo+horizonte); filled by the runner (item 8).
+        "axes": {},
     }
 
 
@@ -633,6 +666,23 @@ class AnalysisRunner:
             # the same one the chart/verdict/fundamentals-anchor use). One canonical
             # field so the cover, UI and automated consumers never disagree on price.
             run.result["as_of_price"] = (run.result.get("actionable") or {}).get("price")
+            # Reading axes (item 8): every parecer declares eixo+horizonte so the UI
+            # frames the modules as layers, not competing verdicts.
+            run.result["axes"] = module_axes()
+            # Audit footer (item 10): run_id + single collection timestamp + pipeline
+            # version + the model behind each agent tier, so a regression between runs
+            # is attributable instead of a mystery. deep_think drives the juiz / PM /
+            # risco / debate; quick_think the analistas / trader.
+            run.result["audit"] = {
+                "run_id": run.run_id,
+                "collected_at": timeutil.stamp(),
+                "pipeline_version": _pipeline_version(),
+                "models": {
+                    "provider": config.get("llm_provider"),
+                    "deep_think": config.get("deep_think_llm"),
+                    "quick_think": config.get("quick_think_llm"),
+                },
+            }
             run.result["timeframe"] = run.timeframe
             run.result["verdict_timeframe"] = run.timeframe
             run.result["timeframes"] = timeframes_for_asset(run.asset_type)

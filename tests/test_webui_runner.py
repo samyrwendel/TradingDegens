@@ -10,8 +10,10 @@ import pytest
 import tradingagents.webui.runner as runner_module
 from tradingagents.webui.runner import (
     AnalysisRunner,
+    _pipeline_version,
     extract_result,
     fetch_derivatives_report,
+    module_axes,
     select_analysts_for_asset,
     timeframes_for_asset,
 )
@@ -146,6 +148,32 @@ def test_extract_result_final_decision_falls_back_to_signal():
     """An unexpected signal string degrades to itself, never crashes."""
     r = extract_result({}, "Weird")
     assert r["final_decision"] == "Weird"
+
+
+def test_extract_result_has_audit_and_axes_defaults():
+    """Item 8/10: the audit footer + reading-axes fields are always present (the
+    runner fills them on completion; here they default to empty, never missing)."""
+    r = extract_result({}, "Hold")
+    assert r["audit"] == {}
+    assert r["axes"] == {}
+    assert r["as_of_price"] is None
+
+
+def test_module_axes_every_module_declares_eixo_and_horizonte():
+    """Item 8: each module carries an axis + horizon so a weekly-up/daily-down/reduce/
+    wait spread reads as LAYERS, not a contradiction. The verdict is the position axis."""
+    axes = module_axes()
+    for key in ("veredito", "juiz", "tecnico", "erick", "trader"):
+        assert axes[key]["eixo"] and axes[key]["horizonte"]
+    assert axes["veredito"]["eixo"] == "posição"
+    assert axes["erick"]["eixo"] == "tático"
+    assert axes["tecnico"]["eixo"] == "estrutural"
+
+
+def test_pipeline_version_is_a_string():
+    """Item 10: audit footer version resolves to a string, never raises."""
+    v = _pipeline_version()
+    assert isinstance(v, str) and v
 
 
 def test_runner_completes_and_extracts(tmp_path):

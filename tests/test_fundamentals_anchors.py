@@ -97,6 +97,32 @@ def test_price_snapshot_no_shares_no_market_cap():
 
 
 @pytest.mark.unit
+def test_price_snapshot_carries_canonical_50_200_averages():
+    """Item 6: the 50d/200d averages come off the SAME date-guarded series the chart
+    draws (one canonical value), not yfinance's live figures."""
+    import pandas as pd
+
+    d = _daily(300)
+    snap = fa.price_snapshot(d, shares=None)
+    c = d["Close"].astype(float)
+    assert snap["ma_50"] == round(float(c.rolling(50).mean().iloc[-1]), 2)
+    assert snap["ma_200"] == round(float(c.rolling(200).mean().iloc[-1]), 2)
+
+
+@pytest.mark.unit
+def test_price_snapshot_averages_none_when_window_too_short():
+    snap = fa.price_snapshot(_daily(40), shares=None)   # < 50 bars
+    assert snap["ma_50"] is None and snap["ma_200"] is None
+
+
+@pytest.mark.unit
+def test_render_anchors_section_includes_moving_averages():
+    snap = fa.price_snapshot(_daily(), shares=80_200_000)
+    md = fa.render_anchors_section(snap, {})
+    assert "MMS50" in md and "MMS200" in md
+
+
+@pytest.mark.unit
 def test_render_anchors_section_carries_numbers_and_rule():
     snap = fa.price_snapshot(_daily(), shares=80_200_000)
     agg = fa.compute_ttm_cashflow(_quarterly_with_fifth_older())
