@@ -1207,6 +1207,19 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .subscription-box .sub-advanced[open] summary { margin-bottom: 10px; }
 .subscription-box .sub-advanced .owner-login-row { margin-top: 0; }
 
+/* Multi-provedor (task 020): uma linha por assinatura; ao conectar, COLAPSA pra a
+   linha compacta "✅ Label conectada · Desconectar". Linhas separadas por divisória
+   sutil, respiro entre elas. */
+.sub-providers { display: flex; flex-direction: column; }
+.sub-row { padding: 12px 0; border-top: 1px solid var(--border); }
+.sub-row:first-child { border-top: none; padding-top: 6px; }
+.sub-row:last-child { padding-bottom: 2px; }
+.subscription-box .sub-row .sub-status { font-size: var(--fs-12); color: var(--muted); }
+.subscription-box .sub-row .sub-status.ok { color: var(--green); }
+.subscription-box .sub-row .sub-status.err { color: var(--danger, #f87171); }
+.sub-row-connected { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sub-connected-label { font-size: var(--fs-14); color: var(--green); font-weight: var(--fw-med); }
+
 @media (max-width: 640px) {
   .owner-login-row input { min-width: 0; width: 100%; }
 }

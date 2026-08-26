@@ -46,7 +46,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tradingagents.webui import oauth_codex, timeutil
+from tradingagents.webui import oauth_codex, oauth_providers, server_login, timeutil
 from tradingagents.webui.auth import OwnerAuth
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
@@ -72,7 +72,7 @@ class _Handler(BaseHTTPRequestHandler):
     runner: AnalysisRunner  # injected on the server instance
     auth: OwnerAuth         # injected on the server instance
     subscription: SubscriptionStore          # injected on the server instance
-    oauth_flows: oauth_codex.PendingFlows     # injected on the server instance
+    oauth_flows: oauth_providers.PendingOAuth  # injected on the server instance
 
     # -- helpers --------------------------------------------------------------
     def _send_json(self, obj, status: int = 200, cookies: list[str] | None = None) -> None:
@@ -232,18 +232,23 @@ class _Handler(BaseHTTPRequestHandler):
                 text = text.replace(secret, "***")
         return text
 
-    # -- OAuth da assinatura (task 019) ---------------------------------------
-    def _oauth_redirect_uri(self) -> str:
-        """redirect_uri do fluxo: default = loopback :1455 do codex (o único aceito
-        pela OpenAI pra este client). ``TRADINGDEGENS_OAUTH_REDIRECT`` sobrepõe pra
-        apontar o callback deste servidor quando ele consegue receber o redirect."""
-        return os.getenv("TRADINGDEGENS_OAUTH_REDIRECT", oauth_codex.DEFAULT_REDIRECT)
+    # -- OAuth da assinatura (task 019; multi-provedor 020) -------------------
+    def _oauth_redirect_uri(self, provider: str = "openai") -> str:
+        """redirect_uri do fluxo, por provedor: default = o loopback verbatim do CLI
+        de cada assinatura (o único aceito pelo issuer). ``TRADINGDEGENS_OAUTH_REDIRECT``
+        sobrepõe (mantido pro openai/compat) pra apontar o callback deste servidor
+        quando ele consegue receber o redirect."""
+        default = oauth_providers.get(provider).default_redirect
+        if (provider or "openai") == "openai":
+            return os.getenv("TRADINGDEGENS_OAUTH_REDIRECT", default)
+        return default
 
     def _handle_oauth_callback(self) -> None:
-        """Callback do OAuth: ?code&state → valida o state (uso único), troca o code
-        por token (PKCE) e grava server-side (store 017 + ponte pro codex-proxy).
-        Protegido pelo nonce ``state`` (o verifier fica no servidor), não pelo cookie
-        — o redirect vem cross-site do issuer. Nada de segredo volta ao cliente/log."""
+        """Callback do OAuth: ?code&state → valida o state (uso único, carrega o
+        provedor), troca o code por token (PKCE) e grava server-side (store 017; ponte
+        pro codex-proxy só no openai). Protegido pelo nonce ``state`` (o verifier fica
+        no servidor), não pelo cookie — o redirect vem cross-site do issuer. Nada de
+        segredo volta ao cliente/log."""
         qs = parse_qs(urlparse(self.path).query)
         err = (qs.get("error", [""])[0] or "").strip()
         code = (qs.get("code", [""])[0] or "").strip()
@@ -253,25 +258,29 @@ class _Handler(BaseHTTPRequestHandler):
             self._oauth_html(f"Autorização não concluída ({err}). Você pode tentar de novo.",
                              ok=False)
             return
-        verifier = self.oauth_flows.take(state)
-        if not code or not verifier:
+        taken = self.oauth_flows.take(state)
+        if not code or not taken:
             self._oauth_html("Link de conexão inválido ou expirado. Recomece pelo botão "
-                             "“Conectar com ChatGPT”.", ok=False)
+                             "“Conectar”.", ok=False)
             return
+        verifier, provider = taken
         try:
-            token_resp = oauth_codex.exchange_code(
-                code, verifier, redirect_uri=self._oauth_redirect_uri())
+            token_resp = oauth_providers.get(provider).exchange_code(
+                code, verifier, redirect_uri=self._oauth_redirect_uri(provider))
         except Exception:  # noqa: BLE001 — nunca ecoa a exceção (pode conter o code)
             self._oauth_html("Não consegui trocar o código pelo token da assinatura.",
                              ok=False)
             return
-        # Guarda no store 017 (arquivo 0600) — o token NUNCA volta ao cliente.
+        # Guarda no store 017 (arquivo 0600, por provedor) — o token NUNCA volta ao cliente.
         try:
-            self.subscription.connect(token_resp["access_token"], kind="openai",
+            self.subscription.connect(token_resp["access_token"], provider=provider,
                                       connected_at=timeutil.stamp())
-        except Exception:  # noqa: BLE001 — segue pra ponte mesmo se o store falhar
+        except Exception:  # noqa: BLE001 — segue mesmo se o store falhar
             pass
-        self._bridge_codex_auth(token_resp)
+        # Ponte pro codex-proxy é EXCLUSIVA do openai (grava auth.json do codex). Pros
+        # demais NÃO tocamos as creds do CLI da box (guardrail) — a detecção cuida.
+        if provider == "openai":
+            self._bridge_codex_auth(token_resp)
         self._oauth_html("Assinatura conectada. Pode fechar esta aba e voltar ao "
                          "TradingDegens.", ok=True)
 
@@ -327,6 +336,30 @@ class _Handler(BaseHTTPRequestHandler):
         )
         self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8", 200)
 
+    def _subscription_state(self) -> dict:
+        """Estado da assinatura por provedor (task 020): funde o REGISTRO DO APP
+        (store 0600 da 017) com a DETECÇÃO read-only do login do CLI da box
+        (:mod:`server_login`). ``connected`` = app OU servidor; ``source`` diz qual.
+        NUNCA traz token — só booleanos, o rótulo do provedor e o "quando"."""
+        providers: dict[str, dict] = {}
+        for key in oauth_providers.PROVIDER_ORDER:
+            prov = oauth_providers.PROVIDERS[key]
+            app = self.subscription.status(provider=key)
+            det = server_login.detect(key)
+            app_on = bool(app.get("connected"))
+            det_on = bool(det.get("connected"))
+            source = "app" if app_on else ("server" if det_on else None)
+            providers[key] = {
+                "provider": key,
+                "label": prov.label,
+                "cta": prov.cta,
+                "connected": app_on or det_on,
+                "source": source,
+                "connected_at": app.get("connected_at"),
+                "detected_at": det.get("detected_at"),
+            }
+        return providers
+
     # -- routing --------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         path = urlparse(self.path).path
@@ -364,12 +397,22 @@ class _Handler(BaseHTTPRequestHandler):
                 term = (qs.get("q", [""])[0] or "").strip()
                 self._send_json({"query": term, "results": self.runner.search_symbols(term)})
             elif path == "/api/subscription/status":
-                # Status da assinatura do dono (task 017): SÓ-DONO. Público → 403.
-                # Devolve só metadados (conectada?/quando), NUNCA o token.
+                # Status da assinatura do dono (task 017; multi-provedor 020): SÓ-DONO.
+                # Público → 403. Devolve só metadados (conectada?/quando/fonte por
+                # provedor), NUNCA o token. Mantém os campos "planos" do openai pra
+                # compat com a 017/019; a UI nova lê ``providers``.
                 if not self._owner_or_403():
                     return
-                info = self.subscription.status()
-                info["owner"] = True
+                providers = self._subscription_state()
+                oa = providers["openai"]
+                info = {
+                    "owner": True,
+                    "connected": oa["connected"],
+                    "kind": "openai" if oa["connected"] else None,
+                    "connected_at": oa["connected_at"],
+                    "source": oa["source"],
+                    "providers": providers,
+                }
                 self._send_json(info)
             elif path == "/api/subscription/oauth/callback":
                 # Retorno do OAuth (task 019): o issuer redireciona o navegador pra cá
@@ -445,15 +488,22 @@ class _Handler(BaseHTTPRequestHandler):
                 # a abre em nova aba (ação principal = ABRIR O LINK, não colar token).
                 if not self._owner_or_403():
                     return
-                verifier = oauth_codex.new_verifier()
-                state = oauth_codex.new_state()
-                redirect_uri = self._oauth_redirect_uri()
-                url = oauth_codex.build_authorize_url(
-                    state=state, code_challenge=oauth_codex.challenge_for(verifier),
+                provider = (self._read_json_body().get("provider") or "openai").strip().lower()
+                try:
+                    prov = oauth_providers.get(provider)
+                except ValueError:
+                    self._send_json({"ok": False, "error": "provedor desconhecido"}, 400)
+                    return
+                verifier = oauth_providers.new_verifier()
+                state = oauth_providers.new_state()
+                redirect_uri = self._oauth_redirect_uri(prov.key)
+                url = prov.build_authorize_url(
+                    state=state, code_challenge=oauth_providers.challenge_for(verifier),
                     redirect_uri=redirect_uri)
-                self.oauth_flows.create(state, verifier)
-                self._send_json({"ok": True, "owner": True, "authorize_url": url,
-                                 "state": state, "redirect_uri": redirect_uri})
+                self.oauth_flows.create(state, verifier, prov.key)
+                self._send_json({"ok": True, "owner": True, "provider": prov.key,
+                                 "authorize_url": url, "state": state,
+                                 "redirect_uri": redirect_uri})
                 return
             if path == "/api/subscription/connect":
                 # Conectar a assinatura do dono (task 017): SÓ-DONO — valida a sessão
@@ -467,18 +517,27 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "token da assinatura ausente "
                                      "(envie no header X-Subscription-Token)"}, 400)
                     return
-                kind = (self._read_json_body().get("kind") or "openai").strip() or "openai"
-                info = self.subscription.connect(token, kind=kind, connected_at=timeutil.stamp())
+                body = self._read_json_body()
+                # ``provider`` roteia o arquivo 0600; ``kind`` fica como rótulo (compat).
+                provider = (body.get("provider") or body.get("kind") or "openai").strip().lower()
+                info = self.subscription.connect(token, provider=provider,
+                                                 kind=body.get("kind"),
+                                                 connected_at=timeutil.stamp())
                 info["ok"] = True
                 info["owner"] = True
+                info["provider"] = provider
                 self._send_json(info)   # status só (sem o token)
                 return
             if path == "/api/subscription/disconnect":
+                # Desconectar (task 017; multi-provedor 020): remove SÓ o registro do
+                # APP do provedor. NUNCA toca nas creds reais do CLI da box (guardrail).
                 if not self._owner_or_403():
                     return
-                info = self.subscription.disconnect()
+                provider = (self._read_json_body().get("provider") or "openai").strip().lower()
+                info = self.subscription.disconnect(provider=provider)
                 info["ok"] = True
                 info["owner"] = True
+                info["provider"] = provider
                 self._send_json(info)
                 return
             if path == "/api/analyze":
@@ -604,7 +663,7 @@ def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
     # Fluxos OAuth em andamento (task 019): state→verifier em memória, uso único +
     # TTL. Compartilhado no handler (não por-requisição) pra o /start e o /callback
     # verem o mesmo mapa.
-    oauth_flows = oauth_codex.PendingFlows()
+    oauth_flows = oauth_providers.PendingOAuth()
     handler = type("BoundHandler", (_Handler,),
                    {"runner": runner, "auth": auth, "subscription": subscription,
                     "oauth_flows": oauth_flows})

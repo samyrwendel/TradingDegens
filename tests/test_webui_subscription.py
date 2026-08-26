@@ -61,10 +61,15 @@ def test_store_failopen_on_corrupt_file(tmp_path):
 
 # ---------------------------------------------------------- HTTP: gating -------
 @pytest.fixture(autouse=True)
-def _hermetic(monkeypatch):
+def _hermetic(monkeypatch, tmp_path):
     monkeypatch.setattr(runner_module, "fetch_price_chart", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(runner_module, "fetch_actionable_plan", lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(runner_module, "fetch_derivatives_report", lambda t, d: "")
+    # Detecção do login do CLI (task 020) aponta pra caminhos INEXISTENTES aqui — sem
+    # isso o teste leria as creds reais da box (~/.local/share/opencode, ~/.claude…).
+    monkeypatch.setenv("TRADINGDEGENS_CODEX_AUTH_FILE", str(tmp_path / "no-codex.json"))
+    monkeypatch.setenv("TRADINGDEGENS_CLAUDE_CREDS_FILE", str(tmp_path / "no-claude.json"))
+    monkeypatch.setenv("TRADINGDEGENS_GEMINI_DIR", str(tmp_path / "no-gemini"))
     yield
     os.environ.pop("TRADINGDEGENS_OWNER_TOKEN", None)
 

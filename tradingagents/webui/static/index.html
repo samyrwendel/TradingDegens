@@ -54,33 +54,21 @@
       </div>
     </div>
 
-    <!-- Conectar assinatura (task 017): SÓ o dono logado vê e usa. O token da
-         assinatura vai por HEADER direto pro servidor e NUNCA fica salvo no
-         navegador além da requisição. Público nem vê (JS) e o endpoint barra 403. -->
+    <!-- Conectar assinatura (task 017; multi-provedor 020): SÓ o dono logado vê e usa.
+         Três provedores (ChatGPT/Claude/Gemini), cada linha com botão OAuth no estilo
+         do app; ao conectar, a linha COLAPSA pra "✅ conectada · Desconectar". O token
+         vai por HEADER direto pro servidor e NUNCA fica salvo no navegador. Público nem
+         vê (JS) e o endpoint barra 403. As linhas são renderizadas por JS em #subProviders. -->
     <div class="subscription-box hidden" id="subscriptionBox">
       <div class="sub-head">
-        <span class="sub-title">🔗 Conectar assinatura <span class="orig">(OpenAI/ChatGPT)</span></span>
-        <span class="sub-state" id="subState"></span>
+        <span class="sub-title">🔗 Conectar assinatura</span>
       </div>
       <p class="owner-lead">
-        Conecte com um clique: abrimos o login oficial da OpenAI numa nova aba, você
-        autoriza, e o token fica só no servidor (arquivo protegido). Nada é colado à mão
-        nem salvo neste navegador.
+        Abrimos o login oficial de cada provedor numa nova aba; o token fica só no
+        servidor (arquivo protegido), nunca colado à mão nem salvo neste navegador. Se
+        o CLI já está logado nesta máquina, a linha aparece conectada automaticamente.
       </p>
-      <div class="sub-actions">
-        <button type="button" id="subOAuthBtn" class="btn-primary">Conectar com ChatGPT <span aria-hidden="true">↗</span></button>
-        <button type="button" id="subDisconnectBtn" class="btn-ghost hidden">Desconectar</button>
-        <span class="cfg-status" id="subStatus"></span>
-      </div>
-      <!-- Fallback avançado (task 019): colar o token na mão só pra quem já tem. O
-           caminho principal é o botão acima. O token vai por HEADER, nunca fica no DOM. -->
-      <details class="sub-advanced" id="subAdvanced">
-        <summary>Avançado — colar o token manualmente</summary>
-        <div class="owner-login-row">
-          <input id="subToken" type="password" autocomplete="off" placeholder="token de acesso da assinatura" />
-          <button type="button" id="subConnectBtn" class="btn-secondary">Conectar token</button>
-        </div>
-      </details>
+      <div class="sub-providers" id="subProviders"></div>
     </div>
 
     <div class="config-grid" id="byokGrid">

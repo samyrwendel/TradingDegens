@@ -2433,66 +2433,140 @@ function renderConfigPanel() {
   updateConfigBadge();
 }
 
-// Conectar assinatura (task 017): a seção só aparece pro DONO logado; o público nem
-// a vê (e o endpoint barra 403 no server, defesa real — o esconder é só cosmético).
+// Conectar assinatura (task 017; multi-provedor 020): a seção só aparece pro DONO
+// logado; o público nem a vê (e o endpoint barra 403 no server, defesa real — o
+// esconder é só cosmético). São TRÊS provedores; cada linha COLAPSA ao conectar.
+const SUB_PROVIDERS = [
+  { key: "openai", label: "ChatGPT", cta: "Conectar com ChatGPT" },
+  { key: "anthropic", label: "Claude", cta: "Conectar com Claude" },
+  { key: "google", label: "Gemini", cta: "Conectar com Google" },
+];
+let _subRowsBuilt = false;
+
 function renderSubscriptionBox() {
   const box = $("subscriptionBox");
   if (!box) return;
   if (!_isOwner) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
+  buildSubscriptionRows();
   refreshSubscriptionStatus();
 }
 
+// Monta as 3 linhas (uma vez). Cada linha tem duas caras: "conectar" (botão OAuth no
+// estilo do app + fallback avançado de colar token) e "conectada" (colapsada:
+// "✅ Label conectada · Desconectar"). O JS alterna as duas conforme o status.
+function buildSubscriptionRows() {
+  const host = $("subProviders");
+  if (!host || _subRowsBuilt) return;
+  host.innerHTML = SUB_PROVIDERS.map((p) => `
+    <div class="sub-row" data-provider="${p.key}">
+      <div class="sub-row-connect">
+        <div class="sub-actions">
+          <button type="button" class="btn-primary sub-oauth-btn">${escapeHtml(p.cta)} <span aria-hidden="true">↗</span></button>
+          <span class="cfg-status sub-status"></span>
+        </div>
+        <details class="sub-advanced">
+          <summary>Avançado — colar o token do ${escapeHtml(p.label)} manualmente</summary>
+          <div class="owner-login-row">
+            <input type="password" class="sub-token" autocomplete="off" placeholder="token de acesso da assinatura" />
+            <button type="button" class="btn-secondary sub-connect-btn">Conectar token</button>
+          </div>
+        </details>
+      </div>
+      <div class="sub-row-connected hidden">
+        <span class="sub-connected-label"></span>
+        <button type="button" class="btn-ghost sub-disc-btn"></button>
+      </div>
+    </div>`).join("");
+  // wiring por linha (o provider vem do data-attribute — nada hardcoded no handler)
+  host.querySelectorAll(".sub-row").forEach((row) => {
+    const key = row.getAttribute("data-provider");
+    row.querySelector(".sub-oauth-btn").addEventListener("click", () => subscriptionOAuthStart(key));
+    row.querySelector(".sub-connect-btn").addEventListener("click", () => subscriptionConnect(key));
+    row.querySelector(".sub-token").addEventListener("keydown", (e) => { if (e.key === "Enter") subscriptionConnect(key); });
+    row.querySelector(".sub-disc-btn").addEventListener("click", () => subscriptionDisconnect(key));
+  });
+  _subRowsBuilt = true;
+}
+
+function _subRow(key) {
+  const host = $("subProviders");
+  return host ? host.querySelector(`.sub-row[data-provider="${key}"]`) : null;
+}
+
+// Reflete o estado colapsado/expandido de cada linha a partir do /status (que já
+// funde o registro do app com a DETECÇÃO do login do CLI da box).
 async function refreshSubscriptionStatus() {
-  const state = $("subState");
-  const disc = $("subDisconnectBtn");
   try {
     const res = await fetch("/api/subscription/status", { credentials: "same-origin" });
-    if (!res.ok) { if (state) state.textContent = ""; return; }   // não-dono/erro: silêncio
+    if (!res.ok) return;                                   // não-dono/erro: silêncio
     const s = await res.json();
-    if (s.connected) {
-      if (state) { state.textContent = "✅ conectada"; state.className = "sub-state ok"; }
-      if (disc) disc.classList.remove("hidden");
-    } else {
-      if (state) { state.textContent = "não conectada"; state.className = "sub-state"; }
-      if (disc) disc.classList.add("hidden");
-    }
+    const providers = s.providers || {};
+    SUB_PROVIDERS.forEach((p) => applySubRowState(p, providers[p.key] || {}));
   } catch (e) { /* rede: mantém como está */ }
 }
 
-// Conectar via LINK (task 019): pede a URL de autorização ao servidor (owner-gated),
-// abre o login oficial do ChatGPT/OpenAI numa nova aba (ação principal = ABRIR O LINK,
-// não colar token) e faz poll do status até conectar. O segredo (verifier) fica no
-// servidor — o cliente só recebe a URL pública.
+function applySubRowState(meta, info) {
+  const row = _subRow(meta.key);
+  if (!row) return;
+  const connectView = row.querySelector(".sub-row-connect");
+  const connectedView = row.querySelector(".sub-row-connected");
+  const label = row.querySelector(".sub-connected-label");
+  const discBtn = row.querySelector(".sub-disc-btn");
+  if (info.connected) {
+    // COLAPSA: esconde botão/texto/Avançado, deixa só a linha compacta.
+    const viaServer = info.source === "server";
+    label.textContent = viaServer
+      ? `✅ ${meta.label} conectada · login do servidor`
+      : `✅ ${meta.label} conectada`;
+    // login do servidor não tem registro do app pra remover → oferece "Reconectar"
+    // (reabre o OAuth); registro do app → "Desconectar" (remove só o registro).
+    discBtn.textContent = viaServer ? "Reconectar" : "Desconectar";
+    discBtn.dataset.mode = viaServer ? "reconnect" : "disconnect";
+    connectView.classList.add("hidden");
+    connectedView.classList.remove("hidden");
+  } else {
+    connectView.classList.remove("hidden");
+    connectedView.classList.add("hidden");
+  }
+}
+
+// Conectar via LINK (task 019, por provedor): pede a URL de autorização ao servidor
+// (owner-gated), abre o login oficial do provedor numa nova aba (ação principal =
+// ABRIR O LINK, não colar token) e faz poll do status até conectar. O segredo
+// (verifier/secret) fica no servidor — o cliente só recebe a URL pública.
 let _subPoll = null;
-async function subscriptionOAuthStart() {
-  const btn = $("subOAuthBtn");
-  const st = $("subStatus");
+async function subscriptionOAuthStart(provider) {
+  const row = _subRow(provider);
+  const meta = SUB_PROVIDERS.find((p) => p.key === provider) || { label: provider };
+  const btn = row ? row.querySelector(".sub-oauth-btn") : null;
+  const st = row ? row.querySelector(".sub-status") : null;
   if (btn) btn.disabled = true;
-  if (st) { st.textContent = "abrindo o login do ChatGPT…"; st.className = "cfg-status"; }
+  if (st) { st.textContent = `abrindo o login do ${meta.label}…`; st.className = "cfg-status sub-status"; }
   try {
     const res = await fetch("/api/subscription/oauth/start", {
       method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" }, body: "{}",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.authorize_url) {
-      if (st) { st.textContent = "❌ " + (data.error || "não deu pra iniciar"); st.className = "cfg-status err"; }
+      if (st) { st.textContent = "❌ " + (data.error || "não deu pra iniciar"); st.className = "cfg-status sub-status err"; }
       return;
     }
     // Abre o login oficial numa nova aba; o usuário autoriza lá e volta.
     window.open(data.authorize_url, "_blank", "noopener");
-    if (st) { st.textContent = "aguardando você autorizar no ChatGPT…"; st.className = "cfg-status"; }
+    if (st) { st.textContent = `aguardando você autorizar no ${meta.label}…`; st.className = "cfg-status sub-status"; }
     startSubscriptionPoll();
   } catch (e) {
-    if (st) { st.textContent = "❌ erro de rede"; st.className = "cfg-status err"; }
+    if (st) { st.textContent = "❌ erro de rede"; st.className = "cfg-status sub-status err"; }
   } finally {
     if (btn) btn.disabled = false;
   }
 }
 
-// Poll do status enquanto o dono autoriza na aba do ChatGPT; para ao conectar ou
-// após ~5min (teto). O callback grava server-side; aqui só refletimos o estado.
+// Poll do status enquanto o dono autoriza na aba; para ao conectar (qualquer provedor)
+// ou após ~5min (teto). O callback grava server-side; aqui só refletimos o estado.
 function startSubscriptionPoll() {
   if (_subPoll) clearInterval(_subPoll);
   let tries = 0;
@@ -2502,54 +2576,58 @@ function startSubscriptionPoll() {
       const res = await fetch("/api/subscription/status", { credentials: "same-origin" });
       if (res.ok) {
         const s = await res.json();
-        if (s.connected) {
-          clearInterval(_subPoll); _subPoll = null;
-          const st = $("subStatus");
-          if (st) { st.textContent = "✅ assinatura conectada"; st.className = "cfg-status ok"; }
-          refreshSubscriptionStatus();
-          return;
-        }
+        const anyConnected = Object.values(s.providers || {}).some((p) => p.connected);
+        if (anyConnected) { refreshSubscriptionStatus(); }
       }
     } catch (e) { /* rede: tenta de novo */ }
     if (tries > 150) { clearInterval(_subPoll); _subPoll = null; }   // ~5min
   }, 2000);
 }
 
-async function subscriptionConnect() {
-  const input = $("subToken");
-  const btn = $("subConnectBtn");
-  const st = $("subStatus");
+async function subscriptionConnect(provider) {
+  const row = _subRow(provider);
+  if (!row) return;
+  const input = row.querySelector(".sub-token");
+  const btn = row.querySelector(".sub-connect-btn");
+  const st = row.querySelector(".sub-status");
   const token = (input.value || "").trim();
-  if (!token) { st.textContent = "cole o token"; st.className = "cfg-status err"; return; }
+  if (!token) { st.textContent = "cole o token"; st.className = "cfg-status sub-status err"; return; }
   btn.disabled = true;
-  st.textContent = "conectando…"; st.className = "cfg-status";
+  st.textContent = "conectando…"; st.className = "cfg-status sub-status";
   try {
     // O token vai por HEADER (nunca querystring/corpo-logado) e é limpo do input já.
     const res = await fetch("/api/subscription/connect", {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-Subscription-Token": token },
-      body: JSON.stringify({ kind: "openai" }),
+      body: JSON.stringify({ provider }),
     });
     input.value = "";                       // não retém a credencial no navegador
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.connected) {
-      st.textContent = "✅ assinatura conectada"; st.className = "cfg-status ok";
+      st.textContent = "✅ assinatura conectada"; st.className = "cfg-status sub-status ok";
     } else {
-      st.textContent = "❌ " + (data.error || "falhou"); st.className = "cfg-status err";
+      st.textContent = "❌ " + (data.error || "falhou"); st.className = "cfg-status sub-status err";
     }
   } catch (e) {
-    st.textContent = "❌ erro de rede"; st.className = "cfg-status err";
+    st.textContent = "❌ erro de rede"; st.className = "cfg-status sub-status err";
   } finally {
     btn.disabled = false;
     refreshSubscriptionStatus();
   }
 }
 
-async function subscriptionDisconnect() {
-  const st = $("subStatus");
+async function subscriptionDisconnect(provider) {
+  const row = _subRow(provider);
+  const btn = row ? row.querySelector(".sub-disc-btn") : null;
+  // "Reconectar" (login do servidor) reabre o OAuth; "Desconectar" remove o registro
+  // do app (NUNCA as creds do CLI da box — isso é garantido server-side).
+  if (btn && btn.dataset.mode === "reconnect") { subscriptionOAuthStart(provider); return; }
   try {
-    await fetch("/api/subscription/disconnect", { method: "POST", credentials: "same-origin" });
-    st.textContent = "assinatura desconectada"; st.className = "cfg-status";
+    await fetch("/api/subscription/disconnect", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
   } catch (e) { /* segue */ }
   refreshSubscriptionStatus();
 }
@@ -2727,12 +2805,9 @@ function bindConfig() {
   $("ownerLoginBtn").addEventListener("click", ownerLogin);
   $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
   $("ownerLogoutBtn").addEventListener("click", ownerLogout);
-  // Conectar assinatura: só-dono (a seção só aparece logado). Caminho principal =
-  // botão OAuth (task 019); colar token vira fallback avançado (task 017 preservada).
-  $("subOAuthBtn").addEventListener("click", subscriptionOAuthStart);
-  $("subConnectBtn").addEventListener("click", subscriptionConnect);
-  $("subToken").addEventListener("keydown", (e) => { if (e.key === "Enter") subscriptionConnect(); });
-  $("subDisconnectBtn").addEventListener("click", subscriptionDisconnect);
+  // Conectar assinatura: só-dono (a seção só aparece logado). As linhas por provedor
+  // (task 020) são montadas e "wired" em buildSubscriptionRows(); caminho principal =
+  // botão OAuth (task 019), colar token vira fallback avançado (task 017 preservada).
 }
 
 // Erro de "precisa de chave" (403 need_key): abre a config e aponta o caminho.
