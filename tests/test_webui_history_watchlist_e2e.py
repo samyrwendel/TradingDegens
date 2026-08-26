@@ -134,7 +134,8 @@ def test_watchlist_layout_and_uniform_radius(live):
         page.wait_for_selector(".history li .h-remove")
 
         # (1) BORDAS: raio único em botões sempre presentes + a linha do histórico
-        # deixou de ser cartão arredondado (raio 0, divisória de 1px embaixo).
+        # não é cartão arredondado (raio 0). A régua de 1px entre itens saiu na 018
+        # (watchlist contínua estilo Quantfury) — a densidade vem do espaçamento.
         run_r = page.eval_on_selector("#runBtn", "el=>getComputedStyle(el).borderRadius")
         cfg_r = page.eval_on_selector("#configBtn", "el=>getComputedStyle(el).borderRadius")
         assert run_r == "5px", run_r
@@ -145,7 +146,7 @@ def test_watchlist_layout_and_uniform_radius(live):
                   display: cs.display};
         }""")
         assert li["radius"] == "0px", li
-        assert li["bottom"] == "1px", li        # divisória fina de 1px
+        assert li["bottom"] == "0px", li        # sem divisória entre itens (task 018)
         assert li["display"] == "grid", li
 
         # abas: sublinhado verde no ativo, sem caixa (borda só embaixo)

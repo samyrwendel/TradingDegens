@@ -3003,6 +3003,65 @@ function init() {
   document.addEventListener("visibilitychange", onVisibleForeground);
   startHistoryAutoRefresh();
   startPriceAutoRefresh();
+  initColResizer();
+}
+
+// Divisória arrastável histórico ↔ conteúdo (task 018): arrasta pra redimensionar,
+// cursor col-resize, largura persiste (localStorage), mín/máx sensatos pra o gráfico
+// não esticar feio. Só no desktop (o resizer some ao empilhar; a var não afeta o 1fr).
+const _SIDEBAR_KEY = "td_sidebar_w";
+const _SIDEBAR_MIN = 200;
+function _sidebarMax(layout) {
+  const w = layout.getBoundingClientRect().width || 1200;
+  return Math.max(_SIDEBAR_MIN + 40, Math.min(560, Math.round(w * 0.45)));
+}
+function _applySidebarWidth(layout, w) {
+  const clamped = Math.max(_SIDEBAR_MIN, Math.min(_sidebarMax(layout), Math.round(w)));
+  layout.style.setProperty("--sidebar-w", clamped + "px");
+  return clamped;
+}
+function _redrawLiveCharts() {
+  document.querySelectorAll("canvas").forEach((cv) => {
+    if (cv._chart) drawPriceChart(cv, cv._chart, cv._actionable);
+  });
+}
+function initColResizer() {
+  const rz = document.getElementById("colResizer");
+  const layout = document.querySelector("main.layout");
+  if (!rz || !layout) return;
+  const saved = parseInt(localStorage.getItem(_SIDEBAR_KEY) || "", 10);
+  if (saved >= _SIDEBAR_MIN) _applySidebarWidth(layout, saved);
+  let raf = null;
+  const liveRedraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; _redrawLiveCharts(); }); };
+  rz.addEventListener("pointerdown", (e) => {
+    if (window.matchMedia("(max-width: 900px)").matches) return;   // empilhado: sem resize
+    rz.setPointerCapture(e.pointerId);
+    document.body.classList.add("col-resizing");
+    e.preventDefault();
+    const onMove = (ev) => {
+      _applySidebarWidth(layout, ev.clientX - layout.getBoundingClientRect().left);
+      liveRedraw();
+    };
+    const onUp = () => {
+      rz.removeEventListener("pointermove", onMove);
+      rz.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("col-resizing");
+      const w = parseInt(getComputedStyle(layout).getPropertyValue("--sidebar-w"), 10);
+      if (w) localStorage.setItem(_SIDEBAR_KEY, String(w));
+      _redrawLiveCharts();
+    };
+    rz.addEventListener("pointermove", onMove);
+    rz.addEventListener("pointerup", onUp);
+  });
+  // teclado (a11y): ← / → redimensionam em passos de 16px
+  rz.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const cur = parseInt(getComputedStyle(layout).getPropertyValue("--sidebar-w"), 10) || 280;
+    const w = _applySidebarWidth(layout, cur + (e.key === "ArrowRight" ? 16 : -16));
+    localStorage.setItem(_SIDEBAR_KEY, String(w));
+    _redrawLiveCharts();
+    e.preventDefault();
+  });
 }
 
 function onVisibleForeground() {

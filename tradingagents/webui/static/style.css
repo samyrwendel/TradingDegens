@@ -102,12 +102,27 @@ body {
 main { max-width: none; margin: 0; padding: 0; flex: 1; background: var(--panel); }
 /* two columns: history sidebar (left) + analysis content (right) */
 main.layout {
-  display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 0;
+  /* 3 colunas: histórico · divisória arrastável (task 018) · conteúdo. A largura do
+     histórico é uma var que o resizer atualiza e persiste no localStorage. */
+  display: grid; grid-template-columns: var(--sidebar-w, 280px) 6px minmax(0, 1fr); gap: 0;
   align-items: start;
 }
-/* divisória vertical fina entre histórico e conteúdo (encosta, sem gap gordo) */
-.sidebar { position: sticky; top: 0; border-right: 1px solid var(--border); }
+/* a divisória agora é o .col-resizer (arrastável), então a lateral não tem borda */
+.sidebar { position: sticky; top: 0; }
 .sidebar .history { max-height: calc(100vh - 130px); overflow-y: auto; }
+
+/* Divisória vertical ARRASTÁVEL entre o histórico e o conteúdo (task 018): 6px de
+   área pra pegar com um hairline no centro; acende no accent ao passar/arrastar. A
+   largura escolhida persiste (JS/localStorage). Some ao empilhar (mobile). */
+.col-resizer { position: relative; cursor: col-resize; background: transparent; touch-action: none; align-self: stretch; min-height: 100%; }
+.col-resizer::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+  transform: translateX(-50%); background: var(--border); transition: background .12s, width .12s;
+}
+.col-resizer:hover::before, body.col-resizing .col-resizer::before { background: var(--accent); width: 2px; }
+.col-resizer:focus-visible { outline: none; }
+.col-resizer:focus-visible::before { background: var(--accent); width: 2px; }
+body.col-resizing { cursor: col-resize; user-select: none; }
 /* coluna estreita: o nome da empresa trunca com … em vez de estourar; a meta
    fica compacta à direita (a linha é uma grade, não mais flex que quebrava). */
 .sidebar .history .h-ticker { min-width: 0; }
@@ -339,7 +354,10 @@ details.section[open] > summary::before { content: "▾"; }
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
   padding: 14px 16px; margin: 8px 0 6px;
 }
-.chart-card.setup-active { border-color: #2e7d55; box-shadow: 0 0 0 1px rgba(46,204,113,.25) inset; }
+/* setup ativo NÃO pinta o gráfico de verde (task 018): a Quantfury não tem moldura
+   colorida no gráfico. O destaque do setup vive nas faixas dentro do próprio gráfico
+   (compra/realização/1-2-3), não numa borda em volta do card. */
+
 .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .chart-head .section-title { margin: 0; }
 .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
@@ -615,20 +633,19 @@ details.section[open] > summary::before { content: "▾"; }
   color: var(--accent); background: var(--panel-2); border: 1px solid var(--border);
 }
 
-/* history — WATCHLIST densa (task 009): nada de cartão empilhado. Cada linha é
-   ticker (negrito) + nome da empresa (cinza) à esquerda, veredito + meta à
-   direita e um × discreto pra remover. Divisórias FINAS de 1px separam as linhas
-   (não caixas com margem gorda) — o oposto do card anterior. */
+/* history — WATCHLIST densa (task 009/018): nada de cartão nem RÉGUA entre itens.
+   Como a Quantfury, é contínua e densa — só espaçamento separa as linhas (sem
+   divisória de 1px). Cada linha é ticker (negrito) + nome (cinza) à esquerda,
+   veredito + data à direita e um × discreto. Legibilidade vem do respiro + hover. */
 .history { list-style: none; margin: 0; padding: 0; display: block; }
 .history li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: start;
   column-gap: 10px; row-gap: 2px;
-  padding: 9px 4px;
+  padding: 10px 4px;   /* respiro sem régua: o espaçamento é que separa as linhas */
   cursor: pointer;
   border: none;
-  border-bottom: 1px solid var(--border);
   background: none;
   transition: background .12s;
 }
@@ -639,7 +656,6 @@ details.section[open] > summary::before { content: "▾"; }
 /* linha de baixo: PREÇO LIVE ocupa a largura toda (não espreme com a data) */
 .history li .h-price  { grid-row: 2; grid-column: 1 / -1; }
 .history li:hover { background: var(--panel-2); }
-.history li:last-child { border-bottom: none; }
 
 /* esquerda: ticker em negrito SOBRE o nome da empresa em cinza (duas linhas) */
 .history .h-ticker { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-family: inherit; }
@@ -733,8 +749,10 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* stack the two columns before they get cramped; history vira faixa no topo */
 @media (max-width: 900px) {
   main.layout { grid-template-columns: 1fr; gap: 1px; background: var(--border); }
-  /* coluna única: a divisória vira horizontal (embaixo do histórico), não à direita */
+  /* coluna única: a divisória vira horizontal (embaixo do histórico), não à direita.
+     O resizer arrastável some (não faz sentido empilhado). */
   .sidebar { position: static; order: 1; border-right: none; }
+  .col-resizer { display: none; }
   .content { order: 2; }
   .sidebar .history { max-height: 320px; }
   /* faixa recolhível: seta indica que abre/fecha; some o respiro do heading */
@@ -877,7 +895,8 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .section-body > .md > * { break-inside: avoid; }
 }
 @media (min-width: 1900px) {
-  main.layout { grid-template-columns: 300px minmax(0, 1fr); }
+  /* mantém a divisória arrastável; só muda o padrão da lateral quando não há valor salvo */
+  main.layout { grid-template-columns: var(--sidebar-w, 300px) 6px minmax(0, 1fr); }
 }
 /* A linha de texto não deve passar de ~95 caracteres, mesmo em tela enorme:
    linha longa demais cansa a leitura e a tela "cheia" fica pior que a vazia. */
