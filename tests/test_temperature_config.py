@@ -20,7 +20,9 @@ class TestTemperatureForwarding:
             # are reasoning models and correctly drop temperature (see
             # test_openai_reasoning_effort), so forwarding is tested on gpt-4.1.
             ("openai", "gpt-4.1"),
-            ("anthropic", "claude-sonnet-5"),
+            # A 4.x Anthropic model still accepts temperature. The Claude 5
+            # family deprecated it and is gated out (see test_anthropic_temperature).
+            ("anthropic", "claude-opus-4-8"),
             ("google", "gemini-3.5-flash"),
             ("deepseek", "deepseek-chat"),
         ],

@@ -38,16 +38,79 @@ def _supports_effort(model: str) -> bool:
     return (major, minor) >= _EFFORT_MIN_VERSION[family]
 
 
+# ``temperature`` was deprecated for the Claude 5 family (Opus 5, Sonnet 5,
+# Fable 5) and later: sending it returns 400 ``"temperature is deprecated for
+# this model"``. Earlier families (opus/sonnet/haiku 4.x) still accept it. This
+# mirrors the ``effort`` machine above — a per-family minimum version keeps it
+# forward-compatible so future ``claude-{family}-X`` releases inherit the drop.
+# Models on 4.x that reject temperature only under extended thinking are caught
+# by the invoke-level retry (``_is_temperature_deprecated_error``), not here.
+_NO_TEMPERATURE_EXACT = {
+    "claude-mythos-preview",  # Claude 5 preview name; temperature deprecated
+    "claude-mythos-5",        # Fable 5 twin (Project Glasswing); deprecated
+}
+_TEMPERATURE_MODEL = re.compile(r"^claude-(opus|sonnet|fable|haiku)-(\d+)(?:-(\d+))?$")
+_TEMPERATURE_DEPRECATED_MIN_VERSION = {
+    "opus": (5, 0), "sonnet": (5, 0), "fable": (5, 0), "haiku": (5, 0),
+}
+
+
+def _supports_temperature(model: str) -> bool:
+    """Whether Anthropic still accepts the ``temperature`` parameter for this model.
+
+    Returns ``False`` for the Claude 5 family and later (which deprecated it).
+    Unknown / unmatched model names default to ``True`` — the conservative choice
+    here is to keep forwarding temperature and let the invoke-level retry drop it
+    if the API actually rejects it, rather than silently omitting a valid knob.
+    """
+    model_lc = model.lower()
+    if model_lc in _NO_TEMPERATURE_EXACT:
+        return False
+    match = _TEMPERATURE_MODEL.match(model_lc)
+    if not match:
+        return True
+    family = match.group(1)
+    major = int(match.group(2))
+    minor = int(match.group(3)) if match.group(3) else 0
+    return (major, minor) < _TEMPERATURE_DEPRECATED_MIN_VERSION[family]
+
+
+def _is_temperature_deprecated_error(exc: BaseException) -> bool:
+    """True when an Anthropic 400 says ``temperature`` is deprecated/unsupported.
+
+    Model-agnostic safety belt: matches on the message text, so any current or
+    future model/route that rejects ``temperature`` is caught, not just the ones
+    the name-based gate knows about.
+    """
+    msg = str(exc).lower()
+    return "temperature" in msg and (
+        "deprecated" in msg or "not supported" in msg or "unsupported" in msg
+    )
+
+
 class NormalizedChatAnthropic(ChatAnthropic):
     """ChatAnthropic with normalized content output.
 
     Claude models with extended thinking or tool use return content as a
     list of typed blocks. This normalizes to string for consistent
     downstream handling.
+
+    Also carries a one-shot safety belt: if a call fails with a 400 saying
+    ``temperature`` is deprecated/unsupported, drop the parameter and retry
+    once. This backstops the name-based gate in :meth:`AnthropicClient.get_llm`
+    for models the gate doesn't recognize (e.g. BYOK/base_url routes).
     """
 
     def invoke(self, input, config=None, **kwargs):
-        return normalize_content(super().invoke(input, config, **kwargs))
+        try:
+            return normalize_content(super().invoke(input, config, **kwargs))
+        except Exception as exc:
+            if self.temperature is None or not _is_temperature_deprecated_error(exc):
+                raise
+            # Model rejected ``temperature`` — drop it (persists for later calls
+            # on this instance too) and retry the request once.
+            self.temperature = None
+            return normalize_content(super().invoke(input, config, **kwargs))
 
 
 class AnthropicClient(BaseLLMClient):
@@ -68,6 +131,8 @@ class AnthropicClient(BaseLLMClient):
             if key not in self.kwargs:
                 continue
             if key == "effort" and not _supports_effort(self.model):
+                continue
+            if key == "temperature" and not _supports_temperature(self.model):
                 continue
             llm_kwargs[key] = self.kwargs[key]
 
