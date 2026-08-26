@@ -64,3 +64,20 @@ def test_fail_open_on_non_string():
     assert sanitize_report_text(None) == ""
     assert sanitize_result(None) is None
     assert sanitize_result({"market_report": 123}) == {"market_report": 123}
+
+
+@pytest.mark.unit
+def test_long_whitespace_run_is_linear_not_redos():
+    """Regressão (task 025): o passo 4 usava ``\\s*\\(`` — com o literal ``(`` falhando
+    ao longo de uma corrida de espaços, o motor re-escaneava tudo a cada posição = O(n²).
+    Um relatório degradado com ~100k espaços travava o ``re.sub`` por MINUTOS segurando o
+    GIL → congelava o servidor HTTP. Agora é ``\\s?`` (linear). Prova: 200k espaços
+    sanitizam numa fração de segundo (era >minutos)."""
+    import time
+    text = " " * 100_000 + "algo (KeyError) mais" + " " * 100_000
+    start = time.monotonic()
+    out = sanitize_report_text(text)
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0, f"sanitize levou {elapsed:.1f}s — ReDoS voltou?"
+    assert "(KeyError)" not in out            # ainda remove o parentético interno
+    assert "algo mais" in out                 # e o espaço extra é limpo (passo 5)

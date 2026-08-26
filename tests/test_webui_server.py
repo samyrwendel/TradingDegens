@@ -111,6 +111,59 @@ def test_health_reports_active_runs(tmp_path):
         httpd.shutdown()
 
 
+def test_health_stays_responsive_while_sanitizing_degraded_report(tmp_path, monkeypatch):
+    """Task 025 — a análise NÃO pode congelar o serving. Um relatório degradado com uma
+    corrida longa de espaços fazia o passo 4 do sanitizer (``\\s*\\(``) explodir em O(n²):
+    o ``re.sub`` segurava o GIL por MINUTOS no thread da run e o ThreadingHTTPServer
+    parava de responder (health/progress timavam) — o "caiu/dança/esquece". Prova de
+    ponta a ponta: com esse texto na run, o /api/health responde <500ms o TEMPO TODO e a
+    run termina rápido (pré-fix: nunca; ficava minutos no re.sub)."""
+    _stub_enrich(monkeypatch)
+    # 150k espaços contíguos de cada lado: pré-fix isso é O((150k)²) = minutos travando
+    # o GIL; pós-fix (``\\s?``) é linear (~centenas de ms).
+    pathological = {**FINAL_STATE,
+                    "news_report": " " * 150_000 + "dado (NoMarketDataError) ausente" + " " * 150_000}
+    httpd, base = _make_server(tmp_path, _factory(final_state=pathological))
+    latencies: list[float] = []
+    stop = threading.Event()
+
+    def hammer():
+        while not stop.is_set():
+            t0 = time.time()
+            try:
+                _get(base, "/api/health")
+                latencies.append(time.time() - t0)
+            except Exception:
+                latencies.append(999.0)   # timeout = servidor congelou
+            time.sleep(0.01)
+
+    th = threading.Thread(target=hammer, daemon=True)
+    th.start()
+    try:
+        _, started = _post(base, "/api/analyze", {"ticker": "AAPL", "date": "2020-01-02"})
+        run_id = started["run_id"]
+        # a run TEM que terminar rápido — pré-fix o sanitize prendia o thread por minutos
+        deadline = time.time() + 8.0
+        status = None
+        while time.time() < deadline:
+            _, snap = _get(base, "/api/run/" + run_id)
+            status = snap.get("status")
+            if status in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert status == "done", f"run não terminou (status={status}) — sanitize congelou?"
+        # health nunca passou de 500ms enquanto a run (e o sanitize) rodava
+        assert latencies, "nenhuma amostra de /api/health"
+        assert max(latencies) < 0.5, f"/api/health travou: máx {max(latencies) * 1000:.0f}ms"
+        # e o vazamento interno foi de fato limpo do relatório
+        _, snap = _get(base, "/api/run/" + run_id)
+        assert "NoMarketDataError" not in snap["result"]["news_report"]
+    finally:
+        stop.set()
+        th.join(timeout=2)
+        httpd.shutdown()
+
+
 def test_config_endpoint_reports_manaus(server):
     status, body = _get(server, "/api/config")
     assert status == 200

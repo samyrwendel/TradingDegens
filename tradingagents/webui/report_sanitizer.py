@@ -70,8 +70,13 @@ def sanitize_report_text(text: str | None) -> str:
     # 3) Bracketed internal detail: "[ta_datacache cached failure: NoMarketDataError] ...".
     out = re.sub(r"\[ta_datacache cached failure:[^\]]*\]\s*", "", out)
     # 4) Bare "(SomeError)" parentheticals right after an "indisponível"-style word.
+    # O prefixo tem que ser UM espaço opcional (``\s?``), NUNCA ``\s*``: com ``\s*`` +
+    # o literal ``\(`` o motor re-escaneia a corrida de espaços inteira a cada posição
+    # de início → O(n²) (ReDoS). 100k espaços num relatório degradado travavam o
+    # ``re.sub`` por MINUTOS segurando o GIL e congelando o servidor HTTP (task 025).
+    # ``\s?`` consome no máx. 1 espaço (linear); o passo 5 tira qualquer espaço dobrado.
     out = re.sub(
-        r"\s*\((?:" + "|".join(map(re.escape, _INTERNAL_NAMES)) + r")\)",
+        r"\s?\((?:" + "|".join(map(re.escape, _INTERNAL_NAMES)) + r")\)",
         "",
         out,
     )
