@@ -38,6 +38,28 @@ function saveLlmCfg(cfg) {
   try { localStorage.setItem(_LLM_CFG_KEY, JSON.stringify(_llmCfg)); } catch (e) { /* quota */ }
 }
 
+// ---- Run ativo persistido: reengate após refresh / voltar de 2º plano --------
+// A análise roda numa thread no SERVIDOR e sobrevive a refresh, troca de ativo e
+// app em segundo plano. Só a VISÃO se perdia: o pollTimer morria (clearInterval em
+// vários pontos, ou o throttle de aba de fundo no mobile) e ninguém reengatava —
+// o front "esquecia" a análise viva. Guardamos {run_id, ticker} enquanto um run
+// está sendo acompanhado ao vivo; ao carregar a página e ao voltar o app pra
+// frente, se ele ainda está `running` no servidor, reengatamos. Some no término.
+const _ACTIVE_RUN_KEY = "td_active_run";
+function saveActiveRun(runId, ticker) {
+  if (!runId) return;
+  try {
+    localStorage.setItem(_ACTIVE_RUN_KEY, JSON.stringify({ run_id: runId, ticker: ticker || "" }));
+  } catch (e) { /* quota / modo privado: perde só o reengate, não quebra */ }
+}
+function clearActiveRun() {
+  try { localStorage.removeItem(_ACTIVE_RUN_KEY); } catch (e) { /* ignore */ }
+}
+function loadActiveRun() {
+  try { return JSON.parse(localStorage.getItem(_ACTIVE_RUN_KEY) || "null"); }
+  catch (e) { return null; }
+}
+
 // Header + campos de corpo pra uma requisição que roda LLM (analyze/compare/ask).
 // A chave SÓ no header; provider/modelo/base_url só quando o usuário definiu.
 function llmRequestParts() {
@@ -376,6 +398,7 @@ function bindErrorCard(container) {
 function renderResult(snap) {
   // este run passa a ser o "aberto" na tela: enquanto for ele, um término dele
   // NÃO vira aviso "pronto" (o usuário já está vendo o resultado).
+  clearActiveRun();   // resultado na tela = nada de run vivo a reengatar
   _watchedRunId = snap.run_id || _watchedRunId;
   $("comparePanel").classList.add("hidden");
   // Run de comparação (Padrão × Erick): view própria, lado a lado.
@@ -1841,6 +1864,7 @@ else if (_histMq.addListener) _histMq.addListener(syncHistoryCollapse);
 function watchRun(runId) {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   _watchedRunId = runId;
+  saveActiveRun(runId, _openTicker);   // persiste pra reengatar após refresh / 2º plano
   poll(runId);
   pollTimer = setInterval(() => poll(runId), 2000);
 }
@@ -1852,12 +1876,44 @@ async function poll(runId) {
     const snap = await res.json();
     if (runId !== _watchedRunId) return;   // já trocamos de run: ignora resposta tardia
     if (snap.status === "running") {
+      saveActiveRun(runId, snap.ticker);   // mantém o ticker fresco pro reengate
       renderProgress(snap);
     } else {
+      clearActiveRun();                    // terminou: não há mais o que reengatar
       renderResult(snap);
     }
   } catch (e) {
-    // transient error — keep polling
+    // erro transitório de rede: mantém o timer (segue tentando) e o estado persistido
+  }
+}
+
+// Reengate ao CARREGAR a página (e ao voltar de 2º plano): se havia um run sendo
+// acompanhado e ele ainda está `running` no servidor, volta a mostrar o progresso
+// ao vivo — o front não "esquece" a análise. Se terminou enquanto estávamos fora,
+// abre o resultado e limpa. Rede fora: mantém o estado (tenta de novo depois).
+// Retorna true se assumiu a tela (aí o openLatestRun não precisa rodar).
+async function resumeActiveRun() {
+  const active = loadActiveRun();
+  if (!active || !active.run_id) return false;
+  try {
+    const res = await fetch("/api/status/" + active.run_id);
+    if (res.status === 404) { clearActiveRun(); return false; }   // run sumiu do servidor
+    if (!res.ok) return false;                                    // transitório: tenta depois
+    const snap = await res.json();
+    if (snap.status === "running") {
+      _openTicker = snap.ticker || active.ticker || "";
+      if (snap.ticker) $("ticker").value = snap.ticker;
+      $("resultPanel").classList.add("hidden");
+      $("comparePanel").classList.add("hidden");
+      renderProgress(snap);
+      watchRun(active.run_id);
+      return true;
+    }
+    clearActiveRun();        // terminou em 2º plano: mostra o resultado final e limpa
+    renderResult(snap);
+    return true;
+  } catch (e) {
+    return false;            // offline no boot: deixa o openLatestRun assumir a tela
   }
 }
 
@@ -2664,8 +2720,21 @@ function init() {
   bindConfront();
   bindReanalyzeBar();
   bindExportPdf();
-  loadHistory().then(openLatestRun);
+  loadHistory();
+  // Ao abrir: se havia um run vivo sendo acompanhado, reengata o progresso; senão,
+  // mostra a análise mais recente. Sem isso o refresh no meio de um run "esquecia".
+  resumeActiveRun().then((resumed) => { if (!resumed) openLatestRun(); });
+  // Voltar o app pro primeiro plano (aba de fundo afrouxa/pausa o setInterval, muito
+  // no mobile): força um poll imediato + reinicia o intervalo; se o timer morreu,
+  // reengata o run persistido. Contorna o throttle e retoma o progresso na hora.
+  document.addEventListener("visibilitychange", onVisibleForeground);
   startHistoryAutoRefresh();
+}
+
+function onVisibleForeground() {
+  if (document.visibilityState !== "visible") return;
+  if (_watchedRunId && pollTimer) watchRun(_watchedRunId);   // poll já + intervalo novo
+  else resumeActiveRun();                                    // timer morreu: reengata o vivo
 }
 
 // A lista de fundo se atualiza devagar (5s), independente do run assistido: é o
