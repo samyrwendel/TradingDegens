@@ -403,3 +403,62 @@ def render_contradictions_section(findings: list[dict[str, str]]) -> str:
         icon = _SEVERITY_ICON.get(f.get("severity", ""), "•")
         lines.append(f"- {icon} **{f.get('code', '')}**: {f.get('message', '')}")
     return "\n".join(lines)
+
+
+# ── Validação ANTES do juiz (FRENTE 2 / task 016) ────────────────────────────
+# O checker acima roda PÓS-publicação (trava final). Aqui a MESMA lógica roda
+# UPSTREAM (antes do nó de decisão): monta um bloco "DADOS VERIFICADOS" com os
+# números canônicos + as inconsistências detectadas pra injetar no contexto do juiz,
+# pra a DECISÃO não se apoiar calada num dado furado. Reusa check_contradictions —
+# não duplica os checks.
+
+_ANCHORS_HEADING = "## Âncoras determinísticas"
+
+
+def _extract_anchors_section(fundamentals_report: str) -> str:
+    """Recorta o bloco de âncoras determinísticas do relatório de fundamentos —
+    os números canônicos (preço as_of, market cap, FCF/FCO/Capex TTM com magnitude).
+    Vazio quando o relatório não trouxe âncoras."""
+    if not isinstance(fundamentals_report, str) or _ANCHORS_HEADING not in fundamentals_report:
+        return ""
+    start = fundamentals_report.index(_ANCHORS_HEADING)
+    rest = fundamentals_report[start:]
+    # vai até o próximo heading de nível 2 (ou o fim)
+    nxt = re.search(r"\n## ", rest[len(_ANCHORS_HEADING):])
+    return rest if nxt is None else rest[: len(_ANCHORS_HEADING) + nxt.start()].rstrip()
+
+
+def build_verified_context(reports: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    """Roda os checks determinísticos ANTES da decisão e devolve
+    ``(bloco_markdown, findings)``.
+
+    O bloco "DADOS VERIFICADOS" carrega os números canônicos (âncoras) e a lista de
+    inconsistências detectadas, com a instrução de decidir SÓ por eles (valor em
+    conflito = o verificado). ``findings`` volta pra marcar o veredito quando sobra
+    inconsistência. Fail-open: nunca levanta (o próprio check_contradictions é guardado).
+    """
+    findings = check_contradictions(reports if isinstance(reports, dict) else {})
+    anchors = _extract_anchors_section((reports or {}).get("fundamentals_report", ""))
+    out = [
+        "## DADOS VERIFICADOS (canônicos — decida SÓ por estes)",
+        "Estes são os números DETERMINÍSTICOS da análise. Se um agente citou um valor "
+        "que CONFLITA com estes, o valor válido é ESTE, nunca o citado.",
+    ]
+    if anchors:
+        out += ["", anchors]
+    if findings:
+        out += ["", f"### ⚠️ {len(findings)} inconsistência(s) detectada(s) nos insumos "
+                "(use o valor verificado, não o citado):"]
+        for f in findings:
+            out.append(f"- {f.get('message', '')}")
+    return "\n".join(out), findings
+
+
+def format_verdict_caveat(findings: list[dict[str, str]] | None) -> str:
+    """Carimbo curto pro veredito quando os insumos tinham inconsistência na hora da
+    decisão (task 016). Vazio quando não há nada a avisar."""
+    n = len(findings or [])
+    if not n:
+        return ""
+    return (f"⚠️ Decidido com {n} inconsistência(s) nos insumos — os valores "
+            "verificados foram dados ao juiz; tratar com cautela.")

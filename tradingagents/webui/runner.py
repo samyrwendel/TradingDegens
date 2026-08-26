@@ -29,7 +29,10 @@ from tradingagents.webui.compare import (
     detect_method,
     deterministic_meta,
 )
-from tradingagents.webui.contradiction_checker import check_contradictions
+from tradingagents.webui.contradiction_checker import (
+    check_contradictions,
+    format_verdict_caveat,
+)
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
     NEED_KEY_MESSAGE,
@@ -276,6 +279,13 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         "axes": {},
         # Pre-publication contradiction findings (item 7); filled by the runner.
         "contradictions": [],
+        # Inconsistências detectadas ANTES do juiz (task 016): os insumos batidos
+        # contra as âncoras já na hora da decisão (o juiz recebeu os DADOS VERIFICADOS
+        # e decidiu com eles). Quando não-vazio, o veredito sai carimbado.
+        "pre_judge_findings": list(final_state.get("pre_judge_findings") or []),
+        # Aviso curto ao lado do veredito quando os insumos tinham inconsistência na
+        # hora da decisão (task 016); preenchido na finalização.
+        "verdict_caveat": "",
     }
 
 
@@ -715,6 +725,12 @@ class AnalysisRunner:
             # reconcile). Attached as a list the UI surfaces — a listed inconsistency
             # beats a hard block; fail-open so a checker bug never sinks a run.
             run.result["contradictions"] = check_contradictions(run.result)
+            # Carimbo do veredito (task 016): se os insumos tinham inconsistência na
+            # hora da decisão, o juiz recebeu os DADOS VERIFICADOS pra usar o valor
+            # certo — e AINDA assim o veredito sai marcado, pra o julgamento nunca se
+            # apoiar calado num dado furado (ou usa o verificado, ou sai avisado).
+            run.result["verdict_caveat"] = format_verdict_caveat(
+                run.result.get("pre_judge_findings"))
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server

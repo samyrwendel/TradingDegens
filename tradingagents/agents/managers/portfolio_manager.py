@@ -40,9 +40,23 @@ def create_portfolio_manager(llm):
             else ""
         )
 
+        # FRENTE 2 (task 016): a MESMA validação upstream também blinda a decisão FINAL
+        # — injeta os DADOS VERIFICADOS (âncoras + inconsistências) no contexto do PM
+        # pra o veredito não se apoiar num número furado que veio do plano/risco.
+        from tradingagents.webui.contradiction_checker import build_verified_context
+
+        verified_block, _ = build_verified_context({
+            "fundamentals_report": state.get("fundamentals_report", "") or "",
+            "market_report": state.get("market_report", "") or "",
+            "research_manager": research_plan or "",
+            "investment_plan": trader_plan or "",
+        })
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
+
+{verified_block}
 
 ---
 

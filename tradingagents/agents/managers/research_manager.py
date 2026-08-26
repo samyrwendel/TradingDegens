@@ -54,9 +54,25 @@ def create_research_manager(llm):
         # Never let the judge rule on a one-sided debate (fork brief 23/08).
         assert_debate_integrity(investment_debate_state)
 
+        # FRENTE 2 (task 016): validação de consistência ANTES do juiz. Roda os mesmos
+        # checks determinísticos do checker pós-publicação sobre os relatórios + debate
+        # e injeta um bloco DADOS VERIFICADOS (âncoras canônicas + inconsistências) no
+        # contexto do juiz, pra a DECISÃO não pesar um número furado (ex.: FCF 1000×).
+        # Import tardio (checker é lógica pura; evita acoplar o engine ao webui no load).
+        from tradingagents.webui.contradiction_checker import build_verified_context
+
+        verified_block, pre_judge_findings = build_verified_context({
+            "fundamentals_report": state.get("fundamentals_report", "") or "",
+            "market_report": state.get("market_report", "") or "",
+            "bull": investment_debate_state.get("bull_history", "") or "",
+            "bear": investment_debate_state.get("bear_history", "") or "",
+        })
+
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
 {instrument_context}
+
+{verified_block}
 
 ---
 
@@ -96,6 +112,9 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
         return {
             "investment_debate_state": new_investment_debate_state,
             "investment_plan": investment_plan,
+            # inconsistências detectadas nos insumos ANTES da decisão — o runner
+            # carimba o veredito com elas (task 016).
+            "pre_judge_findings": pre_judge_findings,
         }
 
     return research_manager_node

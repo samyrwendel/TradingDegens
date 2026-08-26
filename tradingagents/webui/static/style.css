@@ -526,6 +526,19 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .degraded-banner .dg-btn:hover { color: #fff; background: #3a2f10; border-color: var(--amber); }
 
+/* Carimbo do veredito (task 016): banner âmbar quando os insumos tinham
+   inconsistência na hora da decisão — o juiz recebeu os DADOS VERIFICADOS, e isto
+   avisa o leitor + lista o que divergiu. Discreto, mas visível ao lado do veredito. */
+.verdict-caveat {
+  margin: 6px 0 4px; padding: 8px 12px;
+  border: 1px solid var(--yellow-border); border-radius: var(--radius);
+  background: var(--yellow-dim); color: var(--yellow);
+  font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.verdict-caveat .vc-head { font-weight: var(--fw-bold); }
+.verdict-caveat .vc-list { margin: 6px 0 0; padding-left: 18px; color: #e7d9a6; }
+.verdict-caveat .vc-list li { margin: 2px 0; line-height: 1.4; }
+
 /* carimbo do TF no cabeçalho do veredito ("veredito no Diário/4h/15m") */
 .verdict-tf {
   font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-med); color: var(--muted);

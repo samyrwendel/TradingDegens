@@ -397,6 +397,21 @@ function axisTag(axis) {
 // publicação. Aberto e no topo quando há achados (é um portão de QA); um selo verde
 // discreto quando limpo. Vazio quando o run não trouxe o campo.
 const _SEV_ICON = { alta: "🔴", "média": "🟡", baixa: "🟢" };
+// Carimbo do veredito (task 016): banner âmbar ao lado do veredito quando os insumos
+// tinham inconsistência na hora da DECISÃO. O juiz recebeu os DADOS VERIFICADOS e
+// decidiu com eles; isto avisa o leitor + lista o que divergiu. Vazio → escondido.
+function renderVerdictCaveat(caveat, findings) {
+  const el = $("verdictCaveat");
+  if (!el) return;
+  if (!caveat) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const list = Array.isArray(findings) && findings.length
+    ? `<ul class="vc-list">${findings.map((f) =>
+        `<li>${escapeHtml((f && f.message) || "")}</li>`).join("")}</ul>`
+    : "";
+  el.innerHTML = `<span class="vc-head">${escapeHtml(caveat)}</span>${list}`;
+  el.classList.remove("hidden");
+}
+
 function contradictionsHtml(findings) {
   if (findings === undefined || findings === null) return "";
   if (!Array.isArray(findings) || findings.length === 0) {
@@ -545,6 +560,7 @@ function renderResult(snap) {
   _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick)
   $("verdictBadge").className = verdictClass(r.verdict);
   $("verdictBadge").innerHTML = verdictHtml(r.verdict);
+  renderVerdictCaveat(r.verdict_caveat, r.pre_judge_findings);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
 
