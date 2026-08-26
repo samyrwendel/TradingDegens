@@ -133,6 +133,18 @@ def test_section_crypto_cites_intraday_entry_exit_and_weight(monkeypatch):
     assert "Tático × estrutural" in section
 
 
+def test_section_emits_single_state_enum(monkeypatch):
+    """Item 6b: the method emits ONE state (AGIR/AGUARDAR/CAIXA), computed once, and
+    the sub-blocks derive from it — no parallel 'Veredito'."""
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
+    assert "**Estado (Método Erick):** AGIR" in section
+    # exactly one state label, no competing 'Veredito' line in the deterministic part
+    assert section.count("Estado (Método Erick):") == 1
+    assert "Veredito" not in section
+
+
 def test_section_stock_reads_intraday_like_crypto(monkeypatch):
     """An equity now has keyless intraday (yfinance), so the Erick section reads the
     4h swing frame for a stock too — no longer a daily-only 'no intraday for stocks'

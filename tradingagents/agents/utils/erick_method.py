@@ -115,6 +115,21 @@ _TREND_PT = {"alta": "alta (médias empilhadas)", "baixa": "baixa (médias inver
              "transicao": "transição (médias entrelaçadas)"}
 
 
+def _estado(acao: str, trend: str) -> str:
+    """The single method state enum (item 6b): AGIR | AGUARDAR | CAIXA, computed ONCE
+    so every sub-block renders from it (no 'Veredito AGUARDAR' vs 'Estado AGIR').
+
+    * AGIR — there is an entry at the pullback now;
+    * CAIXA — downtrend / no setup: cash IS the active position (filtro do método);
+    * AGUARDAR — a valid pullback/breakout is still forming.
+    """
+    if acao == "AGIR":
+        return "AGIR"
+    if trend == "baixa":
+        return "CAIXA"
+    return "AGUARDAR"
+
+
 def _decide(r: dict) -> dict:
     """Do read de EMA para o veredito do método: agir/aguardar, entrada e PESO.
 
@@ -235,9 +250,11 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
         )
 
     decision = _decide(read)
+    # ONE canonical state (item 6b); all sub-blocks below render from it.
+    decision["estado"] = _estado(decision["acao"], read["trend"])
     saida = _saida(build_actionable_plan_dict(symbol, curr_date, frame), read)
     trend_pt = _TREND_PT.get(read["trend"], read["trend"])
-    caixa = decision["peso"] == "caixa"
+    caixa = decision["estado"] == "CAIXA"
 
     lines = [
         head,
@@ -248,7 +265,8 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
         f"**Regime (médias):** {trend_pt} — preço {_fmt(read['close'])}, "
         f"EMA 8 {_fmt(read['e8'])} · EMA 21 {_fmt(read['e21'])} · EMA 50 {_fmt(read['e50'])}.",
         "",
-        f"**Estado:** {decision['acao']}",
+        f"**Estado (Método Erick):** {decision['estado']} — estado único do método "
+        "neste run; a leitura abaixo deriva dele (sem veredito paralelo).",
         f"**Entrada (recuo à média):** {decision['entrada']}.",
         f"**Saída (antes da reversão):** {saida}.",
         f"**Peso relativo do trade:** {decision['peso']} — {decision['peso_racional']}.",

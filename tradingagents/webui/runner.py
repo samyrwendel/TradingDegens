@@ -37,6 +37,7 @@ from tradingagents.webui.errors import (
 )
 from tradingagents.webui.pricing import cost_breakdown
 from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
+from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.store import HistoryStore
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
@@ -689,6 +690,9 @@ class AnalysisRunner:
             run.result["timeframe"] = run.timeframe
             run.result["verdict_timeframe"] = run.timeframe
             run.result["timeframes"] = timeframes_for_asset(run.asset_type)
+            # Scrub internal error/component strings from the published texts (item 6d)
+            # — the reader sees "dados indisponíveis", not a NoMarketDataError leak.
+            sanitize_result(run.result)
             # Keystone pre-publication check (item 7): a final deterministic sweep of
             # the ASSEMBLED report for the whole 1-6 class of inconsistencies (double
             # decision, chart-vs-text 1-2-3, price drift, aggregates that don't

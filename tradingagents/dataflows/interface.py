@@ -314,10 +314,13 @@ def route_to_vendor(method: str, *args, **kwargs):
     # abort the run.
     if first_error is not None:
         if category in OPTIONAL_CATEGORIES:
+            # The raw exception (e.g. "[ta_datacache cached failure: NoMarketDataError]")
+            # goes to the LOG only — never into the returned sentinel, so an internal
+            # component/exception name can't leak into the published report (item 6d).
             logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)
             return (
-                f"DATA_UNAVAILABLE: optional {category} could not be retrieved "
-                f"({first_error}). Proceed without it; do not fabricate values."
+                f"DATA_UNAVAILABLE: optional {category} could not be retrieved. "
+                "Proceed without it; do not fabricate values."
             )
         raise first_error
 

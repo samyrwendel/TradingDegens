@@ -66,7 +66,7 @@ def create_erick_analyst(llm):
 3. **Timeframe intradiário.** O método opera no 15m e no 4h para o gatilho; diário/semanal só dão a tendência de fundo. DECLARE explicitamente em qual timeframe você embasou a leitura.
 4. **Entrada no recuo, FRACIONADA.** Nunca 100% de uma vez: começa a montar no recuo à média, com espaço para adicionar se cair mais. Diga o ponto de recuo (qual média) onde entraria.
 5. **Saída antes da reversão.** "Pega a maior parte do movimento e sai antes que reverta." Realização em exaustão/resistência/perda de estrutura — não é sobre acertar o topo.
-6. **Caixa é posição.** Ficar de fora é decisão ATIVA. Se não há ponto de recuo à média agora, o veredito pode ser AGUARDAR / caixa — e isso é uma resposta, não uma omissão.
+6. **Caixa é posição.** Ficar de fora é decisão ATIVA. Se não há ponto de recuo à média agora, ficar em caixa é uma resposta legítima do método (o **Estado** determinístico dirá AGUARDAR ou CAIXA), não uma omissão.
 7. **Tático × estrutural.** Separe explicitamente o trade tático de curto prazo da tese estrutural de longo. Diga qual dos dois é a sua leitura.
 8. **Peso relativo do trade.** Responda "quanto entrar" em termos RELATIVOS conforme a confirmação: posição cheia (alinhamento pleno), meia posição (confirmação parcial), posição inicial (só um começo, aguardando somar) ou caixa (sem gatilho). NUNCA chute um valor absoluto em % ou em dinheiro.
 9. **Filtros.** Evite comprar no sentimento extremo sem confirmação; desconfie de alavancagem alta no mercado. Em cripto, leia funding/OI/liquidações e o medo & ganância como filtro — não como gatilho isolado.
@@ -87,7 +87,7 @@ Ancore CADA nível em dado de ferramenta — nunca invente um número. Chame get
             )
             + """
 
-Feche com um veredito curto e operável do método: **AGIR ou AGUARDAR**, o **timeframe** que embasou, o **recuo de entrada** (qual média), a **saída**, e o **peso relativo** (cheia / meia / inicial / caixa). Sem repetir o relatório de mercado — só a decisão pelo método."""
+NÃO emita um veredito próprio de AGIR/AGUARDAR nem um ponto de recuo/nível operável: o **Estado** único do método (AGIR/AGUARDAR/CAIXA), o timeframe, o recuo à média, a saída e o peso já são calculados DETERMINISTICAMENTE na seção do método anexada a este relatório — essa é a fonte única; não crie um veredito paralelo que possa contradizê-la. Use SOMENTE as médias do timeframe DESTE relatório; nunca cite uma EMA de outro timeframe (ex.: a EMA diária) como ponto de recuo numa leitura intradiária. Traga só a MOLDURA: regime/tendência de fundo, macro e os filtros de sentimento e derivativo — sem repetir o relatório de mercado."""
             + get_language_instruction()
         )
 

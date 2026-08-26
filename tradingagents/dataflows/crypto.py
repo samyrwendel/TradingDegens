@@ -366,9 +366,11 @@ def _oi_line(base, as_of, is_live) -> str:
             f"(≈ {_fmt_usd(oi['oi_usd'])})."
         )
     except Exception as exc:  # noqa: BLE001
+        # The exception type stays in the LOG only — the published line stays friendly,
+        # never surfacing an internal component/exception name (item 6d).
         logger.warning("Binance OI unavailable for %s: %s", base, exc)
         note = "" if is_live else " (Hyperliquid não tem OI histórico; Binance retém ~30d)"
-        return f"- **Contratos em aberto** (open interest): indisponível ({type(exc).__name__}){note}; sem valor reportado."
+        return f"- **Contratos em aberto** (open interest): indisponível{note}; sem valor reportado."
 
 
 def _liq_line(base, as_of, is_live) -> str:

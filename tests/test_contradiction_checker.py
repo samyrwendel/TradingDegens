@@ -113,6 +113,51 @@ def test_render_section_clean_and_dirty():
 
 
 @pytest.mark.unit
+def test_erick_state_vs_veredito_divergence_is_flagged():
+    """Item 6b: 'Estado: AGIR' with a prose 'Veredito: AGUARDAR' is a self-contradiction."""
+    r = {"erick_report": (
+        "**Estado (Método Erick):** AGIR — estado único.\n"
+        "Veredito do método: AGUARDAR / caixa até o gatilho."
+    )}
+    codes = {f["code"] for f in check_contradictions(r)}
+    assert "erick_estado_veredito_divergente" in codes
+
+
+@pytest.mark.unit
+def test_erick_state_consistent_not_flagged():
+    r = {"erick_report": (
+        "**Estado (Método Erick):** CAIXA — estado único.\n"
+        "A leitura deriva do estado: caixa é posição."
+    )}
+    codes = {f["code"] for f in check_contradictions(r)}
+    assert "erick_estado_veredito_divergente" not in codes
+
+
+@pytest.mark.unit
+def test_open_interest_divergence_is_flagged():
+    """Item 6e: labeled feed OI (10,6M) vs an unlabeled prose OI (~29M)."""
+    r = {
+        "derivatives_report": (
+            "- **Contratos em aberto** (open interest — capital alavancado no book; "
+            "Hyperliquid perp): 10.6M LINK (≈ US$ 250M)."
+        ),
+        "news_report": "O open interest agregado subiu para ~29M tokens no período.",
+    }
+    codes = {f["code"] for f in check_contradictions(r)}
+    assert "oi_divergente" in codes
+
+
+@pytest.mark.unit
+def test_open_interest_agreement_not_flagged():
+    r = {
+        "derivatives_report": "- **Contratos em aberto** (open interest — Hyperliquid perp): 10.6M LINK.",
+        "news_report": "O open interest está em ~10,5M tokens.",
+    }
+    codes = {f["code"] for f in check_contradictions(r)}
+    assert "oi_divergente" not in codes
+
+
+@pytest.mark.unit
 def test_fail_open_on_bad_input():
     assert check_contradictions(None) == []
     assert check_contradictions({}) == []

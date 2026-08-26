@@ -295,6 +295,63 @@ def _check_aggregates(result: dict[str, Any]) -> list[dict[str, str]]:
     return findings
 
 
+_ERICK_STATES = ("AGIR", "AGUARDAR", "CAIXA")
+
+
+def _check_erick_state(result: dict[str, Any]) -> list[dict[str, str]]:
+    """The Erick module must speak ONE state (item 6b): the deterministic 'Estado' and
+    any prose 'Veredito' must agree, never 'Veredito AGUARDAR' vs 'Estado AGIR'."""
+    text = result.get("erick_report") or ""
+    if not isinstance(text, str) or not text:
+        return []
+    est = re.search(r"Estado[^\n:]*:\**\s*(AGIR|AGUARDAR|CAIXA)", text, re.IGNORECASE)
+    ver = re.search(r"Veredito[^\n:]*:?\**\s*(AGIR|AGUARDAR|CAIXA)", text, re.IGNORECASE)
+    if not est or not ver:
+        return []
+    a, b = est.group(1).upper(), ver.group(1).upper()
+    if a != b:
+        return [_finding(
+            "erick_estado_veredito_divergente", "alta",
+            f"Método Erick contradiz a si mesmo: Estado={a} vs Veredito={b}. O módulo "
+            "deve emitir UM estado único (AGIR/AGUARDAR/CAIXA).",
+        )]
+    return []
+
+
+def _oi_value(text: str, near: str) -> float | None:
+    """First open-interest magnitude near an OI cue in ``text`` (absolute units)."""
+    if not isinstance(text, str):
+        return None
+    m = re.search(
+        near + r"[^\n]{0,60}?([\d.,]+)\s*(bilh\w*|milh\w*|mi|bi|M|B|k)?",
+        text, re.IGNORECASE,
+    )
+    if not m:
+        return None
+    num = _pt_number(m.group(1))
+    return _money_to_units(num, m.group(2) or "") if num is not None else None
+
+
+def _check_oi_divergence(result: dict[str, Any]) -> list[dict[str, str]]:
+    """Same indicator (open interest) with values from different sources and no note
+    (item 6e): the labeled derivatives feed vs an unlabeled prose figure."""
+    feed = _oi_value(result.get("derivatives_report") or "", r"open interest[^\n]*?\):")
+    if feed is None or feed <= 0:
+        return []
+    for key in ("news_report", "bull", "bear", "research_manager"):
+        prose = _oi_value(result.get(key) or "", r"(?:open interest|contratos em aberto|\bOI\b)")
+        if prose is None or prose <= 0:
+            continue
+        if abs(prose - feed) / max(feed, 1.0) > 0.25:
+            return [_finding(
+                "oi_divergente", "média",
+                f"Open interest com valores divergentes sem rótulo: feed ={feed:,.0f} "
+                f"vs '{key}' ={prose:,.0f}. Rotule origem+escopo ou suprima o menos "
+                "confiável.",
+            )]
+    return []
+
+
 def check_contradictions(result: dict[str, Any] | None) -> list[dict[str, str]]:
     """Run all deterministic checks over an assembled ``result`` → list of findings.
 
@@ -309,6 +366,8 @@ def check_contradictions(result: dict[str, Any] | None) -> list[dict[str, str]]:
         _check_price_drift,
         _check_market_cap_price,
         _check_aggregates,
+        _check_erick_state,
+        _check_oi_divergence,
     ):
         try:
             findings.extend(check(result))
