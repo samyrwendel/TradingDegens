@@ -44,13 +44,13 @@
         <span class="owner-lead">É o dono? Entre pra usar a chave do servidor sem colar nada.</span>
         <div class="owner-login-row">
           <input id="ownerPass" type="password" autocomplete="off" placeholder="senha do dono" />
-          <button type="button" id="ownerLoginBtn" class="cfg-test">Entrar</button>
+          <button type="button" id="ownerLoginBtn" class="btn-secondary">Entrar</button>
           <span class="cfg-status" id="ownerStatus"></span>
         </div>
       </div>
       <div class="owner-loggedin hidden" id="ownerLoggedIn">
         <span class="owner-badge">✅ Dono logado — usando a chave do servidor.</span>
-        <button type="button" id="ownerLogoutBtn" class="cfg-clear">Sair</button>
+        <button type="button" id="ownerLogoutBtn" class="btn-ghost">Sair</button>
       </div>
     </div>
 
@@ -63,15 +63,24 @@
         <span class="sub-state" id="subState"></span>
       </div>
       <p class="owner-lead">
-        Cole o token de acesso da sua assinatura. Ele vai por header direto ao servidor
-        e nunca fica salvo neste navegador; o servidor guarda em arquivo protegido.
+        Conecte com um clique: abrimos o login oficial da OpenAI numa nova aba, você
+        autoriza, e o token fica só no servidor (arquivo protegido). Nada é colado à mão
+        nem salvo neste navegador.
       </p>
-      <div class="owner-login-row">
-        <input id="subToken" type="password" autocomplete="off" placeholder="token de acesso da assinatura" />
-        <button type="button" id="subConnectBtn" class="cfg-test">Conectar</button>
-        <button type="button" id="subDisconnectBtn" class="cfg-clear hidden">Desconectar</button>
+      <div class="sub-actions">
+        <button type="button" id="subOAuthBtn" class="btn-primary">Conectar com ChatGPT <span aria-hidden="true">↗</span></button>
+        <button type="button" id="subDisconnectBtn" class="btn-ghost hidden">Desconectar</button>
         <span class="cfg-status" id="subStatus"></span>
       </div>
+      <!-- Fallback avançado (task 019): colar o token na mão só pra quem já tem. O
+           caminho principal é o botão acima. O token vai por HEADER, nunca fica no DOM. -->
+      <details class="sub-advanced" id="subAdvanced">
+        <summary>Avançado — colar o token manualmente</summary>
+        <div class="owner-login-row">
+          <input id="subToken" type="password" autocomplete="off" placeholder="token de acesso da assinatura" />
+          <button type="button" id="subConnectBtn" class="btn-secondary">Conectar token</button>
+        </div>
+      </details>
     </div>
 
     <div class="config-grid" id="byokGrid">

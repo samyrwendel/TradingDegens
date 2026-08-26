@@ -71,6 +71,11 @@ def test_owner_only_subscription_login_ui(live):
         page.wait_for_selector("#subscriptionBox:not(.hidden)")
         assert page.query_selector("#subscriptionBox").is_visible() is True
 
+        # o caminho principal agora é o botão OAuth (task 019): colar token ficou no
+        # "Avançado". Abre o fallback antes de digitar.
+        page.click("#subAdvanced summary")
+        page.wait_for_selector("#subToken", state="visible")
+
         # conecta pela UI: digita o token, clica Conectar → header, nunca fica no DOM
         page.fill("#subToken", "sk-UI-SECRET-777")
         page.click("#subConnectBtn")
@@ -83,4 +88,35 @@ def test_owner_only_subscription_login_ui(live):
         assert "sk-UI-SECRET-777" not in page.content()
         # estado reflete conectada + botão desconectar aparece
         assert "conectada" in page.eval_on_selector("#subState", "el => el.textContent")
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_owner_connect_button_opens_oauth_link(live):
+    """Task 019: o botão principal ABRE o link OAuth certo (não pede pra colar token).
+    Exercita: clicar → window.open com a URL de autorização do ChatGPT/OpenAI."""
+    base, _sub = live
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=_ARGS)
+        page = browser.new_page(viewport={"width": 1100, "height": 800})
+        page.goto(base, wait_until="networkidle")
+        page.click("#configBtn")
+        page.evaluate("""async () => {
+          await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'},
+            credentials:'same-origin', body: JSON.stringify({password:'senha-dono'})});
+          await applyConfig(); renderConfigPanel();
+        }""")
+        page.wait_for_selector("#subscriptionBox:not(.hidden)")
+
+        # captura o window.open (nova aba) sem navegar de verdade pro auth.openai.com
+        page.evaluate("window.__opened=null; window.open=(u)=>{window.__opened=u; return null;};")
+        page.click("#subOAuthBtn")
+        page.wait_for_function("() => window.__opened && window.__opened.indexOf('auth.openai.com') >= 0")
+        opened = page.evaluate("window.__opened")
+        assert "auth.openai.com/oauth/authorize" in opened
+        assert "client_id=app_EMoamEEZ73f0CkXaXp7hrann" in opened
+        assert "code_challenge_method=S256" in opened
+        assert "response_type=code" in opened
+        # o botão é o estilo primário do app (mesma cara do "Analisar/Salvar")
+        assert "btn-primary" in (page.get_attribute("#subOAuthBtn", "class") or "")
         browser.close()

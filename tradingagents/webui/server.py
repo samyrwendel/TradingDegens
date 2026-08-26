@@ -40,12 +40,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tradingagents.webui import timeutil
+from tradingagents.webui import oauth_codex, timeutil
 from tradingagents.webui.auth import OwnerAuth
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
@@ -70,6 +71,8 @@ class _Handler(BaseHTTPRequestHandler):
     server_version = "TradingDegensWeb/1.0"
     runner: AnalysisRunner  # injected on the server instance
     auth: OwnerAuth         # injected on the server instance
+    subscription: SubscriptionStore          # injected on the server instance
+    oauth_flows: oauth_codex.PendingFlows     # injected on the server instance
 
     # -- helpers --------------------------------------------------------------
     def _send_json(self, obj, status: int = 200, cookies: list[str] | None = None) -> None:
@@ -229,6 +232,101 @@ class _Handler(BaseHTTPRequestHandler):
                 text = text.replace(secret, "***")
         return text
 
+    # -- OAuth da assinatura (task 019) ---------------------------------------
+    def _oauth_redirect_uri(self) -> str:
+        """redirect_uri do fluxo: default = loopback :1455 do codex (o único aceito
+        pela OpenAI pra este client). ``TRADINGDEGENS_OAUTH_REDIRECT`` sobrepõe pra
+        apontar o callback deste servidor quando ele consegue receber o redirect."""
+        return os.getenv("TRADINGDEGENS_OAUTH_REDIRECT", oauth_codex.DEFAULT_REDIRECT)
+
+    def _handle_oauth_callback(self) -> None:
+        """Callback do OAuth: ?code&state → valida o state (uso único), troca o code
+        por token (PKCE) e grava server-side (store 017 + ponte pro codex-proxy).
+        Protegido pelo nonce ``state`` (o verifier fica no servidor), não pelo cookie
+        — o redirect vem cross-site do issuer. Nada de segredo volta ao cliente/log."""
+        qs = parse_qs(urlparse(self.path).query)
+        err = (qs.get("error", [""])[0] or "").strip()
+        code = (qs.get("code", [""])[0] or "").strip()
+        state = (qs.get("state", [""])[0] or "").strip()
+        if err:
+            # ``error`` vem do issuer (ex.: access_denied) — texto controlado, sem segredo.
+            self._oauth_html(f"Autorização não concluída ({err}). Você pode tentar de novo.",
+                             ok=False)
+            return
+        verifier = self.oauth_flows.take(state)
+        if not code or not verifier:
+            self._oauth_html("Link de conexão inválido ou expirado. Recomece pelo botão "
+                             "“Conectar com ChatGPT”.", ok=False)
+            return
+        try:
+            token_resp = oauth_codex.exchange_code(
+                code, verifier, redirect_uri=self._oauth_redirect_uri())
+        except Exception:  # noqa: BLE001 — nunca ecoa a exceção (pode conter o code)
+            self._oauth_html("Não consegui trocar o código pelo token da assinatura.",
+                             ok=False)
+            return
+        # Guarda no store 017 (arquivo 0600) — o token NUNCA volta ao cliente.
+        try:
+            self.subscription.connect(token_resp["access_token"], kind="openai",
+                                      connected_at=timeutil.stamp())
+        except Exception:  # noqa: BLE001 — segue pra ponte mesmo se o store falhar
+            pass
+        self._bridge_codex_auth(token_resp)
+        self._oauth_html("Assinatura conectada. Pode fechar esta aba e voltar ao "
+                         "TradingDegens.", ok=True)
+
+    def _bridge_codex_auth(self, token_resp: dict) -> None:
+        """Ponte pro codex-proxy: grava os tokens frescos no arquivo que ele lê
+        (``~/.local/share/opencode/auth.json`` → chave ``openai``), reestabelecendo o
+        refresh quebrado. É o elo que faz o ``gpt-5.3-codex`` (via litellm) voltar a
+        responder. Best-effort e atômico 0600; preserva o que já havia. Caminho
+        sobreponível por ``TRADINGDEGENS_CODEX_AUTH_FILE`` (testes)."""
+        path = os.getenv("TRADINGDEGENS_CODEX_AUTH_FILE",
+                         os.path.expanduser("~/.local/share/opencode/auth.json"))
+        try:
+            p = Path(path)
+            current: dict = {}
+            if p.exists():
+                try:
+                    loaded = json.loads(p.read_text("utf-8"))
+                    current = loaded if isinstance(loaded, dict) else {}
+                except Exception:  # noqa: BLE001 — arquivo corrompido: recomeça limpo
+                    current = {}
+            prev = current.get("openai") if isinstance(current.get("openai"), dict) else None
+            current["openai"] = oauth_codex.bridge_record(
+                token_resp, now_ms=int(time.time() * 1000), previous=prev)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(current, fh, indent=2)
+            os.replace(tmp, p)
+            os.chmod(p, 0o600)
+        except Exception:  # noqa: BLE001 — ponte é best-effort; o store 017 já guardou
+            pass
+
+    def _oauth_html(self, message: str, *, ok: bool) -> None:
+        """Página de retorno do OAuth (aba nova). ``message`` é sempre gerada pelo
+        servidor — nunca reflete input/segredo do usuário."""
+        icon = "✅" if ok else "⚠️"
+        color = "#22c55e" if ok else "#f59e0b"
+        safe = (message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        html = (
+            "<!doctype html><html lang=\"pt-br\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>TradingDegens — assinatura</title><style>"
+            "body{background:#0d0d0f;color:#e7e7ea;font-family:system-ui,-apple-system,"
+            "sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}"
+            ".card{max-width:420px;padding:28px 32px;border:1px solid #26262b;"
+            "border-radius:12px;background:#151519;text-align:center}"
+            ".i{font-size:40px;line-height:1}.m{margin:14px 0 0;font-size:15px;"
+            f"line-height:1.5}}.s{{color:{color};font-weight:600}}"
+            ".sub{color:#8a8a92;font-size:13px}</style></head><body><div class=\"card\">"
+            f"<div class=\"i\">{icon}</div><p class=\"m s\">{safe}</p>"
+            "<p class=\"m sub\">Esta janela é só o retorno do login.</p></div></body></html>"
+        )
+        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8", 200)
+
     # -- routing --------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         path = urlparse(self.path).path
@@ -273,6 +371,12 @@ class _Handler(BaseHTTPRequestHandler):
                 info = self.subscription.status()
                 info["owner"] = True
                 self._send_json(info)
+            elif path == "/api/subscription/oauth/callback":
+                # Retorno do OAuth (task 019): o issuer redireciona o navegador pra cá
+                # com ?code&state. NÃO owner-gated (o redirect vem cross-site, sem
+                # cookie) — o nonce ``state`` (uso único, verifier server-side) é a
+                # proteção. Fecha o token de ponta a ponta quando o redirect chega aqui.
+                self._handle_oauth_callback()
             elif path == "/api/prices":
                 # Preço LIVE (3ª linha da watchlist): lote de tickers -> preço atual
                 # + variação do dia. Leve (fast_info, sem pipeline), cacheado ~45s;
@@ -332,6 +436,24 @@ class _Handler(BaseHTTPRequestHandler):
                 cleared = (f"{self.auth.cookie_name}=; HttpOnly; SameSite=Strict; "
                            f"Path=/; Max-Age=0")
                 self._send_json({"ok": True, "owner": False}, cookies=[cleared])
+                return
+            if path == "/api/subscription/oauth/start":
+                # Conectar via LINK (task 019): SÓ-DONO. Gera PKCE, guarda o verifier
+                # server-side (state→verifier, em memória) e devolve a URL de
+                # autorização do ChatGPT/OpenAI — a MESMA do ``codex login``. O segredo
+                # (verifier) NUNCA vai ao cliente; a URL é pública por natureza. O front
+                # a abre em nova aba (ação principal = ABRIR O LINK, não colar token).
+                if not self._owner_or_403():
+                    return
+                verifier = oauth_codex.new_verifier()
+                state = oauth_codex.new_state()
+                redirect_uri = self._oauth_redirect_uri()
+                url = oauth_codex.build_authorize_url(
+                    state=state, code_challenge=oauth_codex.challenge_for(verifier),
+                    redirect_uri=redirect_uri)
+                self.oauth_flows.create(state, verifier)
+                self._send_json({"ok": True, "owner": True, "authorize_url": url,
+                                 "state": state, "redirect_uri": redirect_uri})
                 return
             if path == "/api/subscription/connect":
                 # Conectar a assinatura do dono (task 017): SÓ-DONO — valida a sessão
@@ -479,8 +601,13 @@ def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
         sub_path = os.getenv("TRADINGDEGENS_SUBSCRIPTION_FILE") or str(
             Path(getattr(runner.store, "base", ".")) / "subscription.json")
         subscription = SubscriptionStore(sub_path)
+    # Fluxos OAuth em andamento (task 019): state→verifier em memória, uso único +
+    # TTL. Compartilhado no handler (não por-requisição) pra o /start e o /callback
+    # verem o mesmo mapa.
+    oauth_flows = oauth_codex.PendingFlows()
     handler = type("BoundHandler", (_Handler,),
-                   {"runner": runner, "auth": auth, "subscription": subscription})
+                   {"runner": runner, "auth": auth, "subscription": subscription,
+                    "oauth_flows": oauth_flows})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
     return httpd

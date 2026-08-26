@@ -2460,6 +2460,61 @@ async function refreshSubscriptionStatus() {
   } catch (e) { /* rede: mantém como está */ }
 }
 
+// Conectar via LINK (task 019): pede a URL de autorização ao servidor (owner-gated),
+// abre o login oficial do ChatGPT/OpenAI numa nova aba (ação principal = ABRIR O LINK,
+// não colar token) e faz poll do status até conectar. O segredo (verifier) fica no
+// servidor — o cliente só recebe a URL pública.
+let _subPoll = null;
+async function subscriptionOAuthStart() {
+  const btn = $("subOAuthBtn");
+  const st = $("subStatus");
+  if (btn) btn.disabled = true;
+  if (st) { st.textContent = "abrindo o login do ChatGPT…"; st.className = "cfg-status"; }
+  try {
+    const res = await fetch("/api/subscription/oauth/start", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.authorize_url) {
+      if (st) { st.textContent = "❌ " + (data.error || "não deu pra iniciar"); st.className = "cfg-status err"; }
+      return;
+    }
+    // Abre o login oficial numa nova aba; o usuário autoriza lá e volta.
+    window.open(data.authorize_url, "_blank", "noopener");
+    if (st) { st.textContent = "aguardando você autorizar no ChatGPT…"; st.className = "cfg-status"; }
+    startSubscriptionPoll();
+  } catch (e) {
+    if (st) { st.textContent = "❌ erro de rede"; st.className = "cfg-status err"; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Poll do status enquanto o dono autoriza na aba do ChatGPT; para ao conectar ou
+// após ~5min (teto). O callback grava server-side; aqui só refletimos o estado.
+function startSubscriptionPoll() {
+  if (_subPoll) clearInterval(_subPoll);
+  let tries = 0;
+  _subPoll = setInterval(async () => {
+    tries++;
+    try {
+      const res = await fetch("/api/subscription/status", { credentials: "same-origin" });
+      if (res.ok) {
+        const s = await res.json();
+        if (s.connected) {
+          clearInterval(_subPoll); _subPoll = null;
+          const st = $("subStatus");
+          if (st) { st.textContent = "✅ assinatura conectada"; st.className = "cfg-status ok"; }
+          refreshSubscriptionStatus();
+          return;
+        }
+      }
+    } catch (e) { /* rede: tenta de novo */ }
+    if (tries > 150) { clearInterval(_subPoll); _subPoll = null; }   // ~5min
+  }, 2000);
+}
+
 async function subscriptionConnect() {
   const input = $("subToken");
   const btn = $("subConnectBtn");
@@ -2672,7 +2727,9 @@ function bindConfig() {
   $("ownerLoginBtn").addEventListener("click", ownerLogin);
   $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
   $("ownerLogoutBtn").addEventListener("click", ownerLogout);
-  // Conectar assinatura (task 017): só-dono (a seção só aparece logado).
+  // Conectar assinatura: só-dono (a seção só aparece logado). Caminho principal =
+  // botão OAuth (task 019); colar token vira fallback avançado (task 017 preservada).
+  $("subOAuthBtn").addEventListener("click", subscriptionOAuthStart);
   $("subConnectBtn").addEventListener("click", subscriptionConnect);
   $("subToken").addEventListener("keydown", (e) => { if (e.key === "Enter") subscriptionConnect(); });
   $("subDisconnectBtn").addEventListener("click", subscriptionDisconnect);

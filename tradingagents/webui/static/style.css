@@ -1173,6 +1173,40 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .subscription-box .sub-title { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); color: var(--text); }
 .subscription-box .sub-state { font-size: var(--fs-12); color: var(--muted); white-space: nowrap; }
 .subscription-box .sub-state.ok { color: var(--green); }
+
+/* Botões da owner-box / assinatura no design system do app (task 019): antes eram
+   .cfg-test/.cfg-clear "soltos" (só cor, sem base) e saíam com cara de default. Agora
+   compartilham a base (altura/raio/fonte do "Analisar/Salvar") e três variantes:
+   primário azul (ação principal), secundário (painel-2) e ghost (Sair/Desconectar). */
+.owner-box button, .subscription-box button {
+  border-radius: var(--radius); height: 36px; padding: 0 16px;
+  font-family: var(--font); font-size: var(--fs-14); font-weight: var(--fw-bold);
+  line-height: 1; cursor: pointer; border: 1px solid var(--border);
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+}
+.owner-box button:disabled, .subscription-box button:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none; }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
+.btn-secondary { background: var(--panel-2); color: var(--text); }
+.btn-secondary:hover:not(:disabled) { border-color: var(--accent); }
+.btn-ghost { background: none; color: var(--muted); }
+.btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+
+.subscription-box .sub-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px;
+}
+.subscription-box .sub-advanced { margin-top: 12px; }
+.subscription-box .sub-advanced summary {
+  cursor: pointer; color: var(--muted); font-size: var(--fs-12); user-select: none;
+  list-style: none; display: inline-flex; align-items: center; gap: 6px;
+}
+.subscription-box .sub-advanced summary::-webkit-details-marker { display: none; }
+.subscription-box .sub-advanced summary::before { content: "▸"; font-size: 10px; }
+.subscription-box .sub-advanced[open] summary::before { content: "▾"; }
+.subscription-box .sub-advanced summary:hover { color: var(--text); }
+.subscription-box .sub-advanced[open] summary { margin-bottom: 10px; }
+.subscription-box .sub-advanced .owner-login-row { margin-top: 0; }
+
 @media (max-width: 640px) {
   .owner-login-row input { min-width: 0; width: 100%; }
 }
