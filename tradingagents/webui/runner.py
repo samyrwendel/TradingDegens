@@ -29,6 +29,7 @@ from tradingagents.webui.compare import (
     detect_method,
     deterministic_meta,
 )
+from tradingagents.webui.contradiction_checker import check_contradictions
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
     NEED_KEY_MESSAGE,
@@ -265,6 +266,8 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         "audit": {},
         # Reading axes per module (eixo+horizonte); filled by the runner (item 8).
         "axes": {},
+        # Pre-publication contradiction findings (item 7); filled by the runner.
+        "contradictions": [],
     }
 
 
@@ -686,6 +689,12 @@ class AnalysisRunner:
             run.result["timeframe"] = run.timeframe
             run.result["verdict_timeframe"] = run.timeframe
             run.result["timeframes"] = timeframes_for_asset(run.asset_type)
+            # Keystone pre-publication check (item 7): a final deterministic sweep of
+            # the ASSEMBLED report for the whole 1-6 class of inconsistencies (double
+            # decision, chart-vs-text 1-2-3, price drift, aggregates that don't
+            # reconcile). Attached as a list the UI surfaces — a listed inconsistency
+            # beats a hard block; fail-open so a checker bug never sinks a run.
+            run.result["contradictions"] = check_contradictions(run.result)
             run.tracker.mark_done()
             final_status = "done"
         except Exception as exc:  # surface, never crash the server

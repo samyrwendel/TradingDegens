@@ -1126,3 +1126,18 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   font-weight: 400;
   white-space: nowrap;
 }
+
+/* Checagem de consistência (item 7): portão de QA pré-publicação. Verde discreto
+   quando limpo; card de alerta aberto quando há inconsistências a revisar. */
+.consistency-ok {
+  margin: 8px 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #23304a);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+.consistency-warn > summary { color: var(--accent, #e6b800); font-weight: 600; }
+.consistency-list { margin: 6px 0 0; padding-left: 18px; }
+.consistency-list li { margin: 4px 0; line-height: 1.4; }

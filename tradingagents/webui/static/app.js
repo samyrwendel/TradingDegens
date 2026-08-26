@@ -304,6 +304,26 @@ function axisTag(axis) {
   return ` <span class="axis-tag">eixo ${escapeHtml(axis.eixo)}${h}</span>`;
 }
 
+// Checagem de consistência (item 7): o resultado do checker de contradições pré-
+// publicação. Aberto e no topo quando há achados (é um portão de QA); um selo verde
+// discreto quando limpo. Vazio quando o run não trouxe o campo.
+const _SEV_ICON = { alta: "🔴", "média": "🟡", baixa: "🟢" };
+function contradictionsHtml(findings) {
+  if (findings === undefined || findings === null) return "";
+  if (!Array.isArray(findings) || findings.length === 0) {
+    return `<div class="consistency-ok">✅ Checagem de consistência: sem inconsistências ` +
+      `(decisão única · gatilho 1-2-3 coerente · preço único · agregados batem).</div>`;
+  }
+  const items = findings.map((f) => {
+    const icon = _SEV_ICON[f && f.severity] || "•";
+    return `<li>${icon} <b>${escapeHtml((f && f.code) || "")}</b>: ` +
+      `${escapeHtml((f && f.message) || "")}</li>`;
+  }).join("");
+  return `<details class="section consistency-warn" open>` +
+    `<summary>⚠️ Checagem de consistência — ${findings.length} inconsistência(s) a revisar</summary>` +
+    `<div class="section-body"><ul class="consistency-list">${items}</ul></div></details>`;
+}
+
 function section(title, mdText, axis) {
   if (!mdText || !mdText.trim()) return "";
   return `<details class="section"><summary>${escapeHtml(title)}${axisTag(axis)}</summary>` +
@@ -477,6 +497,8 @@ function renderResult(snap) {
   // o Samyr pediu em destaque (recuo à média, saída, peso do trade). Só aparece
   // quando o método Erick foi acionado; a análise Padrão não a tem.
   const axes = r.axes || {};
+  // Portão de QA (item 7): a checagem de consistência vai no TOPO das seções.
+  html += contradictionsHtml(r.contradictions);
   if (r.erick_report && r.erick_report.trim()) {
     html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${axisTag(axes.erick)}</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
