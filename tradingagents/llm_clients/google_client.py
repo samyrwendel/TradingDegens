@@ -2,7 +2,7 @@ from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from .base_client import BaseLLMClient, normalize_content
+from .base_client import BaseLLMClient, apply_streaming, normalize_content
 from .validators import validate_model
 
 
@@ -49,6 +49,10 @@ class GoogleClient(BaseLLMClient):
             if "pro" in self.model.lower() and thinking_level == "minimal":
                 thinking_level = "low"
             llm_kwargs["thinking_level"] = thinking_level
+
+        # Streaming pro raciocínio ao vivo (task 011). ChatGoogleGenerativeAI não
+        # tem stream_usage (usage já é agregado no streaming), então só streaming.
+        apply_streaming(llm_kwargs, self.kwargs, supports_stream_usage=False)
 
         return NormalizedChatGoogleGenerativeAI(**llm_kwargs)
 

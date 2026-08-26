@@ -3,7 +3,7 @@ from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 
-from .base_client import BaseLLMClient, normalize_content
+from .base_client import BaseLLMClient, apply_streaming, normalize_content
 from .validators import validate_model
 
 _PASSTHROUGH_KWARGS = (
@@ -135,6 +135,10 @@ class AnthropicClient(BaseLLMClient):
             if key == "temperature" and not _supports_temperature(self.model):
                 continue
             llm_kwargs[key] = self.kwargs[key]
+
+        # Streaming liga o raciocínio ao vivo (task 011); stream_usage preserva o
+        # custo. ChatAnthropic entrega o texto completo + tool calls no fim igual.
+        apply_streaming(llm_kwargs, self.kwargs, supports_stream_usage=True)
 
         return NormalizedChatAnthropic(**llm_kwargs)
 

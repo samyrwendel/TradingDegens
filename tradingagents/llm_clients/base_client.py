@@ -22,6 +22,26 @@ def normalize_content(response):
     return response
 
 
+def apply_streaming(llm_kwargs: dict, kwargs: dict, *, supports_stream_usage: bool) -> None:
+    """Enable token streaming by default so ``on_llm_new_token`` fires (task 011).
+
+    Without ``streaming=True`` the chat model returns everything in one shot, so the
+    live-reasoning callback (task 008) only sees the text at ``on_llm_end`` — a slow
+    first agent looks frozen. With it on, ``.invoke`` streams under the hood (the
+    aggregated result still carries the full text + tool calls, so tool-calling and
+    the final report are unchanged), and the reasoning card grows token-by-token.
+
+    Overridable: pass ``streaming=False`` to fall back to the old reveal-at-end
+    behavior (a provider/route that can't stream) without touching call sites. When
+    streaming is on and the provider supports it, request usage inside the stream so
+    cost tracking (``UsageMetadataCallbackHandler``) keeps getting ``usage_metadata``.
+    """
+    streaming = kwargs.get("streaming", True)
+    llm_kwargs["streaming"] = streaming
+    if streaming and supports_stream_usage:
+        llm_kwargs.setdefault("stream_usage", kwargs.get("stream_usage", True))
+
+
 class BaseLLMClient(ABC):
     """Abstract base class for LLM clients."""
 

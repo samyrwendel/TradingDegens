@@ -3,7 +3,7 @@ from typing import Any
 
 from langchain_openai import AzureChatOpenAI
 
-from .base_client import BaseLLMClient, normalize_content
+from .base_client import BaseLLMClient, apply_streaming, normalize_content
 
 _PASSTHROUGH_KWARGS = (
     "timeout", "max_retries", "api_key", "reasoning_effort", "temperature",
@@ -43,6 +43,10 @@ class AzureOpenAIClient(BaseLLMClient):
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
+
+        # Streaming pro raciocínio ao vivo (task 011); Azure é família OpenAI e
+        # aceita stream_usage pra manter o custo. Overridable via streaming=False.
+        apply_streaming(llm_kwargs, self.kwargs, supports_stream_usage=True)
 
         return NormalizedAzureChatOpenAI(**llm_kwargs)
 

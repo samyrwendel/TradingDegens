@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 
 from .api_key_env import get_api_key_env
-from .base_client import BaseLLMClient, normalize_content
+from .base_client import BaseLLMClient, apply_streaming, normalize_content
 from .capabilities import get_capabilities
 from .validators import validate_model
 
@@ -331,6 +331,10 @@ class OpenAIClient(BaseLLMClient):
             if key == "reasoning_effort" and not _supports_reasoning_effort(self.model):
                 continue
             llm_kwargs[key] = self.kwargs[key]
+
+        # Stream tokens so the live-reasoning card grows in real time (task 011);
+        # stream_usage keeps cost tracking intact. Overridable via streaming=False.
+        apply_streaming(llm_kwargs, self.kwargs, supports_stream_usage=True)
 
         # The subclass (provider quirks) comes from the registry spec.
         return chat_cls(**llm_kwargs)
