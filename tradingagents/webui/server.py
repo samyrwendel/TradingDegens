@@ -43,7 +43,7 @@ import os
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from tradingagents.webui.auth import OwnerAuth
 from tradingagents.webui.errors import (
@@ -386,6 +386,24 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json({"error": self._redact_key(str(exc))}, 400)
         except Exception as exc:
+            self._send_json({"error": self._redact_key(f"{type(exc).__name__}: {exc}")}, 500)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        # Remover um ATIVO da lista lateral (watchlist): apaga do histórico todas
+        # as análises salvas daquele ticker. A lista é por ativo, então o × remove
+        # o ativo inteiro. Idempotente (removed=0 se já não existe).
+        path = urlparse(self.path).path
+        try:
+            if path.startswith("/api/history/"):
+                ticker = unquote(path[len("/api/history/"):]).strip()
+                if not ticker:
+                    self._send_json({"error": "informe um ticker"}, 400)
+                    return
+                removed = self.runner.delete_ticker(ticker)
+                self._send_json({"ok": True, "ticker": ticker.upper(), "removed": removed})
+            else:
+                self._send_json({"error": "não encontrado"}, 404)
+        except Exception as exc:  # never leak a stack to the socket as HTML
             self._send_json({"error": self._redact_key(f"{type(exc).__name__}: {exc}")}, 500)
 
     def log_message(self, fmt, *args) -> None:  # keep the journal readable

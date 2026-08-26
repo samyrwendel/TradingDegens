@@ -1300,6 +1300,12 @@ class AnalysisRunner:
         persisted = [r for r in self.store.recent(limit) if r.get("run_id") not in seen]
         return live + persisted
 
+    def delete_ticker(self, ticker: str) -> int:
+        """Remove do histórico persistido todas as análises de um ticker (a lista
+        lateral é por ativo). Runs em andamento (em memória) não são tocados —
+        eles voltam à lista ao terminar. Retorna quantas foram removidas."""
+        return self.store.delete_ticker(ticker)
+
     def search_symbols(self, term: str, limit: int = 8) -> list[dict[str, Any]]:
         """Autocomplete candidates for a name-or-ticker term (fail-open)."""
         return fetch_symbol_search(term, limit)

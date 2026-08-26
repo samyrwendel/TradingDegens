@@ -59,6 +59,54 @@ class HistoryStore:
                 break
         return out
 
+    def delete_ticker(self, ticker: str) -> int:
+        """Remove every run of ``ticker`` from the index and delete its JSON files.
+
+        The sidebar is a per-asset list, so the UI's "×" removes the whole asset.
+        Rewrites ``index.jsonl`` atomically keeping the other lines; unlinks each
+        removed run file best-effort. Returns how many index entries were dropped.
+        Unreadable index lines are preserved untouched.
+        """
+        target = (ticker or "").strip().upper()
+        if not target:
+            return 0
+        with self._lock:
+            if not self.index_path.exists():
+                return 0
+            with open(self.index_path, "r", encoding="utf-8") as fh:
+                lines = fh.readlines()
+            kept: list[str] = []
+            removed_ids: set[str] = set()
+            removed = 0
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    rec = json.loads(stripped)
+                except json.JSONDecodeError:
+                    kept.append(line if line.endswith("\n") else line + "\n")
+                    continue
+                if (rec.get("ticker") or "").strip().upper() == target:
+                    removed += 1
+                    rid = rec.get("run_id")
+                    if rid:
+                        removed_ids.add(str(rid))
+                else:
+                    kept.append(line if line.endswith("\n") else line + "\n")
+            if not removed:
+                return 0
+            tmp = self.index_path.with_suffix(self.index_path.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.writelines(kept)
+            os.replace(tmp, self.index_path)
+            for rid in removed_ids:
+                try:
+                    (self.runs_dir / f"{rid}.json").unlink()
+                except OSError:
+                    pass
+        return removed
+
     def get(self, run_id: str) -> dict[str, Any] | None:
         """Load a full run record by id, or ``None`` if unknown."""
         path = self.runs_dir / f"{run_id}.json"

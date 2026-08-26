@@ -43,3 +43,30 @@ def test_get_unknown_returns_none(tmp_path):
 
 def test_recent_empty_when_no_history(tmp_path):
     assert HistoryStore(tmp_path).recent() == []
+
+
+def test_delete_ticker_removes_all_runs_and_files(tmp_path):
+    # A lista lateral é por ATIVO, então o × remove o ativo inteiro (todas as
+    # análises daquele ticker). Some do índice E os arquivos de run são apagados.
+    store = HistoryStore(tmp_path)
+    store.save(_rec("m1", "MCD", "Buy"))
+    store.save(_rec("m2", "MCD", "Hold"))   # segundo run do MESMO ativo
+    store.save(_rec("b1", "BTC", "Buy"))
+    removed = store.delete_ticker("mcd")     # case-insensitive
+    assert removed == 2
+    assert [r["run_id"] for r in store.recent()] == ["b1"]
+    assert store.get("m1") is None and store.get("m2") is None
+    assert store.get("b1") is not None
+    assert not (store.runs_dir / "m1.json").exists()
+    assert not (store.runs_dir / "m2.json").exists()
+    assert (store.runs_dir / "b1.json").exists()
+
+
+def test_delete_ticker_idempotent_and_guards(tmp_path):
+    store = HistoryStore(tmp_path)
+    store.save(_rec("b1", "BTC", "Buy"))
+    assert store.delete_ticker("NADA") == 0   # ticker inexistente
+    assert store.delete_ticker("") == 0       # vazio é no-op
+    assert store.delete_ticker("BTC") == 1
+    assert store.delete_ticker("BTC") == 0    # idempotente
+    assert store.recent() == []

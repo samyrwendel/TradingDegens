@@ -2164,13 +2164,30 @@ function paintHistory() {
     } else {
       vHtml = verdictHtml(v);
       vClass = verdictClass(v).replace("verdict", "").trim();
-      const when = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
-      meta = `${when} · ${fmtCost({ usd: r.cost_usd || 0 })} · ${r.elapsed || 0}s`;
+      // Watchlist densa (task 009): a coluna estreita da lateral só comporta
+      // veredito + DATA à direita sem espremer o nome da empresa. Custo/tempo
+      // seguem visíveis no cabeçalho da análise aberta (Custo/Tempo), não aqui.
+      meta = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
     }
-    return `<li data-id="${escapeHtml(r.run_id)}" class="${running ? "is-running" : ""}">` +
-      `<span class="h-ticker">${tickerLabelHtml(r.ticker)}${badge}${flagHtml}</span>` +
-      `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : v)}">${vHtml}</span>` +
-      `<span class="h-meta">${meta}</span>` +
+    // watchlist: ticker em negrito + nome cinza (2 linhas) à esquerda; veredito +
+    // meta empilhados à direita; × discreto pra remover (só em run já concluído —
+    // não se remove uma análise em andamento).
+    const t = (r.ticker || "").toUpperCase();
+    const co = _nameCache.get(t);
+    const coHtml = co ? `<span class="tk-co">${escapeHtml(co)}</span>` : "";
+    const rm = running ? "" :
+      `<button type="button" class="h-remove" data-ticker="${escapeHtml(t)}" ` +
+      `title="Remover ${escapeHtml(t)} do histórico" aria-label="Remover ${escapeHtml(t)}">×</button>`;
+    return `<li data-id="${escapeHtml(r.run_id)}" data-ticker="${escapeHtml(t)}" class="${running ? "is-running" : ""}">` +
+      `<span class="h-ticker">` +
+        `<span class="h-sym"><span class="tk-sym">${escapeHtml(t || "?")}</span>${badge}${flagHtml}</span>` +
+        coHtml +
+      `</span>` +
+      `<span class="h-right">` +
+        `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : v)}">${vHtml}</span>` +
+        `<span class="h-meta">${meta}</span>` +
+      `</span>` +
+      rm +
       `</li>`;
   };
   const filtered = _historyFilter === "all"
@@ -2189,10 +2206,27 @@ function paintHistory() {
   [...ul.children].forEach((li) => {
     const id = li.getAttribute("data-id");
     if (id) li.addEventListener("click", () => openRun(id));
+    const rm = li.querySelector(".h-remove");
+    if (rm) rm.addEventListener("click", (ev) => {
+      ev.stopPropagation();   // não abrir a análise ao clicar no ×
+      removeTicker(rm.getAttribute("data-ticker"));
+    });
   });
   // Resolve os nomes que faltam e re-pinta UMA vez quando chegam (cacheado → o
   // segundo ensureNames não muda nada e o loop para).
   ensureNames([...seen.keys()]).then((changed) => { if (changed) paintHistory(); });
+}
+
+// Remove um ATIVO da lista lateral (a linha é por ticker): apaga do histórico
+// todas as análises salvas daquele ativo. Confirma antes (é destrutivo) e re-carrega.
+async function removeTicker(ticker) {
+  const t = (ticker || "").toUpperCase();
+  if (!t) return;
+  if (!confirm(`Remover ${t} do histórico? As análises salvas deste ativo serão apagadas.`)) return;
+  try {
+    const res = await fetch("/api/history/" + encodeURIComponent(t), { method: "DELETE" });
+    if (res.ok) await loadHistory();
+  } catch (e) { /* fonte fora do ar: mantém a lista como está */ }
 }
 
 async function openRun(runId) {
