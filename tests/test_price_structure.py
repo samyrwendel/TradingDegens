@@ -99,6 +99,59 @@ def test_detects_123_reversal(synth):
     assert p.p1["date"] < p.p2["date"] < p.p3["date"]
 
 
+def _retraced_frame() -> pd.DataFrame:
+    """Um 1-2-3 de compra que ROMPEU o gatilho e depois RETRAÇOU pra baixo dele —
+    o preço atual fica ABAIXO do gatilho (o caso real 313,44 ≤ 334,7 do bug 014)."""
+    closes: list[float] = []
+    closes += [100 + i for i in range(60)]
+    closes += [156, 150, 146, 150, 156]
+    closes += [162 + i for i in range(20)]
+    closes += [175, 168, 160, 150, 145]           # L1 ~145
+    closes += [150, 160, 172, 185, 190]           # P2 ~190 (gatilho na máxima)
+    closes += [182, 175, 168, 162, 166]           # L3 ~162 (> L1)
+    closes += [192, 198, 205, 200, 188, 182, 178, 176]  # rompeu e voltou < gatilho
+    dates = pd.bdate_range("2025-01-01", periods=len(closes))
+    c = pd.Series(closes, dtype=float)
+    return pd.DataFrame({
+        "Date": dates.strftime("%Y-%m-%d"),
+        "Open": c.shift(1).fillna(c).values,
+        "High": (c * 1.01).values,
+        "Low": (c * 0.99).values,
+        "Close": c.values,
+        "Volume": [1000] * len(c),
+    })
+
+
+@pytest.mark.unit
+def test_123_broke_then_retraced_is_not_acionado(monkeypatch):
+    """Bug 014: 'acionado' tem que refletir o preço ATUAL. Um 1-2-3 que rompeu e
+    depois retraçou pra baixo do gatilho NÃO é 'acionado' seco — vira
+    'rompeu_retracou'; e o checker (acionado_incoerente) NÃO flag esse caso (os
+    dois concordam)."""
+    df = _retraced_frame()
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
+    s = ps.detect_price_structure("SYN", CURR)
+    p = s.pattern
+    assert p is not None and p.direction == "compra"
+    assert df["Close"].iloc[-1] < p.trigger          # preço atual ABAIXO do gatilho
+    assert p.state == "rompeu_retracou"              # antes marcava 'acionado' (enganoso)
+
+    # markdown honesto: não diz 'acionado' seco pra esse padrão
+    md = ps.build_price_structure_section("SYN", CURR)
+    assert "rompeu e retraçou" in md
+
+    # o checker concorda: sem acionado_incoerente pra o estado retraçado
+    from tradingagents.webui.contradiction_checker import _check_pattern_123
+    result = {
+        "as_of_price": float(df["Close"].iloc[-1]),
+        "price_chart": {"markers": {"pattern_123": {
+            "state": p.state, "trigger": p.trigger, "direction": p.direction}}},
+        "market_report": "",
+    }
+    codes = [f["code"] for f in _check_pattern_123(result)]
+    assert "acionado_incoerente" not in codes
+
+
 @pytest.mark.unit
 def test_detects_123_de_venda(top):
     """Descending-top 1-2-3: H -> L -> lower H, trigger = break BELOW point 2's low."""

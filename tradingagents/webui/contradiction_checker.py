@@ -70,6 +70,8 @@ def _pt_number(token: str) -> float | None:
 
 def _money_to_units(value: float, unit: str) -> float:
     u = (unit or "").lower()
+    if u.startswith(("t", "tri")) or "trilh" in u:
+        return value * 1e12
     if u.startswith(("b", "bi")) or "bilh" in u:
         return value * 1e9
     if u.startswith(("m", "mi")) or "milh" in u:
@@ -245,15 +247,24 @@ def _anchor_fcf_ttm(result: dict[str, Any]) -> float | None:
     text = result.get("fundamentals_report") or ""
     if not isinstance(text, str):
         return None
-    m = re.search(r"FCF TTM[^:\n]*:\s*(-?[\d.,]+)", text)
-    return _pt_number(m.group(1)) if m else None
+    # O agregado agora vem com magnitude ("FCF TTM (soma de ...): US$ 136.68 bilhões"),
+    # então captura número + palavra e converte pra unidades absolutas — mesma
+    # semântica do que o agente cita, pra os dois compararem na mesma escala (bug 014).
+    m = re.search(
+        r"FCF TTM[^:\n]*:\s*(-?\s*(?:US\$\s*)?[\d.,]+)\s*(trilh\w*|bilh\w*|milh\w*|tri|bi|mi|b|m|k)?",
+        text, re.IGNORECASE,
+    )
+    if not m:
+        return None
+    num = _pt_number(m.group(1))
+    return _money_to_units(num, m.group(2) or "") if num is not None else None
 
 
 def _cited_fcf_ttm(result: dict[str, Any]) -> list[tuple[str, float]]:
     """Every 'FCF ... TTM ... value' cited in prose, in absolute currency units."""
     out: list[tuple[str, float]] = []
     pat = re.compile(
-        r"FCF[^.\n]{0,40}?(-?\s*(?:US\$\s*)?[\d.,]+)\s*(bilh\w*|milh\w*|mil|bi|mi|b|m|k)?"
+        r"FCF[^.\n]{0,40}?(-?\s*(?:US\$\s*)?[\d.,]+)\s*(trilh\w*|bilh\w*|milh\w*|tri|mil|bi|mi|b|m|k)?"
         r"[^.\n]{0,20}?TTM",
         re.IGNORECASE,
     )

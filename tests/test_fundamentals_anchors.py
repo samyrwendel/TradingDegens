@@ -130,8 +130,28 @@ def test_render_anchors_section_carries_numbers_and_rule():
     assert "Âncoras determinísticas" in md
     assert "TTM = soma dos 4 trimestres mais recentes" in md
     assert "113,15".replace(",", ".") in md or "113.15" in md
-    assert "-601" in md              # the computed FCF TTM, not -887
+    # FCF TTM computado ≈ -601 (dados de teste pequenos), agora com prefixo US$
+    # (bug 014); é o valor computado (-601), não -887.
+    assert "-US$ 601" in md
     assert "Cite APENAS estes números" in md
+    assert "PALAVRA DE MAGNITUDE" in md   # instrui o agente a citar a magnitude
+
+
+@pytest.mark.unit
+def test_aggregates_render_with_explicit_magnitude_word():
+    """Bug 014: agregados grandes saem com a PALAVRA de magnitude (bilhões/milhões),
+    não o número cru que fazia o agente escalar 1000× (136 bi → 136 tri)."""
+    md = fa.render_anchors_section(
+        {"price": 313.44, "market_cap": 3_500_000_000_000, "shares": 15_000_000_000},
+        {"fcf_ttm": 136_683_000_000, "ocf_ttm": 150_000_000_000,
+         "capex_ttm": -13_200_000_000, "quarters": ["Q1", "Q2", "Q3", "Q4"]})
+    assert "US$ 136.68 bilhões" in md       # não "136,683,000,000" cru
+    assert "-US$ 13.20 bilhões" in md       # capex negativo com magnitude
+    assert "US$ 3.50 trilhões" in md        # market cap em trilhões
+    # e o checker parseia o agregado da âncora de volta na mesma escala
+    from tradingagents.webui.contradiction_checker import _anchor_fcf_ttm
+    parsed = _anchor_fcf_ttm({"fundamentals_report": md})
+    assert parsed is not None and abs(parsed - 136_683_000_000) / 136_683_000_000 < 0.01
 
 
 @pytest.mark.unit

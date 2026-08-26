@@ -127,6 +127,13 @@ const PAT_DIR = {
   compra: ["🟢", "de compra", "fundo ascendente"],
   venda: ["🔴", "de venda", "topo descendente"],
 };
+// rótulo pt-BR do estado do gatilho 1-2-3 (task 014) — "rompeu_retracou" é token
+// de máquina; aqui vira texto legível pra nota do gráfico não mostrar o snake_case.
+const PAT_STATE = {
+  acionado: "acionado",
+  formando: "em formação",
+  rompeu_retracou: "rompeu e retraçou (não confirmado)",
+};
 
 // "2025-08-14" -> "14/08" sem passar por Date() (evita re-shift de timezone).
 function fmtDate(iso) {
@@ -1209,7 +1216,7 @@ function renderChartCard(chart, ticker, actionable) {
   if (pat) {
     const [demo, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     const verb = pat.direction === "venda" ? "perda de" : "rompimento de";
-    notes.push(`${demo} Padrão 1-2-3 ${dlabel}: gatilho ${verb} ${fmtNum(pat.trigger)} — <b>${pat.state}</b>.`);
+    notes.push(`${demo} Padrão 1-2-3 ${dlabel}: gatilho ${verb} ${fmtNum(pat.trigger)} — <b>${PAT_STATE[pat.state] || pat.state}</b>.`);
   }
   if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");

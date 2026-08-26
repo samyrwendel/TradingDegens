@@ -135,7 +135,25 @@ def price_snapshot(
 
 
 def _money(v: float | None) -> str:
-    return "não disponível" if v is None else f"{v:,.0f}"
+    """Formata um agregado em USD com a PALAVRA DE MAGNITUDE explícita (bug 014).
+
+    O número cru (``136683000000``) deixava o agente re-escalar: o bull citou
+    "136,683 trilhões" em vez de "136,68 bilhões" (1000×). Injetar a magnitude
+    inline ("US$ 136.68 bilhões" / "-US$ 601.31 milhões") remove a ambiguidade — os
+    agentes são instruídos a citar essa string exata. O separador decimal segue o
+    resto do bloco de âncoras (en-US, ponto), pra casar com os preços ao lado.
+    """
+    if v is None:
+        return "não disponível"
+    sign = "-" if v < 0 else ""
+    a = abs(float(v))
+    if a >= 1e12:
+        return f"{sign}US$ {a / 1e12:,.2f} trilhões"
+    if a >= 1e9:
+        return f"{sign}US$ {a / 1e9:,.2f} bilhões"
+    if a >= 1e6:
+        return f"{sign}US$ {a / 1e6:,.2f} milhões"
+    return f"{sign}US$ {a:,.0f}"       # < 1 milhão: número cru (raro pra esses agregados)
 
 
 def render_anchors_section(
@@ -157,7 +175,9 @@ def render_anchors_section(
         f"_Calculado da série date-guarded e da tabela trimestral (até {as_of}). "
         "Cite APENAS estes números para preço atual, market cap, mínima/máxima de 52 "
         "semanas e agregados TTM — não leia uma cotação live diferente nem some os "
-        "trimestres na mão. TTM = soma dos 4 trimestres mais recentes._",
+        "trimestres na mão. Os agregados (market cap, FCF/FCO/Capex TTM) já vêm com a "
+        "PALAVRA DE MAGNITUDE (bilhões/milhões) — cite-a EXATAMENTE, não re-escale (um "
+        "valor em bilhões NÃO é trilhões). TTM = soma dos 4 trimestres mais recentes._",
         "",
     ]
     if has_price:

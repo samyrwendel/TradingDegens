@@ -201,7 +201,7 @@ class Pattern123:
     p2: dict[str, Any]
     p3: dict[str, Any]
     trigger: float
-    state: str  # "acionado" | "formando"
+    state: str  # "acionado" | "rompeu_retracou" | "formando"
     direction: str  # "compra" (bottom) | "venda" (top)
 
     def as_dict(self) -> dict[str, Any]:
@@ -425,13 +425,31 @@ def _pattern_123(
         return None
     p1, p2, p3, direction = best
 
+    # "acionado" tem que refletir o preço ATUAL, não só a história (bug 014): antes
+    # bastava QUALQUER barra pós-ponto-3 romper o gatilho pra marcar 'acionado' — um
+    # 1-2-3 que rompeu lá atrás e retraçou (preço 313,44 ≤ gatilho 334,7) ficava
+    # "acionado" enganoso. Agora: rompeu E o preço segue do lado rompido = acionado;
+    # rompeu mas voltou = "rompeu_retracou"; nunca rompeu = "formando".
+    last_close = round(float(df["Close"].astype(float).iloc[-1]), 2)
     if direction == "compra":
         trigger = round(float(hi.iloc[p2]), 2)                 # rompe a máxima do ponto 2
-        state = "acionado" if (hi.iloc[p3 + 1:] > trigger).any() else "formando"
+        broke = bool((hi.iloc[p3 + 1:] > trigger).any())
+        if not broke:
+            state = "formando"
+        elif last_close > trigger:
+            state = "acionado"                                 # rompeu e o preço segue acima
+        else:
+            state = "rompeu_retracou"                          # rompeu mas voltou abaixo do gatilho
         pt_kinds = ("L", "H", "L")
     else:
         trigger = round(float(lo.iloc[p2]), 2)                 # perde a mínima do ponto 2
-        state = "acionado" if (lo.iloc[p3 + 1:] < trigger).any() else "formando"
+        broke = bool((lo.iloc[p3 + 1:] < trigger).any())
+        if not broke:
+            state = "formando"
+        elif last_close < trigger:
+            state = "acionado"                                 # perdeu e o preço segue abaixo
+        else:
+            state = "rompeu_retracou"                          # perdeu mas voltou acima do gatilho
         pt_kinds = ("H", "L", "H")
 
     def pt(idx: int, kind: str) -> dict[str, Any]:
@@ -567,8 +585,12 @@ def build_price_structure_section(
         p = s.pattern
         if p.direction == "venda":
             lines.append("### Padrão 1-2-3 de venda")
-            gatilho = "**acionado** (perdeu a mínima do ponto 2)" if p.state == "acionado" \
-                else "**em formação** (ainda não perdeu a mínima do ponto 2)"
+            if p.state == "acionado":
+                gatilho = "**acionado** (perdeu a mínima do ponto 2 e o preço segue abaixo)"
+            elif p.state == "rompeu_retracou":
+                gatilho = "**perdeu e voltou** (perdeu a mínima do ponto 2 mas o preço voltou acima do gatilho — sinal não confirmado)"
+            else:
+                gatilho = "**em formação** (ainda não perdeu a mínima do ponto 2)"
             lines += [
                 f"- **Ponto 1** (topo): {p.p1['date']} — {p.p1['price']:,.2f}",
                 f"- **Ponto 2** (repique / mínima): {p.p2['date']} — {p.p2['price']:,.2f}",
@@ -578,8 +600,12 @@ def build_price_structure_section(
             ]
         else:
             lines.append("### Padrão 1-2-3 de compra")
-            gatilho = "**acionado** (rompeu a máxima do ponto 2)" if p.state == "acionado" \
-                else "**em formação** (ainda não rompeu a máxima do ponto 2)"
+            if p.state == "acionado":
+                gatilho = "**acionado** (rompeu a máxima do ponto 2 e o preço segue acima)"
+            elif p.state == "rompeu_retracou":
+                gatilho = "**rompeu e retraçou** (rompeu a máxima do ponto 2 mas o preço voltou abaixo do gatilho — sinal não confirmado)"
+            else:
+                gatilho = "**em formação** (ainda não rompeu a máxima do ponto 2)"
             lines += [
                 f"- **Ponto 1** (fundo): {p.p1['date']} — {p.p1['price']:,.2f}",
                 f"- **Ponto 2** (repique / máxima): {p.p2['date']} — {p.p2['price']:,.2f}",
@@ -826,7 +852,9 @@ def build_actionable_plan(
             "label": f"recuo até {buy_zone['label'].split(' —')[0]} (média subindo)",
             "price": buy_zone["price"],
         }
-    elif struct.pattern is not None and struct.pattern.state == "formando":
+    elif struct.pattern is not None and struct.pattern.state in ("formando", "rompeu_retracou"):
+        # "formando" (nunca rompeu) e "rompeu_retracou" (rompeu e voltou) têm o preço
+        # do lado NÃO rompido do gatilho → em ambos o que se espera é o rompimento.
         setup_state = "aguardar_rompimento"
         pullback_is_trigger = True  # a trigger is a line, not a zone → stays a point
         if struct.pattern.direction == "venda":
