@@ -632,6 +632,19 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .theses { grid-template-columns: 1fr; }
   .launcher form { flex-direction: column; align-items: stretch; }
   .field input { min-width: 0; width: 100%; }
+  /* iOS Safari: input[type=date] com appearance nativa centraliza o valor
+     ('26 de ago. de 2026') e mantém uma largura intrínseca que estoura o
+     container. Normaliza pra caber (width:100% + min-width:0 vencendo o
+     #date{min-width:170px} da linha 131) e alinhar o valor igual ao ATIVO.
+     Escopo mobile: no desktop o input mantém o ícone de calendário nativo. */
+  #date {
+    min-width: 0;
+    -webkit-appearance: none;
+    appearance: none;
+    text-align: left;
+  }
+  #date::-webkit-date-and-time-value { text-align: left; margin: 0; }
+  #date::-webkit-datetime-edit { padding: 0; }
   #runBtn { width: 100%; }
   .act-grid { grid-template-columns: 1fr; }
 
