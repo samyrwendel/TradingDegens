@@ -198,6 +198,11 @@ details.section.erick > summary { color: #9cc7f5; }
 .tk-card {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--panel-2); overflow: hidden;
+  /* NÃO encolher (bug 013): como .thinking-live é um flex column de altura fixa,
+     o flex-shrink padrão espremia cada card pra caber e o overflow:hidden CORTAVA
+     o texto — sem rolagem pra ler. Com flex:none cada card mantém a altura natural
+     (conteúdo COMPLETO) e quem rola é o container (.thinking-live). */
+  flex: 0 0 auto;
 }
 .tk-sum {
   cursor: pointer; list-style: none; padding: 9px 13px;
