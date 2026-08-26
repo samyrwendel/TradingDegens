@@ -226,3 +226,71 @@ def test_server_login_detected_and_disconnect_preserves_cli_creds(live, monkeypa
     # registro do app removido; creds do CLI da box BYTE-A-BYTE intactas
     assert sub.token(provider="openai") is None
     assert cli_creds.read_text() == cli_body
+
+
+# --------- sessão de dono perdida no restart degrada com dignidade (BUG task 023) ---
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_owner_session_lost_on_restart_degrades_gracefully(tmp_path):
+    """O print do bug: dono logado clica "Conectar com Google" e leva "acesso restrito
+    ao dono". A causa NÃO é falta de credentials no fetch (o cookie vai) — é que o
+    servidor REINICIOU (deploy da 022) e as sessões, em memória por design, zeraram; a
+    página, aberta desde antes, ainda se achava logada. O oauth/start aceita o dono com
+    sessão válida (ver test_each_oauth_button_opens_correct_authorize_url); o que faltava
+    era a UI reagir ao owner_only: cair pro login em vez de mostrar o enigma. Aqui
+    simulamos o restart limpando as sessões do servidor com o MESMO cookie no browser."""
+    # A senha do dono é lida por OwnerAuth() no __init__ → setar a env ANTES de construí-lo.
+    os.environ["TRADINGDEGENS_OWNER_TOKEN"] = "senha-dono"
+    # detecção do CLI aponta pra caminhos inexistentes → nada "conectado por servidor"
+    os.environ["TRADINGDEGENS_CODEX_AUTH_FILE"] = str(tmp_path / "no-codex.json")
+    os.environ["TRADINGDEGENS_CLAUDE_CREDS_FILE"] = str(tmp_path / "no-claude.json")
+    os.environ["TRADINGDEGENS_GEMINI_DIR"] = str(tmp_path / "no-gemini")
+    auth = OwnerAuth()
+    runner = AnalysisRunner(
+        base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
+                     "deep_think_llm": "gpt-5.5", "quick_think_llm": "gpt-5.4-mini"},
+        store=HistoryStore(tmp_path))
+    sub = SubscriptionStore(tmp_path / "sub.json")
+    httpd = make_server("127.0.0.1", 0, runner=runner, auth=auth, subscription=sub)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=_ARGS)
+            page = browser.new_page(viewport={"width": 1100, "height": 900})
+            _login_owner(page, base)
+            page.wait_for_selector(f"{_row('google')} .sub-oauth-btn")
+
+            # RESTART: o servidor esquece as sessões (o cookie do browser continua o mesmo)
+            auth._sessions.clear()
+
+            # o dono clica "Conectar com Google" → oauth/start responde 403 owner_only
+            page.evaluate("window.__opened=null; window.open=(u)=>{window.__opened=u; return null;};")
+            page.click(f"{_row('google')} .sub-oauth-btn")
+
+            # NÃO abre OAuth com sessão morta; a UI cai pro login e explica (nada de enigma)
+            page.wait_for_selector("#ownerLoggedOut:not(.hidden)")
+            page.wait_for_selector("#subscriptionBox", state="hidden")
+            status = page.inner_text("#ownerStatus")
+            assert "expirou" in status.lower(), status
+            assert page.evaluate("window.__opened") is None
+            _shot(page, "06-sessao-expirada-cai-pro-login.png")
+
+            # RECUPERAÇÃO: reloga (sessão nova, válida) e o MESMO botão passa — prova que
+            # oauth/start aceita o dono; o problema era só a sessão morta, não o caminho.
+            page.evaluate("""async () => {
+              await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'},
+                credentials:'same-origin', body: JSON.stringify({password:'senha-dono'})});
+              await applyConfig(); renderConfigPanel();
+            }""")
+            page.wait_for_selector("#subscriptionBox:not(.hidden)")
+            page.evaluate("window.__opened=null; window.open=(u)=>{window.__opened=u; return null;};")
+            page.click(f"{_row('google')} .sub-oauth-btn")
+            page.wait_for_function("() => window.__opened && window.__opened.length > 0")
+            assert "accounts.google.com/o/oauth2/v2/auth" in page.evaluate("window.__opened")
+            browser.close()
+    finally:
+        httpd.shutdown()
+        for k in ("TRADINGDEGENS_OWNER_TOKEN", "TRADINGDEGENS_CODEX_AUTH_FILE",
+                  "TRADINGDEGENS_CLAUDE_CREDS_FILE", "TRADINGDEGENS_GEMINI_DIR"):
+            os.environ.pop(k, None)

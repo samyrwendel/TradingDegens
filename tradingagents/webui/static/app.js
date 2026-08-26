@@ -2521,7 +2521,12 @@ function _subRow(key) {
 async function refreshSubscriptionStatus() {
   try {
     const res = await fetch("/api/subscription/status", { credentials: "same-origin" });
-    if (!res.ok) return;                                   // não-dono/erro: silêncio
+    if (!res.ok) {
+      // 403 owner_only enquanto a UI se acha dona = sessão morta no restart: cai pro
+      // login em vez de deixar o estado velho na tela (fica coerente com os cliques).
+      if (res.status === 403) handleOwnerSessionLost(res, await res.json().catch(() => ({})));
+      return;                                              // não-dono/erro: silêncio
+    }
     const s = await res.json();
     const providers = s.providers || {};
     SUB_PROVIDERS.forEach((p) => applySubRowState(p, providers[p.key] || {}));
@@ -2553,6 +2558,30 @@ function applySubRowState(meta, info) {
   }
 }
 
+// Sessão de dono expirada (o servidor reinicia — deploy da 022 — e as sessões, em
+// memória por design [auth.py], zeram): um endpoint só-dono responde 403 owner_only
+// enquanto a UI, aberta desde antes do restart, ainda se acha logada. É POR ISSO que
+// "Conectar com Google" mostrava "acesso restrito ao dono" mesmo com o dono logado —
+// o cookie de sessão morreu no restart, não faltou credentials na chamada. Em vez de
+// prender esse enigma numa seção que vai sumir, reflete a verdade: cai pro estado
+// deslogado e pede login de novo — aí a ação volta a funcionar (o oauth/start aceita
+// o dono com sessão válida). Retorna true se tratou (o chamador não mostra o erro cru).
+function handleOwnerSessionLost(res, data) {
+  if (!_isOwner) return false;                                  // já deslogado: nada a fazer
+  if (!res || res.status !== 403) return false;
+  if (!data || data.error_code !== "owner_only") return false;
+  _isOwner = false;
+  renderConfigPanel();          // esconde a assinatura e mostra o login do dono
+  const st = $("ownerStatus");
+  if (st) {
+    st.textContent = "⚠️ Sua sessão expirou (o servidor reiniciou). Entre de novo pra conectar assinaturas.";
+    st.className = "cfg-status err";
+  }
+  const pass = $("ownerPass");
+  if (pass) pass.focus();
+  return true;
+}
+
 // Conectar via LINK (task 019, por provedor): pede a URL de autorização ao servidor
 // (owner-gated), abre o login oficial do provedor numa nova aba (ação principal =
 // ABRIR O LINK, não colar token) e faz poll do status até conectar. O segredo
@@ -2573,6 +2602,7 @@ async function subscriptionOAuthStart(provider) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.authorize_url) {
+      if (handleOwnerSessionLost(res, data)) return;   // sessão caiu no restart: já pedimos re-login
       if (st) { st.textContent = "❌ " + (data.error || "não deu pra iniciar"); st.className = "cfg-status sub-status err"; }
       return;
     }
@@ -2627,6 +2657,8 @@ async function subscriptionConnect(provider) {
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.connected) {
       st.textContent = "✅ assinatura conectada"; st.className = "cfg-status sub-status ok";
+    } else if (handleOwnerSessionLost(res, data)) {
+      return;                                 // sessão caiu no restart: já pedimos re-login
     } else {
       st.textContent = "❌ " + (data.error || "falhou"); st.className = "cfg-status sub-status err";
     }

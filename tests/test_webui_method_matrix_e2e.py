@@ -128,21 +128,41 @@ def _seed(page, ticker, tf, open_view):
     page.evaluate(_SEED_JS, [ticker, tf, open_view, TODAY, OPEN_DATE])
 
 
+def _drain_analyze(page):
+    """Deixa a ``renderProgress()`` DEFERIDA (disparada por um POST /api/analyze) rodar
+    antes de a matriz semear o próximo estado.
+
+    O handler do launcher (``startAnalysis``) e o da barra (``runReanalyze``) só chamam
+    ``renderProgress`` — que ESCONDE a barra de reanálise — DEPOIS do ``await
+    res.json()``. Ou seja: quando o clique retorna (a requisição só foi ENVIADA), esse
+    ``renderProgress`` ainda está pendente. Se ele disparar DEPOIS do ``_seed`` seguinte
+    (que remostra a barra), a barra some no meio da matriz e o clique no TF acha o botão
+    "não visível" (timeout de 30s). Não é regressão da barra — ela renderiza e funciona;
+    é uma corrida do harness sintético (semear via JS enquanto um POST está em voo),
+    agravada sob carga. Dois ticks de macrotarefa drenam o ``.then`` pendente ANTES do
+    próximo semear, tornando o ``_seed`` o último a tocar a barra."""
+    page.evaluate("() => new Promise(r => setTimeout(() => setTimeout(r, 0), 0))")
+
+
 def _bar_post(page, ticker, tf, method, open_view="padrao"):
     """Semeia a barra, clica TF depois método, devolve o corpo do POST interceptado."""
     _seed(page, ticker, tf, open_view)
-    page.click(f'#reanalyzeBar button.re-tf[data-retf="{tf}"]')
-    with page.expect_request("**/api/analyze") as ri:
+    tf_btn = page.locator(f'#reanalyzeBar button.re-tf[data-retf="{tf}"]')
+    tf_btn.wait_for(state="visible")   # a barra tem que estar de pé antes de clicar
+    tf_btn.click()
+    with page.expect_response("**/api/analyze") as ri:
         page.click(f'#reanalyzeBar button.re-method[data-method="{method}"]')
-    return json.loads(ri.value.post_data)
+    _drain_analyze(page)               # deixa a renderProgress deferida esconder a barra AGORA
+    return json.loads(ri.value.request.post_data)
 
 
 def _launcher_post(page, ticker):
     page.fill("#ticker", ticker)
     page.fill("#date", TODAY)
-    with page.expect_request("**/api/analyze") as ri:
+    with page.expect_response("**/api/analyze") as ri:
         page.click("#runBtn")
-    return json.loads(ri.value.post_data)
+    _drain_analyze(page)               # idem: drena antes de a matriz semear o 1º estado
+    return json.loads(ri.value.request.post_data)
 
 
 def _expect_bar_body(body, method, tf):
