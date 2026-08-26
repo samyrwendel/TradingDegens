@@ -54,6 +54,26 @@
       </div>
     </div>
 
+    <!-- Conectar assinatura (task 017): SÓ o dono logado vê e usa. O token da
+         assinatura vai por HEADER direto pro servidor e NUNCA fica salvo no
+         navegador além da requisição. Público nem vê (JS) e o endpoint barra 403. -->
+    <div class="subscription-box hidden" id="subscriptionBox">
+      <div class="sub-head">
+        <span class="sub-title">🔗 Conectar assinatura <span class="orig">(OpenAI/ChatGPT)</span></span>
+        <span class="sub-state" id="subState"></span>
+      </div>
+      <p class="owner-lead">
+        Cole o token de acesso da sua assinatura. Ele vai por header direto ao servidor
+        e nunca fica salvo neste navegador; o servidor guarda em arquivo protegido.
+      </p>
+      <div class="owner-login-row">
+        <input id="subToken" type="password" autocomplete="off" placeholder="token de acesso da assinatura" />
+        <button type="button" id="subConnectBtn" class="cfg-test">Conectar</button>
+        <button type="button" id="subDisconnectBtn" class="cfg-clear hidden">Desconectar</button>
+        <span class="cfg-status" id="subStatus"></span>
+      </div>
+    </div>
+
     <div class="config-grid" id="byokGrid">
       <div class="field">
         <label for="cfgProvider">Provedor</label>

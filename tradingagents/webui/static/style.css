@@ -1141,6 +1141,19 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .owner-badge { font-size: var(--fs-14); color: var(--green); font-weight: var(--fw-med); }
 .byok-note { margin: 0 0 10px; color: var(--muted); }
 .byok-optional { opacity: .78; }
+
+/* Conectar assinatura (task 017) — só-dono, reusa a estética da owner-box */
+.subscription-box {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+  margin: 4px 0 14px; background: var(--panel-2);
+}
+.subscription-box .sub-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; margin-bottom: 4px;
+}
+.subscription-box .sub-title { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); color: var(--text); }
+.subscription-box .sub-state { font-size: var(--fs-12); color: var(--muted); white-space: nowrap; }
+.subscription-box .sub-state.ok { color: var(--green); }
 @media (max-width: 640px) {
   .owner-login-row input { min-width: 0; width: 100%; }
 }

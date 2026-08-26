@@ -2429,7 +2429,74 @@ function renderConfigPanel() {
   $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
   syncProviderFields(cur);
   renderOwnerBox();
+  renderSubscriptionBox();
   updateConfigBadge();
+}
+
+// Conectar assinatura (task 017): a seção só aparece pro DONO logado; o público nem
+// a vê (e o endpoint barra 403 no server, defesa real — o esconder é só cosmético).
+function renderSubscriptionBox() {
+  const box = $("subscriptionBox");
+  if (!box) return;
+  if (!_isOwner) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  refreshSubscriptionStatus();
+}
+
+async function refreshSubscriptionStatus() {
+  const state = $("subState");
+  const disc = $("subDisconnectBtn");
+  try {
+    const res = await fetch("/api/subscription/status", { credentials: "same-origin" });
+    if (!res.ok) { if (state) state.textContent = ""; return; }   // não-dono/erro: silêncio
+    const s = await res.json();
+    if (s.connected) {
+      if (state) { state.textContent = "✅ conectada"; state.className = "sub-state ok"; }
+      if (disc) disc.classList.remove("hidden");
+    } else {
+      if (state) { state.textContent = "não conectada"; state.className = "sub-state"; }
+      if (disc) disc.classList.add("hidden");
+    }
+  } catch (e) { /* rede: mantém como está */ }
+}
+
+async function subscriptionConnect() {
+  const input = $("subToken");
+  const btn = $("subConnectBtn");
+  const st = $("subStatus");
+  const token = (input.value || "").trim();
+  if (!token) { st.textContent = "cole o token"; st.className = "cfg-status err"; return; }
+  btn.disabled = true;
+  st.textContent = "conectando…"; st.className = "cfg-status";
+  try {
+    // O token vai por HEADER (nunca querystring/corpo-logado) e é limpo do input já.
+    const res = await fetch("/api/subscription/connect", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-Subscription-Token": token },
+      body: JSON.stringify({ kind: "openai" }),
+    });
+    input.value = "";                       // não retém a credencial no navegador
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.connected) {
+      st.textContent = "✅ assinatura conectada"; st.className = "cfg-status ok";
+    } else {
+      st.textContent = "❌ " + (data.error || "falhou"); st.className = "cfg-status err";
+    }
+  } catch (e) {
+    st.textContent = "❌ erro de rede"; st.className = "cfg-status err";
+  } finally {
+    btn.disabled = false;
+    refreshSubscriptionStatus();
+  }
+}
+
+async function subscriptionDisconnect() {
+  const st = $("subStatus");
+  try {
+    await fetch("/api/subscription/disconnect", { method: "POST", credentials: "same-origin" });
+    st.textContent = "assinatura desconectada"; st.className = "cfg-status";
+  } catch (e) { /* segue */ }
+  refreshSubscriptionStatus();
 }
 
 // Seção de login do dono + visibilidade do BYOK conforme o estado do servidor.
@@ -2605,6 +2672,10 @@ function bindConfig() {
   $("ownerLoginBtn").addEventListener("click", ownerLogin);
   $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
   $("ownerLogoutBtn").addEventListener("click", ownerLogout);
+  // Conectar assinatura (task 017): só-dono (a seção só aparece logado).
+  $("subConnectBtn").addEventListener("click", subscriptionConnect);
+  $("subToken").addEventListener("keydown", (e) => { if (e.key === "Enter") subscriptionConnect(); });
+  $("subDisconnectBtn").addEventListener("click", subscriptionDisconnect);
 }
 
 // Erro de "precisa de chave" (403 need_key): abre a config e aponta o caminho.

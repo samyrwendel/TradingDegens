@@ -45,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from tradingagents.webui import timeutil
 from tradingagents.webui.auth import OwnerAuth
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
@@ -53,6 +54,7 @@ from tradingagents.webui.errors import (
 )
 from tradingagents.webui.models_list import fetch_provider_model_infos
 from tradingagents.webui.runner import AnalysisRunner
+from tradingagents.webui.subscription import SubscriptionStore
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _CONTENT_TYPES = {
@@ -207,12 +209,24 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE}, 403)
         return False
 
+    def _owner_or_403(self) -> bool:
+        """Portão só-dono (task 017): rotas da assinatura exigem sessão de dono
+        válida ANTES de tudo. Público → 403 e retorna False (não executa nada)."""
+        if self._is_owner():
+            return True
+        self._send_json({"error": "acesso restrito ao dono", "error_code": "owner_only"}, 403)
+        return False
+
     def _redact_key(self, text: str) -> str:
-        """Redige a chave BYOK (header ``X-LLM-Key``) de um texto de erro antes de
-        devolvê-lo — o SDK do provedor pode ecoar a chave numa exceção."""
-        key = (self.headers.get("X-LLM-Key") or "").strip()
-        if key and text:
-            return text.replace(key, "***")
+        """Redige credenciais dos headers (``X-LLM-Key`` BYOK e ``X-Subscription-Token``
+        da assinatura) de um texto de erro antes de devolvê-lo — o SDK/OS pode ecoar
+        o valor numa exceção. Nunca deixa um segredo vazar pela resposta."""
+        if not text:
+            return text
+        for hdr in ("X-LLM-Key", "X-Subscription-Token"):
+            secret = (self.headers.get(hdr) or "").strip()
+            if secret:
+                text = text.replace(secret, "***")
         return text
 
     # -- routing --------------------------------------------------------------
@@ -251,6 +265,14 @@ class _Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 term = (qs.get("q", [""])[0] or "").strip()
                 self._send_json({"query": term, "results": self.runner.search_symbols(term)})
+            elif path == "/api/subscription/status":
+                # Status da assinatura do dono (task 017): SÓ-DONO. Público → 403.
+                # Devolve só metadados (conectada?/quando), NUNCA o token.
+                if not self._owner_or_403():
+                    return
+                info = self.subscription.status()
+                info["owner"] = True
+                self._send_json(info)
             elif path == "/api/prices":
                 # Preço LIVE (3ª linha da watchlist): lote de tickers -> preço atual
                 # + variação do dia. Leve (fast_info, sem pipeline), cacheado ~45s;
@@ -310,6 +332,32 @@ class _Handler(BaseHTTPRequestHandler):
                 cleared = (f"{self.auth.cookie_name}=; HttpOnly; SameSite=Strict; "
                            f"Path=/; Max-Age=0")
                 self._send_json({"ok": True, "owner": False}, cookies=[cleared])
+                return
+            if path == "/api/subscription/connect":
+                # Conectar a assinatura do dono (task 017): SÓ-DONO — valida a sessão
+                # ANTES de tocar no token. O token vem no HEADER X-Subscription-Token
+                # (nunca querystring/corpo-logado); é gravado server-side e NUNCA volta
+                # ao cliente. log_message é no-op → não vaza no journal.
+                if not self._owner_or_403():
+                    return
+                token = (self.headers.get("X-Subscription-Token") or "").strip()
+                if not token:
+                    self._send_json({"ok": False, "error": "token da assinatura ausente "
+                                     "(envie no header X-Subscription-Token)"}, 400)
+                    return
+                kind = (self._read_json_body().get("kind") or "openai").strip() or "openai"
+                info = self.subscription.connect(token, kind=kind, connected_at=timeutil.stamp())
+                info["ok"] = True
+                info["owner"] = True
+                self._send_json(info)   # status só (sem o token)
+                return
+            if path == "/api/subscription/disconnect":
+                if not self._owner_or_403():
+                    return
+                info = self.subscription.disconnect()
+                info["ok"] = True
+                info["owner"] = True
+                self._send_json(info)
                 return
             if path == "/api/analyze":
                 body = self._read_json_body()
@@ -419,12 +467,20 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
-                auth: OwnerAuth | None = None) -> ThreadingHTTPServer:
+                auth: OwnerAuth | None = None,
+                subscription: SubscriptionStore | None = None) -> ThreadingHTTPServer:
     runner = runner or AnalysisRunner()
     # OwnerAuth lê a senha do dono da env (TRADINGDEGENS_OWNER_TOKEN) uma vez, na
     # subida; sem senha configurada, o login fica desabilitado e todos são público.
     auth = auth or OwnerAuth()
-    handler = type("BoundHandler", (_Handler,), {"runner": runner, "auth": auth})
+    # Credencial da assinatura do dono (task 017): arquivo 0600 no dir de dados do
+    # runtime (env TRADINGDEGENS_SUBSCRIPTION_FILE sobrepõe). NUNCA no repo.
+    if subscription is None:
+        sub_path = os.getenv("TRADINGDEGENS_SUBSCRIPTION_FILE") or str(
+            Path(getattr(runner.store, "base", ".")) / "subscription.json")
+        subscription = SubscriptionStore(sub_path)
+    handler = type("BoundHandler", (_Handler,),
+                   {"runner": runner, "auth": auth, "subscription": subscription})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
     return httpd
