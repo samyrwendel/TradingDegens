@@ -260,13 +260,11 @@ function fmtCost(cost) {
   return "$" + usd.toFixed(4) + partial;
 }
 
-// Ao abrir um resultado/comparação, rola pra faixa de reanálise (quando visível)
-// em vez do painel — assim o controle de método/TF fica no topo da visão, logo à
-// mão, e não some scrollado acima da borda. Sem a faixa, rola pro próprio painel.
+// Ao abrir um resultado/comparação, rola pro painel aberto. O controle de método/TF
+// agora vive na barra ÚNICA fixa no topo (launcher), sempre à mão — não precisa mais
+// rolar até ele.
 function scrollToOpen(panel) {
-  const bar = $("reanalyzeBar");
-  const target = bar && !bar.classList.contains("hidden") ? bar : panel;
-  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // PARAR/PAUSAR (task 026): mostra/esconde os controles conforme o snapshot e liga os
@@ -369,10 +367,7 @@ function renderProgress(snap) {
   $("progressPanel").classList.remove("hidden");
   // Controles PARAR/PAUSAR (task 026): visíveis enquanto a run está viva.
   updateRunControls(snap);
-  // a faixa de reanálise só faz sentido com um resultado/comparação na tela;
-  // enquanto uma análise roda ela some (reaparece quando o resultado renderiza).
-  const reBar = $("reanalyzeBar");
-  if (reBar) reBar.classList.add("hidden");
+  // A barra ÚNICA (launcher) é persistente — fica no topo durante a run, não some.
   const tk = $("progressTicker");
   if (tk) {
     // qual ativo está sendo analisado — some quando não sabemos o ticker (start
@@ -646,10 +641,10 @@ function renderResult(snap) {
     $("degradedBanner").classList.add("hidden");
     $("exportPdfBtn").classList.add("hidden");  // nada de análise pra exportar num run com erro
     $("confrontCtl").classList.add("hidden");   // não confrontar a partir de um run com erro
-    // Reanálise segue disponível: uma falha (fonte fora do ar, transitório) é
-    // justamente quando o usuário quer rerodar escolhendo método/TF, sem redigitar.
+    // Reanálise segue disponível pela barra ÚNICA: uma falha (fonte fora do ar,
+    // transitório) é justamente quando o usuário quer rerodar escolhendo método/TF.
     // Método aberto: preserva o que o run errado carregava (history traz r.method);
-    // sem isso, sem destaque (não inventa método num run que falhou).
+    // sem isso, cai em padrão (não inventa método num run que falhou).
     _openMethod = snap.method === "erick" ? "erick" : (snap.method === "padrao" ? "padrao" : _openMethod);
     _openView = snap.method === "compare" ? "compare"
       : (snap.method === "erick" ? "erick" : (snap.method === "padrao" ? "padrao" : ""));
@@ -660,15 +655,14 @@ function renderResult(snap) {
   // da verdade é result.timeframes do backend.
   _timeframes = ["1w", "1d", "4h", "1h", "15m"];
     _verdictTf = snap.verdict_timeframe || "1d";
-    _reTf = _timeframes.includes(_verdictTf) ? _verdictTf : "1d";
-    renderReanalyzeBar();
+    syncLaunchBarToOpen();
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = "";
     $("bull").innerHTML = ""; $("bear").innerHTML = "";
     $("bullLead").textContent = ""; $("bearLead").textContent = "";
     // O banner ocupa o lugar do RESULTADO: esconde as teses vazias (Alta/Baixa) —
-    // sem dado, mostrá-las é ruído. A faixa de reanálise segue visível acima.
+    // sem dado, mostrá-las é ruído. A barra ÚNICA (launcher) segue no topo.
     const railTheses = document.querySelector(".rail-theses");
     if (railTheses) railTheses.classList.add("hidden");
     // Banner de erro HUMANO (sem stack, sem chave): a mensagem acionável do backend
@@ -713,8 +707,7 @@ function renderResult(snap) {
   // trocado só pra olhar o gráfico, o carimbo fixa o frame do veredito real.
   _verdictTf = snap.verdict_timeframe || r.verdict_timeframe || r.timeframe || "1d";
   renderVerdictTf();
-  _reTf = _verdictTf;                 // a reanálise começa no frame do veredito aberto
-  renderReanalyzeBar();
+  syncLaunchBarToOpen();              // a barra passa a apontar pro aberto (método + frame do veredito)
   renderDegraded(r.degraded);
   hideDegrade();
 
@@ -868,9 +861,9 @@ function renderCompare(snap) {
       metaSection("O que significa pra decisão", meta.significado) +
     `</div>`;
 
-  // Faixa de reanálise também na comparação: o ativo está aberto, então dá pra
-  // rerodar (Padrão / Erick / Comparar) sem redigitar direto daqui. Estado do ativo
-  // aberto vem do snapshot do compare (TF de referência = lado A, senão B, senão diário).
+  // Barra ÚNICA também na comparação: o ativo está aberto, então a barra aponta pra
+  // ele (método = Comparar destacado, TF de referência = lado A, senão B, senão diário)
+  // e dá pra rerodar sem redigitar. Estado do ativo aberto vem do snapshot do compare.
   _openTicker = snap.ticker || "";
   _openDate = snap.date || "";
   _assetType = snap.asset_type || "";
@@ -882,8 +875,7 @@ function renderCompare(snap) {
   const cmpTf = (a && (a.verdict_timeframe || a.timeframe)) ||
     (b && (b.verdict_timeframe || b.timeframe)) || "1d";
   _verdictTf = cmpTf;
-  _reTf = _timeframes.includes(cmpTf) ? cmpTf : "1d";
-  renderReanalyzeBar();
+  syncLaunchBarToOpen();
 
   $("cmpCols").innerHTML = compareColumn(a, "A") + compareColumn(b, "B");
   $("cmpCols").querySelectorAll("button.cmp-open").forEach((btn) =>
@@ -1098,64 +1090,128 @@ async function confront(a, b) {
   } catch (e) { $("formError").textContent = "falha ao confrontar"; }
 }
 
-// ---- reanálise com método explícito, sem redigitar (task 023) ---------------
-// Com um ativo ABERTO (clicado no histórico ou já na tela), esta faixa oferece o
-// ticker JÁ preenchido + escolha de método (Padrão / Erick / Comparar) + timeframe.
-// Clicar um método RODA na hora — a comparação fica a ≤2 cliques do ativo escolhido
-// (1: abrir o ativo · 2: ⚖️ Comparar). Reusa exatamente os endpoints de /api/analyze.
-let _reTf = "1d";   // timeframe escolhido para a próxima reanálise (default = TF do veredito aberto)
+// ---- barra ÚNICA: timeframe + método + chip de data + ↻ (task 029) ----------
+// O launcher absorveu a barra de reanálise (023): um só lugar pro método e o TF.
+// Analisar (startAnalysis) roda o ticker do INPUT com o método + TF escolhidos aqui;
+// ↻ (runReanalyze via _openView) reanalisa o ativo ABERTO hoje preservando o método
+// aberto. Os frames operáveis vêm do ativo aberto (o backend é a fonte da verdade);
+// sem ativo aberto, a escada inteira fica ativa (o backend clampa/degrada honesto).
+let _barTf = "1d";        // timeframe escolhido na barra (default diário; reflete o veredito do aberto)
+let _barMethod = "padrao"; // método escolhido na barra: "padrao" | "erick" | "compare"
 
-function renderReanalyzeBar() {
-  const bar = $("reanalyzeBar");
-  if (!bar) return;
-  if (!_openTicker) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
-  const enabled = new Set(_timeframes || ["1d"]);
-  // TF fora da escada operável do ativo cai no do veredito (defesa; hoje ação e
-  // cripto têm a escada inteira, mas o backend continua sendo a fonte da verdade).
-  if (!enabled.has(_reTf)) _reTf = enabled.has(_verdictTf) ? _verdictTf : "1d";
-  const tfBtns = ALL_TFS.map(([tf, label]) => {
-    const on = enabled.has(tf);
-    const active = tf === _reTf;
-    const cls = ["re-tf", active ? "is-active" : "", on ? "" : "is-off"].filter(Boolean).join(" ");
-    const title = on ? `Reanalisar no ${label}` : "Frame indisponível para este ativo (o backend não inventa candle)";
-    return `<button type="button" class="${cls}" data-retf="${tf}" ${on ? "" : "disabled"} title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
-  }).join("");
-  // O método aberto ganha destaque (is-open): é o antigo "Atualizar" embutido —
-  // clicá-lo reanalisa HOJE preservando o método. Padrão/Erick/Comparar num lugar só.
-  const methods = [
-    ["padrao", "Padrão", "Reanalisa com a leitura Padrão no timeframe escolhido, na data de hoje"],
-    ["erick", "🧭 Erick", "Reanalisa com o método Erick — recuo à média, saída antes da reversão, peso do trade — na data de hoje"],
-    ["compare", "⚖️ Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
-  ];
-  const mBtns = methods.map(([m, label, title]) => {
-    const open = m === _openView;
-    const cls = ["re-method", m, open ? "is-open" : ""].filter(Boolean).join(" ");
-    const t = open ? `${title} · leitura aberta agora — clique = atualizar hoje` : title;
-    return `<button type="button" class="${cls}" data-method="${m}"${open ? ' aria-current="true"' : ""} title="${escapeHtml(t)}">${escapeHtml(label)}</button>`;
-  }).join("");
-  bar.innerHTML =
-    `<div class="re-lead"><span class="re-icon">🔁</span>Reanalisar <b class="re-ticker">${escapeHtml(_openTicker)}</b> <span class="re-today">hoje</span></div>` +
-    `<div class="re-grp">` +
-      `<span class="re-glabel">tempo</span>` +
-      `<div class="re-tfs" role="group" aria-label="Timeframe da reanálise">${tfBtns}</div>` +
-    `</div>` +
-    `<div class="re-grp re-grp-methods">` +
-      `<span class="re-glabel">método</span>` +
-      `<div class="re-methods">${mBtns}</div>` +
-    `</div>`;
-  bar.classList.remove("hidden");
+// Normaliza um "view" (padrao|erick|compare|"") pro método a rodar. "" (run com erro
+// sem método) e qualquer desconhecido caem em padrão — nunca inventa método.
+function normMethod(v) {
+  return v === "compare" ? "compare" : (v === "erick" ? "erick" : "padrao");
+}
+function methodLabel(v) {
+  return v === "compare" ? "Comparar" : (v === "erick" ? "Erick" : "Padrão");
 }
 
-function bindReanalyzeBar() {
-  const bar = $("reanalyzeBar");
-  if (!bar || bar._bound) return;
-  bar._bound = true;
-  bar.addEventListener("click", (e) => {
-    const tfBtn = e.target.closest("button.re-tf");
-    if (tfBtn && !tfBtn.disabled) { _reTf = tfBtn.dataset.retf; renderReanalyzeBar(); return; }
-    const mBtn = e.target.closest("button.re-method");
-    if (mBtn) runReanalyze(mBtn.dataset.method, _reTf);
-  });
+// Chip de data: "Hoje" quando a data é a de hoje (ou vazia), senão dd/mm. O input
+// #date (sobreposto transparente) é a fonte da verdade; o chip só espelha o rótulo.
+function updateDateChip() {
+  const el = $("dateChipLabel");
+  if (!el) return;
+  const v = ($("date") && $("date").value) || "";
+  const today = _todayManaus || new Date().toLocaleDateString("en-CA");
+  el.textContent = (!v || v === today) ? "Hoje" : fmtDate(v);
+}
+
+function renderLaunchBar() {
+  const tfsEl = $("launchTfs");
+  const mEl = $("launchMethods");
+  if (!tfsEl || !mEl) return;
+  // Com um ativo aberto, os frames operáveis são os dele; sem ativo aberto (launch
+  // de um ticker novo), a escada inteira fica selecionável — o backend não inventa
+  // candle e degrada honesto por símbolo/data.
+  const enabled = _openTicker ? new Set(_timeframes || ["1d"]) : new Set(ALL_TFS.map(([t]) => t));
+  if (!enabled.has(_barTf)) _barTf = enabled.has(_verdictTf) ? _verdictTf : "1d";
+  tfsEl.innerHTML = ALL_TFS.map(([tf, label]) => {
+    const on = enabled.has(tf);
+    const active = tf === _barTf;
+    const cls = ["lb-tf", active ? "is-active" : "", on ? "" : "is-off"].filter(Boolean).join(" ");
+    const title = on ? `Analisar no ${label}` : "Frame indisponível para este ativo (o backend não inventa candle)";
+    return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  }).join("");
+  const methods = [
+    ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
+    ["erick", "🧭 Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
+    ["compare", "⚖️ Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+  ];
+  mEl.innerHTML = methods.map(([m, label, title]) => {
+    const active = m === _barMethod;
+    const cls = ["lb-method", m, active ? "is-active" : ""].filter(Boolean).join(" ");
+    return `<button type="button" class="${cls}" data-method="${m}" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  }).join("");
+  updateDateChip();
+  const rerun = $("rerunBtn");
+  if (rerun) {
+    rerun.disabled = !_openTicker;
+    rerun.title = _openTicker
+      ? `Reanalisar ${_openTicker} hoje (método ${methodLabel(_openView)})`
+      : "Abra um ativo pra reanalisar";
+  }
+}
+
+// Ao abrir um ativo (resultado / comparação / run com erro), a barra passa a apontar
+// pra ele: ticker preenchido, método = o método ABERTO, TF = o do veredito. Assim
+// Analisar/↻ reanalisam sem redigitar e a preservação de método por TF (031/037/039)
+// se mantém — trocar de TF não reseta o método aberto.
+function syncLaunchBarToOpen() {
+  if (_openTicker) {
+    const t = $("ticker");
+    // não sobrescreve enquanto o usuário digita no campo
+    if (t && document.activeElement !== t) t.value = _openTicker;
+  }
+  _barMethod = normMethod(_openView);
+  _barTf = (_timeframes && _timeframes.includes(_verdictTf)) ? _verdictTf : "1d";
+  renderLaunchBar();
+}
+
+function bindLaunchBar() {
+  const tfsEl = $("launchTfs");
+  if (tfsEl && !tfsEl._bound) {
+    tfsEl._bound = true;
+    tfsEl.addEventListener("click", (e) => {
+      const b = e.target.closest("button.lb-tf");
+      if (b && !b.disabled) { _barTf = b.dataset.tf; renderLaunchBar(); }
+    });
+  }
+  const mEl = $("launchMethods");
+  if (mEl && !mEl._bound) {
+    mEl._bound = true;
+    mEl.addEventListener("click", (e) => {
+      const b = e.target.closest("button.lb-method");
+      if (b) { _barMethod = b.dataset.method; renderLaunchBar(); }
+    });
+  }
+  const chip = $("dateChip");
+  if (chip && !chip._bound) {
+    chip._bound = true;
+    chip.addEventListener("click", () => {
+      const d = $("date");
+      if (!d) return;
+      // calendário nativo na hora; se showPicker não existir/for barrado, cai no foco
+      if (d.showPicker) { try { d.showPicker(); return; } catch (e) { /* fallback abaixo */ } }
+      d.focus();
+    });
+  }
+  const dateInput = $("date");
+  if (dateInput && !dateInput._bound) {
+    dateInput._bound = true;
+    dateInput.addEventListener("change", updateDateChip);
+    dateInput.addEventListener("input", updateDateChip);
+  }
+  const rerun = $("rerunBtn");
+  if (rerun && !rerun._bound) {
+    rerun._bound = true;
+    rerun.addEventListener("click", () => {
+      if (!_openTicker) return;
+      // ↻ = reanalisar o ABERTO hoje preservando o método aberto, no TF selecionado.
+      runReanalyze(normMethod(_openView), _barTf);
+    });
+  }
 }
 
 // Dispara a reanálise do ativo ABERTO sem redigitar: método explícito + TF escolhido,
@@ -2135,17 +2191,18 @@ async function startAnalysis(ev) {
   const ticker = $("ticker").value.trim();
   const date = $("date").value;
   if (!ticker) { $("formError").textContent = "Informe um ticker."; return; }
-  // O launcher só ABRE o ativo: roda sempre Padrão (o método vive na barra de
-  // reanálise, um lugar só). Sem checkbox aqui → nada de método fantasma no POST.
-  const method = "padrao";
-  const compare = false;
+  // Barra ÚNICA (task 029): Analisar roda com o método + timeframe escolhidos na barra.
+  // Comparar dispara as DUAS (Padrão × Erick, compare=true); Erick/Padrão vão no method.
+  const compare = _barMethod === "compare";
+  const method = _barMethod === "erick" ? "erick" : "padrao";
+  const timeframe = _barTf || "1d";
   $("runBtn").disabled = true;
   $("resultPanel").classList.add("hidden");
   $("comparePanel").classList.add("hidden");
   $("steps").innerHTML = "";
   resetThinking();   // análise nova: começa com o painel de raciocínio limpo
   try {
-    const res = await apiPost("/api/analyze", { ticker, date, method, compare });
+    const res = await apiPost("/api/analyze", { ticker, date, method, compare, timeframe });
     const data = await res.json();
     if (res.status === 403 && data.error_code === "need_key") {
       handleNeedKey(data.error);
@@ -2499,9 +2556,11 @@ async function applyConfig() {
     _ownerLoginEnabled = !!cfg.owner_login_enabled;
     if (cfg.llm) { _llmMeta = cfg.llm; renderConfigPanel(); }
     updateConfigBadge();
+    updateDateChip();   // chip reflete "Hoje" com a data do servidor (Manaus)
   } catch (e) {
     // fallback: browser-local date if the server is unreachable at boot
     $("date").value = new Date().toLocaleDateString("en-CA");
+    updateDateChip();
   }
 }
 
@@ -3309,7 +3368,8 @@ function init() {
   bindHistoryTabs();
   bindReeval();
   bindConfront();
-  bindReanalyzeBar();
+  bindLaunchBar();
+  renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();

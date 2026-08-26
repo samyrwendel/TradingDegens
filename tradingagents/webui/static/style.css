@@ -137,15 +137,15 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 .hidden { display: none !important; }
 
-/* launcher */
-.launcher form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+/* launcher — BARRA ÚNICA (task 029): ativo · data (chip) · tempo · método · Analisar · ↻.
+   Absorveu a barra de reanálise (as classes .re-* saíram junto). Uma linha no desktop
+   (flex-wrap), empilha limpo no mobile. Reverte a 021: método volta a viver aqui. */
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field label { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .field input {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: var(--radius); padding: 8px 11px; font-size: var(--fs-14); min-width: 220px;
 }
-#date { min-width: 170px; }
 .field input:focus { outline: none; border-color: var(--accent); }
 #runBtn {
   background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none;
@@ -153,8 +153,72 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   cursor: pointer; height: 36px;
 }
 #runBtn:disabled { opacity: .55; cursor: not-allowed; }
-/* método Erick/Comparar NÃO mora mais no launcher (task 018): vive só na barra de
-   reanálise (.re-methods). O launcher é ATIVO + DATA + [Analisar] (roda Padrão). */
+
+.launch-bar { display: flex; gap: 10px 16px; align-items: flex-end; flex-wrap: wrap; }
+.lb-field { display: flex; flex-direction: column; gap: 5px; }
+.lb-ticker { flex: 1 1 240px; min-width: 200px; }
+.lb-ticker label { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.lb-ticker input {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 8px 11px; font-size: var(--fs-14); width: 100%;
+}
+.lb-ticker input:focus { outline: none; border-color: var(--accent); }
+.lb-ctrls { display: flex; gap: 10px 16px; align-items: flex-end; flex-wrap: wrap; }
+.lb-group { display: flex; flex-direction: column; gap: 5px; }
+.lb-glabel { font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.lb-glabel .tz { text-transform: none; letter-spacing: 0; margin-left: 4px; }
+
+/* chip de data: mostra "Hoje" (ou dd/mm); clicar abre o calendário nativo. O input
+   #date fica sobreposto transparente (fonte da verdade do POST) e recebe o clique. */
+.date-chip-wrap { position: relative; display: inline-flex; }
+.date-chip {
+  font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold);
+  color: var(--text); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 12px; cursor: pointer; white-space: nowrap;
+  transition: border-color .12s, color .12s; height: 36px;
+}
+.date-chip:hover { border-color: var(--accent); }
+.date-native {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; border: 0; padding: 0; margin: 0; cursor: pointer;
+}
+
+/* timeframe + método na barra única — pills herdados da antiga barra de reanálise */
+.lb-tfs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.lb-tf {
+  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold);
+  color: var(--muted); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 10px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+}
+.lb-tf:hover:not(.is-off):not(.is-active) { color: var(--text); border-color: var(--accent); }
+.lb-tf.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.lb-tf.is-off { color: #55607a; cursor: not-allowed; opacity: .6; text-decoration: line-through; text-decoration-color: #55607a55; }
+
+.lb-methods { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.lb-method {
+  font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold); cursor: pointer;
+  border-radius: var(--radius); padding: 8px 14px; white-space: nowrap;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  transition: color .12s, border-color .12s, background .12s, box-shadow .12s;
+}
+.lb-method.padrao { border-color: #2e5c7d; color: var(--accent); }
+.lb-method.erick { border-color: #2e5c7d; color: #9cc7f5; }
+.lb-method.compare { border-color: #5b4a8a; color: #cbb6f5; }
+.lb-method:hover { color: #fff; }
+/* método SELECIONADO (o que Analisar/↻ vão rodar): anel de destaque */
+.lb-method.is-active { box-shadow: 0 0 0 2px var(--accent) inset; color: #fff; background: var(--panel); border-color: var(--accent); }
+.lb-method.compare.is-active { background: linear-gradient(180deg, #3b82f6, #2563eb); border-color: transparent; }
+
+.lb-actions { display: inline-flex; gap: 8px; align-items: flex-end; }
+/* ↻ reanalisa o ativo ABERTO hoje (mesmo método) — absorve o antigo "Atualizar" */
+.rerun-btn {
+  background: var(--panel-2); color: var(--accent); border: 1px solid var(--border);
+  border-radius: var(--radius); height: 36px; min-width: 40px; font-size: var(--fs-16); line-height: 1;
+  cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+}
+.rerun-btn:hover:not(:disabled) { color: #fff; border-color: var(--accent); background: var(--panel); }
+.rerun-btn:disabled { opacity: .45; cursor: not-allowed; }
 
 /* seção do método Erick no resultado: destaque sutil sem gritar */
 details.section.erick { border-color: #2e5c7d; }
@@ -601,65 +665,8 @@ details.section[open] > summary::before { content: "▾"; }
 .reeval-btn:hover:not(:disabled) { color: #fff; border-color: var(--accent); background: var(--panel-2); }
 .reeval-btn:disabled { opacity: .6; cursor: default; color: var(--muted); border-color: var(--border); }
 
-/* Reanalisar sem redigitar (task 023): faixa logo abaixo do cabeçalho do
-   resultado com o ticker JÁ preenchido + escolha explícita de método
-   (Padrão / Erick / Comparar) + timeframe. Tira a escolha de método de dentro
-   do launcher e elimina a redigitação do ativo. */
-.reanalyze-bar {
-  display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
-  margin: 0; padding: 10px 16px;
-  /* faixa de controle achatada (edge-to-edge): sem cartão flutuando; a divisória
-     de 1px da coluna já a separa dos blocos vizinhos */
-  border: none; border-radius: 0; background: var(--panel-2);
-}
-.re-lead { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); white-space: nowrap; }
-.re-lead .re-icon { margin-right: 6px; }
-.re-lead .re-ticker { color: var(--text); font-family: var(--mono); font-weight: var(--fw-bold); font-size: var(--fs-12); margin-left: 3px; }
-.re-grp { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.re-grp-methods { margin-left: auto; }   /* empurra os métodos pra direita em telas largas */
-.re-glabel {
-  font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
-}
-.re-tfs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
-.re-tf {
-  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold);
-  color: var(--muted); background: var(--panel);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 4px 10px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
-}
-.re-tf:hover:not(.is-off):not(.is-active) { color: var(--text); border-color: var(--accent); }
-.re-tf.is-active {
-  color: #fff; border-color: var(--accent);
-  background: var(--panel); box-shadow: 0 0 0 1px var(--accent) inset;
-}
-.re-tf.is-off {
-  color: #55607a; cursor: not-allowed; opacity: .6;
-  text-decoration: line-through; text-decoration-color: #55607a55;
-}
-.re-methods { display: inline-flex; gap: 8px; flex-wrap: wrap; }
-.re-method {
-  font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold); cursor: pointer;
-  border-radius: var(--radius); padding: 8px 14px; white-space: nowrap;
-  border: 1px solid var(--border); background: var(--panel); color: var(--text);
-  transition: color .12s, border-color .12s, background .12s, box-shadow .12s;
-}
-.re-method.padrao { border-color: #2e5c7d; color: var(--accent); }
-.re-method.padrao:hover { color: #fff; background: var(--panel); }
-.re-method.erick { border-color: #2e5c7d; color: #9cc7f5; }
-.re-method.erick:hover { color: #fff; background: var(--panel); }
-/* Comparar é o atalho que mais faltava — CTA cheio pra ser achado de relance */
-.re-method.compare { border: none; color: #fff; background: linear-gradient(180deg, #3b82f6, #2563eb); }
-.re-method.compare:hover { box-shadow: 0 0 0 1px var(--accent) inset; }
-/* método ABERTO agora (absorve o antigo "Atualizar"): anel de destaque — clicá-lo
-   reanalisa hoje preservando o método. Vale pros três (padrao/erick/compare). */
-.re-method.is-open { box-shadow: 0 0 0 2px var(--accent) inset; color: #fff; }
-.re-method.padrao.is-open, .re-method.erick.is-open { background: var(--panel-2); border-color: var(--accent); }
-/* "hoje": deixa explícito que a reanálise usa a data de hoje (semântica do Atualizar) */
-.re-today {
-  margin-left: 4px; padding: 1px 7px; border-radius: 999px;
-  font-size: var(--fs-10); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .04em;
-  color: var(--accent); background: var(--panel-2); border: 1px solid var(--border);
-}
+/* (A faixa de reanálise separada — .reanalyze-bar / .re-* — foi absorvida pela barra
+   ÚNICA do launcher na task 029; os estilos vivem agora em .launch-bar / .lb-*.) */
 
 /* history — WATCHLIST densa (task 009/018): nada de cartão nem RÉGUA entre itens.
    Como a Quantfury, é contínua e densa — só espaçamento separa as linhas (sem
@@ -795,38 +802,32 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .panel { padding: 16px 14px; }
 
   .theses { grid-template-columns: 1fr; }
-  .launcher form { flex-direction: column; align-items: stretch; }
   .field input { min-width: 0; width: 100%; }
-  /* iOS Safari: input[type=date] com appearance nativa centraliza o valor
-     ('26 de ago. de 2026') e mantém uma largura intrínseca que estoura o
-     container. Normaliza pra caber (width:100% + min-width:0 vencendo o
-     #date{min-width:170px} da linha 131) e alinhar o valor igual ao ATIVO.
-     Escopo mobile: no desktop o input mantém o ícone de calendário nativo. */
-  #date {
-    min-width: 0;
-    -webkit-appearance: none;
-    appearance: none;
-    text-align: left;
-  }
-  #date::-webkit-date-and-time-value { text-align: left; margin: 0; }
-  #date::-webkit-datetime-edit { padding: 0; }
-  #runBtn { width: 100%; }
+
+  /* barra ÚNICA empilha em blocos (ativo · data · tempo · método · ações), sem
+     empurrar nada pro lado; TFs e métodos ocupam a largura toda e o "Comparar"
+     continua achável de relance. Nada estoura na largura de 390. */
+  .launch-bar { flex-direction: column; align-items: stretch; gap: 12px; }
+  .lb-ticker { flex: 1 1 auto; min-width: 0; }
+  .lb-ticker input { width: 100%; }
+  .lb-ctrls { flex-direction: column; align-items: stretch; gap: 12px; }
+  .lb-group { width: 100%; }
+  .lb-tfs, .lb-methods { width: 100%; }
+  .lb-tf { flex: 1; text-align: center; }
+  .lb-method { flex: 1; text-align: center; padding: 10px 8px; }
+  .date-chip-wrap { width: 100%; }
+  .date-chip { width: 100%; text-align: left; }
+  .lb-actions { width: 100%; }
+  #runBtn { flex: 1; }
+  .rerun-btn { flex: 0 0 auto; }
   .act-grid { grid-template-columns: 1fr; }
 
   /* cabeçalho do veredito empilha: ticker+veredito na 1ª linha, preço na 2ª,
-     calendário + Atualizar embaixo (nada estoura numa linha só) */
+     calendário + navegação embaixo (nada estoura numa linha só) */
   .result-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .head-nav { justify-content: flex-start; }
   /* veredito no mobile: mesmo texto colorido sem pílula, na escala */
   .verdict { font-size: var(--fs-16); line-height: var(--lh-16); padding: 0; }
-
-  /* faixa de reanálise empilha em blocos (ticker · tempo · método), sem
-     empurrar nada pro lado; os métodos ocupam a largura toda e o "Comparar"
-     continua achável de relance */
-  .reanalyze-bar { flex-direction: column; align-items: stretch; gap: 12px; }
-  .re-grp-methods { margin-left: 0; }
-  .re-methods { width: 100%; }
-  .re-method { flex: 1; text-align: center; padding: 10px 8px; }
 
   /* altura do gráfico proporcional à tela, não 380px fixo */
   #priceChart { height: 46vh; min-height: 240px; max-height: 340px; }
@@ -949,8 +950,8 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* (o estilo do ticker/nome na lista lateral agora vive no bloco `history` acima —
    watchlist de 2 linhas com … no nome; task 009) */
 
-/* "Atualizar" (reanalisar hoje) foi absorvido pela barra de reanálise (task 018):
-   o método aberto fica destacado (.re-method.is-open) e clicá-lo roda na data de hoje. */
+/* "Atualizar" (reanalisar hoje) virou o botão ↻ da barra ÚNICA (task 029):
+   reanalisa o ativo aberto hoje preservando o método aberto (.rerun-btn). */
 
 /* Contador de análises do ativo na lista lateral */
 .h-count {
@@ -1294,9 +1295,9 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
-  /* fora da impressão: topo, config, launcher, progresso, faixa de reanálise,
+  /* fora da impressão: topo, config, launcher (barra única), progresso,
      histórico lateral, Q&A, rodapé, navegação/ações, dicas e seletores do gráfico */
-  .topbar, .config-panel, .launcher, .progress-panel, .reanalyze-bar,
+  .topbar, .config-panel, .launcher, .progress-panel,
   .sidebar, .ask-box, footer,
   .head-nav, .tf-selector, .reeval-btn, .confront-ctl,
   .chart-zoom-hint, .chart-degrade, .degraded-banner,

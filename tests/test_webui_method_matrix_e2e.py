@@ -1,17 +1,20 @@
-"""E2E (Playwright) — MATRIZ COMPLETA de método × timeframe × entrada (task 018).
+"""E2E (Playwright) — MATRIZ COMPLETA de método × timeframe × entrada (task 029).
 
-Prova a consolidação dos controles pedida pelo Samyr ("confirmar e TESTAR TODAS as
-combinações antes de dizer que foi feito"):
+Consolidação confirmada pelo Samyr (opção A): o launcher virou a BARRA ÚNICA no topo
+e a barra de reanálise separada DEIXOU DE EXISTIR. Esta suíte prova a matriz inteira no
+NOVO layout (o DOM mudou — os seletores .re-* saíram, entraram .lb-*):
 
-  * método vive num lugar SÓ — a barra de reanálise [Padrão][🧭 Erick][⚖️ Comparar];
-  * o launcher (ATIVO+DATA+Analisar) NÃO tem mais checkbox e roda sempre Padrão;
-  * "Atualizar" foi absorvido pela barra: o método aberto fica destacado (is-open) e
-    a reanálise sempre sai na data de HOJE.
+  * método volta a viver no launcher (reverte a 021 de propósito): a barra tem
+    ‹Padrão · 🧭 Erick · ⚖️ Comparar› como SELETOR (clicar seleciona; Analisar roda);
+  * Analisar roda o ticker do input com o método + timeframe escolhidos na barra;
+  * ↻ (#rerunBtn) reanalisa o ativo ABERTO hoje preservando o método aberto — absorve
+    o antigo "Atualizar"; fica desabilitado enquanto nenhum ativo está aberto;
+  * preservação de método por TF (031/037/039): trocar de TF NÃO reseta o método.
 
 Sem rodar LLM: intercepta o POST /api/analyze (Playwright route) e LÊ o corpo, provando
-que cada combinação manda o método + timeframe + data corretos. Cobre AÇÃO e CRIPTO,
-as duas rotas de entrada, os casos críticos (Erick preserva Erick; Comparar sempre
-Padrão × Erick; default Padrão) e a matriz inteira 3×5.
+que cada combinação manda método + timeframe + data corretos. Cobre AÇÃO e CRIPTO, as
+duas rotas (launcher e ↻), os casos críticos (Erick preserva Erick por TF; Comparar
+sempre Padrão × Erick; default Padrão · Diário) e a matriz inteira 3×5.
 
 Pulado com skip se Playwright/Chromium não estiver disponível.
 """
@@ -36,8 +39,8 @@ except Exception:  # noqa: BLE001
     sync_playwright = None
 
 
-TODAY = "2026-08-25"          # data de "hoje" forçada no cliente (semântica do Atualizar)
-OPEN_DATE = "2026-08-20"      # data da análise ABERTA (≠ hoje) — prova que a reanálise usa hoje
+TODAY = "2026-08-25"          # data de "hoje" forçada no cliente (semântica do ↻)
+OPEN_DATE = "2026-08-20"      # data da análise ABERTA (≠ hoje) — prova que o ↻ usa hoje
 METHODS = ["padrao", "erick", "compare"]
 TFS = ["1w", "1d", "4h", "1h", "15m"]
 TF_PT = {"1w": "semanal", "1d": "diário", "4h": "4h", "1h": "1h", "15m": "15m"}
@@ -81,11 +84,12 @@ def live_server(tmp_path):
         httpd.shutdown()
 
 
-# Semeia o estado "ativo ABERTO" e renderiza a barra de reanálise (sem rodar nada).
-# openView = método destacado na barra ("padrao"|"erick"|"compare").
-_SEED_JS = r"""
+# Semeia o estado "ativo ABERTO" e aponta a barra única pra ele (sem rodar nada).
+# openView = método aberto ("padrao"|"erick"|"compare"); syncLaunchBarToOpen espelha
+# isso em _barMethod/_barTf e preenche o ticker do input — igual ao render de resultado.
+_SEED_OPEN_JS = r"""
 (args) => {
-  const [ticker, tf, openView, today, openDate] = args;
+  const [ticker, openView, today, openDate, verdictTf] = args;
   document.getElementById('progressPanel').classList.add('hidden');
   document.getElementById('resultPanel').classList.add('hidden');
   document.getElementById('comparePanel').classList.add('hidden');
@@ -94,11 +98,10 @@ _SEED_JS = r"""
   _todayManaus = today;
   _assetType = /-(USD|USDT)$|^BTC|^ETH/.test(ticker.toUpperCase()) ? 'crypto' : 'stock';
   _timeframes = ['1w','1d','4h','1h','15m'];
-  _verdictTf = '1d';
-  _reTf = tf;
-  _openMethod = (openView === 'erick') ? 'erick' : 'padrao';
+  _verdictTf = verdictTf;
   _openView = openView;
-  renderReanalyzeBar();
+  _openMethod = (openView === 'erick') ? 'erick' : 'padrao';
+  syncLaunchBarToOpen();
   return true;
 }
 """
@@ -106,8 +109,7 @@ _SEED_JS = r"""
 
 def _route_stub(page):
     """Intercepta /api/analyze e responde stub (não chega no motor). Também neutraliza
-    o polling de /api/status (404 → o cliente ignora sem re-renderizar), pra o watchRun
-    disparado por cada clique não esconder a barra no meio da matriz."""
+    o polling de /api/status (404 → o cliente ignora sem re-renderizar)."""
     page.route(
         "**/api/analyze",
         lambda route: route.fulfill(
@@ -124,49 +126,32 @@ def _route_stub(page):
     )
 
 
-def _seed(page, ticker, tf, open_view):
-    page.evaluate(_SEED_JS, [ticker, tf, open_view, TODAY, OPEN_DATE])
+def _seed_open(page, ticker, open_view, verdict_tf="1d"):
+    page.evaluate(_SEED_OPEN_JS, [ticker, open_view, TODAY, OPEN_DATE, verdict_tf])
 
 
-def _drain_analyze(page):
-    """Deixa a ``renderProgress()`` DEFERIDA (disparada por um POST /api/analyze) rodar
-    antes de a matriz semear o próximo estado.
-
-    O handler do launcher (``startAnalysis``) e o da barra (``runReanalyze``) só chamam
-    ``renderProgress`` — que ESCONDE a barra de reanálise — DEPOIS do ``await
-    res.json()``. Ou seja: quando o clique retorna (a requisição só foi ENVIADA), esse
-    ``renderProgress`` ainda está pendente. Se ele disparar DEPOIS do ``_seed`` seguinte
-    (que remostra a barra), a barra some no meio da matriz e o clique no TF acha o botão
-    "não visível" (timeout de 30s). Não é regressão da barra — ela renderiza e funciona;
-    é uma corrida do harness sintético (semear via JS enquanto um POST está em voo),
-    agravada sob carga. Dois ticks de macrotarefa drenam o ``.then`` pendente ANTES do
-    próximo semear, tornando o ``_seed`` o último a tocar a barra."""
-    page.evaluate("() => new Promise(r => setTimeout(() => setTimeout(r, 0), 0))")
-
-
-def _bar_post(page, ticker, tf, method, open_view="padrao"):
-    """Semeia a barra, clica TF depois método, devolve o corpo do POST interceptado."""
-    _seed(page, ticker, tf, open_view)
-    tf_btn = page.locator(f'#reanalyzeBar button.re-tf[data-retf="{tf}"]')
-    tf_btn.wait_for(state="visible")   # a barra tem que estar de pé antes de clicar
-    tf_btn.click()
-    with page.expect_response("**/api/analyze") as ri:
-        page.click(f'#reanalyzeBar button.re-method[data-method="{method}"]')
-    _drain_analyze(page)               # deixa a renderProgress deferida esconder a barra AGORA
-    return json.loads(ri.value.request.post_data)
-
-
-def _launcher_post(page, ticker):
+def _launch_run(page, ticker, method, tf, date=TODAY):
+    """Barra única: preenche ativo + data, seleciona TF e método, clica Analisar e
+    devolve o corpo do POST /api/analyze interceptado."""
     page.fill("#ticker", ticker)
-    page.fill("#date", TODAY)
+    page.click(f'#launchTfs button.lb-tf[data-tf="{tf}"]')
+    page.click(f'#launchMethods button.lb-method[data-method="{method}"]')
+    # data por ÚLTIMO: vence qualquer default assíncrono do applyConfig (/api/config)
+    page.fill("#date", date)
     with page.expect_response("**/api/analyze") as ri:
         page.click("#runBtn")
-    _drain_analyze(page)               # idem: drena antes de a matriz semear o 1º estado
     return json.loads(ri.value.request.post_data)
 
 
-def _expect_bar_body(body, method, tf):
-    """Valida o POST de uma combinação da barra (método + TF + data de hoje)."""
+def _rerun_click(page):
+    """Clica o ↻ (reanalisar o ABERTO) e devolve o corpo do POST interceptado."""
+    with page.expect_response("**/api/analyze") as ri:
+        page.click("#rerunBtn")
+    return json.loads(ri.value.request.post_data)
+
+
+def _expect_body(body, method, tf):
+    """Valida o POST de uma combinação (método + TF + data de hoje)."""
     assert body.get("timeframe") == tf, ("timeframe", body)
     assert body.get("date") == TODAY, ("data != hoje", body)
     if method == "compare":
@@ -180,8 +165,9 @@ def _expect_bar_body(body, method, tf):
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
 def test_full_method_timeframe_matrix(live_server):
-    """A matriz inteira: método{padrao,erick,compare} × TF{5} × ativo{ação,cripto}
-    pela barra + a rota do launcher (default Padrão). Imprime a tabela de resultados."""
+    """A matriz inteira: método{padrao,erick,compare} × TF{5} × ativo{ação,cripto} pela
+    barra única (Analisar), mais o default (Padrão · Diário sem tocar nos seletores).
+    Imprime a tabela de resultados."""
     rows = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
@@ -189,21 +175,29 @@ def test_full_method_timeframe_matrix(live_server):
         _route_stub(page)
         try:
             page.goto(live_server)
-            page.wait_for_selector("#analyzeForm", state="attached")
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
 
-            # rota do LAUNCHER: sempre Padrão, sem compare (default Padrão)
+            # DEFAULT: sem tocar nos seletores → Padrão · Diário, sem compare
             for ticker, asset_pt in ASSETS:
-                body = _launcher_post(page, ticker)
-                ok = body.get("method") == "padrao" and body.get("compare") in (False, None)
-                rows.append(("launcher", asset_pt, ticker, "padrao", "(default)", ok, body))
-                assert ok, ("launcher default padrao", body)
+                page.fill("#ticker", ticker)
+                page.fill("#date", TODAY)
+                with page.expect_response("**/api/analyze") as ri:
+                    page.click("#runBtn")
+                body = json.loads(ri.value.request.post_data)
+                ok = (
+                    body.get("method") == "padrao"
+                    and body.get("compare") in (False, None)
+                    and body.get("timeframe") == "1d"
+                )
+                rows.append(("default", asset_pt, ticker, "padrao", "diário", ok, body))
+                assert ok, ("default padrao/diário", body)
 
-            # rota da BARRA: método × TF × ativo
+            # MATRIZ: método × TF × ativo pela barra (Analisar)
             for ticker, asset_pt in ASSETS:
                 for method in METHODS:
                     for tf in TFS:
-                        body = _bar_post(page, ticker, tf, method)
-                        _expect_bar_body(body, method, tf)
+                        body = _launch_run(page, ticker, method, tf)
+                        _expect_body(body, method, tf)
                         rows.append(("barra", asset_pt, ticker, method, tf, True, body))
         finally:
             browser.close()
@@ -222,88 +216,129 @@ def test_full_method_timeframe_matrix(live_server):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
-def test_reanalyze_from_erick_preserves_erick(live_server):
-    """Estando numa análise ERICK, a barra DESTACA Erick (is-open) e reanalisar Erick
-    mantém Erick em TODOS os TFs — a classe de bug do 037/039 não volta."""
+def test_reanalyze_preserves_method_across_tf(live_server):
+    """Preservação de método por TF (031/037/039) no novo layout: com um ERICK aberto,
+    a barra DESTACA Erick (is-active); trocar de TF NÃO reseta o método; e o ↻ reanalisa
+    Erick em TODOS os TFs, sempre na data de HOJE — a classe de bug do 037/039 não volta."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _route_stub(page)
         try:
             page.goto(live_server)
-            page.wait_for_selector("#analyzeForm", state="attached")
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
             for tf in TFS:
-                _seed(page, "AAPL", tf, "erick")
-                # o botão Erick fica destacado (é o "Atualizar" embutido)
-                cls = page.get_attribute('#reanalyzeBar button.re-method[data-method="erick"]', "class")
-                assert "is-open" in (cls or ""), ("Erick sem destaque no TF", tf, cls)
-                body = _bar_post(page, "AAPL", tf, "erick", open_view="erick")
-                assert body.get("method") == "erick", ("caiu pra padrao", tf, body)
-                assert body.get("compare") in (False, None)
-                assert body.get("timeframe") == tf
-                assert body.get("date") == TODAY   # reanalisar-hoje preserva método + usa hoje
+                _seed_open(page, "AAPL", "erick", verdict_tf="1d")
+                # abrir um Erick já deixa o método Erick selecionado e o ↻ habilitado
+                cls0 = page.get_attribute('#launchMethods button.lb-method[data-method="erick"]', "class")
+                assert "is-active" in (cls0 or ""), ("Erick sem destaque ao abrir", tf, cls0)
+                assert page.is_disabled("#rerunBtn") is False, "↻ deveria estar habilitado com ativo aberto"
+
+                # troca de TF: só muda o timeframe — o método Erick PERMANECE selecionado
+                page.click(f'#launchTfs button.lb-tf[data-tf="{tf}"]')
+                cls = page.get_attribute('#launchMethods button.lb-method[data-method="erick"]', "class")
+                assert "is-active" in (cls or ""), ("trocar de TF resetou o método", tf, cls)
+
+                # ↻ reanalisa o ABERTO preservando Erick, no TF escolhido, na data de hoje
+                body = _rerun_click(page)
+                assert body.get("method") == "erick", ("↻ caiu pra padrao", tf, body)
+                assert body.get("compare") in (False, None), ("↻ não é compare", tf, body)
+                assert body.get("timeframe") == tf, ("↻ timeframe", tf, body)
+                assert body.get("date") == TODAY, ("↻ deveria usar hoje", tf, body)
         finally:
             browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
 def test_compare_always_padrao_x_erick(live_server):
-    """Comparar SEMPRE sai como Padrão × Erick (compare=true), mesmo estando aberto
-    num Erick — nunca método × ele-mesmo — em todos os TFs, ação e cripto."""
+    """Comparar SEMPRE sai como Padrão × Erick (compare=true), nunca método × ele-mesmo:
+    tanto do zero (launcher) quanto selecionando Comparar sobre um Erick aberto, em todos
+    os TFs, ação e cripto."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _route_stub(page)
         try:
             page.goto(live_server)
-            page.wait_for_selector("#analyzeForm", state="attached")
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
             for ticker, _ in ASSETS:
-                for open_view in ("padrao", "erick"):
-                    for tf in TFS:
-                        body = _bar_post(page, ticker, tf, "compare", open_view=open_view)
-                        assert body.get("compare") is True, ("compare deveria ser true", body)
-                        assert body.get("timeframe") == tf
+                for tf in TFS:
+                    # do zero, pelo launcher
+                    body = _launch_run(page, ticker, "compare", tf)
+                    assert body.get("compare") is True, ("compare do zero", body)
+                    assert body.get("timeframe") == tf, ("compare timeframe", body)
+
+                    # com um Erick ABERTO: selecionar Comparar sobrepõe o método aberto
+                    _seed_open(page, ticker, "erick", verdict_tf="1d")
+                    page.click(f'#launchTfs button.lb-tf[data-tf="{tf}"]')
+                    page.click('#launchMethods button.lb-method[data-method="compare"]')
+                    with page.expect_response("**/api/analyze") as ri:
+                        page.click("#runBtn")
+                    body2 = json.loads(ri.value.request.post_data)
+                    assert body2.get("compare") is True, ("compare sobre erick", body2)
+                    assert body2.get("timeframe") == tf, ("compare/erick timeframe", body2)
         finally:
             browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
-def test_launcher_has_no_method_controls(live_server):
-    """O launcher ficou limpo: some o checkbox de método/comparar e o botão Atualizar
-    separado — método vive só na barra (zero botão morto)."""
+def test_single_bar_layout_no_separate_reanalyze_bar(live_server):
+    """UMA barra só: a barra de reanálise separada não existe mais, e o launcher tem
+    ativo · data (chip) · tempo (5 TFs) · método (3) · Analisar · ↻. Sem botão morto."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         try:
             page.goto(live_server)
-            page.wait_for_selector("#analyzeForm", state="attached")
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
+
+            # a barra de reanálise separada e os controles antigos sumiram
+            assert page.locator("#reanalyzeBar").count() == 0
+            assert page.locator(".reanalyze-bar").count() == 0
             assert page.locator("#erickToggle").count() == 0
             assert page.locator("#compareToggle").count() == 0
             assert page.locator(".method-toggle").count() == 0
             assert page.locator("#refreshBtn").count() == 0
-            # o form tem só ATIVO + DATA + Analisar
+
+            # a barra única tem tudo num lugar só
             assert page.locator("#ticker").count() == 1
             assert page.locator("#date").count() == 1
+            assert page.locator("#dateChip").count() == 1
             assert page.locator("#runBtn").count() == 1
+            assert page.locator("#rerunBtn").count() == 1
+            assert page.locator("#launchTfs button.lb-tf").count() == 5
+            assert page.locator("#launchMethods button.lb-method").count() == 3
+
+            # sem ativo aberto, o ↻ nasce desabilitado (não há o que reanalisar)
+            assert page.is_disabled("#rerunBtn") is True
+
+            # o chip de data começa em "Hoje"
+            assert (page.text_content("#dateChipLabel") or "").strip() == "Hoje"
         finally:
             browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
 def test_bar_renders_and_clicks_on_mobile_390(live_server):
-    """Sem regressão no mobile 390: a barra renderiza os 3 métodos + 5 TFs e o clique
-    dispara o POST correto (layout empilha, mas tudo continua clicável)."""
+    """Mobile 390: a barra única quebra limpa (flex-wrap, sem overflow horizontal),
+    renderiza os 3 métodos + 5 TFs, e o clique dispara o POST correto."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 390, "height": 850})
         _route_stub(page)
         try:
             page.goto(live_server)
-            page.wait_for_selector("#analyzeForm", state="attached")
-            _seed(page, "BTC-USD", "4h", "padrao")
-            assert page.locator("#reanalyzeBar button.re-method").count() == 3
-            assert page.locator("#reanalyzeBar button.re-tf").count() == 5
-            body = _bar_post(page, "BTC-USD", "15m", "erick")
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
+            assert page.locator("#launchMethods button.lb-method").count() == 3
+            assert page.locator("#launchTfs button.lb-tf").count() == 5
+
+            # quebra limpa: nada estoura a largura de 390 (sem scroll horizontal)
+            no_overflow = page.evaluate(
+                "() => document.body.scrollWidth <= window.innerWidth + 1"
+            )
+            assert no_overflow, "barra estourou a largura no mobile 390"
+
+            body = _launch_run(page, "BTC-USD", "erick", "15m")
             assert body.get("method") == "erick" and body.get("timeframe") == "15m"
         finally:
             browser.close()

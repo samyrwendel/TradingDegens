@@ -144,22 +144,49 @@
          aria-label="Redimensionar histórico e conteúdo" tabindex="0"></div>
 
     <div class="content">
+      <!-- Barra ÚNICA (task 029): o launcher ABSORVEU a barra de reanálise (023).
+           Ativo · data (chip 📅, padrão hoje) · timeframe · método · Analisar · ↻.
+           Analisar roda com o método + TF escolhidos; ↻ reanalisa o ativo ABERTO
+           hoje preservando o método aberto (absorve o antigo "Atualizar"). A barra de
+           reanálise separada deixou de existir — método volta a viver aqui (reverte a
+           021 de propósito). Preserva método por TF: trocar de TF não reseta o método. -->
       <section class="panel launcher">
-        <form id="analyzeForm" autocomplete="off">
-          <div class="field">
+        <form id="analyzeForm" class="launch-bar" autocomplete="off">
+          <div class="lb-field lb-ticker">
             <label for="ticker">Ativo <span class="orig">(sigla ou nome)</span></label>
             <input id="ticker" name="ticker" placeholder="AAPL · Microsoft · BTC-USD · Bitcoin"
                    list="tickerSuggest" autocomplete="off" required />
             <datalist id="tickerSuggest"></datalist>
           </div>
-          <div class="field">
-            <label for="date">Data <span class="tz" id="tzLabel"></span></label>
-            <input id="date" name="date" type="date" />
+          <div class="lb-ctrls">
+            <!-- Data via chip: clica → abre o calendário nativo; mostra "Hoje" quando é
+                 a data de hoje, senão dd/mm. O input date (sobreposto transparente) é a
+                 fonte da verdade do POST e recebe o clique. -->
+            <div class="lb-group lb-date">
+              <span class="lb-glabel">data <span class="tz" id="tzLabel"></span></span>
+              <div class="date-chip-wrap">
+                <button type="button" class="date-chip" id="dateChip"
+                        title="Data da análise — clique pra escolher (padrão: hoje)">📅 <span id="dateChipLabel">Hoje</span></button>
+                <input id="date" name="date" type="date" class="date-native" aria-label="Data da análise" tabindex="-1" />
+              </div>
+            </div>
+            <div class="lb-group lb-tf">
+              <span class="lb-glabel">tempo</span>
+              <div class="lb-tfs" id="launchTfs" role="group" aria-label="Timeframe da análise"></div>
+            </div>
+            <div class="lb-group lb-method">
+              <span class="lb-glabel">método</span>
+              <div class="lb-methods" id="launchMethods" role="group" aria-label="Método da análise"></div>
+            </div>
           </div>
-          <!-- Método vive num lugar SÓ: a barra de reanálise [Padrão][Erick][Comparar]
-               (abaixo, com um resultado na tela). O launcher só ABRE o ativo — roda
-               Padrão por padrão; daí é 1 clique pra trocar de método/TF sem redigitar. -->
-          <button type="submit" id="runBtn">Analisar</button>
+          <div class="lb-actions">
+            <button type="submit" id="runBtn">Analisar</button>
+            <!-- ↻ reanalisa o ativo ABERTO hoje, preservando o método aberto. Fica
+                 desabilitado enquanto nenhum ativo está aberto. -->
+            <button type="button" id="rerunBtn" class="rerun-btn"
+                    title="Reanalisar o ativo aberto hoje (mesmo método)"
+                    aria-label="Reanalisar o ativo aberto" disabled>↻</button>
+          </div>
         </form>
         <p class="hint" id="assetHint"></p>
         <p class="error" id="formError"></p>
@@ -203,17 +230,6 @@
         <span class="resume-msg" id="resumeMsg">Análise pausada.</span>
         <button type="button" class="btn-primary" id="resumeRunBtn">▶ Retomar</button>
       </div>
-
-      <!-- Reanalisar SEM redigitar (task 023 · consolidado na 018): faixa do ativo
-           ABERTO (clicado no histórico ou já na tela) — vale tanto pra análise simples
-           quanto pra comparação, por isso fica FORA dos dois painéis (o de comparação
-           esconde o de resultado). É o ÚNICO lugar do método: ticker JÁ preenchido +
-           escolha EXPLÍCITA (Padrão / Erick / Comparar) + timeframe, sempre na data de
-           HOJE — absorve o antigo botão "Atualizar" (o método aberto fica destacado, e
-           clicá-lo = reanalisar hoje preservando o método). Reusa os endpoints de
-           /api/analyze — não reescreve o motor. Visível só com um resultado/comparação
-           na tela (escondida enquanto uma análise roda). Populada por JS. -->
-      <div class="reanalyze-bar hidden" id="reanalyzeBar"></div>
 
       <section class="panel result-panel hidden" id="resultPanel">
         <!-- Cabeçalho = a decisão: ticker · veredito · preço. À direita, só
