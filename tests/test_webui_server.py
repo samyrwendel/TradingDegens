@@ -83,6 +83,32 @@ def _post(base, path, payload):
 def test_health(server):
     status, body = _get(server, "/api/health")
     assert status == 200 and body["ok"] is True
+    # Deploy gracioso (task 022): /api/health expõe as runs ativas pra o restart
+    # drenar em vez de matar cego. Sem run em voo, zero.
+    assert body["active_runs"] == 0 and body["runs"] == []
+
+
+def test_health_reports_active_runs(tmp_path):
+    """Uma run em voo aparece no /api/health (contagem + id) — o sinal que o drain
+    de shutdown usa pra não matar análise no meio (task 022)."""
+    gate = threading.Event()
+    httpd, base = _make_server(tmp_path, _blocking_factory(gate))
+    try:
+        _, started = _post(base, "/api/analyze",
+                           {"ticker": "AAPL", "date": "2020-01-02"})
+        run_id = started["run_id"]
+        deadline = time.time() + 3.0
+        seen = {}
+        while time.time() < deadline:
+            _, seen = _get(base, "/api/health")
+            if seen.get("active_runs", 0) >= 1:
+                break
+            time.sleep(0.05)
+        assert seen["active_runs"] >= 1
+        assert run_id in seen["runs"]
+    finally:
+        gate.set()
+        httpd.shutdown()
 
 
 def test_config_endpoint_reports_manaus(server):

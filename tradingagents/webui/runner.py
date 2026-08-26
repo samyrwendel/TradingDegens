@@ -11,12 +11,14 @@ run analyses at once.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import threading
 import time
 import traceback
 import uuid
+from datetime import datetime
 from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
@@ -46,6 +48,7 @@ from tradingagents.webui.progress import (
     ThinkingTracker,
 )
 from tradingagents.webui.report_sanitizer import sanitize_result
+from tradingagents.webui.resume_store import ActiveRunStore
 from tradingagents.webui.store import HistoryStore
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
@@ -64,6 +67,15 @@ _STOCK_TIMEFRAMES = ("1w", "1d", "4h", "1h", "15m")
 _DEFAULT_TIMEFRAME = "1d"
 # TTL do cache de preço LIVE da watchlist: "vivo" o bastante sem martelar a fonte.
 _PRICE_TTL = 45.0
+
+# Janela de reúso de dia-corrente (herda DA-058): uma análise de HOJE só é
+# reaproveitada enquanto o dado que ela leu ainda vale — passado o TTL, a barra
+# live pode ter refrescado (candle parcial vira final) e o julgamento fica
+# obsoleto, então recomputa. Data histórica é imutável e reusa sempre. O default
+# espelha ``OHLCV_CACHE_TTL_SECONDS`` da DA-058 (resolvido em runtime, fail-soft).
+_SAME_DAY_REUSE_TTL_DEFAULT = 900.0
+# Quantos registros do histórico varrer procurando um reúso íntegro.
+_REUSE_SCAN_LIMIT = 50
 
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
 _MAX_QUESTION_CHARS = 500
@@ -193,6 +205,17 @@ def timeframes_for_asset(asset_type: str) -> list[str]:
     no candle degrades honestly on demand). The single source of truth the UI
     selector and the ``/api/chart`` validation both read, so they never disagree."""
     return list(_CRYPTO_TIMEFRAMES if asset_type == "crypto" else _STOCK_TIMEFRAMES)
+
+
+def _resolve_same_day_ttl() -> float:
+    """Same-day reuse window in seconds — the DA-058 OHLCV cache TTL, so run-reuse
+    and data-cache freshness agree by construction. Fail-soft to the default when
+    the heavy dataflows module can't be imported (keeps unit tests decoupled)."""
+    try:
+        from tradingagents.dataflows.stockstats_utils import OHLCV_CACHE_TTL_SECONDS
+        return float(OHLCV_CACHE_TTL_SECONDS)
+    except Exception:  # noqa: BLE001
+        return _SAME_DAY_REUSE_TTL_DEFAULT
 
 
 def _pipeline_version() -> str:
@@ -397,7 +420,17 @@ class _Run:
         # Reference frame the market analyst reads for THIS run (task 012). Stamped
         # on the verdict and used as the chart's opening frame.
         self.timeframe = timeframe or _DEFAULT_TIMEFRAME
+        # Method label (padrao/erick), reliable from the analyst selection — feeds
+        # the resume descriptor and the cross-run reuse key.
+        self.method = "erick" if "erick" in (selected_analysts or []) else "padrao"
         self.status = "running"           # running | done | error
+        # Reúso honesto (DA-058): True quando ESTE run devolveu, íntegras, as etapas
+        # de um run idêntico já concluído — sem re-rodar o pipeline (custo zero).
+        self.reused = False
+        self.reused_from: str | None = None
+        # True quando este run está RETOMANDO um checkpoint interrompido (boot pós
+        # restart): o worker resume do último nó concluído, não do zero.
+        self.resuming = False
         self.error: str | None = None
         # code estável do erro (no_credit/invalid_key/rate_limit/unavailable) pra UI.
         self.error_code: str | None = None
@@ -425,6 +458,11 @@ class _Run:
             "error": self.error,
             "error_code": self.error_code,
             "verdict_timeframe": self.timeframe,
+            # Honest reuse marker (DA-058): the whole analysis came back intact from
+            # an identical prior run; the UI badges it "reaproveitado", cost is zero.
+            "reused": self.reused,
+            "reused_from": self.reused_from,
+            "resuming": self.resuming,
             "progress": self.tracker.snapshot(),
             "thinking": self.thinking.snapshot(),
             "cost": self.cost(),
@@ -570,6 +608,16 @@ class AnalysisRunner:
         # Serve o /api/prices sem martelar a fonte nem rodar o pipeline.
         self._price_cache: dict[str, Any] = {}
         self._price_lock = threading.Lock()
+        # Descritores das runs em voo (checkpoint/resume): gravados no start,
+        # apagados no terminal — o que sobra num boot é a fila de retomada.
+        self.active = ActiveRunStore(self.store.base / "active")
+        # Checkpoint LangGraph por-nó ligado por padrão (deploy/erro no meio de uma
+        # run não descarta o trabalho — retoma do último nó). Válvula de escape por
+        # env; só efetivo quando há data_cache_dir (o real; o fake dos testes ignora).
+        self.checkpoint_enabled = os.getenv("TRADINGDEGENS_RESUME", "1") != "0"
+        # Janela de reúso de dia-corrente (DA-058), resolvida do TTL do cache OHLCV;
+        # fail-soft pro default. Testes ajustam pra exercitar os dois lados do reúso.
+        self.reuse_same_day_ttl = _resolve_same_day_ttl()
 
     @staticmethod
     def _default_graph_factory(config, selected_analysts, callbacks):
@@ -588,11 +636,21 @@ class AnalysisRunner:
 
     def start(self, ticker: str, date: str, method: str = "padrao",
               timeframe: str = _DEFAULT_TIMEFRAME,
-              overrides: dict[str, Any] | None = None) -> str:
+              overrides: dict[str, Any] | None = None,
+              reuse: bool = True) -> str:
         """Kick off an analysis; returns a run_id to poll immediately.
 
         ``method="erick"`` adds the on-demand Erick-method analyst to the run
         (Modo Erick); any other value runs the Padrão selection unchanged.
+
+        ``reuse`` (default on) reaproveita, HONESTAMENTE, uma análise idêntica já
+        concluída — mesmo (ticker, data, timeframe, método) — devolvendo o
+        resultado íntegro sem re-rodar o pipeline (custo zero, marcado ``reused``,
+        DA-058). Só reusa quando os INSUMOS batem: data histórica é imutável e
+        reusa sempre; data=hoje só reusa dentro da janela de frescor do dado
+        (:attr:`reuse_same_day_ttl`) — passada, o dado live pode ter refrescado e
+        recomputa. Um run interrompido/errado não conta como concluído: um novo
+        start com checkpoint ligado RETOMA do último nó (roda só o que faltou).
 
         ``timeframe`` is the reference frame the market analyst reads (task 012);
         it must be one of the asset's operable frames (``timeframes_for_asset``) —
@@ -622,11 +680,24 @@ class AnalysisRunner:
         selected = select_analysts_for_asset(
             asset_type, include_erick=(method == "erick")
         )
+        method_norm = "erick" if "erick" in selected else "padrao"
+        # Reúso entre runs (DA-058): uma análise idêntica já concluída E com o dado
+        # ainda íntegro volta inteira, sem re-rodar. Só o caminho concluído; um run
+        # interrompido é retomado pelo checkpoint no worker abaixo (não aqui).
+        if reuse:
+            prior = self._find_reusable_completed(ticker, date, timeframe, method_norm)
+            if prior is not None:
+                return self._register_reused_run(
+                    prior, ticker, date, asset_type, selected, timeframe, overrides
+                )
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe,
                    overrides=overrides)
         with self._lock:
             self._runs[run_id] = run
+        # Descritor em disco ANTES de rodar: um kill (deploy/OOM) no meio da run
+        # deixa ele pra trás e o boot seguinte retoma. Apagado no terminal.
+        self._write_descriptor(run, overrides)
         threading.Thread(target=self._worker, args=(run,), daemon=True).start()
         return run_id
 
@@ -637,6 +708,10 @@ class AnalysisRunner:
         final_status = self._execute(run)
         self._persist(run, final_status)
         run.status = final_status
+        # Terminal reached in-process → drop the resume descriptor so the next boot
+        # doesn't re-run a finished analysis. (A kill before here leaves it behind,
+        # which is exactly what makes the run recoverable.)
+        self.active.remove(run.run_id)
 
     def _execute(self, run: _Run) -> str:
         """Run the analysis pipeline for ``run`` in the CURRENT thread.
@@ -650,6 +725,13 @@ class AnalysisRunner:
         # Config efetiva computada fora do try pra estar disponível no except mesmo
         # se a construção do grafo falhar (o provider vira parte da mensagem humana).
         config = apply_llm_overrides(self.base_config, run.overrides)
+        # Checkpoint por-nó (resume): o grafo persiste o estado a cada nó concluído
+        # num SQLite keyed por ticker+data+forma-do-grafo, e RETOMA do último nó se
+        # já houver checkpoint (deploy/erro no meio não joga o trabalho fora). Só
+        # quando há data_cache_dir (o grafo real; o fake dos testes ignora a config).
+        config["checkpoint_enabled"] = bool(
+            self.checkpoint_enabled and config.get("data_cache_dir")
+        )
         # Gating da chave do servidor (defesa em profundidade — o server já recusa
         # antes de criar a run): requisição PÚBLICA (allow_server_key=False, que o
         # server marca explicitamente pra quem não é dono) sem chave própria NÃO roda
@@ -778,6 +860,207 @@ class AnalysisRunner:
             self.store.save(record)
         except Exception:
             pass  # history is best-effort; a failed write must not kill the run
+
+    # ------------------------------------------ reúso entre runs (DA-058) ------
+    def _find_reusable_completed(
+        self, ticker: str, date: str, timeframe: str, method: str
+    ) -> dict[str, Any] | None:
+        """Registro DONE mais recente idêntico em (ticker, data, timeframe, método)
+        cujo dado ainda é íntegro (:meth:`_is_reuse_fresh`), ou ``None``.
+
+        A chave inclui o método (padrao/erick); registros de comparação (method=
+        ``compare``) e errados/interrompidos ficam de fora — não são uma leitura
+        simples reaproveitável. É o análogo single-run do ``_find_reusable`` do
+        confronto, com a guarda de frescor de dia-corrente por cima (correção de
+        cache, herda DA-058: só reusa quando o insumo é o mesmo)."""
+        want = (method or "padrao").lower()
+        for summ in self.store.recent(_REUSE_SCAN_LIMIT):
+            if summ.get("status") != "done":
+                continue
+            if (summ.get("ticker") or "").upper() != ticker.upper():
+                continue
+            if (summ.get("date") or "") != date:
+                continue
+            if (summ.get("verdict_timeframe") or _DEFAULT_TIMEFRAME) != timeframe:
+                continue
+            if (summ.get("method") or "padrao").lower() != want:
+                continue
+            rec = self.store.get(summ["run_id"])
+            if not rec or rec.get("status") != "done":
+                continue
+            res = rec.get("result") or {}
+            if not res or res.get("compare"):
+                continue  # nada a reusar / não é leitura simples
+            if not self._is_reuse_fresh(rec, date):
+                continue
+            return rec
+        return None
+
+    def _is_reuse_fresh(self, record: dict[str, Any], date: str) -> bool:
+        """Se o dado que ``record`` leu ainda vale pra reusar HOJE (correção de cache,
+        DA-058).
+
+        Data histórica (< hoje em Manaus) é imutável → reusa sempre. Data=hoje só
+        reusa dentro da janela de frescor (:attr:`reuse_same_day_ttl`, o TTL do
+        cache OHLCV): passada, a barra live pode ter refrescado (candle parcial →
+        final) e o julgamento fica obsoleto — recomputa. Fail-safe: se não dá pra
+        determinar a idade de um registro de hoje, NÃO reusa (recomputar é mais
+        seguro que reusar podre)."""
+        try:
+            today = timeutil.today()
+        except Exception:  # noqa: BLE001
+            return False
+        if (date or "") < today:
+            return True  # passado imutável
+        if (date or "") > today:
+            return False  # futuro (não deveria ocorrer) → conservador
+        # Dia corrente: idade do run < TTL de frescor?
+        stamp = record.get("finished_at") or (record.get("result") or {}).get(
+            "audit", {}
+        ).get("collected_at")
+        if not stamp:
+            return False
+        try:
+            finished = datetime.fromisoformat(str(stamp))
+            age = (timeutil.now() - finished).total_seconds()
+        except Exception:  # noqa: BLE001
+            return False
+        return 0 <= age < float(self.reuse_same_day_ttl)
+
+    def _register_reused_run(
+        self, prior: dict[str, Any], ticker: str, date: str, asset_type: str,
+        selected: list[str], timeframe: str, overrides: dict[str, Any] | None,
+    ) -> str:
+        """Cria um run já CONCLUÍDO que devolve, íntegro, o resultado de ``prior`` —
+        sem tocar no pipeline (custo zero). Marca ``reused``/``reused_from`` pra o
+        front badgear "reaproveitado" e pra o teste provar que o grafo não rodou.
+        Não re-persiste no histórico (o original já está lá) nem grava descritor."""
+        run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
+        run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe,
+                   overrides=overrides)
+        result = copy.deepcopy(prior.get("result") or {})
+        result["reused"] = True
+        result["reused_from"] = prior.get("run_id")
+        run.result = result
+        run.reused = True
+        run.reused_from = prior.get("run_id")
+        run.finished_at = time.time()
+        run.finished_stamp = timeutil.stamp()
+        run.tracker.mark_done()
+        run.status = "done"
+        with self._lock:
+            self._runs[run_id] = run
+        return run_id
+
+    # ---------------------------------- checkpoint / resume (deploy-safe) ------
+    def _write_descriptor(
+        self, run: _Run, overrides: dict[str, Any] | None
+    ) -> None:
+        """Grava o descritor de retomada da run em disco (sem NUNCA a chave BYOK).
+
+        ``resumable`` só quando a run roda com a chave do SERVIDOR (dono logado, sem
+        chave colada): aí um boot pós-restart a retoma sozinho. Uma run BYOK (chave
+        do usuário, que vive só no navegador) é não-resumível — o boot a re-superfície
+        HONESTAMENTE como "interrompida, rode de novo", jamais finge que rodou."""
+        ov = overrides or {}
+        resumable = (not ov.get("api_key")) and (ov.get("allow_server_key") is True)
+        safe_ov: dict[str, Any] = {"allow_server_key": True} if resumable else {}
+        for k in ("provider", "deep_model", "quick_model", "base_url"):
+            if ov.get(k):
+                safe_ov[k] = ov[k]
+        self.active.put(run.run_id, {
+            "run_id": run.run_id,
+            "ticker": run.ticker,
+            "date": run.date,
+            "asset_type": run.asset_type,
+            "timeframe": run.timeframe,
+            "method": run.method,
+            "selected_analysts": list(run.selected_analysts),
+            "started_at": run.finished_stamp or timeutil.stamp(),
+            "resumable": resumable,
+            "overrides": safe_ov,
+        })
+
+    def resume_interrupted(self) -> int:
+        """Na subida do servidor: retoma as runs que um restart matou no meio.
+
+        Cada descritor que sobrou em disco é uma run interrompida. As resumíveis
+        (chave do servidor) voltam a rodar — com o checkpoint por-nó, RETOMAM do
+        último estágio concluído (só o que faltou), não do zero. As não-resumíveis
+        (BYOK, sem a chave) viram um registro ``error`` honesto ("interrompida, rode
+        de novo") — nada de reúso falso. Retorna quantas foram re-enfileiradas."""
+        resumed = 0
+        for desc in self.active.list_pending():
+            rid = desc.get("run_id")
+            if not rid:
+                continue
+            # Já concluída em disco (crash entre persist e remove) → só limpa.
+            rec = self.store.get(rid)
+            if rec and rec.get("status") in ("done", "error"):
+                self.active.remove(rid)
+                continue
+            if not desc.get("resumable"):
+                self._persist_interrupted(desc)
+                self.active.remove(rid)
+                continue
+            try:
+                self._reenqueue(desc)
+                resumed += 1
+            except Exception:  # noqa: BLE001 — uma retomada não pode derrubar o boot
+                logger.warning("falha ao retomar run %s", rid, exc_info=True)
+        return resumed
+
+    def _reenqueue(self, desc: dict[str, Any]) -> None:
+        """Sobe de novo uma run interrompida resumível. O worker chama o mesmo
+        ``_execute``; com o checkpoint ligado e o thread_id derivado de ticker+data+
+        forma-do-grafo (não do run_id), o grafo retoma do último nó concluído."""
+        asset_type = desc.get("asset_type") or self.detect_asset_type(desc["ticker"])
+        selected = desc.get("selected_analysts") or select_analysts_for_asset(
+            asset_type, include_erick=(desc.get("method") == "erick")
+        )
+        run = _Run(
+            desc["run_id"], desc["ticker"], desc["date"], asset_type, list(selected),
+            timeframe=desc.get("timeframe", _DEFAULT_TIMEFRAME),
+            overrides=desc.get("overrides") or {},
+        )
+        run.resuming = True
+        with self._lock:
+            self._runs[run.run_id] = run
+        threading.Thread(target=self._worker, args=(run,), daemon=True).start()
+
+    def _persist_interrupted(self, desc: dict[str, Any]) -> None:
+        """Registro honesto de uma run interrompida que NÃO dá pra retomar sozinha
+        (BYOK, sem a chave). Aparece no histórico como erro claro, não some calada
+        nem finge estar completa."""
+        try:
+            record = {
+                "run_id": desc.get("run_id"),
+                "ticker": desc.get("ticker"),
+                "date": desc.get("date"),
+                "asset_type": desc.get("asset_type"),
+                "status": "error",
+                "error": ("Análise interrompida por reinício do servidor — rode de "
+                          "novo (sua chave não fica salva)."),
+                "error_code": "interrupted",
+                "verdict": None,
+                "verdict_timeframe": desc.get("timeframe"),
+                "method": desc.get("method", "padrao"),
+                "cost_usd": 0,
+                "elapsed": 0,
+                "finished_at": timeutil.stamp(),
+                "result": None,
+                "cost": {"usd": 0, "complete": True},
+            }
+            self.store.save(record)
+        except Exception:  # noqa: BLE001
+            pass  # registro honesto é best-effort; não pode derrubar o boot
+
+    def active_run_ids(self) -> list[str]:
+        """Ids das runs ainda EXECUTANDO neste processo (pro /api/health e o drain
+        de shutdown gracioso). Reused/terminais não contam."""
+        with self._lock:
+            return [rid for rid, r in self._runs.items()
+                    if getattr(r, "status", "") == "running"]
 
     # ----------------------------------------------------- compare (Fase 3) ----
     def start_compare(self, ticker: str, date: str,

@@ -40,6 +40,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import threading
 import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -369,7 +371,14 @@ class _Handler(BaseHTTPRequestHandler):
             elif path.startswith("/static/"):
                 self._serve_static(path[len("/static/"):])
             elif path == "/api/health":
-                self._send_json({"ok": True, "service": "tradingdegens-web"})
+                # Expõe as runs ATIVAS pra um deploy ser gracioso: quem for reiniciar
+                # o serviço vê que há análise em voo e drena (o handler de SIGTERM
+                # espera esvaziar) — nunca mata cega no meio. Os ids deixam auditar.
+                active = self.runner.active_run_ids()
+                self._send_json({
+                    "ok": True, "service": "tradingdegens-web",
+                    "active_runs": len(active), "runs": active,
+                })
             elif path == "/api/config":
                 info = self.runner.config_info()
                 # Estado do login do dono (server-side): a UI mostra "usando a chave
@@ -569,9 +578,12 @@ class _Handler(BaseHTTPRequestHandler):
                     )
                     self._send_json({"run_id": run_id})
                     return
+                # Reúso automático de análise idêntica já feita (DA-058); o front
+                # pode forçar do zero com force_fresh (ex.: "reanalisar").
+                reuse = not bool(body.get("force_fresh"))
                 run_id = self.runner.start(
                     ticker, date, method=method or "padrao", timeframe=timeframe,
-                    overrides=overrides,
+                    overrides=overrides, reuse=reuse,
                 )
                 self._send_json({"run_id": run_id})
             elif path == "/api/compare":
@@ -672,10 +684,47 @@ def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
     return httpd
 
 
+def _graceful_shutdown(httpd: ThreadingHTTPServer, runner: AnalysisRunner) -> None:
+    """Instala o handler de SIGTERM/SIGINT pra um deploy NÃO matar run no meio.
+
+    No stop (``systemctl restart`` manda SIGTERM), em vez de o processo morrer
+    cru — matando as threads das runs em voo — a gente DRENA: para de aceitar e
+    espera até ``TRADINGDEGENS_DRAIN_SECONDS`` as runs ativas terminarem. O que
+    não fechar a tempo não se perde: o descritor em disco + o checkpoint por-nó
+    fazem o próximo boot RETOMAR do último estágio. ``httpd.shutdown()`` roda em
+    outra thread (não pode ser chamado de dentro do serve_forever/handler)."""
+    stopping = threading.Event()
+
+    def _handler(signum, _frame):
+        if stopping.is_set():
+            return
+        stopping.set()
+        drain = float(os.getenv("TRADINGDEGENS_DRAIN_SECONDS", "8"))
+        deadline = time.time() + max(0.0, drain)
+        # Deixa as runs quase-prontas fecharem; as demais serão retomadas no boot.
+        while time.time() < deadline and runner.active_run_ids():
+            time.sleep(0.3)
+        threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, _handler)
+    signal.signal(signal.SIGINT, _handler)
+
+
 def main() -> None:
     host = os.getenv("TRADINGDEGENS_WEB_HOST", "0.0.0.0")
     port = int(os.getenv("TRADINGDEGENS_WEB_PORT", "8781"))
-    httpd = make_server(host, port)
+    # Constrói o runner primeiro pra RETOMAR as runs que um restart anterior matou
+    # no meio (fila de descritores em disco) ANTES de aceitar tráfego.
+    runner = AnalysisRunner()
+    try:
+        resumed = runner.resume_interrupted()
+        if resumed:
+            print(f"Retomando {resumed} análise(s) interrompida(s) por restart.",
+                  flush=True)
+    except Exception as exc:  # noqa: BLE001 — retomada nunca impede a subida
+        print(f"Aviso: falha ao retomar runs interrompidas: {exc}", flush=True)
+    httpd = make_server(host, port, runner=runner)
+    _graceful_shutdown(httpd, runner)
     shown = host if host != "0.0.0.0" else "0.0.0.0 (todas as interfaces — Tailscale incluído)"
     print(f"TradingDegens web em http://{shown}:{port}", flush=True)
     try:

@@ -465,6 +465,7 @@ class TradingAgentsGraph:
         self._resolve_pending_entries(company_name)
 
         # Recompile with a checkpointer if the user opted in.
+        resume = False
         if self.config.get("checkpoint_enabled"):
             self._checkpointer_ctx = get_checkpointer(
                 self.config["data_cache_dir"], company_name
@@ -477,6 +478,11 @@ class TradingAgentsGraph:
                 self._run_signature(asset_type, timeframe),
             )
             if step is not None:
+                # A checkpoint exists → resume from the last completed node. The
+                # graph must be invoked with ``None`` (not the initial state) so
+                # LangGraph continues the saved thread instead of re-seeding it and
+                # re-running completed nodes (mirrors the resume in the test suite).
+                resume = True
                 logger.info(
                     "Resuming from step %d for %s on %s", step, company_name, trade_date
                 )
@@ -485,7 +491,7 @@ class TradingAgentsGraph:
 
         try:
             return self._run_graph(company_name, trade_date, asset_type=asset_type,
-                                   timeframe=timeframe)
+                                   timeframe=timeframe, resume=resume)
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -508,8 +514,13 @@ class TradingAgentsGraph:
         return write_report_tree(final_state, ticker, save_path)
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock",
-                   timeframe: str = "1d"):
-        """Execute the graph and write the resulting state to disk and memory log."""
+                   timeframe: str = "1d", resume: bool = False):
+        """Execute the graph and write the resulting state to disk and memory log.
+
+        ``resume`` (a checkpoint for this thread already exists) feeds ``None`` to
+        the graph instead of the freshly-built initial state, so the run continues
+        from the last completed node rather than restarting it.
+        """
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
@@ -533,6 +544,10 @@ class TradingAgentsGraph:
                             self._run_signature(asset_type, timeframe))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
+        # On resume, feed ``None`` so LangGraph continues the checkpointed thread
+        # from its last completed node instead of re-seeding and re-running it.
+        graph_input = None if resume else init_agent_state
+
         # Pin the analysis date as the run's base date so every data tool clamps
         # look-ahead: a backtest at a past date can never fetch data dated after
         # it (see agents/utils/date_guard.py). The whole graph runs synchronously
@@ -541,7 +556,7 @@ class TradingAgentsGraph:
             if self.debug:
                 trace = []
                 last_printed = None
-                for chunk in self.graph.stream(init_agent_state, **args):
+                for chunk in self.graph.stream(graph_input, **args):
                     if chunk["messages"]:
                         msg = chunk["messages"][-1]
                         # Nodes after the trader don't append to messages, so the
@@ -558,7 +573,7 @@ class TradingAgentsGraph:
                 for chunk in trace:
                     final_state.update(chunk)
             else:
-                final_state = self.graph.invoke(init_agent_state, **args)
+                final_state = self.graph.invoke(graph_input, **args)
 
         # Store current state for reflection.
         self.curr_state = final_state
