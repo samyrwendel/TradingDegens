@@ -170,3 +170,154 @@ class ProgressCallbackHandler(BaseCallbackHandler):
 
     def on_chain_start(self, serialized, inputs, **kwargs) -> None:
         self._note(kwargs)
+
+
+# ── Raciocínio AO VIVO (task 008) ───────────────────────────────────────────
+# Uma análise leva 13-21min; ver só QUAL agente roda (a barra) é um black box. Os
+# agentes JÁ produzem o texto do parecer — hoje só aparece no fim. Isto REVELA esse
+# texto progressivamente, com CUSTO ZERO de LLM: captura a SAÍDA de cada nó direto
+# do callback do LLM (o mesmo já anexado pra medir uso/progresso), sem re-perguntar
+# nada ao modelo. Cada card mostra o que aquele agente está pensando/escrevendo.
+
+# node LangGraph -> (rótulo pt-BR, fase, é_debate). Ordem = ordem do pipeline (a
+# ordem em que o usuário assiste a análise ser construída). O debate alta×baixa e o
+# de risco ganham destaque (is_debate) — é o mais interessante de acompanhar.
+_THINKING_NODES: list[tuple[str, str, str, bool]] = [
+    ("Market Analyst",       "📊 Mercado — preço e tempos gráficos",       "Analistas", False),
+    ("Sentiment Analyst",    "💬 Sentimento",                              "Analistas", False),
+    ("News Analyst",         "📰 Notícias — macro e mercados de previsão", "Analistas", False),
+    ("Fundamentals Analyst", "📑 Fundamentos",                             "Analistas", False),
+    ("Erick Analyst",        "🧭 Método Erick",                            "Analistas", False),
+    ("Bull Researcher",      "🟢 Tese de Alta (bull)",                     "Debate",    True),
+    ("Bear Researcher",      "🔴 Tese de Baixa (bear)",                    "Debate",    True),
+    ("Research Manager",     "⚖️ Juiz do Debate",                          "Debate",    False),
+    ("Trader",               "🎯 Plano do Trader",                         "Execução",  False),
+    ("Aggressive Analyst",   "🔥 Risco — Agressivo",                       "Risco",     True),
+    ("Conservative Analyst", "🛡️ Risco — Conservador",                     "Risco",     True),
+    ("Neutral Analyst",      "⚖️ Risco — Neutro",                          "Risco",     True),
+    ("Portfolio Manager",    "🛡️ Decisão de Risco (veredito)",             "Risco",     False),
+]
+_THINKING_INDEX = {
+    node: (i, label, phase, debate)
+    for i, (node, label, phase, debate) in enumerate(_THINKING_NODES)
+}
+
+# Cap por card: os pareceres cabem folgado; o teto evita despejar um payload gigante
+# a cada poll (2s) e protege o mobile. O texto integral vem no resultado final.
+_THINKING_CAP = 8000
+
+
+def _text_from_llm_response(response: Any) -> str:
+    """Texto plano da resposta do LLM (chat ou completions), tolerante a formatos.
+
+    Cobre content string, blocos de conteúdo (lista de dicts com ``text``) e o
+    ``.text`` das gerações antigas. Nunca levanta — no pior caso devolve "".
+    """
+    try:
+        parts: list[str] = []
+        for row in getattr(response, "generations", None) or []:
+            for gen in row:
+                msg = getattr(gen, "message", None)
+                content = getattr(msg, "content", None) if msg is not None else getattr(gen, "text", "")
+                if isinstance(content, list):   # provedores que devolvem blocos
+                    content = "".join(
+                        (b.get("text", "") if isinstance(b, dict) else str(b)) for b in content
+                    )
+                if content:
+                    parts.append(content if isinstance(content, str) else str(content))
+        return "\n".join(parts).strip()
+    except Exception:
+        return ""
+
+
+class ThinkingTracker:
+    """Guarda o TEXTO produzido por cada nó, por agente, pra revelar o raciocínio ao
+    vivo. Thread-safe: o callback escreve na thread do grafo, o snapshot é lido na
+    thread HTTP. Só EXPÕE o que o grafo já gera — zero custo extra de LLM."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._texts: dict[str, str] = {}     # node -> último texto (recortado)
+
+    def set_by_node(self, node: str, text: str) -> None:
+        if node not in _THINKING_INDEX or not text:
+            return
+        text = text.strip()
+        if len(text) < 8:            # descarta ruído trivial de meio de tool-loop
+            return
+        if len(text) > _THINKING_CAP:
+            text = text[:_THINKING_CAP] + "…"
+        with self._lock:
+            self._texts[node] = text
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        """Cards com texto, na ordem do pipeline (estável — o front não reordena)."""
+        with self._lock:
+            items = []
+            for node, txt in self._texts.items():
+                order, label, phase, debate = _THINKING_INDEX[node]
+                items.append({
+                    "id": node, "label": label, "phase": phase, "debate": debate,
+                    "order": order, "len": len(txt), "text": txt,
+                })
+        items.sort(key=lambda it: it["order"])
+        return items
+
+
+class ThinkingCallbackHandler(BaseCallbackHandler):
+    """Alimenta a :class:`ThinkingTracker` com a saída dos LLMs de cada nó.
+
+    Os callbacks vivem no LLM (não no grafo), então correlacionamos por ``run_id``:
+    no *start* guardamos o ``langgraph_node`` daquela chamada; no *end* atribuímos o
+    texto ao nó. Se o provedor faz streaming, ``on_llm_new_token`` cresce o card em
+    tempo real; senão, o texto aparece por-agente-concluído (resolve o essencial).
+    Defensivo: qualquer erro aqui é engolido — nunca quebra a run.
+    """
+
+    def __init__(self, tracker: ThinkingTracker):
+        super().__init__()
+        self.tracker = tracker
+        self._node_by_run: dict[Any, str] = {}    # run_id -> node
+        self._partial: dict[Any, str] = {}        # run_id -> texto em streaming
+
+    def _remember(self, kwargs: dict[str, Any]) -> None:
+        try:
+            node = (kwargs.get("metadata") or {}).get("langgraph_node")
+            rid = kwargs.get("run_id")
+            if node and rid is not None:
+                self._node_by_run[rid] = node
+        except Exception:
+            pass
+
+    def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
+        self._remember(kwargs)
+
+    def on_llm_start(self, serialized, prompts, **kwargs) -> None:
+        self._remember(kwargs)
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        try:
+            rid = kwargs.get("run_id")
+            node = self._node_by_run.get(rid)
+            if not node:
+                return
+            self._partial[rid] = self._partial.get(rid, "") + (token or "")
+            self.tracker.set_by_node(node, self._partial[rid])
+        except Exception:
+            pass
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        try:
+            rid = kwargs.get("run_id")
+            node = self._node_by_run.pop(rid, None)
+            partial = self._partial.pop(rid, "")
+            if not node:
+                return
+            text = _text_from_llm_response(response) or partial
+            self.tracker.set_by_node(node, text)
+        except Exception:
+            pass
+
+    # alguns wrappers de chat emitem on_chat_model_end em vez de on_llm_end
+    def on_chat_model_end(self, response, **kwargs) -> None:   # pragma: no cover
+        self.on_llm_end(response, **kwargs)

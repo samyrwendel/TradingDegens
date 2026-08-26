@@ -162,6 +162,10 @@
              com estado de cada (rodando/concluída/reusada do cache). Só aparece
              quando o progresso é de uma comparação (compare_steps no snapshot). -->
         <ol class="cmp-steps hidden" id="compareSteps"></ol>
+        <!-- Raciocínio AO VIVO (task 008): conforme cada agente termina, o texto do
+             parecer aparece aqui (colapsável, debate em destaque). Custo zero de
+             LLM — só revela o que o motor já gera. Rola dentro do painel no mobile. -->
+        <div class="thinking-live hidden" id="thinkingLive"></div>
       </section>
 
       <!-- Reanalisar SEM redigitar (task 023 · consolidado na 018): faixa do ativo

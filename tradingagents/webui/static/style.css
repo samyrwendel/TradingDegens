@@ -183,6 +183,36 @@ details.section.erick > summary { color: #9cc7f5; }
 }
 .steps { min-height: 60px; align-content: flex-start; }
 
+/* Raciocínio AO VIVO (task 008): feed dos pareceres conforme cada agente termina.
+   Altura máxima com ROLAGEM INTERNA → o painel de progresso não cresce sem fim nem
+   empurra a página (layout estável); no mobile o texto quebra e rola por dentro,
+   sem overflow horizontal. Cada card é colapsável; o debate ganha destaque. */
+.thinking-live {
+  margin-top: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: min(460px, 55vh); overflow-y: auto; overflow-x: hidden;
+  padding-right: 4px;
+}
+.tk-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel-2); overflow: hidden;
+}
+.tk-sum {
+  cursor: pointer; list-style: none; padding: 9px 13px;
+  font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold);
+  color: var(--text); display: flex; align-items: center; gap: 8px;
+}
+.tk-sum::-webkit-details-marker { display: none; }
+.tk-sum::after { content: "▸"; margin-left: auto; color: var(--muted); font-weight: 400; }
+.tk-card[open] > .tk-sum::after { content: "▾"; }
+.tk-body {
+  padding: 2px 13px 12px; border-top: 1px solid var(--border);
+  overflow-wrap: anywhere; word-break: break-word;
+}
+/* debate alta×baixa e de risco em destaque — o mais interessante de acompanhar */
+.tk-debate { border-color: var(--accent); }
+.tk-debate > .tk-sum { color: #cfe0ff; }
+
 /* Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação, cada
    uma com número, ícone de estado e rótulo. Estados: aguardando (apagada) ·
    rodando (accent, pulsa) · concluída (verde) · reusada do cache (âmbar/♻). */

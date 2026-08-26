@@ -287,6 +287,9 @@ function renderProgress(snap) {
 
   // Progresso de CONFRONTO: trilha de 3 etapas (Padrão → Erick → Comparação) com
   // o estado de cada — em vez dos chips de analista da análise única.
+  // Raciocínio ao vivo: revela o texto dos agentes conforme terminam (task 008).
+  renderThinking(snap.thinking);
+
   if (p.compare_steps && p.compare_steps.length) {
     steps.classList.add("hidden");
     cmpStepsEl.classList.remove("hidden");
@@ -316,6 +319,63 @@ function renderProgress(snap) {
     li.classList.toggle("done", reachedLabels.has(label) && label !== activeLabel);
     li.classList.toggle("active", label === activeLabel && snap.status === "running");
   });
+}
+
+// Raciocínio AO VIVO (task 008): renderiza os pareceres dos agentes conforme
+// CHEGAM no snapshot (mercado → sentimento → … → debate → juiz → risco). Faz
+// UPSERT por card (data-tk) e só re-renderiza o corpo quando o texto CRESCE — nada
+// de recriar o DOM inteiro a cada 2s (senão "dança"). Cada card é colapsável; o
+// debate ganha destaque. O container tem altura máxima e rola por dentro (mobile).
+// Zera o painel de raciocínio (troca de run / novo run): sem isso os cards de uma
+// análise anterior ficariam misturados com a nova.
+function resetThinking() {
+  const box = $("thinkingLive");
+  if (box) { box.innerHTML = ""; box.classList.add("hidden"); }
+}
+
+function renderThinking(items) {
+  const box = $("thinkingLive");
+  if (!box) return;
+  if (!Array.isArray(items) || !items.length) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  items.forEach((it) => {
+    let card = box.querySelector(`[data-tk="${cssEsc(it.id)}"]`);
+    if (!card) {
+      card = document.createElement("details");
+      card.className = "tk-card" + (it.debate ? " tk-debate" : "");
+      card.dataset.tk = it.id;
+      card.dataset.order = String(it.order);
+      card.open = true;   // abre conforme chega — o Samyr quer VER o pensamento
+      const sum = document.createElement("summary");
+      sum.className = "tk-sum";
+      sum.textContent = it.label;
+      const body = document.createElement("div");
+      body.className = "tk-body md";
+      card.appendChild(sum);
+      card.appendChild(body);
+      // insere na posição do pipeline (mantém a ordem mesmo se chegar fora de ordem)
+      const after = [...box.children].find(
+        (c) => Number(c.dataset.order) > it.order
+      );
+      box.insertBefore(card, after || null);
+    }
+    const body = card.querySelector(".tk-body");
+    // re-renderiza só quando o texto mudou de tamanho (streaming/parcial→final)
+    if (body && body.dataset.len !== String(it.len)) {
+      body.innerHTML = renderMarkdown(it.text || "");
+      body.dataset.len = String(it.len);
+    }
+  });
+}
+
+// Escapa um id pra usar em querySelector([data-tk="..."]) sem quebrar com caracteres
+// especiais (os ids são nomes de nó com espaços). Usa CSS.escape quando existe.
+function cssEsc(s) {
+  s = String(s);
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\\]]/g, "\\$&");
 }
 
 // Selo de eixo (item 8): {eixo · horizonte} — mostra que o módulo opera numa
@@ -1931,6 +1991,7 @@ async function startAnalysis(ev) {
   $("resultPanel").classList.add("hidden");
   $("comparePanel").classList.add("hidden");
   $("steps").innerHTML = "";
+  resetThinking();   // análise nova: começa com o painel de raciocínio limpo
   try {
     const res = await apiPost("/api/analyze", { ticker, date, method, compare });
     const data = await res.json();
@@ -2147,6 +2208,7 @@ async function openRun(runId) {
       // daquele run_id). O run nunca parou — só a visão tinha saído dele.
       _openTicker = snap.ticker || "";
       $("resultPanel").classList.add("hidden");
+      resetThinking();   // trocou pra outro run em andamento: raciocínio começa limpo
       renderProgress(snap);
       watchRun(runId);
     } else {

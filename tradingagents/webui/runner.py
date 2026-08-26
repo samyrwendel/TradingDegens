@@ -36,7 +36,12 @@ from tradingagents.webui.errors import (
     humanize_provider_error,
 )
 from tradingagents.webui.pricing import cost_breakdown
-from tradingagents.webui.progress import ProgressCallbackHandler, ProgressTracker
+from tradingagents.webui.progress import (
+    ProgressCallbackHandler,
+    ProgressTracker,
+    ThinkingCallbackHandler,
+    ThinkingTracker,
+)
 from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.store import HistoryStore
 
@@ -390,6 +395,9 @@ class _Run:
         self.finished_stamp: str | None = None  # Manaus ISO, set on completion
         self.usage_cb = UsageMetadataCallbackHandler()
         self.tracker = ProgressTracker(selected_analysts)
+        # Raciocínio ao vivo (task 008): captura a saída de cada agente conforme sai,
+        # pra o painel revelar o "pensamento" durante o run. Custo zero de LLM.
+        self.thinking = ThinkingTracker()
 
     def cost(self) -> dict[str, Any]:
         return cost_breakdown(self.usage_cb.usage_metadata)
@@ -406,6 +414,7 @@ class _Run:
             "error_code": self.error_code,
             "verdict_timeframe": self.timeframe,
             "progress": self.tracker.snapshot(),
+            "thinking": self.thinking.snapshot(),
             "cost": self.cost(),
             "elapsed": round(elapsed, 1),
             "finished_at": self.finished_stamp,
@@ -641,8 +650,9 @@ class AnalysisRunner:
             # usuário tem prioridade; sem chave, cai na env do servidor). O grafo
             # tira ``llm_api_key`` do dict antes do set_config global.
             progress_cb = ProgressCallbackHandler(run.tracker)
+            thinking_cb = ThinkingCallbackHandler(run.thinking)
             graph = self._graph_factory(
-                config, run.selected_analysts, [run.usage_cb, progress_cb]
+                config, run.selected_analysts, [run.usage_cb, progress_cb, thinking_cb]
             )
             final_state, signal = graph.propagate(
                 run.ticker, run.date, asset_type=run.asset_type,
