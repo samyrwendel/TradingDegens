@@ -2388,6 +2388,28 @@ function scheduleTickerSuggest(term) {
   if (q.length < 2) { const dl = $("tickerSuggest"); if (dl) dl.innerHTML = ""; return; }
   _suggestTimer = setTimeout(() => fetchTickerSuggest(q), 220);
 }
+
+// Ao ESCOLHER uma sugestão do <datalist> (clique OU Enter), o navegador seta o valor
+// do campo e dispara um 'input' — que, sem guarda, reagenda a busca e REABRE o popup
+// (o Samyr tinha que selecionar de novo). Fechar aqui: cancela o timer, invalida
+// qualquer fetch em voo e ESVAZIA o datalist, então o navegador não tem o que reabrir.
+function closeTickerSuggest() {
+  clearTimeout(_suggestTimer);
+  _suggestSeq++;                              // descarta resposta de fetch em voo
+  const dl = $("tickerSuggest");
+  if (dl) dl.innerHTML = "";                  // sem opções → popup não reabre
+}
+
+// Uma seleção de sugestão chega como 'input' com inputType 'insertReplacementText'
+// (Chrome/Firefox, tanto no clique quanto no Enter). Alguns navegadores não setam
+// inputType — aí o fallback: o valor bate EXATO num símbolo sugerido = seleção.
+function isTickerSuggestionPick(ev, raw) {
+  if (ev && ev.inputType === "insertReplacementText") return true;
+  const dl = $("tickerSuggest");
+  const up = (raw || "").trim().toUpperCase();
+  if (!dl || !up) return false;
+  return Array.from(dl.options).some((o) => (o.value || "").toUpperCase() === up);
+}
 async function fetchTickerSuggest(term) {
   const seq = ++_suggestSeq;
   try {
@@ -3114,10 +3136,13 @@ function init() {
   applyConfig();
   bindConfig();
   $("analyzeForm").addEventListener("submit", startAnalysis);
-  $("ticker").addEventListener("input", () => {
-    const t = $("ticker").value.trim().toUpperCase();
+  $("ticker").addEventListener("input", (e) => {
+    const raw = $("ticker").value.trim();
+    const t = raw.toUpperCase();
     $("assetHint").innerHTML = /-(USD|USDT)$|^BTC|^ETH/.test(t) ? `Detectado: cripto — inclui taxa de financiamento <span class="orig">(funding)</span>, contratos em aberto <span class="orig">(open interest)</span> e liquidações <span class="orig">(liquidations)</span>.` : "";
-    scheduleTickerSuggest($("ticker").value.trim());
+    // Seleção de sugestão (datalist) → fecha e NÃO reabre; digitar → busca normal.
+    if (isTickerSuggestionPick(e, raw)) { closeTickerSuggest(); return; }
+    scheduleTickerSuggest(raw);
   });
   $("netNote").textContent = "acesse por " + location.host;
   bindHistoryTabs();
