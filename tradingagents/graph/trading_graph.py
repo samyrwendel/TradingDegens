@@ -1,5 +1,6 @@
 # TradingAgents/graph/trading_graph.py
 
+import contextlib
 import json
 import logging
 import os
@@ -464,30 +465,47 @@ class TradingAgentsGraph:
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
         self._resolve_pending_entries(company_name)
 
-        # Recompile with a checkpointer if the user opted in.
+        # Recompile with a checkpointer if the user opted in. Fail-soft: the resume
+        # machinery must NEVER be the thing that kills a run — if the checkpoint DB
+        # can't be opened/compiled, fall back to a plain (non-resumable) run instead
+        # of erroring the analysis.
         resume = False
         if self.config.get("checkpoint_enabled"):
-            self._checkpointer_ctx = get_checkpointer(
-                self.config["data_cache_dir"], company_name
-            )
-            saver = self._checkpointer_ctx.__enter__()
-            self.graph = self.workflow.compile(checkpointer=saver)
-
-            step = checkpoint_step(
-                self.config["data_cache_dir"], company_name, str(trade_date),
-                self._run_signature(asset_type, timeframe),
-            )
-            if step is not None:
-                # A checkpoint exists → resume from the last completed node. The
-                # graph must be invoked with ``None`` (not the initial state) so
-                # LangGraph continues the saved thread instead of re-seeding it and
-                # re-running completed nodes (mirrors the resume in the test suite).
-                resume = True
-                logger.info(
-                    "Resuming from step %d for %s on %s", step, company_name, trade_date
+            try:
+                self._checkpointer_ctx = get_checkpointer(
+                    self.config["data_cache_dir"], company_name
                 )
-            else:
-                logger.info("Starting fresh for %s on %s", company_name, trade_date)
+                saver = self._checkpointer_ctx.__enter__()
+                self.graph = self.workflow.compile(checkpointer=saver)
+
+                step = checkpoint_step(
+                    self.config["data_cache_dir"], company_name, str(trade_date),
+                    self._run_signature(asset_type, timeframe),
+                )
+                if step is not None:
+                    # A checkpoint exists → resume from the last completed node. The
+                    # graph must be invoked with ``None`` (not the initial state) so
+                    # LangGraph continues the saved thread instead of re-seeding it
+                    # and re-running completed nodes (mirrors the resume test).
+                    resume = True
+                    logger.info(
+                        "Resuming from step %d for %s on %s",
+                        step, company_name, trade_date,
+                    )
+                else:
+                    logger.info("Starting fresh for %s on %s", company_name, trade_date)
+            except Exception:  # noqa: BLE001 — checkpoint is best-effort, never fatal
+                logger.warning(
+                    "checkpoint disabled for %s on %s (setup failed); running plain",
+                    company_name, trade_date, exc_info=True,
+                )
+                if self._checkpointer_ctx is not None:
+                    # best-effort cleanup of a half-open checkpointer
+                    with contextlib.suppress(Exception):
+                        self._checkpointer_ctx.__exit__(None, None, None)
+                    self._checkpointer_ctx = None
+                self.graph = self.workflow.compile()
+                resume = False
 
         try:
             return self._run_graph(company_name, trade_date, asset_type=asset_type,
