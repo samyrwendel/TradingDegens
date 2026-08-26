@@ -42,7 +42,7 @@ Key points to focus on:
 - Competitive Weaknesses: Emphasize vulnerabilities such as weaker market positioning, declining innovation, or threats from competitors.
 - Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
 - Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
-- Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
+- Directness: Open with your strongest argument or the decisive data point. NO greeting, NO addressing the bull analyst by title, NO preamble or theatrical framing ("Dear colleagues", "my esteemed colleague", "opening the debate", "let me show you"). Rebut the bull's points with specific data and reasoning; make every sentence carry information (a number, a mechanism, a counter), not courtesy.
 
 Resources available:
 
@@ -53,7 +53,7 @@ Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
-Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.
+Use this information to deliver a compelling bear argument and refute the bull's claims — straight to the substance, no rhetorical preamble or greeting.
 """ + get_language_instruction()
 
         content, report = invoke_debate_turn(

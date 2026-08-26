@@ -41,7 +41,7 @@ Key points to focus on:
 - Competitive Advantages: Emphasize factors like unique products, strong branding, or dominant market positioning.
 - Positive Indicators: Use financial health, industry trends, and recent positive news as evidence.
 - Bear Counterpoints: Critically analyze the bear argument with specific data and sound reasoning, addressing concerns thoroughly and showing why the bull perspective holds stronger merit.
-- Engagement: Present your argument in a conversational style, engaging directly with the bear analyst's points and debating effectively rather than just listing data.
+- Directness: Open with your strongest argument or the decisive data point. NO greeting, NO addressing the bear analyst by title, NO preamble or theatrical framing ("Dear colleagues", "my esteemed colleague", "opening the debate", "let me show you"). Rebut the bear's points with specific data and reasoning; make every sentence carry information (a number, a mechanism, a counter), not courtesy.
 
 Resources available:
 {instrument_context}
@@ -51,7 +51,7 @@ Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
-Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
+Use this information to deliver a compelling bull argument and refute the bear's concerns — straight to the substance, no rhetorical preamble or greeting.
 """ + get_language_instruction()
 
         content, report = invoke_debate_turn(
