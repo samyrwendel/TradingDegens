@@ -70,6 +70,59 @@ _SEED_NAMES = ("(names)=>{for(const k in names){_nameCache.set(k,names[k]);} "
                "if(window.paintHistory) paintHistory();}")
 
 
+@pytest.fixture
+def live_long(tmp_path):
+    # ticker longo (ZEC-USD) + veredito COM qualificador inglês (Overweight) —
+    # o caso que quebrava a linha e espremia o nome (bug 015).
+    store = HistoryStore(tmp_path)
+    store.save(_rec("z1", "ZEC-USD", "Overweight", "crypto"))
+    runner = AnalysisRunner(
+        base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
+                     "deep_think_llm": "gpt-5.5", "quick_think_llm": "gpt-5.4-mini"},
+        store=store)
+    httpd = make_server("127.0.0.1", 0, runner=runner)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        httpd.shutdown()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_long_ticker_one_line_name_legible_qualifier_hidden(live_long):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=_CHROMIUM_ARGS)
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        page.goto(live_long, wait_until="networkidle")
+        page.evaluate(_SEED_NAMES, {"ZEC-USD": "Zcash"})
+        page.wait_for_selector('.history li[data-ticker="ZEC-USD"] .tk-sym')
+        row = page.query_selector('.history li[data-ticker="ZEC-USD"]')
+
+        m = page.evaluate("""()=>{
+          const li = document.querySelector('.history li[data-ticker="ZEC-USD"]');
+          const sym = li.querySelector('.tk-sym');
+          const lh = parseFloat(getComputedStyle(sym).lineHeight) || 20;
+          const orig = li.querySelector('.h-verdict .verdict-orig');
+          const co = li.querySelector('.tk-co');
+          return {
+            symText: sym.textContent,
+            symH: sym.getBoundingClientRect().height, lh,
+            origVisible: orig ? orig.offsetHeight > 0 : false,
+            coText: co ? co.textContent : "",
+          };
+        }""")
+        assert m["symText"] == "ZEC-USD"
+        assert m["symH"] <= m["lh"] * 1.6, m       # ticker em UMA linha (não quebrou)
+        assert m["origVisible"] is False, m        # "Overweight" escondido na lateral
+        assert m["coText"] == "Zcash"              # nome legível, não "Zca…"
+
+        ov = page.evaluate(
+            "()=>({sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth})")
+        assert ov["sw"] <= ov["cw"], ov
+        browser.close()
+
+
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_watchlist_layout_and_uniform_radius(live):
     base, _store = live

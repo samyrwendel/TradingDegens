@@ -2245,10 +2245,12 @@ function paintHistory() {
     } else {
       vHtml = verdictHtml(v);
       vClass = verdictClass(v).replace("verdict", "").trim();
-      // Watchlist densa (task 009): a coluna estreita da lateral só comporta
-      // veredito + DATA à direita sem espremer o nome da empresa. Custo/tempo
-      // seguem visíveis no cabeçalho da análise aberta (Custo/Tempo), não aqui.
-      meta = r.finished_at ? fmtStamp(r.finished_at) : escapeHtml(r.date || "");
+      // Watchlist densa (task 009/015): a coluna estreita só comporta veredito +
+      // DATA à direita sem espremer o nome. Só a DATA (dd/mm, sem hora) — o horário
+      // e custo/tempo seguem no cabeçalho da análise aberta.
+      const dm = (r.date || "").match(/^\d{4}-(\d{2})-(\d{2})/);
+      meta = r.finished_at ? fmtStamp(r.finished_at).split(" ")[0]
+                           : (dm ? `${dm[2]}/${dm[1]}` : escapeHtml(r.date || ""));
     }
     // watchlist: ticker em negrito + nome cinza (2 linhas) à esquerda; veredito +
     // meta empilhados à direita; × discreto pra remover (só em run já concluído —

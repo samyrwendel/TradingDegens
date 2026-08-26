@@ -102,7 +102,7 @@ body {
 main { max-width: none; margin: 0; padding: 0; flex: 1; background: var(--panel); }
 /* two columns: history sidebar (left) + analysis content (right) */
 main.layout {
-  display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 0;
+  display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 0;
   align-items: start;
 }
 /* divisória vertical fina entre histórico e conteúdo (encosta, sem gap gordo) */
@@ -630,8 +630,10 @@ details.section[open] > summary::before { content: "▾"; }
 
 /* esquerda: ticker em negrito SOBRE o nome da empresa em cinza (duas linhas) */
 .history .h-ticker { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-family: inherit; }
-.history .h-ticker .h-sym { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
-.history .h-ticker .tk-sym { font-family: var(--mono); font-weight: var(--fw-bold); font-size: var(--fs-14); line-height: var(--lh-14); color: var(--text); }
+/* ticker NUNCA quebra linha (bug 015: "ZEC-USD" virava "ZEC-\nUSD") — nowrap +
+   badge de contagem inline na mesma linha, sem embrulhar pra baixo. */
+.history .h-ticker .h-sym { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
+.history .h-ticker .tk-sym { font-family: var(--mono); font-weight: var(--fw-bold); font-size: var(--fs-14); line-height: var(--lh-14); color: var(--text); white-space: nowrap; }
 .history .h-ticker .tk-co {
   font-family: inherit; font-weight: var(--fw-med); font-size: var(--fs-12); line-height: var(--lh-12);
   color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
@@ -661,6 +663,10 @@ details.section[open] > summary::before { content: "▾"; }
 /* Veredito SEM PÍLULA nos chips (task 036): só o texto colorido na escala 12/700,
    sem fundo/borda/cápsula. O qualificador ao lado fica cinza apagado. */
 .history .h-verdict { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); padding: 0; border: none; border-radius: 0; background: none; }
+/* na LATERAL o qualificador inglês (Overweight/Buy…) é ruído que alargava a linha 1
+   e espremia o nome (bug 015): mostra só o veredito pt-BR; o inglês fica na análise
+   aberta. */
+.history .h-verdict .verdict-orig { display: none; }
 .history .h-verdict.buy,
 .history .h-verdict.overweight { color: var(--green); background: none; border: none; }
 .history .h-verdict.hold { color: var(--yellow); background: none; border: none; }
