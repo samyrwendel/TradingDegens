@@ -69,6 +69,27 @@ def test_fetch_anthropic_uses_x_api_key_header():
     assert hdr.get("anthropic-version") == "2023-06-01"
 
 
+def test_fetch_google_uses_gemini_openai_compat_base_and_bearer_header():
+    # Google/Gemini como provedor DIRETO: lista pela camada OpenAI-compat do Gemini,
+    # com a chave no header Authorization (nunca na querystring/URL).
+    cap = {}
+    op = _fake_urlopen({"data": [{"id": "models/gemini-2.5-flash"},
+                                 {"id": "models/gemini-2.5-pro"}]}, cap)
+    out = fetch_provider_models("google", "AIza-KEY", urlopen=op)
+    # o prefixo "models/" é removido -> casa com o catálogo e o client nativo
+    assert out == ["gemini-2.5-flash", "gemini-2.5-pro"]
+    assert cap["url"] == "https://generativelanguage.googleapis.com/v1beta/openai/models"
+    assert cap["headers"].get("Authorization") == "Bearer AIza-KEY"
+    assert "AIza-KEY" not in cap["url"]  # chave nunca na URL
+
+
+def test_fetch_google_ids_without_prefix_pass_through():
+    # Alguns retornos já vêm sem "models/"; não deve haver dupla remoção nem erro.
+    op = _fake_urlopen({"data": [{"id": "gemini-flash-latest"}]})
+    out = fetch_provider_models("google", "AIza-KEY", urlopen=op)
+    assert out == ["gemini-flash-latest"]
+
+
 def test_fetch_ollama_hits_api_tags_on_root():
     cap = {}
     op = _fake_urlopen({"models": [{"name": "llama3.1:8b"}, {"name": "qwen2:7b"}]}, cap)

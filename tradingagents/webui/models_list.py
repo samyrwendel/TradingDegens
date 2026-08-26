@@ -28,6 +28,12 @@ _OPENAI_COMPAT_BASE = {
     "mistral": "https://api.mistral.ai/v1",
     "groq": "https://api.groq.com/openai/v1",
     "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    # Gemini expõe uma camada OpenAI-compatível (chat/completions + /models) com
+    # auth por header ``Authorization: Bearer <GOOGLE_API_KEY>`` — a MESMA regra
+    # dos outros compat. Lista os modelos Gemini com a chave do usuário sem SDK
+    # extra e sem NUNCA pôr a chave na URL (?key= não é o caminho aqui). A análise
+    # roda pelo GoogleClient nativo (factory); isto é só a listagem do BYOK.
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai",
 }
 
 # Ordena "modelos de chat reconhecíveis" primeiro — o usuário acha o que quer sem
@@ -96,7 +102,17 @@ def _raw_models(provider: str, api_key: str | None, base_url: str | None,
     if key:
         headers["Authorization"] = f"Bearer {key}"
     data = _get_json(endpoint.rstrip("/") + "/models", headers, timeout, opener)
-    return list(data.get("data") or [])
+    models = list(data.get("data") or [])
+    if provider == "google":
+        # O /models OpenAI-compat do Gemini devolve ids com prefixo ``models/``
+        # (ex.: models/gemini-2.5-flash). O client nativo (langchain_google_genai)
+        # aceita ambos, mas tirar o prefixo deixa o dropdown consistente com o
+        # catálogo (gemini-2.5-flash) e com o que o usuário reconhece.
+        for m in models:
+            mid = m.get("id") if isinstance(m, dict) else None
+            if isinstance(mid, str) and mid.startswith("models/"):
+                m["id"] = mid[len("models/"):]
+    return models
 
 
 def fetch_provider_model_infos(provider: str, api_key: str | None,
