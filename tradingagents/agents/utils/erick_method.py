@@ -141,13 +141,37 @@ def _estado(acao: str, trend: str, drop_cls: str | None = None) -> str:
     return "AGUARDAR"
 
 
-def _decide(r: dict, drop_cls: str | None = None) -> dict:
+def _liq_entry_ref(drop: dict | None) -> str:
+    """Referência de ENTRADA numa liquidação: a média DIÁRIA que sobe — a MESMA que
+    classificou o recuo (``active_rising_label`` da evidência) — NUNCA a EMA 4h
+    invertida. Numa liquidação as EMAs curtas do 4h invertem por construção: são
+    RESISTÊNCIA, o SINTOMA da queda, não o eixo da compra. Fail-open → texto genérico
+    da média diária (jamais um nível de EMA 4h inventado)."""
+    asset = ((drop or {}).get("evidence") or {}).get("asset") or {}
+    label = asset.get("active_rising_label")
+    val = None
+    if label and "200" in str(label):
+        val = asset.get("ma200")
+    elif label and "50" in str(label):
+        val = asset.get("ma50")
+    if label and val is not None:
+        return f"{label} diária ({_fmt(val)})"
+    if label:
+        return f"{label} diária"
+    return "média diária que sobe"
+
+
+def _decide(r: dict, drop: dict | None = None, fine_veto: bool = False) -> dict:
     """Do read de EMA para o veredito do método: agir/aguardar, entrada e PESO.
 
-    A natureza da queda (``drop_cls``) manda ANTES da pilha de médias: ``fraqueza``
-    zera a entrada (caixa) e ``liquidacao_saudavel`` numa tendência de baixa/transição
-    lê o recuo à média que sobe como comprável (posição inicial no toque, aguardar o
-    toque senão). ``drop_cls=None`` (default) reproduz a mecânica de hoje BYTE-A-BYTE.
+    ``drop`` é o dict inteiro da natureza da queda (fonte única): ``_decide`` extrai a
+    ``classification`` e, na liquidação, a REFERÊNCIA de entrada (a média diária que
+    sobe) via :func:`_liq_entry_ref`. A natureza manda ANTES da pilha de médias:
+    ``fraqueza`` zera a entrada (caixa) e ``liquidacao_saudavel`` numa baixa/transição
+    lê o recuo à média DIÁRIA que sobe como comprável (posição inicial no toque,
+    aguardar o toque senão). ``fine_veto`` (1-2-3 de venda no 15m acionado) trava a
+    promoção da liquidação além de AGUARDAR — o recuo virou ruptura. ``drop=None`` e
+    ``fine_veto=False`` (defaults) reproduzem a mecânica de hoje BYTE-A-BYTE.
 
     Peso relativo sempre FRACIONADO (o método nunca entra 100% de uma vez) e
     responde em termos relativos — cheia / meia / inicial / caixa — não em %
@@ -155,6 +179,7 @@ def _decide(r: dict, drop_cls: str | None = None) -> dict:
     """
     trend, at_media, extended, below = r["trend"], r["at_media"], r["extended"], r["below"]
     e8, e21 = r["e8"], r["e21"]
+    drop_cls = (drop or {}).get("classification")
 
     # Natureza da queda ANTES das médias (fonte única). Nunca rebaixa uma leitura de
     # alta já válida — só reenquadra a baixa/transição da liquidação e veta a fraqueza.
@@ -166,16 +191,27 @@ def _decide(r: dict, drop_cls: str | None = None) -> dict:
             "peso_racional": "filtro do método: estrutura rompida, sem entrada contra o gráfico quebrado — caixa é a posição",
         }
     if drop_cls == "liquidacao_saudavel" and trend in ("baixa", "transicao"):
+        ref = _liq_entry_ref(drop)
+        if fine_veto:
+            return {
+                "acao": "AGUARDAR",
+                "entrada": f"recuo comprável na {ref}, mas o 15m tem 1-2-3 de venda ACIONADO — aguardar o gatilho virar",
+                "peso": "caixa",
+                "peso_racional": "1-2-3 de venda no 15m — o recuo virou ruptura; "
+                                 "a liquidação não promove a entrada além de aguardar",
+            }
         if at_media:
             return {
                 "acao": "AGIR",
-                "entrada": f"liquidação de longs — recuo comprável na média (EMA 8 {_fmt(e8)} · EMA 21 {_fmt(e21)}); é o ponto de entrada",
+                "entrada": f"queda é liquidação de longs — segue comprador no recuo à {ref}; a EMA 4h "
+                           f"invertida (EMA 21 {_fmt(e21)}) é o sintoma da liquidação, não o eixo da entrada",
                 "peso": "posição inicial",
-                "peso_racional": "recuo comprável numa liquidação saudável: fração inicial na média que sobe, com espaço para somar — nunca 100% de uma vez",
+                "peso_racional": "recuo comprável numa liquidação saudável: fração inicial na média diária "
+                                 "que sobe, com espaço para somar — nunca 100% de uma vez",
             }
         return {
             "acao": "AGUARDAR",
-            "entrada": f"liquidação de longs — aguardar o toque na EMA 21 ({_fmt(e21)}) que sobe antes de montar (recuo comprável, ainda sem toque)",
+            "entrada": f"liquidação de longs — aguardar o toque na {ref} antes de montar (recuo comprável, ainda sem toque)",
             "peso": "caixa",
             "peso_racional": "recuo comprável, mas o preço ainda não tocou a média — caixa até o ponto de entrada",
         }
@@ -261,32 +297,21 @@ def _render_drop_nature(res: dict | None, estado: str | None) -> str | None:
         return None
 
 
-def _sell_breakdown_15m(symbol: str, curr_date: str) -> bool:
-    """True quando o 15m tem um 1-2-3 de VENDA acionado — o sinal mais rápido de que
-    o recuo virou ruptura (mitigação 1 do caveat). Fail-open → False: na dúvida NÃO
-    veta (não inventa um rompimento que a fonte não confirma)."""
+def _fine_plan(symbol: str, curr_date: str) -> dict | None:
+    """Plano 15m computado UMA vez — o seam de dado que alimenta TANTO o veto (o 1-2-3
+    de venda) QUANTO o render do timing fino. Fail-open → None quando não há candle."""
     try:
-        plan = build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
+        return build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
     except Exception:  # noqa: BLE001
-        return False
+        return None
+
+
+def _fine_sell_triggered(plan: dict | None) -> bool:
+    """True quando o plano 15m tem um 1-2-3 de VENDA acionado — o sinal mais rápido de
+    que o recuo virou ruptura (mitigação 1 do caveat). Fail-open → False: na dúvida NÃO
+    veta (não inventa um rompimento que a fonte não confirma)."""
     pat = (plan or {}).get("pattern") or {}
     return pat.get("direction") == "venda" and pat.get("state") == "acionado"
-
-
-def _liquidation_veto(decision: dict, drop_cls: str | None, sell_15m: bool) -> tuple[dict, bool]:
-    """Mitigação 1: um 1-2-3 de venda no 15m impede a liquidação de promover a leitura
-    além de AGUARDAR (não vira AGIR). Devolve ``(decision, vetado)`` — não muta a
-    entrada. Só age em ``liquidacao_saudavel`` que ia AGIR; o resto passa intacto."""
-    if drop_cls == "liquidacao_saudavel" and decision.get("acao") == "AGIR" and sell_15m:
-        capped = {
-            **decision,
-            "acao": "AGUARDAR",
-            "peso": "caixa",
-            "peso_racional": "1-2-3 de venda no 15m — o recuo virou ruptura; "
-                             "a liquidação não promove a entrada além de aguardar",
-        }
-        return capped, True
-    return decision, False
 
 
 _PAT_DIR_PT = {"compra": "de compra", "venda": "de venda"}
@@ -311,14 +336,10 @@ def _pattern_line(plan: dict | None, frame_label: str) -> str | None:
     return f"**Gatilho 1-2-3 {direction} ({frame_label}):** {trig_txt} — {state}."
 
 
-def _fine_timing(symbol: str, curr_date: str) -> str | None:
-    """Linha de timing fino no 15m (cripto ou ação — a fonte keyless intradiária
-    existe pros dois agora): estado do setup + gatilho 1-2-3 do 15m, o timing do
-    método. Fail-open -> None quando não há candle."""
-    try:
-        plan = build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
-    except Exception:  # noqa: BLE001
-        return None
+def _fine_timing(plan: dict | None) -> str | None:
+    """Linha de timing fino no 15m a partir do plano JÁ computado (:func:`_fine_plan`)
+    — render PURO, sem rebuild (o mesmo plano alimenta o veto): estado do setup +
+    gatilho 1-2-3 do 15m, o timing do método. Fail-open → None quando não há candle."""
     state = (plan or {}).get("setup_state")
     labels = {
         "ativo": "preço já na média (recuo concluído) — janela de entrada aberta",
@@ -338,15 +359,20 @@ def _fine_timing(symbol: str, curr_date: str) -> str | None:
     return line
 
 
-def _estado_note(drop_cls: str | None, estado: str) -> str:
+def _estado_note(drop_cls: str | None, estado: str, fine_veto: bool = False) -> str:
     """Nota curta que explica a DERIVAÇÃO do Estado a partir da natureza da queda
-    (quando ela mandou), pra ler de cima pra baixo dar a mesma conclusão do enum."""
+    (quando ela mandou), pra ler de cima pra baixo dar a mesma conclusão do enum.
+    Quando o veto do 15m está ativo, declara que ele travou a promoção."""
     if drop_cls == "fraqueza":
         return ("Deriva da natureza da queda (fraqueza: estrutura rompida) — "
                 "não da pilha curta de médias.")
     if drop_cls == "liquidacao_saudavel" and estado in ("AGIR", "AGUARDAR"):
-        return ("Deriva da natureza da queda (liquidação saudável: recuo comprável) — "
+        note = ("Deriva da natureza da queda (liquidação saudável: recuo comprável) — "
                 "não da pilha curta de médias.")
+        if fine_veto:
+            note += (" Veto do 15m ativo: 1-2-3 de venda acionado trava a promoção "
+                     "além de AGUARDAR.")
+        return note
     return ""
 
 
@@ -393,11 +419,12 @@ def build_erick_method_section(
         drop = _drop_nature(symbol, curr_date, asset_type)
     drop_cls = (drop or {}).get("classification")
 
-    decision = _decide(read, drop_cls)
-    # Mitigação 1: veto no timing fino — 1-2-3 de venda no 15m trava a promoção da
-    # liquidação além de AGUARDAR (o recuo virou ruptura). Fail-open → não veta.
-    sell_15m = _sell_breakdown_15m(symbol, curr_date)
-    decision, vetoed = _liquidation_veto(decision, drop_cls, sell_15m)
+    # Plano 15m computado UMA vez — alimenta o veto (1-2-3 de venda) E o timing fino.
+    fine_plan = _fine_plan(symbol, curr_date)
+    # Mitigação 1: 1-2-3 de venda no 15m veta a promoção da liquidação além de AGUARDAR
+    # (o recuo virou ruptura). Fail-open → não veta. Threaded em _decide (não pós-fato).
+    fine_veto = drop_cls == "liquidacao_saudavel" and _fine_sell_triggered(fine_plan)
+    decision = _decide(read, drop, fine_veto)
     # ONE canonical state (item 6b), agora derivado da natureza da queda.
     decision["estado"] = _estado(decision["acao"], read["trend"], drop_cls)
 
@@ -408,7 +435,7 @@ def build_erick_method_section(
     if drop_cls == "liquidacao_saudavel" and mech_estado == "CAIXA" and decision["estado"] != "CAIXA":
         logger.info(
             "erick-drop-flip %s %s: estado %s->%s por liquidacao_saudavel (veto15m=%s)",
-            symbol, curr_date, mech_estado, decision["estado"], vetoed,
+            symbol, curr_date, mech_estado, decision["estado"], fine_veto,
         )
 
     swing_plan = build_actionable_plan_dict(symbol, curr_date, frame)
@@ -418,7 +445,7 @@ def build_erick_method_section(
     # Texto da natureza da queda a partir da classificação já feita (sem re-leitura):
     # o Estado já veio dela, o texto só explica de onde. Vem ANTES do Estado abaixo.
     drop_line = _render_drop_nature(drop, decision["estado"])
-    estado_note = _estado_note(drop_cls, decision["estado"])
+    estado_note = _estado_note(drop_cls, decision["estado"], fine_veto)
     estado_txt = ("**Estado (Método Erick):** "
                   f"{decision['estado']} — estado único do método neste run; a "
                   "leitura abaixo deriva dele (sem veredito paralelo).")
@@ -453,7 +480,7 @@ def build_erick_method_section(
     if swing_pat:
         lines.append(swing_pat)
 
-    fine = _fine_timing(symbol, curr_date)
+    fine = _fine_timing(fine_plan)
     if fine:
         lines += ["", fine]
 

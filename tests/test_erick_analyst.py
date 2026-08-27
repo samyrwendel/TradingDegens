@@ -104,7 +104,19 @@ def test_decide_transition_at_average_initial_only():
 
 
 # ------------------------------------- drop_nature manda no _decide/_estado -----
-from tradingagents.agents.utils.erick_method import _estado, _liquidation_veto
+from tradingagents.agents.utils.erick_method import (
+    _estado,
+    _fine_sell_triggered,
+    _liq_entry_ref,
+)
+
+# Uma liquidação COM a evidência do classificador: o eixo de entrada é a média DIÁRIA
+# que sobe (MMS200) — NUNCA a EMA 4h invertida (que é o sintoma da liquidação).
+_LIQ_DROP_EVID = {
+    "classification": "liquidacao_saudavel",
+    "reasons": ["queda de -17,0% recuou a uma média que sobe (MMS200)"],
+    "evidence": {"asset": {"active_rising_label": "MMS200", "ma200": 250.0, "ma50": 270.0}},
+}
 
 
 def test_default_none_is_byte_for_byte_with_mechanical():
@@ -121,39 +133,68 @@ def test_default_none_is_byte_for_byte_with_mechanical():
 
 def test_fraqueza_vetoes_even_a_mechanical_agir():
     """fraqueza → CAIXA, mesmo com um AGIR mecânico (estrutura rompida veta)."""
-    d = _decide(_read("alta", at_media=True), drop_cls="fraqueza")
+    d = _decide(_read("alta", at_media=True), {"classification": "fraqueza"})
     assert d["acao"] == "AGUARDAR" and d["peso"] == "caixa"
     # o Estado é a fonte única: fraqueza carimba CAIXA independentemente da ação/trend.
     assert _estado("AGIR", "alta", "fraqueza") == "CAIXA"
 
 
 def test_liquidacao_downtrend_at_media_acts_initial():
-    """liquidação + baixa + toque na média → AGIR / posição inicial (recuo comprável)."""
-    d = _decide(_read("baixa", at_media=True), drop_cls="liquidacao_saudavel")
+    """liquidação + baixa + toque na média → AGIR / posição inicial (recuo comprável),
+    com a ENTRADA ancorada na média DIÁRIA que sobe (MMS200), NÃO na EMA 4h invertida."""
+    d = _decide(_read("baixa", at_media=True), _LIQ_DROP_EVID)
     assert d["acao"] == "AGIR" and d["peso"] == "posição inicial"
     assert _estado(d["acao"], "baixa", "liquidacao_saudavel") == "AGIR"
+    # v2 (correção de sinal): a entrada cita a média DIÁRIA que sobe e trata a EMA 4h
+    # como SINTOMA — o texto v1 ("recuo comprável na média (EMA 8 · EMA 21)") sumiu.
+    assert "MMS200 diária" in d["entrada"]
+    assert "sintoma da liquidação" in d["entrada"]
+    assert "recuo comprável na média (EMA 8" not in d["entrada"]
 
 
 def test_liquidacao_downtrend_no_touch_waits_not_cash_state():
     """liquidação + baixa SEM toque → AGUARDAR; o Estado é AGUARDAR (não CAIXA): a
     inversão das EMAs curtas é o sintoma da liquidação, não um downtrend."""
-    d = _decide(_read("baixa"), drop_cls="liquidacao_saudavel")
+    d = _decide(_read("baixa"), _LIQ_DROP_EVID)
     assert d["acao"] == "AGUARDAR" and d["peso"] == "caixa"
     assert _estado("AGUARDAR", "baixa", "liquidacao_saudavel") == "AGUARDAR"
     # sem a natureza da queda, a mesma baixa leria CAIXA (mecânica de hoje).
     assert _estado("AGUARDAR", "baixa", None) == "CAIXA"
+    # aguarda o toque na média DIÁRIA que sobe (não na EMA 4h invertida).
+    assert "MMS200 diária" in d["entrada"]
 
 
-def test_liquidation_veto_caps_promotion_at_aguardar():
-    """Mitigação 1: 1-2-3 de venda no 15m impede a liquidação de virar AGIR."""
-    agir = {"acao": "AGIR", "peso": "posição inicial", "entrada": "x", "peso_racional": "y"}
-    capped, vetoed = _liquidation_veto(agir, "liquidacao_saudavel", sell_15m=True)
-    assert vetoed and capped["acao"] == "AGUARDAR" and capped["peso"] == "caixa"
-    # sem venda no 15m → passa intacto; e só age em liquidação que ia AGIR.
-    same, v2 = _liquidation_veto(agir, "liquidacao_saudavel", sell_15m=False)
-    assert same == agir and v2 is False
-    other, v3 = _liquidation_veto(agir, "fraqueza", sell_15m=True)
-    assert other == agir and v3 is False
+def test_fine_veto_caps_liquidacao_at_aguardar():
+    """Mitigação 1 (v2): fine_veto (1-2-3 de venda no 15m acionado) trava a liquidação
+    em AGUARDAR/caixa mesmo com o preço na média (o que seria AGIR)."""
+    d = _decide(_read("baixa", at_media=True), _LIQ_DROP_EVID, fine_veto=True)
+    assert d["acao"] == "AGUARDAR" and d["peso"] == "caixa"
+    assert "1-2-3 de venda ACIONADO" in d["entrada"]
+    # sem veto, o MESMO cenário promove a AGIR (posição inicial).
+    d2 = _decide(_read("baixa", at_media=True), _LIQ_DROP_EVID, fine_veto=False)
+    assert d2["acao"] == "AGIR" and d2["peso"] == "posição inicial"
+
+
+def test_fine_sell_triggered_detects_venda_acionado():
+    """O seam do veto lê o plano 15m JÁ computado: só um 1-2-3 de VENDA ACIONADO dispara
+    (compra / formando / plano ausente não vetam). Fail-open → False."""
+    assert _fine_sell_triggered({"pattern": {"direction": "venda", "state": "acionado"}}) is True
+    assert _fine_sell_triggered({"pattern": {"direction": "venda", "state": "formando"}}) is False
+    assert _fine_sell_triggered({"pattern": {"direction": "compra", "state": "acionado"}}) is False
+    assert _fine_sell_triggered(None) is False
+
+
+def test_liq_entry_ref_uses_daily_rising_average():
+    """A referência de entrada é a média DIÁRIA que sobe (active_rising_label da
+    evidência) — nunca a EMA 4h. Fail-open → texto genérico da média diária."""
+    ref = _liq_entry_ref(_LIQ_DROP_EVID)
+    assert ref.startswith("MMS200 diária") and "250" in ref
+    d50 = {"evidence": {"asset": {"active_rising_label": "MMS50", "ma50": 270.0}}}
+    assert _liq_entry_ref(d50).startswith("MMS50 diária")
+    # sem nível casado, ainda cita a diária pelo label; sem label/evidência → genérico.
+    assert _liq_entry_ref({"evidence": {"asset": {"active_rising_label": "MMS200"}}}) == "MMS200 diária"
+    assert _liq_entry_ref(None) == "média diária que sobe"
+    assert _liq_entry_ref({}) == "média diária que sobe"
 
 
 # ---------------------------------------------- section (synthetic data) -------
@@ -310,6 +351,21 @@ def test_section_drop_nature_before_estado_and_derives_it(monkeypatch):
     assert "Re-leitura" not in section
     # e nenhuma frase "evitar/fraqueza" contradizendo a liquidação na parte determinística
     assert "fraqueza: evitar" not in section
+
+
+def test_section_liquidacao_entry_cites_daily_average(monkeypatch):
+    """v2 (correção de sinal na seção): numa liquidação que AGE, a linha de ENTRADA
+    cita a média DIÁRIA que sobe (MMS200); a EMA 4h invertida aparece só como SINTOMA,
+    nunca como eixo de entrada."""
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP_EVID)
+    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
+    assert "**Estado (Método Erick):** AGIR" in section
+    assert "MMS200 diária" in section
+    assert "sintoma da liquidação" in section
+    # a formulação v1 (entrada ancorada na EMA 8·EMA 21) não existe mais
+    assert "recuo comprável na média (EMA 8" not in section
 
 
 def _fake_plan_sell_triggered():

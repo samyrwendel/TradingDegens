@@ -46,11 +46,11 @@ from tradingagents.agents.utils.erick_method import ensure_erick_method_coverage
 
 # Regra 10 CONDICIONADA à classificação JÁ FEITA (fonte única): o LLM recebe a
 # natureza da queda decidida e a instrução de NÃO contradizê-la — não reclassifica.
-_DROP_RULE = {
+_DROP_RULE_BASE = {
     "liquidacao_saudavel": (
         "A natureza da queda deste ativo JÁ está classificada como LIQUIDAÇÃO DE "
-        "LONGS (saudável): é combustível, um recuo COMPRÁVEL à média que sobe — segue "
-        "comprador no recuo. NÃO escreva 'evitar', 'fraqueza', 'downtrend' nem 'a "
+        "LONGS (saudável): é combustível, um recuo COMPRÁVEL à média DIÁRIA que sobe — "
+        "segue comprador no recuo. NÃO escreva 'evitar', 'fraqueza', 'downtrend' nem 'a "
         "tendência virou' sobre esta queda; trate-a como recuo comprável, não ruptura."
     ),
     "fraqueza": (
@@ -65,6 +65,18 @@ _DROP_RULE = {
         "bullish nem a rebaixe sem evidência."
     ),
 }
+
+
+def _drop_rule(drop: dict | None) -> str:
+    """Regra 10 condicionada à classificação JÁ FEITA + a EVIDÊNCIA determinística que
+    a sustenta (as ``reasons`` do classificador). O LLM escreve citando os MESMOS fatos
+    do enum — não só 'obedeça'. Fail-open: sem classe → regra do indefinido."""
+    cls = (drop or {}).get("classification") or "indefinido"
+    base = _DROP_RULE_BASE.get(cls, _DROP_RULE_BASE["indefinido"])
+    reasons = [r for r in ((drop or {}).get("reasons") or []) if r]
+    if reasons and cls in ("liquidacao_saudavel", "fraqueza"):
+        return f"{base} Evidência determinística: {'; '.join(reasons)}."
+    return base
 
 
 def create_erick_analyst(llm):
@@ -91,8 +103,7 @@ def create_erick_analyst(llm):
         # contra ela (guardrail) e a mesma classificação alimenta a seção do método e
         # o campo estruturado que o juiz lê. Fail-open → None (drop_cls 'indefinido').
         drop = classify_drop_nature_safe(symbol, current_date, asset_type)
-        drop_cls = (drop or {}).get("classification") or "indefinido"
-        drop_rule = _DROP_RULE.get(drop_cls, _DROP_RULE["indefinido"])
+        drop_rule = _drop_rule(drop)
 
         system_message = (
             """Você é o analista que decide pelo MÉTODO ERICK SEKIAMA — modelado de 59 transcrições, dos gráficos dele (EMA 8/21 no 15m/4h, na Quantfury), da carteira real (62% em caixa) e do racional escrito de cada posição. Você NÃO é o analista de mercado: ele descreve indicadores; você DECIDE como o Erick decide. Suas regras (siga-as, não as recite):

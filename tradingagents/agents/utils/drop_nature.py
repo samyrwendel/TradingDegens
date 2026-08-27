@@ -36,8 +36,11 @@ _SLOPE_BARS = 10
 # Tolerância "testando a MMS200 por baixo" — preço até 7% abaixo de uma 200 que
 # sobe ainda conta como tendência de fundo intacta (recuo profundo, não ruptura).
 _MA200_TEST_TOL = 0.07
-# "Bateu recente" do âncora: dentro de ~um trimestre (a data do Finnhub é o fim do
-# período fiscal, ~8 semanas antes da divulgação, então a folga é generosa).
+# "Bateu recente" do âncora: dentro de ~um trimestre A PARTIR DA DIVULGAÇÃO. O
+# finnhub_earnings já resolve a data real de divulgação (_fetch_announce_date) e
+# devolve days_since medido DELA quando o calendário a tem; só cai no fim de período
+# fiscal (~8 semanas antes) no fallback sem calendário. 100 dias ≈ um trimestre desde
+# o anúncio — a janela do catalisador ativo, não a folga do fim de período.
 _ANCHOR_BEAT_MAX_DAYS = 100
 
 
