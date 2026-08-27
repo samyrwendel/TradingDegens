@@ -367,6 +367,68 @@ def test_test_model_refused_without_key_and_owner(tmp_path):
     assert out["models"] == []
 
 
+def test_test_model_cross_provider_pings_each_level(tmp_path, monkeypatch):
+    """Avançado (task 014): cada nível pinga o SEU provedor — Rápido=claude-cli
+    (assinatura $0) e Pesado=openai — em vez de tudo no provedor-base. Antes o
+    Rápido=claude-cli era pingado no OpenAI e dava falso erro de crédito."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    seen = []
+
+    def fake_create(provider, model, base_url=None, **kwargs):
+        seen.append((provider, model))
+        return _FakeClient(_FakeLLM())
+
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client", fake_create)
+    out = runner.test_model({
+        "advanced": True, "quick_provider": "claude-cli", "deep_provider": "openai",
+        "allow_server_key": True,   # dono: destrava a assinatura
+    })
+    assert out["ok"] is True
+    roles = {m["role"]: m for m in out["models"]}
+    # cada nível reporta e foi pingado no SEU provedor
+    assert roles["quick"]["provider"] == "claude-cli"
+    assert roles["deep"]["provider"] == "openai"
+    provs = {p for p, _ in seen}
+    assert provs == {"claude-cli", "openai"}
+    # e com modelos coerentes (default do catálogo de cada provedor, não cross)
+    assert roles["quick"]["model"].startswith("claude")
+    assert roles["deep"]["model"].startswith("gpt")
+
+
+def test_test_model_owner_only_provider_blocked_for_public(tmp_path, monkeypatch):
+    """Owner-only em profundidade (task 014): um público COM chave BYOK não pode
+    testar a assinatura claude-cli (nem por-nível) e gastar a cota do dono."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    pinged = []
+    monkeypatch.setattr("tradingagents.llm_clients.create_llm_client",
+                        lambda *a, **k: pinged.append(a) or _FakeClient(_FakeLLM()))
+    out = runner.test_model({
+        "advanced": True, "quick_provider": "claude-cli", "deep_provider": "openai",
+        "api_key": "sk-public", "allow_server_key": False,   # público, não-dono
+    })
+    assert out["ok"] is False
+    assert out["error_code"] == "owner_only"
+    assert out["models"] == []
+    assert pinged == []   # nada foi pingado — barrado ANTES de tocar a assinatura
+
+
+def test_config_info_advertises_catalog_models_per_provider(tmp_path):
+    """config_info expõe os modelos do catálogo por provedor (task 014) pra o front
+    sincronizar modelo↔provedor sem /models — claude-cli lista modelos Claude."""
+    runner = AnalysisRunner(base_config=_base_config(tmp_path),
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    providers = {p["id"]: p for p in runner.config_info()["llm"]["providers"]}
+    # openai lista gpt; claude-cli e anthropic listam modelos Claude — nunca cross
+    assert all(m["id"].startswith("gpt") for m in providers["openai"]["models"])
+    assert providers["claude-cli"]["models"] and \
+        all(m["id"].startswith("claude") for m in providers["claude-cli"]["models"])
+    assert all(m["id"].startswith("claude") for m in providers["anthropic"]["models"])
+    # custom-only (openrouter) não lista catálogo — o front busca ao vivo / texto livre
+    assert providers["openrouter"]["models"] == []
+
+
 def test_test_model_no_model_named(tmp_path, monkeypatch):
     """Provider custom-only sem modelo nomeado → item de erro claro, não estoura."""
     base = dict(_base_config(tmp_path))

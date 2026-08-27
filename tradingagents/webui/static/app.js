@@ -1424,9 +1424,11 @@ function _lbChooseModel(level, val) {
 
 function _lbRenderPopList() {
   const p = _lbPop; if (!p) return;
-  p.view = filterModels(_modelItems, p.input.value).slice(0, MODEL_LIST_MAX);
+  // Modelos do provedor DESTE nível (task 014): ao vivo se buscado, senão o catálogo.
+  const items = _itemsForProvider(p.prov);
+  p.view = filterModels(items, p.input.value).slice(0, MODEL_LIST_MAX);
   p.active = -1;
-  if (!_modelItems.length) {
+  if (!items.length) {
     p.list.innerHTML = `<li class="combo-empty" aria-disabled="true">carregando modelos… (Enter usa o texto digitado)</li>`;
     return;
   }
@@ -1472,12 +1474,14 @@ function openLaunchModelPicker(level, btn) {
   group.appendChild(el);
   const input = el.querySelector(".lbp-search");
   const list = el.querySelector(".lbp-list");
-  _lbPop = { el, level, input, list, view: [], active: -1 };
+  _lbPop = { el, level, prov, input, list, view: [], active: -1 };
   _lbRenderPopList();
-  // Lista ainda não carregada: puxa os modelos reais (owner usa a env do servidor;
-  // BYOK usa a chave) e re-renderiza quando chegar, se o popover ainda for deste nível.
-  if (!_modelItems.length) {
-    refreshModels().then(() => { if (_lbPop && _lbPop.level === level) _lbRenderPopList(); });
+  // Sem lista ao vivo pro provedor deste nível: tenta buscar (owner/BYOK/openrouter) e
+  // re-renderiza quando chegar. claude-cli e afins já têm catálogo — nada a buscar.
+  if (!(_liveModels[prov] && _liveModels[prov].length)) {
+    const form = _readConfigForm();
+    refreshModelsForProvider(prov, { apiKey: prov === form.provider ? form.apiKey : "", baseUrl: form.baseUrl })
+      .then(() => { if (_lbPop && _lbPop.level === level) _lbRenderPopList(); });
   }
   input.addEventListener("input", _lbRenderPopList);
   input.addEventListener("keydown", (e) => {
@@ -3056,6 +3060,7 @@ function renderConfigPanel() {
   $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
   syncProviderFields(cur);
   renderLevelProviders(list, cur);
+  applyModelCombosForProviders();   // combos refletem o provedor de cada nível (task 014)
   renderOwnerBox();
   renderSubscriptionBox();
   updateConfigBadge();
@@ -3167,6 +3172,10 @@ async function refreshSubscriptionStatus() {
     const s = await res.json();
     const providers = s.providers || {};
     SUB_PROVIDERS.forEach((p) => applySubRowState(p, providers[p.key] || {}));
+    // Estado de assinatura por provedor (task 014): alimenta a sugestão do claude-cli.
+    _subConnected = {};
+    Object.keys(providers).forEach((k) => { _subConnected[k] = !!(providers[k] || {}).connected; });
+    maybeSuggestClaudeCli();
   } catch (e) { /* rede: mantém como está */ }
 }
 
@@ -3458,6 +3467,57 @@ function setCfgStatus(msg, kind) {
   st.dataset.sticky = msg ? "1" : "";
 }
 
+// Assinatura conectada por provedor (task 014): povoado por refreshSubscriptionStatus.
+// _subConnected.anthropic = a assinatura Claude está conectada (via CLI/OAuth).
+let _subConnected = {};
+
+// Troca do provedor SIMPLES/base (task 014): sincroniza os modelos pro provedor. Fora
+// do avançado, reseta Rápido/Pesado pros defaults do provedor (mata o mismatch). No
+// avançado os modelos seguem os provedores por-nível — não mexe neles aqui.
+function onSimpleProviderChange(prov) {
+  setCfgStatus("");
+  syncProviderFields(prov);
+  const p = _providerMeta(prov);
+  const advanced = $("cfgAdvanced") && $("cfgAdvanced").checked;
+  if (!advanced) {
+    $("cfgQuick").value = (p && p.default_quick) || "";
+    $("cfgDeep").value = (p && p.default_deep) || "";
+  }
+  applyModelCombosForProviders();             // catálogo já reflete o novo provedor
+  const suggest = _isOwner && !!_subConnected.anthropic && prov === "anthropic";
+  const form = _readConfigForm();
+  refreshModelsForProvider(prov, { apiKey: form.apiKey, baseUrl: form.baseUrl, status: !suggest });
+  if (suggest) maybeSuggestClaudeCli();
+  renderLaunchModels();
+}
+
+// Troca do provedor de UM nível no avançado (task 014): o modelo daquele nível volta
+// ao default do NOVO provedor e o combo lista os modelos dele (ao vivo se der, senão
+// catálogo). Nunca deixa o nível com um modelo de outro provedor.
+function onLevelProviderChange(level) {
+  const sel = level === "deep" ? $("cfgDeepProvider") : $("cfgQuickProvider");
+  const fid = level === "deep" ? "cfgDeep" : "cfgQuick";
+  const dk = level === "deep" ? "default_deep" : "default_quick";
+  const prov = sel ? sel.value : "";
+  const p = _providerMeta(prov);
+  if ($(fid)) $(fid).value = (p && p[dk]) || "";
+  applyModelCombosForProviders();
+  const form = _readConfigForm();
+  // a chave BYOK é do provedor-base; um nível diferente lista pela env do dono (ou catálogo).
+  refreshModelsForProvider(prov, { apiKey: prov === form.provider ? form.apiKey : "", baseUrl: form.baseUrl });
+  maybeSuggestClaudeCli();
+  renderLaunchModels();
+}
+
+// Dono com assinatura Claude conectada mas usando o Anthropic PAGO (simples ou por-nível):
+// sugere a assinatura ($0/token) — a escolha óbvia pra Claude sem gastar chave (task 014).
+function maybeSuggestClaudeCli() {
+  if (!_isOwner || !_subConnected.anthropic) return;
+  if (_cfgLevelProvider("quick") === "anthropic" || _cfgLevelProvider("deep") === "anthropic") {
+    setCfgStatus("💡 Assinatura Claude conectada — escolha “Claude — assinatura ($0/token)” em vez do Anthropic pago pra rodar sem gastar chave.", "");
+  }
+}
+
 function bindConfig() {
   // Comboboxes pesquisáveis dos modelos (rápido/pesado) — sobre os inputs do HTML.
   _modelCombos.cfgQuick = new ModelCombo("cfgQuick", "cfgQuickOpts");
@@ -3473,16 +3533,19 @@ function bindConfig() {
   };
   $("configBtn").addEventListener("click", toggle);
   $("configClose").addEventListener("click", () => $("configPanel").classList.add("hidden"));
-  // Trocar de provider invalida os modelos: limpa as listas e redispara a busca.
-  $("cfgProvider").addEventListener("change", (e) => {
-    setCfgStatus("");
-    syncProviderFields(e.target.value);
-    fillModelLists([]); $("cfgQuick").value = ""; $("cfgDeep").value = "";
-    refreshModels();
-  });
-  // Cross-provider (task 027): o toggle Avançado mostra os provedores por nível.
+  // Trocar de provedor SINCRONIZA os modelos pro provedor escolhido (task 014) — nunca
+  // deixa Anthropic com modelo OpenAI. O catálogo reflete na hora; a lista ao vivo enriquece.
+  $("cfgProvider").addEventListener("change", (e) => onSimpleProviderChange(e.target.value));
+  // Cross-provider (task 027/014): provedor POR-NÍVEL — cada troca ressincroniza o modelo
+  // daquele nível pros modelos do seu provedor (Rápido↔quickProvider, Pesado↔deepProvider).
+  const qp = $("cfgQuickProvider"); if (qp) qp.addEventListener("change", () => onLevelProviderChange("quick"));
+  const dp = $("cfgDeepProvider"); if (dp) dp.addEventListener("change", () => onLevelProviderChange("deep"));
+  // O toggle Avançado mostra os provedores por nível e ressincroniza os combos.
   const adv = $("cfgAdvanced");
-  if (adv) adv.addEventListener("change", () => { applyAdvancedVisibility(); setCfgStatus(""); });
+  if (adv) adv.addEventListener("change", () => {
+    applyAdvancedVisibility(); setCfgStatus("");
+    applyModelCombosForProviders(); preselectDefaults(); maybeSuggestClaudeCli();
+  });
   // Ao DIGITAR/COLAR a chave: testa e puxa os modelos automaticamente (debounce).
   $("cfgKey").addEventListener("input", scheduleModels);
   $("cfgKey").addEventListener("paste", () => setTimeout(refreshModels, 0));
@@ -3525,6 +3588,43 @@ function handleNeedKey(msg) {
 const MODEL_LIST_MAX = 60;        // teto de opções exibidas (a lista é filtrada)
 const _modelCombos = {};          // { cfgQuick: ModelCombo, cfgDeep: ModelCombo }
 let _modelItems = [];             // última lista carregada (infos), reidrata combos
+// Cache de modelos POR PROVEDOR (task 014): listas ao vivo (BYOK) vão pra cá por
+// provedor; assim trocar de provedor (simples OU por-nível) reflete os modelos DAQUELE
+// provedor sem mismatch. Sem lista ao vivo, cai no catálogo curado da meta (instantâneo).
+const _liveModels = {};           // { [providerId]: [{id,name,price_*}] }
+
+// Itens do catálogo curado do provedor (vem da meta /api/config, task 014) — {id,name}.
+// Degrada pra [] se a meta ainda não tem `models` (server antigo pré-restart).
+function _providerCatalogItems(prov) {
+  const p = _providerMeta(prov);
+  const list = (p && Array.isArray(p.models)) ? p.models : [];
+  return list.map((m) => ({ id: m.id, name: m.name || m.id, price_in: null, price_out: null }));
+}
+
+// Modelos EFETIVOS de um provedor pro dropdown: lista ao vivo (se já buscada) senão o
+// catálogo curado. Nunca devolve o modelo de OUTRO provedor — mata o mismatch (014).
+function _itemsForProvider(prov) {
+  return (_liveModels[prov] && _liveModels[prov].length) ? _liveModels[prov]
+    : _providerCatalogItems(prov);
+}
+
+// Provedor de um nível NO CONFIG (lê os selects): avançado → por-nível; senão o simples.
+function _cfgLevelProvider(level) {
+  const adv = $("cfgAdvanced") && $("cfgAdvanced").checked;
+  if (adv) {
+    const sel = level === "deep" ? $("cfgDeepProvider") : $("cfgQuickProvider");
+    if (sel && sel.value) return sel.value;
+  }
+  return ($("cfgProvider") && $("cfgProvider").value) || "";
+}
+
+// Realimenta cada combo do config com os modelos do SEU provedor de nível (task 014):
+// no avançado o Rápido lista o provedor do Rápido e o Pesado o do Pesado; no simples
+// os dois listam o provedor único.
+function applyModelCombosForProviders() {
+  if (_modelCombos.cfgQuick) _modelCombos.cfgQuick.setItems(_itemsForProvider(_cfgLevelProvider("quick")));
+  if (_modelCombos.cfgDeep) _modelCombos.cfgDeep.setItems(_itemsForProvider(_cfgLevelProvider("deep")));
+}
 
 // Match token-a-token, case-insensitive, por substring em id + nome. Cada palavra
 // digitada precisa aparecer em algum lugar (id ou nome) — não precisa ser prefixo
@@ -3662,71 +3762,97 @@ class ModelCombo {
   }
 }
 
-// Alimenta os dois comboboxes (rápido/pesado) com os modelos reais da chave.
-// Aceita objetos {id,name,price_*} (endpoint atual) ou ids soltos (compat).
-function fillModelLists(models) {
-  _modelItems = (models || [])
+// Normaliza a resposta do endpoint em {id,name,price_*}; aceita ids soltos (compat).
+function normalizeModelItems(models) {
+  return (models || [])
     .map((m) => (typeof m === "string"
       ? { id: m, name: m, price_in: null, price_out: null } : m))
     .filter((m) => m && m.id);
-  for (const k of Object.keys(_modelCombos)) _modelCombos[k].setItems(_modelItems);
 }
 
-// Pré-seleciona defaults sensatos do provider quando o campo está vazio e o modelo
-// existe na lista (senão deixa o usuário escolher/digitar).
+// Alimenta os comboboxes com uma lista ao vivo, cacheando-a POR PROVEDOR (task 014).
+// Sem provedor (limpar) só zera a lista corrente; os combos voltam ao catálogo do
+// provedor de cada nível via applyModelCombosForProviders.
+function fillModelLists(models, provider) {
+  const items = normalizeModelItems(models);
+  _modelItems = items;                        // compat (última lista carregada)
+  if (provider) _liveModels[provider] = items;
+  applyModelCombosForProviders();             // cada combo reidrata pelo SEU provedor
+}
+
+// Pré-seleciona o default de CADA nível pelo SEU provedor (task 014): no avançado o
+// Rápido usa o default do provedor do Rápido e o Pesado o do Pesado. Só preenche
+// campo vazio cujo default existe na lista do provedor (senão deixa escolher/digitar).
 function preselectDefaults() {
-  const p = _providerMeta($("cfgProvider").value);
-  if (!p) return;
-  const ids = new Set(_modelItems.map((m) => m.id));
-  if (!$("cfgQuick").value && p.default_quick && ids.has(p.default_quick)) $("cfgQuick").value = p.default_quick;
-  if (!$("cfgDeep").value && p.default_deep && ids.has(p.default_deep)) $("cfgDeep").value = p.default_deep;
+  [["quick", "cfgQuick", "default_quick"], ["deep", "cfgDeep", "default_deep"]].forEach(
+    ([lvl, fid, dk]) => {
+      const prov = _cfgLevelProvider(lvl);
+      const p = _providerMeta(prov);
+      if (!p || !$(fid)) return;
+      const ids = new Set(_itemsForProvider(prov).map((m) => m.id));
+      if (!$(fid).value && p[dk] && ids.has(p[dk])) $(fid).value = p[dk];
+    });
 }
 
-// Provider dá pra listar agora? (evita bater no backend sem chave onde ela é obrigatória)
-function _canListModels(form) {
+// Provider dá pra listar AO VIVO agora? claude-cli (assinatura) vem do catálogo, sem
+// /models; os demais seguem a regra de chave/owner. (task 014)
+function _canListProvider(provider, apiKey, baseUrl) {
+  if (provider === "claude-cli") return false;     // assinatura: catálogo curado
   if (_isOwner) return true;                       // dono usa a env do servidor
-  if (form.provider === "openrouter") return true; // catálogo público
-  if (form.provider === "ollama") return !!form.baseUrl;
-  return (form.apiKey || "").length >= 8;          // demais: precisa da chave
+  if (provider === "openrouter") return true;      // catálogo público
+  if (provider === "ollama") return !!baseUrl;
+  return (apiKey || "").length >= 8;               // demais: precisa da chave
 }
 
 let _modelsTimer = null;
 let _modelsAbort = null;
 let _modelsSeq = 0;
 
-// Testa a chave E puxa a lista de modelos numa tacada (POST /api/models). Cancela a
-// requisição anterior se a chave/provider mudar de novo. Sucesso ✅ N modelos +
-// popula os dropdowns; falha ❌ mensagem humana (041) e cai no texto livre.
-async function refreshModels() {
-  const form = _readConfigForm();
-  if (!_canListModels(form)) { setCfgStatus("", ""); return; }
+// Testa a chave E puxa a lista de modelos de UM provedor (POST /api/models), cacheando
+// por provedor. Cancela a requisição anterior. Sucesso ✅ popula; provedor sem listagem
+// (claude-cli) ou falha → cai no CATÁLOGO curado (nunca modelo de outro provedor).
+async function refreshModelsForProvider(provider, { apiKey = "", baseUrl = "", status = false } = {}) {
+  if (!_canListProvider(provider, apiKey, baseUrl)) {
+    applyModelCombosForProviders();               // catálogo do provedor
+    if (status) setCfgStatus(provider === "claude-cli"
+      ? "assinatura Claude — modelos $0/token (catálogo)" : "", provider === "claude-cli" ? "ok" : "");
+    return;
+  }
   const seq = ++_modelsSeq;
   if (_modelsAbort) _modelsAbort.abort();
   _modelsAbort = new AbortController();
-  setCfgStatus("testando chave e carregando modelos…", "");
+  if (status) setCfgStatus("testando chave e carregando modelos…", "");
   const headers = { "Content-Type": "application/json" };
-  if (form.apiKey) headers["X-LLM-Key"] = form.apiKey;
-  const body = { llm_provider: form.provider };
-  if (form.baseUrl) body.backend_url = form.baseUrl;
+  if (apiKey) headers["X-LLM-Key"] = apiKey;
+  const body = { llm_provider: provider };
+  if (baseUrl) body.backend_url = baseUrl;
   try {
     const res = await fetch("/api/models", {
       method: "POST", headers, credentials: "same-origin",
       body: JSON.stringify(body), signal: _modelsAbort.signal,
     });
     const data = await res.json();
-    if (seq !== _modelsSeq) return;   // resposta velha: a chave já mudou
+    if (seq !== _modelsSeq) return;   // resposta velha: a chave/provedor já mudou
     if (data.ok) {
-      fillModelLists(data.models);
+      fillModelLists(data.models, provider);
       preselectDefaults();
-      setCfgStatus(`✅ chave válida — ${data.count} modelos carregados`, "ok");
+      if (status) setCfgStatus(`✅ chave válida — ${data.count} modelos carregados`, "ok");
     } else {
-      fillModelLists([]);
-      setCfgStatus(`❌ ${data.error || "não deu pra listar os modelos"}`, "err");
+      applyModelCombosForProviders();             // catálogo do provedor
+      if (status) setCfgStatus(`❌ ${data.error || "não deu pra listar os modelos"}`, "err");
     }
   } catch (e) {
     if (e.name === "AbortError" || seq !== _modelsSeq) return;
-    setCfgStatus("❌ erro de rede ao listar modelos", "err");
+    if (status) setCfgStatus("❌ erro de rede ao listar modelos", "err");
   }
+}
+
+// Entry-point do provedor SIMPLES/base (mesma assinatura de antes — mantém os callers).
+async function refreshModels() {
+  const form = _readConfigForm();
+  return refreshModelsForProvider(form.provider, {
+    apiKey: form.apiKey, baseUrl: form.baseUrl, status: true,
+  });
 }
 
 // Debounce pra não disparar a cada tecla ao digitar/colar a chave.
@@ -3764,6 +3890,13 @@ async function testModel() {
   if (form.quickModel) body.quick_think_llm = form.quickModel;
   if (form.deepModel) body.deep_think_llm = form.deepModel;
   if (form.baseUrl) body.backend_url = form.baseUrl;
+  // Cross-provider por nível (task 027/014): sem isso o "Testar modelo" testava tudo no
+  // provedor-base (ex.: Rápido=claude-cli mas pingava OpenAI → falso erro de crédito).
+  if (form.advanced) {
+    body.advanced = true;
+    if (form.quickProvider) body.quick_provider = form.quickProvider;
+    if (form.deepProvider) body.deep_provider = form.deepProvider;
+  }
   try {
     const res = await fetch("/api/test-model", {
       method: "POST", headers, credentials: "same-origin",

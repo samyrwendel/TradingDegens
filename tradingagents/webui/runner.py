@@ -226,6 +226,32 @@ def _provider_default_models(provider: str) -> tuple[str | None, str | None]:
     return deep, quick
 
 
+def _provider_catalog_models(provider: str) -> list[dict[str, str]]:
+    """Modelos do catálogo do provedor como ``[{id, name}]`` (rápido ∪ pesado,
+    dedup, ordem estável). Alimenta o dropdown de modelo do BYOK DIRETO do catálogo
+    curado — sem depender de um endpoint /models ao vivo. Essencial pra provedores
+    SEM listagem (claude-cli assinatura) e como default instantâneo pros demais, pra
+    trocar de provedor JÁ refletir os modelos daquele provedor (task 014). O sentinela
+    ``custom`` (id livre do CLI) não vira opção de dropdown. Retorna [] pros custom-only
+    (ollama/openrouter/openai_compatible) — ali o usuário nomeia/lista o modelo."""
+    try:
+        from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+    except Exception:  # noqa: BLE001
+        return []
+    opts = MODEL_OPTIONS.get((provider or "").lower())
+    if not isinstance(opts, dict):
+        return []
+    seen: dict[str, dict[str, str]] = {}
+    for mode in ("quick", "deep"):
+        for label, value in (opts.get(mode) or []):
+            if value == "custom" or value in seen:
+                continue
+            # o label do catálogo é "Nome - descrição"; o nome curto é o antes do " - "
+            name = label.split(" - ", 1)[0].strip() if label else value
+            seen[value] = {"id": value, "name": name}
+    return list(seen.values())
+
+
 def apply_llm_overrides(base_config: dict[str, Any],
                         overrides: dict[str, Any] | None) -> dict[str, Any]:
     """Config efetiva = base_config + overrides BYOK da requisição (dict novo).
@@ -1844,17 +1870,37 @@ class AnalysisRunner:
         deep = cfg.get("deep_think_llm")
         secret = cfg.get("llm_api_key")
         base_url = cfg.get("backend_url")
+        # Cross-provider por nível (task 027/014): no avançado cada nível pinga o SEU
+        # provedor — senão "Testar modelo" testava tudo no provedor-base (ex.: Rápido=
+        # claude-cli mas pingava no OpenAI → falso erro de crédito). Fora do avançado,
+        # os dois caem no provedor único (quick_/deep_think_provider = None → base).
+        quick_provider = (cfg.get("quick_think_provider") or provider).lower()
+        deep_provider = (cfg.get("deep_think_provider") or provider).lower()
+        # Owner-only em profundidade (task 014/030): a assinatura claude-cli é do DONO
+        # (proxy server-side). Um público com chave BYOK NÃO pode "testar" claude-cli
+        # (simples OU por-nível) e gastar a cota do dono. Barra antes de pingar.
+        if ({provider, quick_provider, deep_provider} & _OWNER_ONLY_PROVIDERS) \
+                and (overrides or {}).get("allow_server_key") is not True:
+            return {"ok": False, "provider": provider, "using_user_key": bool(secret),
+                    "error": "acesso restrito ao dono", "error_code": _OWNER_ONLY_CODE,
+                    "models": []}
         # Público explícito sem chave própria não testa — a chave do servidor é só do
         # dono, jamais exposta (nem gasta) num "testar" público. Não pinga nada.
         if not secret and (overrides or {}).get("allow_server_key") is False:
             return {"ok": False, "provider": provider, "using_user_key": False,
                     "error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE, "models": []}
         # Rápido primeiro (o mais provável de responder), pesado depois. Cada item traz
-        # role/label pra UI rotular ("⚡ rápido" / "🧠 pesado") sem adivinhar.
+        # role/label pra UI rotular ("⚡ rápido" / "🧠 pesado") sem adivinhar. A chave
+        # BYOK pertence ao provedor-base; um nível cujo provedor difere dele resolve a
+        # própria credencial (assinatura/env) — não recebe a chave do outro.
         models = []
-        for role, label, model in (("quick", "rápido", quick), ("deep", "pesado", deep)):
-            res = self._ping_model(provider, model, secret, base_url)
-            models.append({"role": role, "label": label, **res})
+        for role, label, model, lvl_provider in (
+            ("quick", "rápido", quick, quick_provider),
+            ("deep", "pesado", deep, deep_provider),
+        ):
+            lvl_secret = secret if lvl_provider == provider else None
+            res = self._ping_model(lvl_provider, model, lvl_secret, base_url)
+            models.append({"role": role, "label": label, "provider": lvl_provider, **res})
         return {"ok": all(m["ok"] for m in models), "provider": provider,
                 "using_user_key": bool(secret), "models": models}
 
@@ -2036,10 +2082,11 @@ class AnalysisRunner:
     # Os defaults de modelo saem do catálogo (_provider_default_models).
     _BYOK_PROVIDERS = (
         ("openai", "OpenAI", False, False, False),
-        ("anthropic", "Anthropic (Claude)", False, False, False),
         # Assinatura Claude via CLI OAuth (task 20260826-030): custo/token = $0, sem
-        # chave — a auth é server-side (proxy). Só o dono (usa a assinatura dele).
-        ("claude-cli", "Claude assinatura (via CLI · $0/token · dono)", False, True, True),
+        # chave — a auth é server-side (proxy). Só o dono (usa a assinatura dele). Vem
+        # ANTES do Anthropic pago (task 014) pra ser a escolha ÓBVIA de Claude pro dono.
+        ("claude-cli", "Claude — assinatura ($0/token · dono)", False, True, True),
+        ("anthropic", "Anthropic (Claude) — chave paga", False, False, False),
         ("openrouter", "OpenRouter", False, False, False),
         ("ollama", "Ollama / Llama (local)", True, True, False),
         ("google", "Google (Gemini)", False, False, False),
@@ -2066,6 +2113,10 @@ class AnalysisRunner:
                 "owner_only": owner_only,
                 "default_deep": deep,
                 "default_quick": quick,
+                # Modelos do catálogo curado (task 014): o front popula o dropdown
+                # DIRETO daqui ao trocar de provedor — sem esperar /models e sem
+                # mismatch (ex.: Anthropic com modelo OpenAI). [] = custom-only.
+                "models": _provider_catalog_models(pid),
                 # Presença (não o valor) da env de fallback no servidor: deixa o
                 # front dizer "sem chave → usa a do servidor" só quando é verdade.
                 # claude-cli não usa env de key (auth server-side via proxy).
