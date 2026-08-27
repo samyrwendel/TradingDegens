@@ -699,8 +699,10 @@ details.section[open] > summary::before { content: "▾"; }
 .history li .h-ticker { grid-row: 1; grid-column: 1; }
 .history li .h-right  { grid-row: 1; grid-column: 2; }
 .history li .h-remove { grid-row: 1; grid-column: 3; align-self: center; }
-/* linha de baixo: PREÇO LIVE ocupa a largura toda (não espreme com a data) */
-.history li .h-price  { grid-row: 2; grid-column: 1 / -1; }
+/* linha de baixo: PREÇO LIVE à esquerda · marcador "pronto/erro" à direita (task
+   007: saiu da linha do ticker, que espremia/quebrava, pra cá onde há espaço) */
+.history li .h-price  { grid-row: 2; grid-column: 1; }
+.history li .h-flag   { grid-row: 2; grid-column: 2 / -1; justify-self: end; align-self: center; }
 .history li:hover { background: var(--panel-2); }
 
 /* esquerda: ticker em negrito SOBRE o nome da empresa em cinza (duas linhas) */
@@ -770,7 +772,7 @@ details.section[open] > summary::before { content: "▾"; }
 /* marcador "pronto"/"erro": um run que terminou em segundo plano (não o que você
    assistia) sinaliza no item do histórico até você abri-lo. */
 .h-flag {
-  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  display: inline-block; padding: 1px 7px;
   font-size: var(--fs-10); font-weight: 700; border-radius: 999px; vertical-align: middle;
 }
 .h-flag.done { color: var(--green); background: var(--green-dim); border: 1px solid #1e5c3c; }

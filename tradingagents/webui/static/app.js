@@ -2570,7 +2570,7 @@ function paintHistory() {
     const priceHtml = `<span class="h-price" data-price-for="${escapeHtml(t)}">${priceLineHtml(_priceCache.get(t))}</span>`;
     return `<li data-id="${escapeHtml(r.run_id)}" data-ticker="${escapeHtml(t)}" class="${running ? "is-running" : ""}">` +
       `<span class="h-ticker">` +
-        `<span class="h-sym"><span class="tk-sym">${escapeHtml(t || "?")}</span>${badge}${flagHtml}</span>` +
+        `<span class="h-sym"><span class="tk-sym">${escapeHtml(t || "?")}</span>${badge}</span>` +
         coHtml +
       `</span>` +
       `<span class="h-right">` +
@@ -2579,6 +2579,10 @@ function paintHistory() {
       `</span>` +
       rm +
       priceHtml +
+      // marcador "pronto/erro" na LINHA DO PREÇO (não mais espremido no ticker,
+      // que quebrava — task 007): irmão de .h-price (o poller reescreve .h-price,
+      // então o flag não pode ser filho dele), alinhado à direita onde há espaço.
+      flagHtml +
       `</li>`;
   };
   const filtered = _historyFilter === "all"
