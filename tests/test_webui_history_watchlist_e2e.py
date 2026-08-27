@@ -242,3 +242,56 @@ def test_remove_button_deletes_ticker(live):
         # e sumiu do STORE de verdade (as duas análises do ticker)
         assert [r["ticker"] for r in store.recent()] == ["BTC"]
         browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_finished_flag_sits_on_price_line(live):
+    """Marcador "✓ pronto"/"⚠ erro" mora na LINHA DO PREÇO, não na do ticker (task 007).
+
+    Espremido ao lado do ticker ele quebrava a linha (o ticker é nowrap e a coluna é
+    estreita). Aqui provamos as duas coisas que o Samyr pediu: (1) o flag NÃO é filho
+    do ``.h-sym``; (2) ele fica na mesma faixa vertical do ``.h-price``, encostado à
+    direita — e o poller de preço (que reescreve ``.h-price``) não o apaga.
+    """
+    base, _store = live
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=_CHROMIUM_ARGS)
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        page.goto(base, wait_until="networkidle")
+        page.evaluate(_SEED_NAMES, {"MCD": "McDonald's Corp.", "BTC": "Bitcoin"})
+        page.wait_for_selector('.history li[data-ticker="MCD"]')
+        # simula "terminou em 2º plano": marca o run e repinta
+        page.evaluate("""() => {
+          document.querySelectorAll('.history li').forEach((li) => {
+            _finishedFlags.set(li.getAttribute('data-id'), 'done');
+          });
+          paintHistory();
+        }""")
+        page.wait_for_selector('.history li[data-ticker="MCD"] .h-flag', state="attached")
+        mcd = page.query_selector('.history li[data-ticker="MCD"]')
+
+        # (1) saiu da linha do ticker
+        assert mcd.query_selector(".h-sym .h-flag") is None
+        flag = mcd.query_selector(".h-flag")
+        assert "pronto" in flag.inner_text()
+
+        # (2) mesma faixa vertical do preço, à direita dele
+        fb = flag.bounding_box()
+        pb = mcd.query_selector(".h-price").bounding_box()
+        assert abs((fb["y"] + fb["height"] / 2) - (pb["y"] + pb["height"] / 2)) < 12, (fb, pb)
+        assert fb["x"] > pb["x"] + pb["width"], (fb, pb)
+        # e abaixo do ticker (não na linha 1)
+        assert fb["y"] > mcd.query_selector(".tk-sym").bounding_box()["y"], fb
+
+        # (3) o poller reescreve .h-price — o flag é IRMÃO, então sobrevive
+        page.evaluate("""() => {
+          document.querySelectorAll('.history .h-price[data-price-for]').forEach((el) => {
+            el.innerHTML = '<span class="pval">$1.23</span>';
+          });
+        }""")
+        assert page.query_selector('.history li[data-ticker="MCD"] .h-flag') is not None
+
+        # (4) abrir a análise limpa o marcador
+        page.evaluate("""() => { _finishedFlags.clear(); paintHistory(); }""")
+        page.wait_for_selector('.history li[data-ticker="MCD"] .h-flag', state="detached")
+        browser.close()
