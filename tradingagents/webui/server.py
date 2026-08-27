@@ -164,6 +164,14 @@ class _Handler(BaseHTTPRequestHandler):
                 val = (body.get(bkey) or "").strip().lower()
                 if val:
                     ov[okey] = val
+            # Endpoint POR NÍVEL (task 017): com provedor por nível como caminho
+            # primário, um self-host (Ollama/compatível) num nível não pode arrastar o
+            # endpoint dele pro client do OUTRO nível — cada um manda a sua base_url.
+            for bkey, okey in (("deep_backend_url", "deep_base_url"),
+                               ("quick_backend_url", "quick_base_url")):
+                val = (body.get(bkey) or "").strip()
+                if val:
+                    ov[okey] = val
         # Só o DONO logado destrava a chave do servidor: marca allow_server_key
         # SEMPRE (True pro dono, False pro público) — assim o runner recusa a
         # requisição pública sem chave própria e nunca cai na env do servidor.

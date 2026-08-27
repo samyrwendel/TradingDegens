@@ -85,7 +85,9 @@ def test_zai_glm_survives_the_cap_and_is_filterable(live_server):
             page.wait_for_selector("#configPanel:not(.hidden)")
             # OpenRouter = catálogo público (lista sem chave) → dispara /api/models,
             # que roda o parser+cap REAIS sobre os 418 crus.
-            page.select_option("#cfgProvider", "openrouter")
+            # Provedor por NÍVEL (task 017): o combo de cada nível lista o SEU provedor,
+            # então o Rápido tem que estar em OpenRouter pra filtrar o catálogo dele.
+            page.select_option("#cfgQuickProvider", "openrouter")
             page.wait_for_selector("#cfgStatus.ok", timeout=8000)
             # os 418 carregaram (nada foi cortado em 400)
             assert "418" in page.inner_text("#cfgStatus")

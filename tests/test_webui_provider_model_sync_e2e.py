@@ -3,10 +3,12 @@
 Bug do Samyr: no Avançado, pôr Provedor do Rápido/Pesado = Anthropic mas os MODELOS
 ficarem gpt-5.4-mini/gpt-5.5 (OpenAI) → a run/Testar caíam no OpenAI sem crédito.
 
-Aqui provamos que escolher um provedor (simples OU por-nível) JÁ reflete os modelos
-DAQUELE provedor — o campo vira o default do provedor e o dropdown lista os modelos
-dele, nunca de outro (o mismatch morre). Usa provedores públicos (openai/anthropic);
-claude-cli (assinatura, owner-only) é coberto nos testes de backend.
+Aqui provamos que escolher um provedor JÁ reflete os modelos DAQUELE provedor — o
+campo vira o default do provedor e o dropdown lista os modelos dele, nunca de outro (o
+mismatch morre). Depois da 017 o provedor é POR NÍVEL e sempre visível: os dois casos
+cobertos são "cada nível no seu provedor" e "os dois iguais" (botão = igual ao Rápido).
+Usa provedores públicos (openai/anthropic); claude-cli (assinatura, owner-only) é
+coberto nos testes de backend.
 
 Pulado com skip se o Playwright/Chromium não estiver disponível no ambiente.
 """
@@ -57,21 +59,25 @@ _COMBO_IDS = "(id) => (_modelCombos[id] && _modelCombos[id].items.map(m => m.id)
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
-def test_simple_provider_switch_syncs_models(live_server):
+def test_mesmo_provedor_nos_dois_niveis_sincroniza_os_modelos(live_server):
+    """Rodar TUDO no mesmo provedor (o antigo "modo simples") agora é escolher o mesmo
+    provedor nos dois níveis — o botão "= igual ao Rápido" faz num clique. Os dois
+    modelos têm que virar do provedor novo, sem sobrar id do anterior."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         try:
             _open_config(page, live_server)
-            # começa em OpenAI: o dropdown lista gpt (o campo vazio mostra o default no
-            # placeholder — sem chave/owner não há preseleção, mas o catálogo já é gpt)
+            # começa em OpenAI nos dois níveis: os dropdowns listam gpt
             quick_ids = page.evaluate(_COMBO_IDS, "cfgQuick")
             assert quick_ids and all(i.startswith("gpt") for i in quick_ids)
 
-            # troca pra Anthropic → modelos viram Claude, SEM sobrar gpt (mismatch morto)
-            page.select_option("#cfgProvider", "anthropic")
+            # Rápido = Anthropic; "= igual ao Rápido" leva o Pesado junto
+            page.select_option("#cfgQuickProvider", "anthropic")
+            page.click("#cfgSameAsQuick")
             assert page.input_value("#cfgQuick").startswith("claude")
             assert page.input_value("#cfgDeep").startswith("claude")
+            assert page.input_value("#cfgDeepProvider") == "anthropic"
             quick_ids = page.evaluate(_COMBO_IDS, "cfgQuick")
             deep_ids = page.evaluate(_COMBO_IDS, "cfgDeep")
             assert quick_ids and all(i.startswith("claude") for i in quick_ids)
@@ -82,15 +88,18 @@ def test_simple_provider_switch_syncs_models(live_server):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
-def test_advanced_cross_provider_syncs_each_level(live_server):
+def test_cross_provider_por_nivel_sem_toggle(live_server):
+    """Provedor por nível é o layout PRIMÁRIO (task 017): dá pra deixar Rápido e Pesado
+    em provedores diferentes sem ligar nenhum "avançado" — e cada nível sincroniza só o
+    SEU modelo."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         try:
             _open_config(page, live_server)
-            # liga o Avançado (cross-provider por nível)
-            page.check("#cfgAdvanced")
-            page.wait_for_selector("#cfgAdvancedGrid:not(.hidden)")
+            # os dois pares estão visíveis de cara — nada de checkbox pra destravar
+            assert page.is_visible("#cfgLevelQuick")
+            assert page.is_visible("#cfgLevelDeep")
 
             # Provedor do RÁPIDO = Anthropic → só o Rápido vira Claude
             page.select_option("#cfgQuickProvider", "anthropic")

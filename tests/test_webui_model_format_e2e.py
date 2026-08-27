@@ -115,7 +115,7 @@ def test_config_salva_no_formato_antigo_e_normalizada_ao_abrir(live):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_avancado_tem_modelo_por_nivel_ao_lado_do_provedor(live):
+def test_modelo_por_nivel_ao_lado_do_provedor(live):
     with sync_playwright() as p:
         browser = p.chromium.launch(args=_ARGS)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
@@ -123,16 +123,14 @@ def test_avancado_tem_modelo_por_nivel_ao_lado_do_provedor(live):
             _login_owner(page, live)
             page.click("#configBtn")
             page.wait_for_selector("#configPanel:not(.hidden)")
-            page.check("#cfgAdvanced")
-            page.dispatch_event("#cfgAdvanced", "change")
-            page.wait_for_selector("#cfgAdvancedGrid:not(.hidden)")
 
-            # os campos de modelo MIGRARAM pra grade do avançado, cada um depois do
-            # provedor do seu nível (Provedor Rápido · Modelo Rápido · Provedor Pesado · Modelo Pesado)
-            ordem = page.eval_on_selector_all(
-                "#cfgAdvancedGrid > .field", "els => els.map(e => e.id)")
-            assert ordem == ["cfgQuickProviderField", "cfgQuickField",
-                             "cfgDeepProviderField", "cfgDeepField"]
+            # cada nível é um bloco com [provedor + modelo] do MESMO nível (task 017)
+            assert page.eval_on_selector_all(
+                "#cfgLevelQuick .field", "els => els.map(e => e.id)")[:2] \
+                == ["cfgQuickProviderField", "cfgQuickField"]
+            assert page.eval_on_selector_all(
+                "#cfgLevelDeep .field", "els => els.map(e => e.id)")[:2] \
+                == ["cfgDeepProviderField", "cfgDeepField"]
 
             # Pesado = assinatura Claude → o modelo do PESADO vira Claude e o dropdown
             # daquele nível lista modelos Claude; o Rápido segue no OpenAI (gpt).
@@ -148,8 +146,7 @@ def test_avancado_tem_modelo_por_nivel_ao_lado_do_provedor(live):
             # nenhum id do catálogo da assinatura vem no formato OpenRouter
             assert not any("/" in i for i in deep_ids)
 
-            # o rótulo diz de quem é o modelo e em que provedor ele roda
-            assert "Pesado" in page.text_content("#cfgDeepLabel")
+            # o rótulo do campo diz em que provedor aquele modelo roda
             assert "claude-cli" in page.text_content("#cfgDeepLabel")
             _shot(page, "avancado-modelo-por-nivel.png")
 

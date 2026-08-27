@@ -66,7 +66,10 @@ def _open_openrouter_config(page, base):
     page.goto(base)
     page.click("#configBtn")
     page.wait_for_selector("#configPanel:not(.hidden)")
-    page.select_option("#cfgProvider", "openrouter")
+    # Provedor por NÍVEL (task 017): não há mais um "provedor" único — o PESADO é o
+    # provedor-base (dono da chave), e é o status dele que a barra mostra.
+    page.select_option("#cfgDeepProvider", "openrouter")
+    page.select_option("#cfgQuickProvider", "openrouter")
     # o change dispara POST /api/models → status "✅ … modelos carregados"
     page.wait_for_selector("#cfgStatus.ok", timeout=8000)
 

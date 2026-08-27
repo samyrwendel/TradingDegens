@@ -1,8 +1,8 @@
 """E2E (Playwright) do cross-provider RÁPIDO/PESADO + escalonamento (task 027).
 
-Parte A (seletor): o dono liga o modo Avançado, escolhe provedor+modelo de CADA
-nível (Rápido=openai, Pesado=claude-cli), salva, e a config avançada persiste e
-sai no corpo das requisições (llmRequestParts). Parte B (escalonamento): uma run
+Parte A (seletor): o dono escolhe provedor+modelo de CADA nível (Rápido=openai,
+Pesado=claude-cli) direto no painel — sem toggle, desde a 017 —, salva, e a config
+por-nível persiste e sai no corpo das requisições (llmRequestParts). Parte B (escalonamento): uma run
 de dono que FALHA numa etapa mostra o controle "Escalar etapa com outro LLM"; o
 clique dispara POST /api/run/<id>/escalate com o nível/provedor/modelo escolhidos.
 
@@ -106,10 +106,10 @@ def test_advanced_selector_persists_and_emits(live):
         page.wait_for_selector("#configPanel:not(.hidden)")
         page.evaluate("() => renderConfigPanel()")
 
-        # Liga o modo Avançado → a grade por nível aparece.
-        page.check("#cfgAdvanced")
-        page.dispatch_event("#cfgAdvanced", "change")
-        page.wait_for_selector("#cfgAdvancedGrid:not(.hidden)")
+        # Provedor por nível é o layout PRIMÁRIO (task 017): os dois pares já estão na
+        # tela, sem toggle pra destravar.
+        page.wait_for_selector("#cfgLevelQuick")
+        page.wait_for_selector("#cfgLevelDeep")
 
         # Provedores por nível populados; claude-cli (owner-only) visível pro dono.
         deep_opts = page.eval_on_selector_all(
@@ -127,9 +127,11 @@ def test_advanced_selector_persists_and_emits(live):
         page.click("#cfgSave")
 
         cfg = page.evaluate("() => _llmCfg")
-        assert cfg["advanced"] is True
+        assert cfg["advanced"] is True     # por-nível é o único caminho agora (017)
         assert cfg["quickProvider"] == "openai"
         assert cfg["deepProvider"] == "claude-cli"
+        # o provedor-BASE (dono da chave BYOK) é o do PESADO
+        assert cfg["provider"] == "claude-cli"
 
         # O corpo das requisições carrega o cross-provider por nível.
         body = page.evaluate("() => llmRequestParts().body")

@@ -71,67 +71,82 @@
       <div class="sub-providers" id="subProviders"></div>
     </div>
 
-    <div class="config-grid" id="byokGrid">
-      <div class="field">
-        <label for="cfgProvider">Provedor</label>
-        <select id="cfgProvider"></select>
-      </div>
-      <div class="field">
-        <label for="cfgKey">Chave de API <span class="orig">(mascarada)</span></label>
-        <input id="cfgKey" type="password" autocomplete="off" placeholder="sk-…" />
-      </div>
-      <div class="field cfg-baseurl hidden" id="cfgBaseUrlField">
-        <label for="cfgBaseUrl">Base URL <span class="orig">(endpoint)</span></label>
-        <input id="cfgBaseUrl" type="text" autocomplete="off" placeholder="http://localhost:11434/v1" />
-      </div>
-      <div class="field" id="cfgQuickField">
-        <label for="cfgQuick" id="cfgQuickLabel">Modelo rápido <span class="orig">(quick)</span></label>
-        <!-- combobox pesquisável: digita e a lista real da chave FILTRA em tempo
-             real, casando id E nome (ex.: "glm 5.2" acha z-ai/glm-5.2). Aceita id
-             livre não listado (fallback). Teclado: ↑/↓ move, Enter escolhe, Esc fecha. -->
-        <div class="combo" data-combo="cfgQuick">
-          <input id="cfgQuick" type="text" autocomplete="off" role="combobox"
-                 aria-autocomplete="list" aria-expanded="false" aria-controls="cfgQuickOpts"
-                 placeholder="(padrão do provedor)" />
-          <ul class="combo-list hidden" id="cfgQuickOpts" role="listbox"></ul>
+    <!-- Provedor + modelo POR NÍVEL (task 017). O cadastro NÃO é mais um provedor
+         único amarrado aos dois modelos: cada nível — RÁPIDO e PESADO — escolhe o SEU
+         provedor e o SEU modelo (no formato daquele provedor, task 016). Rodar tudo no
+         mesmo provedor é só escolher o mesmo nos dois, ou clicar "igual ao Rápido".
+         O combobox de modelo é pesquisável: digita e a lista REAL do provedor daquele
+         nível filtra em tempo real, casando id E nome ("glm 5.2" acha z-ai/glm-5.2).
+         Aceita id livre não listado. Teclado: ↑/↓ move, Enter escolhe, Esc fecha. -->
+    <div class="cfg-levels" id="cfgLevels">
+      <section class="cfg-level" id="cfgLevelQuick">
+        <header class="cfg-level-head">
+          <span class="cfg-level-icon" aria-hidden="true">⚡</span>
+          <span class="cfg-level-name">Rápido</span>
+          <span class="cfg-level-role">analistas · debate · trader · risco</span>
+        </header>
+        <div class="config-grid">
+          <div class="field" id="cfgQuickProviderField">
+            <label for="cfgQuickProvider">Provedor <span class="orig">(quick)</span></label>
+            <select id="cfgQuickProvider"></select>
+          </div>
+          <div class="field" id="cfgQuickField">
+            <label for="cfgQuick" id="cfgQuickLabel">Modelo</label>
+            <div class="combo" data-combo="cfgQuick">
+              <input id="cfgQuick" type="text" autocomplete="off" role="combobox"
+                     aria-autocomplete="list" aria-expanded="false" aria-controls="cfgQuickOpts"
+                     placeholder="(padrão do provedor)" />
+              <ul class="combo-list hidden" id="cfgQuickOpts" role="listbox"></ul>
+            </div>
+          </div>
+          <div class="field cfg-baseurl hidden" id="cfgQuickBaseUrlField">
+            <label for="cfgQuickBaseUrl">Base URL <span class="orig">(endpoint)</span></label>
+            <input id="cfgQuickBaseUrl" type="text" autocomplete="off"
+                   placeholder="http://localhost:11434/v1" />
+          </div>
         </div>
-      </div>
-      <div class="field" id="cfgDeepField">
-        <label for="cfgDeep" id="cfgDeepLabel">Modelo pesado <span class="orig">(deep)</span></label>
-        <div class="combo" data-combo="cfgDeep">
-          <input id="cfgDeep" type="text" autocomplete="off" role="combobox"
-                 aria-autocomplete="list" aria-expanded="false" aria-controls="cfgDeepOpts"
-                 placeholder="(padrão do provedor)" />
-          <ul class="combo-list hidden" id="cfgDeepOpts" role="listbox"></ul>
+      </section>
+
+      <section class="cfg-level" id="cfgLevelDeep">
+        <header class="cfg-level-head">
+          <span class="cfg-level-icon" aria-hidden="true">🧠</span>
+          <span class="cfg-level-name">Pesado</span>
+          <span class="cfg-level-role">pesquisa · juiz</span>
+          <button type="button" class="cfg-mirror" id="cfgSameAsQuick"
+                  title="Usar o mesmo provedor e modelo do Rápido">= igual ao Rápido</button>
+        </header>
+        <div class="config-grid">
+          <div class="field" id="cfgDeepProviderField">
+            <label for="cfgDeepProvider">Provedor <span class="orig">(deep)</span></label>
+            <select id="cfgDeepProvider"></select>
+          </div>
+          <div class="field" id="cfgDeepField">
+            <label for="cfgDeep" id="cfgDeepLabel">Modelo</label>
+            <div class="combo" data-combo="cfgDeep">
+              <input id="cfgDeep" type="text" autocomplete="off" role="combobox"
+                     aria-autocomplete="list" aria-expanded="false" aria-controls="cfgDeepOpts"
+                     placeholder="(padrão do provedor)" />
+              <ul class="combo-list hidden" id="cfgDeepOpts" role="listbox"></ul>
+            </div>
+          </div>
+          <div class="field cfg-baseurl hidden" id="cfgDeepBaseUrlField">
+            <label for="cfgDeepBaseUrl">Base URL <span class="orig">(endpoint)</span></label>
+            <input id="cfgDeepBaseUrl" type="text" autocomplete="off"
+                   placeholder="http://localhost:11434/v1" />
+          </div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <!-- Cross-provider RÁPIDO/PESADO (task 027): modo Avançado escolhe o provedor de
-         CADA nível separadamente (ex.: Rápido=openai + Pesado=claude-cli $0/token). No
-         avançado os campos de MODELO acima MIGRAM pra esta grade (task 016), cada um ao
-         lado do provedor do seu nível — o modelo é do provedor daquele nível, no formato
-         dele; não é um campo compartilhado. Simples é o default. -->
-    <label class="cfg-adv-toggle" for="cfgAdvanced">
-      <input type="checkbox" id="cfgAdvanced" />
-      Avançado — provedor por nível (Rápido × Pesado, cross-provider)
-    </label>
-    <div class="config-grid cfg-advanced-grid hidden" id="cfgAdvancedGrid">
-      <div class="field" id="cfgQuickProviderField">
-        <label for="cfgQuickProvider">Provedor do Rápido <span class="orig">(quick)</span></label>
-        <select id="cfgQuickProvider"></select>
-      </div>
-      <div class="field" id="cfgDeepProviderField">
-        <label for="cfgDeepProvider">Provedor do Pesado <span class="orig">(deep)</span></label>
-        <select id="cfgDeepProvider"></select>
+    <div class="config-grid" id="byokGrid">
+      <div class="field">
+        <label for="cfgKey" id="cfgKeyLabel">Chave de API <span class="orig">(mascarada)</span></label>
+        <input id="cfgKey" type="password" autocomplete="off" placeholder="sk-…" />
       </div>
     </div>
-    <p class="config-note cfg-advanced-note hidden" id="cfgAdvancedNote">
-      No modo avançado, o <b>Rápido</b> (analistas · debate · trader · risco) e o
-      <b>Pesado</b> (pesquisa · juiz) rodam provedores diferentes, cada um com o
-      <b>seu modelo</b> ao lado (no formato daquele provedor). Um nível sem credencial
-      é barrado antes de rodar.
-    </p>
+    <!-- Diz de QUEM é a chave: ela vale pro provedor do PESADO (e pro Rápido quando é
+         o mesmo). Nível que fica sem credencial é barrado ANTES de rodar (027). -->
+    <p class="config-note cfg-key-note hidden" id="cfgKeyNote"></p>
 
     <p class="config-note byok-note hidden" id="byokOptionalNote">
       Opcional: como dono, você já roda com a chave do servidor. Preencha só se quiser

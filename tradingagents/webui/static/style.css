@@ -1186,13 +1186,29 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 }
 .config-grid .field select:focus,
 .config-grid .field input:focus { outline: none; border-color: var(--accent); }
-/* Cross-provider RÁPIDO/PESADO (task 027): toggle Avançado + grade por nível. */
-.cfg-adv-toggle {
-  display: flex; align-items: center; gap: 8px; margin: 12px 0 8px;
-  color: var(--text); font-size: var(--fs-14); cursor: pointer; user-select: none;
+/* Provedor + modelo POR NÍVEL (task 017): dois blocos irmãos, RÁPIDO e PESADO, cada
+   um com o seu provedor, o seu modelo e o seu endpoint. O bloco existe pra o olho
+   fechar o par — provedor e modelo do MESMO nível ficam dentro da mesma moldura, e
+   nunca mais parecem um cadastro único valendo pros dois. */
+.cfg-levels { display: flex; flex-direction: column; gap: 12px; }
+.cfg-level {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px 14px; background: var(--panel-2);
 }
-.cfg-adv-toggle input { accent-color: var(--accent); }
-.cfg-advanced-grid { margin-top: 4px; }
+.cfg-level-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.cfg-level-icon { font-size: var(--fs-16); }
+.cfg-level-name { font-weight: 600; color: var(--text); font-size: var(--fs-14); }
+.cfg-level-role { color: var(--muted); font-size: var(--fs-13); }
+/* "= igual ao Rápido": atalho pra rodar tudo no mesmo provedor sem um modo separado. */
+.cfg-mirror {
+  margin-left: auto; background: transparent; border: 1px solid var(--border);
+  color: var(--muted); border-radius: var(--radius); padding: 4px 10px;
+  font-size: var(--fs-13); font-family: var(--font); cursor: pointer;
+}
+.cfg-mirror:hover { color: var(--text); border-color: var(--accent); }
+.cfg-key-note { margin-top: 6px; }
 /* Escalonamento de etapa no card de erro (task 027 parte B) — só o dono vê. */
 .err-escalate { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .err-escalate-title { font-size: var(--fs-13); color: var(--muted); margin-bottom: 8px; }

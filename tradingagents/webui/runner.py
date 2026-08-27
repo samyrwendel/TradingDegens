@@ -308,6 +308,13 @@ def apply_llm_overrides(base_config: dict[str, Any],
             _, q_def = _provider_default_models(qp)
             if not ov.get("quick_model") and q_def:
                 config["quick_think_llm"] = q_def
+        # Endpoint POR NÍVEL (task 017): lido por resolve_level_specs
+        # (``{nivel}_backend_url``), que já cai no ``backend_url`` base quando ausente.
+        # Sem isso, o endpoint de um self-host num nível ia parar no client do outro.
+        for okey, cfg_key in (("deep_base_url", "deep_backend_url"),
+                              ("quick_base_url", "quick_backend_url")):
+            if ov.get(okey):
+                config[cfg_key] = ov[okey]
 
     # NORMALIZAÇÃO DE FORMATO (task 016): o id de modelo não é portável entre
     # provedores — OpenRouter usa ``vendor/modelo``, a API Anthropic (e a assinatura
@@ -1998,7 +2005,10 @@ class AnalysisRunner:
             ("deep", "pesado", deep, deep_provider),
         ):
             lvl_secret = secret if lvl_provider == provider else None
-            res = self._ping_model(lvl_provider, model, lvl_secret, base_url)
+            # endpoint do NÍVEL (task 017): Ollama no Rápido + OpenAI no Pesado não
+            # podem compartilhar base_url — pingar no endereço errado dava falso erro.
+            lvl_base = cfg.get(f"{role}_backend_url") or base_url
+            res = self._ping_model(lvl_provider, model, lvl_secret, lvl_base)
             models.append({"role": role, "label": label, "provider": lvl_provider, **res})
         return {"ok": all(m["ok"] for m in models), "provider": provider,
                 "using_user_key": bool(secret), "models": models}

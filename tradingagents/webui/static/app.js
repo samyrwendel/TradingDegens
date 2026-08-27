@@ -78,12 +78,15 @@ function llmRequestParts() {
   if (c.deepModel) body.deep_think_llm = c.deepModel;
   if (c.quickModel) body.quick_think_llm = c.quickModel;
   if (c.baseUrl) body.backend_url = c.baseUrl;
-  // Cross-provider RÁPIDO/PESADO (task 027): no modo avançado, cada nível manda o
-  // seu provedor; os modelos por nível reusam deep_think_llm/quick_think_llm acima.
+  // Provedor por NÍVEL (task 027 → primário na 017): cada nível manda o SEU provedor e,
+  // quando é um self-host (Ollama/compatível), o SEU endpoint — senão o endpoint de um
+  // nível ia parar no client do outro. Os modelos reusam deep_think_llm/quick_think_llm.
   if (c.advanced) {
     body.advanced = true;
     if (c.quickProvider) body.quick_provider = c.quickProvider;
     if (c.deepProvider) body.deep_provider = c.deepProvider;
+    if (c.quickBaseUrl) body.quick_backend_url = c.quickBaseUrl;
+    if (c.deepBaseUrl) body.deep_backend_url = c.deepBaseUrl;
   }
   return { headers, body };
 }
@@ -1450,12 +1453,12 @@ function renderLaunchBar() {
 // do config (#cfgQuick/#cfgDeep). O cross-provider por nível (task 027) segue no
 // config, alcançável pelo link "avançado" do popover — mantido "junto".
 
-// Provedor efetivo de um nível: no avançado (027) cada nível tem o seu; senão o simples.
+// Provedor efetivo de um nível: cada nível tem o seu (task 017). Config antiga
+// (provedor único, pré-017) cai no `provider` salvo — migra sozinha ao abrir o painel.
 function _effLevelProvider(level) {
   const c = _llmCfg || {};
-  if (c.advanced) return (level === "deep" ? c.deepProvider : c.quickProvider) || c.provider ||
+  return (level === "deep" ? c.deepProvider : c.quickProvider) || c.provider ||
     (_llmMeta && _llmMeta.default_provider) || "";
-  return c.provider || (_llmMeta && _llmMeta.default_provider) || "";
 }
 
 // Modelo padrão do provedor pra um nível (mostrado quando o campo está vazio).
@@ -1569,7 +1572,7 @@ function openLaunchModelPicker(level, btn) {
     `<ul class="lbp-list" role="listbox"></ul>` +
     `<div class="lbp-foot">` +
       `<button type="button" class="lbp-default">padrão do provedor</button>` +
-      `<button type="button" class="lbp-adv" title="Provedor por nível (Rápido × Pesado, cross-provider)">⚙️ avançado</button>` +
+      `<button type="button" class="lbp-adv" title="Escolher o provedor deste nível nas Configurações">⚙️ provedor</button>` +
     `</div>`;
   const group = btn.closest(".lb-model") || btn.parentNode;
   group.appendChild(el);
@@ -1601,22 +1604,21 @@ function openLaunchModelPicker(level, btn) {
     _lbChooseModel(level, li.getAttribute("data-val"));
   });
   el.querySelector(".lbp-default").addEventListener("click", () => _lbChooseModel(level, ""));
-  el.querySelector(".lbp-adv").addEventListener("click", () => { _closeLaunchModelPop(); openConfigAdvanced(); });
+  el.querySelector(".lbp-adv").addEventListener("click", () => { _closeLaunchModelPop(); openConfigForLevel(level); });
   document.addEventListener("mousedown", _lbPopOutside, true);
   document.addEventListener("keydown", _lbPopEsc, true);
   setTimeout(() => input.focus(), 0);
 }
 
-// Abre o config já no Avançado (cross-provider por nível, task 027) e rola até ele —
-// mantém o avançado "junto" do seletor sem duplicá-lo no launcher.
-function openConfigAdvanced() {
+// Abre o config e rola até o PAR daquele nível (provedor + modelo). Depois da 017 não
+// há mais "modo avançado" pra ligar: o provedor por nível é o layout primário — o link
+// do popover só leva o usuário até o bloco certo.
+function openConfigForLevel(level) {
   const panel = $("configPanel");
   if (panel) panel.classList.remove("hidden");
-  const adv = $("cfgAdvanced");
-  if (adv && !adv.checked) { adv.checked = true; applyAdvancedVisibility(); }
   if (!_modelItems.length) refreshModels();
-  const grid = $("cfgAdvancedGrid") || panel;
-  if (grid && grid.scrollIntoView) grid.scrollIntoView({ behavior: "smooth", block: "center" });
+  const block = $(level === "deep" ? "cfgLevelDeep" : "cfgLevelQuick") || panel;
+  if (block && block.scrollIntoView) block.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 // Ao abrir um ativo (resultado / comparação / run com erro), a barra passa a apontar
@@ -3142,102 +3144,151 @@ function _providerMeta(id) {
   return list.find((p) => p.id === id) || null;
 }
 
-// Preenche o <select> de provedores e reflete a config salva nos campos.
+// Preenche os selects de provedor DE CADA NÍVEL e reflete a config salva nos campos.
+// Task 017: não existe mais um provedor único amarrado aos dois modelos — RÁPIDO e
+// PESADO são dois pares [provedor + modelo] independentes, sempre visíveis. Os dois
+// no mesmo provedor é só um caso particular (o botão "= igual ao Rápido" faz num
+// clique). A chave BYOK segue pertencendo ao provedor do PESADO, que é o provedor-base
+// da requisição — o rótulo/nota da chave diz isso na cara (renderKeyOwnership).
 function renderConfigPanel() {
-  const sel = $("cfgProvider");
-  if (!sel || !_llmMeta) return;
+  if (!_llmMeta || !$("cfgQuickProvider")) return;
   // Provedores owner-only (assinatura do dono, ex.: claude-cli · $0/token) só
   // aparecem pro dono logado — o público nem os vê (o server barra em profundidade).
   const list = (_llmMeta.providers || []).filter((p) => _isOwner || !p.owner_only);
-  let cur = _llmCfg.provider || _llmMeta.default_provider || "openai";
-  // provedor salvo é owner-only mas a sessão não é dona: cai no default visível
-  if (!list.some((p) => p.id === cur)) cur = _llmMeta.default_provider || "openai";
-  sel.innerHTML = list.map((p) =>
-    `<option value="${escapeHtml(p.id)}"${p.id === cur ? " selected" : ""}>${escapeHtml(p.label)}</option>`
-  ).join("");
+  const fallback = _llmMeta.default_provider || "openai";
   $("cfgKey").value = _llmCfg.apiKey || "";
   $("cfgQuick").value = _llmCfg.quickModel || "";
   $("cfgDeep").value = _llmCfg.deepModel || "";
-  $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
-  syncProviderFields(cur);
-  renderLevelProviders(list, cur);
-  // Config salva pode trazer o modelo no formato do provedor ANTERIOR (o bug: trocou
-  // pra assinatura Claude e ficou "anthropic/claude-opus-5" do OpenRouter → 404).
-  // Normaliza ANTES de montar os combos, com os selects de nível já preenchidos.
+  renderLevelProviders(list, fallback);
+  syncLevelFields();
+  // Config salva pode trazer o modelo no formato do provedor ANTERIOR (o bug 016:
+  // trocou pra assinatura Claude e ficou "anthropic/claude-opus-5" do OpenRouter →
+  // 404). Normaliza ANTES de montar os combos, com os selects de nível já preenchidos.
   // Não-estrito: aqui provedor e modelo foram salvos JUNTOS — corrigir o formato é
   // seguro, trocar um id fora do catálogo (fine-tune próprio) pelo default não é.
   normalizeConfigModels({ strict: false });   // task 016
+  migrateSingleProviderConfig();    // task 017
   applyModelCombosForProviders();   // combos refletem o provedor de cada nível (task 014)
+  // Mostra o modelo CONCRETO de cada nível em vez de deixar dois campos vazios com
+  // placeholder: com provedor por nível na cara (017), "padrão do provedor" escondia
+  // justamente o que o usuário veio ver. Só preenche campo VAZIO — nunca sobrescreve.
+  preselectDefaults();
   renderOwnerBox();
   renderSubscriptionBox();
   updateConfigBadge();
   renderLaunchModels();   // reflete os modelos salvos nos chips do launcher (task 012)
 }
 
-// Cross-provider RÁPIDO/PESADO (task 027): popula os selects de provedor por nível
-// (Rápido/Pesado) com a MESMA lista visível do provedor simples, e reflete o estado
-// avançado salvo. Cada nível default = o provedor simples atual.
-function renderLevelProviders(list, cur) {
+// Popula os selects de provedor de CADA nível (mesma lista visível) e restaura o que
+// estava salvo. Config antiga (provedor único, pré-017) migra sozinha: o provedor
+// salvo vira o dos DOIS níveis. Provedor salvo que sumiu da lista (owner-only com
+// sessão deslogada) cai no default visível — sem quebrar o select.
+function renderLevelProviders(list, fallback) {
   const qs = $("cfgQuickProvider");
   const ds = $("cfgDeepProvider");
-  const adv = $("cfgAdvanced");
-  if (!qs || !ds || !adv) return;
+  if (!qs || !ds) return;
   const opts = (selected) => list.map((p) =>
     `<option value="${escapeHtml(p.id)}"${p.id === selected ? " selected" : ""}>${escapeHtml(p.label)}</option>`
   ).join("");
-  let q = _llmCfg.quickProvider || cur;
-  let d = _llmCfg.deepProvider || cur;
-  if (!list.some((p) => p.id === q)) q = cur;
-  if (!list.some((p) => p.id === d)) d = cur;
+  const saved = _llmCfg.provider || fallback;    // pré-017: um provedor pros dois
+  let q = _llmCfg.quickProvider || saved;
+  let d = _llmCfg.deepProvider || saved;
+  if (!list.some((p) => p.id === q)) q = list.some((p) => p.id === fallback) ? fallback : (list[0] || {}).id;
+  if (!list.some((p) => p.id === d)) d = list.some((p) => p.id === fallback) ? fallback : (list[0] || {}).id;
   qs.innerHTML = opts(q);
   ds.innerHTML = opts(d);
-  adv.checked = !!_llmCfg.advanced;
-  applyAdvancedVisibility();
 }
 
-// Mostra/esconde a grade avançada conforme o toggle e REALOCA os campos de modelo
-// (task 016): no avançado, o modelo de cada nível fica AO LADO do provedor daquele
-// nível (Provedor do Rápido → Modelo do Rápido, idem Pesado). Antes os dois campos
-// ficavam lá em cima, junto do provedor simples, parecendo um modelo COMPARTILHADO —
-// era o convite pro mismatch de formato. São os MESMOS inputs (mesmo id, mesmo combo,
-// mesmo estado): só mudam de lugar, sem duplicar fonte de verdade.
-function applyAdvancedVisibility() {
-  const on = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
-  ["cfgAdvancedGrid", "cfgAdvancedNote"].forEach((id) => {
-    const el = $(id);
-    if (el) el.classList.toggle("hidden", !on);
+// Campos que dependem do provedor DE CADA nível: Base URL (só Ollama/self-host),
+// placeholder do modelo (o default daquele provedor) e o rótulo dizendo qual provedor
+// manda naquele nível. Cada nível é independente — um pode ser Ollama local (com
+// endpoint) e o outro OpenAI (sem), sem um campo pisar no outro.
+function syncLevelFields() {
+  ["quick", "deep"].forEach((lvl) => {
+    const cap = lvl === "deep" ? "Deep" : "Quick";
+    const prov = _cfgLevelProvider(lvl);
+    const p = _providerMeta(prov);
+    const field = $(`cfg${cap}BaseUrlField`);
+    if (field) field.classList.toggle("hidden", !(p && p.needs_base_url));
+    const model = $(`cfg${cap}`);
+    if (model && p) model.placeholder = (lvl === "deep" ? p.default_deep : p.default_quick)
+      || "(nome do modelo)";
   });
-  const grid = $("cfgAdvancedGrid");
-  const byok = $("byokGrid");
-  const qf = $("cfgQuickField");
-  const df = $("cfgDeepField");
-  const dpf = $("cfgDeepProviderField");
-  if (grid && byok && qf && df && dpf) {
-    if (on) {
-      grid.insertBefore(qf, dpf);   // …Provedor do Rápido · Modelo do Rápido…
-      grid.appendChild(df);         // …Provedor do Pesado · Modelo do Pesado
-    } else if (qf.parentNode !== byok) {
-      byok.appendChild(qf);         // volta pro fim da grade simples (ordem original)
-      byok.appendChild(df);
-    }
-  }
   syncLevelModelLabels();
+  renderKeyOwnership();
 }
 
-// Rótulo dos campos de modelo: no avançado diz de QUEM é o modelo e em que provedor
-// ele roda ("Modelo do Rápido (claude-cli)") — o formato do id é o daquele provedor.
+// Rótulo do campo de modelo: diz em que provedor aquele modelo roda — é o provedor
+// daquele nível que define o FORMATO do id (task 016).
 function syncLevelModelLabels() {
-  const on = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
-  [["quick", "cfgQuickLabel", "cfgQuick", "Rápido", "Modelo rápido"],
-   ["deep", "cfgDeepLabel", "cfgDeep", "Pesado", "Modelo pesado"]].forEach(
-    ([lvl, lid, fid, lead, plain]) => {
-      const el = $(lid);
-      if (!el) return;
-      const orig = on ? (_cfgLevelProvider(lvl) || lvl) : lvl;
-      el.innerHTML = `${escapeHtml(on ? "Modelo do " + lead : plain)} `
-        + `<span class="orig">(${escapeHtml(orig)})</span>`;
-      el.setAttribute("for", fid);
-    });
+  [["quick", "cfgQuickLabel", "cfgQuick"],
+   ["deep", "cfgDeepLabel", "cfgDeep"]].forEach(([lvl, lid, fid]) => {
+    const el = $(lid);
+    if (!el) return;
+    const prov = _cfgLevelProvider(lvl);
+    el.innerHTML = "Modelo " + (prov ? `<span class="orig">(${escapeHtml(prov)})</span>` : "");
+    el.setAttribute("for", fid);
+  });
+}
+
+// De QUEM é a chave: ela vai no header da requisição e o servidor a entrega ao
+// provedor-BASE, que é o do PESADO (e ao Rápido quando é o mesmo provedor). Com os
+// dois níveis em provedores diferentes que pedem chave, o outro nível precisa da
+// chave do servidor/assinatura — e é barrado antes de rodar se não tiver. Dizer isso
+// aqui evita o "colei minha chave e mesmo assim deu erro de credencial".
+function renderKeyOwnership() {
+  const lbl = $("cfgKeyLabel");
+  const note = $("cfgKeyNote");
+  const qp = _cfgLevelProvider("quick");
+  const dp = _cfgLevelProvider("deep");
+  if (lbl) {
+    lbl.innerHTML = "Chave de API "
+      + `<span class="orig">(${escapeHtml(dp || "provedor")}${qp && qp === dp ? " · vale pros dois" : ""})</span>`;
+  }
+  if (!note) return;
+  const needsKey = (id) => { const p = _providerMeta(id); return !!p && !p.key_optional; };
+  const split = qp && dp && qp !== dp && needsKey(qp);
+  note.classList.toggle("hidden", !split);
+  if (split) {
+    note.innerHTML = `A chave acima é do provedor do <b>Pesado</b> (${escapeHtml(dp)}). `
+      + `O <b>Rápido</b> roda em <b>${escapeHtml(qp)}</b> e usa a credencial do servidor/assinatura — `
+      + `sem ela, esse nível é barrado antes de rodar.`;
+  }
+}
+
+// Config salva antes da 017 tem UM provedor pros dois níveis. Ao abrir o painel ela
+// vira o formato novo (o mesmo provedor nos dois) e é persistida — assim os chips do
+// launcher, a nota da chave e o corpo da requisição já falam por-nível, sem esperar o
+// usuário clicar em Salvar. Não mexe se algum provedor salvo está escondido (owner-only
+// com sessão deslogada): ali a tela não representa a escolha do dono.
+function migrateSingleProviderConfig() {
+  const c = _llmCfg || {};
+  if (!c.provider || (c.quickProvider && c.deepProvider)) return false;
+  if (_savedProviderHidden()) return false;
+  c.quickProvider = c.quickProvider || _cfgLevelProvider("quick") || c.provider;
+  c.deepProvider = c.deepProvider || _cfgLevelProvider("deep") || c.provider;
+  c.quickBaseUrl = c.quickBaseUrl || c.baseUrl || "";
+  c.deepBaseUrl = c.deepBaseUrl || c.baseUrl || "";
+  c.advanced = true;
+  saveLlmCfg(c);
+  return true;
+}
+
+// Copia provedor+modelo (e endpoint) do Rápido pro Pesado: o atalho pra rodar TUDO no
+// mesmo provedor sem precisar de um "modo simples" separado (task 017).
+function mirrorQuickIntoDeep() {
+  const qs = $("cfgQuickProvider");
+  const ds = $("cfgDeepProvider");
+  if (!qs || !ds) return;
+  ds.value = qs.value;
+  const p = _providerMeta(ds.value);
+  // o modelo do PESADO é o do mesmo provedor: usa o do Rápido se ele serve os dois
+  // níveis, senão o default pesado do provedor (nunca deixa em formato de outro).
+  const qm = $("cfgQuick") ? $("cfgQuick").value.trim() : "";
+  if ($("cfgDeep")) $("cfgDeep").value = normalizeModelForProvider(ds.value, qm, "deep")
+    || (p && p.default_deep) || "";
+  if ($("cfgDeepBaseUrl") && $("cfgQuickBaseUrl")) $("cfgDeepBaseUrl").value = $("cfgQuickBaseUrl").value;
+  onLevelProviderChange("deep", { keepModel: true });
 }
 
 // Conectar assinatura (task 017; multi-provedor 020): a seção só aparece pro DONO
@@ -3497,22 +3548,15 @@ function renderOwnerBox() {
   }
 }
 
-// Mostra o campo Base URL só pros provedores que precisam (Ollama/self-host),
-// atualiza placeholders de modelo com o padrão do provedor e a nota de fallback.
-function syncProviderFields(provId) {
+// Linha de status do provedor escolhido num nível (chave opcional / chave de
+// fallback no servidor). Os campos em si são sincronizados por syncLevelFields.
+function syncProviderStatus(provId) {
   const p = _providerMeta(provId);
-  const needsBase = !!(p && p.needs_base_url);
-  $("cfgBaseUrlField").classList.toggle("hidden", !needsBase);
-  if (p) {
-    $("cfgQuick").placeholder = p.default_quick || "(nome do modelo)";
-    $("cfgDeep").placeholder = p.default_deep || "(nome do modelo)";
-  }
   const st = $("cfgStatus");
-  if (st && !st.dataset.sticky) {
-    if (p && p.key_optional) st.textContent = "provedor local — chave opcional";
-    else if (p && p.server_key) st.textContent = "servidor tem chave de fallback pra este provedor";
-    else st.textContent = "";
-  }
+  if (!st || st.dataset.sticky) return;
+  if (p && p.key_optional) st.textContent = "provedor local — chave opcional";
+  else if (p && p.server_key) st.textContent = "servidor tem chave de fallback pra este provedor";
+  else st.textContent = "";
 }
 
 // Rótulo do botão da engrenagem: mostra se está com chave própria ou a do servidor.
@@ -3531,18 +3575,22 @@ function updateConfigBadge() {
   } else {
     lbl.textContent = "Chaves";                     // público sem chave → precisa configurar
   }
-  // Linha "ativo" dentro do painel.
+  // Linha "ativo" dentro do painel: com provedor por NÍVEL (017), mostra o que cada
+  // nível vai rodar de verdade — um "Ativo: openai" só dizia meia verdade.
   const act = $("cfgActive");
   if (act) {
-    if (_isOwner && !_llmCfg.apiKey) {
-      const m = _llmMeta ? ` · ${_llmMeta.default_provider} · ${_llmMeta.default_quick || ""}` : "";
-      act.textContent = `Ativo: chave do servidor (dono)${m}`;
-    } else if (_llmCfg.apiKey) {
-      const prov = _llmCfg.provider || (_llmMeta && _llmMeta.default_provider) || "?";
-      act.textContent = `Ativo: sua chave · ${prov}` +
-        (_llmCfg.quickModel ? ` · ${_llmCfg.quickModel}` : "");
-    } else {
+    const lvl = (level, icon) => {
+      const prov = _effLevelProvider(level);
+      const model = (level === "deep" ? _llmCfg.deepModel : _llmCfg.quickModel)
+        || _providerDefaultModel(level) || "padrão";
+      return `${icon} ${prov || "?"} · ${model}`;
+    };
+    const par = `${lvl("quick", "⚡")}   ${lvl("deep", "🧠")}`;
+    if (!_isOwner && !_llmCfg.apiKey) {
       act.textContent = "Sem chave — informe a sua acima ou entre como dono para rodar.";
+    } else {
+      const fonte = _llmCfg.apiKey ? "sua chave" : "chave do servidor (dono)";
+      act.textContent = `Ativo: ${fonte} · ${par}`;
     }
   }
 }
@@ -3585,14 +3633,22 @@ async function ownerLogout() {
   renderConfigPanel();
 }
 
+// Config lida da tela: DOIS pares [provedor + modelo + endpoint] independentes
+// (task 017). ``provider``/``baseUrl`` continuam saindo como o do PESADO porque ele é
+// o provedor-BASE da requisição (dono da chave BYOK) — o backend e o resto do front
+// já falam essa língua, e assim nada de 014/016/027/012 precisou mudar de contrato.
+// ``advanced`` vai SEMPRE true: o caminho por-nível virou o único caminho; "os dois
+// iguais" é só escolher o mesmo provedor nos dois.
 function _readConfigForm() {
-  const provId = $("cfgProvider").value;
-  const p = _providerMeta(provId);
-  const advanced = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
-  const quickProv = (advanced && $("cfgQuickProvider") && $("cfgQuickProvider").value) || provId;
-  const deepProv = (advanced && $("cfgDeepProvider") && $("cfgDeepProvider").value) || provId;
+  const quickProv = ($("cfgQuickProvider") && $("cfgQuickProvider").value) || "";
+  const deepProv = ($("cfgDeepProvider") && $("cfgDeepProvider").value) || "";
+  const urlFor = (lvl, prov) => {
+    const p = _providerMeta(prov);
+    const el = $(lvl === "deep" ? "cfgDeepBaseUrl" : "cfgQuickBaseUrl");
+    return (p && p.needs_base_url && el) ? el.value.trim() : "";
+  };
   return {
-    provider: provId,
+    provider: deepProv,           // provedor-base = o do PESADO (dono da chave)
     apiKey: $("cfgKey").value.trim(),
     // Modelo SEMPRE no FORMATO do provedor do seu nível (task 016): é este objeto que
     // vira _llmCfg no Salvar e alimenta o corpo do analyze/Testar — normalizar aqui
@@ -3601,11 +3657,12 @@ function _readConfigForm() {
     // sobra de outro provedor é a troca de provedor, não a leitura do formulário.
     quickModel: normalizeModelForProvider(quickProv, $("cfgQuick").value.trim(), "quick", { strict: false }),
     deepModel: normalizeModelForProvider(deepProv, $("cfgDeep").value.trim(), "deep", { strict: false }),
-    baseUrl: (p && p.needs_base_url) ? $("cfgBaseUrl").value.trim() : "",
-    // Cross-provider RÁPIDO/PESADO (task 027): provedor por nível no modo avançado.
-    advanced,
-    quickProvider: advanced && $("cfgQuickProvider") ? $("cfgQuickProvider").value : "",
-    deepProvider: advanced && $("cfgDeepProvider") ? $("cfgDeepProvider").value : "",
+    quickProvider: quickProv,
+    deepProvider: deepProv,
+    quickBaseUrl: urlFor("quick", quickProv),
+    deepBaseUrl: urlFor("deep", deepProv),
+    baseUrl: urlFor("deep", deepProv),   // endpoint-base = o do PESADO
+    advanced: true,
   };
 }
 
@@ -3621,51 +3678,38 @@ function setCfgStatus(msg, kind) {
 // _subConnected.anthropic = a assinatura Claude está conectada (via CLI/OAuth).
 let _subConnected = {};
 
-// Troca do provedor SIMPLES/base (task 014): sincroniza os modelos pro provedor. Fora
-// do avançado, reseta Rápido/Pesado pros defaults do provedor (mata o mismatch). No
-// avançado os modelos seguem os provedores por-nível — não mexe neles aqui.
-function onSimpleProviderChange(prov) {
-  setCfgStatus("");
-  syncProviderFields(prov);
-  const p = _providerMeta(prov);
-  const advanced = $("cfgAdvanced") && $("cfgAdvanced").checked;
-  if (!advanced) {
-    $("cfgQuick").value = (p && p.default_quick) || "";
-    $("cfgDeep").value = (p && p.default_deep) || "";
-  } else {
-    // no avançado os modelos seguem os provedores POR NÍVEL — mas um nível que caia
-    // no provedor-base (select vazio) precisa do id no formato NOVO (task 016).
-    normalizeConfigModels();
-  }
-  applyModelCombosForProviders();             // catálogo já reflete o novo provedor
-  const suggest = _isOwner && !!_subConnected.anthropic && prov === "anthropic";
-  const form = _readConfigForm();
-  refreshModelsForProvider(prov, { apiKey: form.apiKey, baseUrl: form.baseUrl, status: !suggest });
-  if (suggest) maybeSuggestClaudeCli();
-  renderLaunchModels();
-}
-
-// Troca do provedor de UM nível no avançado (task 014): o modelo daquele nível vai pro
-// FORMATO do novo provedor e o combo lista os modelos dele (ao vivo se der, senão
-// catálogo). Nunca deixa o nível com um modelo de outro provedor. Um id compatível
-// (mesma família, ex.: claude-sonnet-5 do Anthropic pago → assinatura) é PRESERVADO;
-// só o incompatível cai no default (task 016) — antes qualquer troca clobberava.
-function onLevelProviderChange(level) {
+// Troca do provedor de UM nível (task 014 → primária na 017): o modelo daquele nível
+// vai pro FORMATO do novo provedor e o combo lista os modelos DELE (ao vivo se der,
+// senão catálogo). Nunca deixa o nível com um modelo de outro provedor. Um id
+// compatível (mesma família, ex.: claude-sonnet-5 do Anthropic pago → assinatura) é
+// PRESERVADO; só o incompatível cai no default (task 016). ``keepModel`` é pra quem
+// já pôs o modelo certo antes de chamar (o "= igual ao Rápido").
+function onLevelProviderChange(level, opts) {
   const sel = level === "deep" ? $("cfgDeepProvider") : $("cfgQuickProvider");
   const fid = level === "deep" ? "cfgDeep" : "cfgQuick";
   const dk = level === "deep" ? "default_deep" : "default_quick";
   const prov = sel ? sel.value : "";
   const p = _providerMeta(prov);
-  if ($(fid)) {
+  setCfgStatus("");
+  if ($(fid) && !(opts && opts.keepModel)) {
     const cur = $(fid).value.trim();
     $(fid).value = cur ? normalizeModelForProvider(prov, cur, level) : ((p && p[dk]) || "");
   }
-  syncLevelModelLabels();
+  syncLevelFields();
+  syncProviderStatus(prov);
   applyModelCombosForProviders();
   const form = _readConfigForm();
-  // a chave BYOK é do provedor-base; um nível diferente lista pela env do dono (ou catálogo).
-  refreshModelsForProvider(prov, { apiKey: prov === form.provider ? form.apiKey : "", baseUrl: form.baseUrl });
-  maybeSuggestClaudeCli();
+  // Dono com assinatura conectada escolhendo o Anthropic PAGO: a dica vale mais que o
+  // "✅ N modelos" — as duas ocupam a mesma linha de status, então só uma escreve.
+  const suggest = _isOwner && !!_subConnected.anthropic && prov === "anthropic";
+  // a chave BYOK é do provedor-base (o do PESADO); um nível em outro provedor lista
+  // pela env do dono (ou cai no catálogo curado).
+  refreshModelsForProvider(prov, {
+    apiKey: prov === form.provider ? form.apiKey : "",
+    baseUrl: level === "deep" ? form.deepBaseUrl : form.quickBaseUrl,
+    status: !suggest,
+  });
+  if (suggest) maybeSuggestClaudeCli();
   renderLaunchModels();
 }
 
@@ -3693,18 +3737,19 @@ function bindConfig() {
   };
   $("configBtn").addEventListener("click", toggle);
   $("configClose").addEventListener("click", () => $("configPanel").classList.add("hidden"));
-  // Trocar de provedor SINCRONIZA os modelos pro provedor escolhido (task 014) — nunca
-  // deixa Anthropic com modelo OpenAI. O catálogo reflete na hora; a lista ao vivo enriquece.
-  $("cfgProvider").addEventListener("change", (e) => onSimpleProviderChange(e.target.value));
-  // Cross-provider (task 027/014): provedor POR-NÍVEL — cada troca ressincroniza o modelo
-  // daquele nível pros modelos do seu provedor (Rápido↔quickProvider, Pesado↔deepProvider).
+  // Provedor POR NÍVEL (task 017 — layout primário): cada troca ressincroniza o modelo
+  // daquele nível pros modelos do SEU provedor (task 014) — nunca deixa Anthropic com
+  // modelo OpenAI. O catálogo reflete na hora; a lista ao vivo enriquece depois.
   const qp = $("cfgQuickProvider"); if (qp) qp.addEventListener("change", () => onLevelProviderChange("quick"));
   const dp = $("cfgDeepProvider"); if (dp) dp.addEventListener("change", () => onLevelProviderChange("deep"));
-  // O toggle Avançado mostra os provedores por nível e ressincroniza os combos.
-  const adv = $("cfgAdvanced");
-  if (adv) adv.addEventListener("change", () => {
-    applyAdvancedVisibility(); setCfgStatus("");
-    applyModelCombosForProviders(); preselectDefaults(); maybeSuggestClaudeCli();
+  // Conveniência: rodar tudo no mesmo provedor sem um "modo simples" separado.
+  const mirror = $("cfgSameAsQuick");
+  if (mirror) mirror.addEventListener("click", mirrorQuickIntoDeep);
+  // Endpoint por nível (Ollama/self-host): trocar o endereço recarrega a lista daquele
+  // nível — é a URL que decide quais modelos existem.
+  [["quick", "cfgQuickBaseUrl"], ["deep", "cfgDeepBaseUrl"]].forEach(([lvl, id]) => {
+    const el = $(id);
+    if (el) el.addEventListener("change", () => onLevelProviderChange(lvl, { keepModel: true }));
   });
   // Ao DIGITAR/COLAR a chave: testa e puxa os modelos automaticamente (debounce).
   $("cfgKey").addEventListener("input", scheduleModels);
@@ -3839,14 +3884,16 @@ function normalizeModelForProvider(prov, model, level, opts) {
   return def || bare;
 }
 
-// O provedor SALVO sumiu da lista? (provedor owner-only com a sessão deslogada: o
+// Algum provedor SALVO sumiu da lista? (provedor owner-only com a sessão deslogada: o
 // select cai no default visível). Aí a tela NÃO representa a escolha do usuário e
 // normalizar contra o provedor visível apagaria os modelos dele — melhor não tocar.
 function _savedProviderHidden() {
-  const saved = (_llmCfg && _llmCfg.provider) || "";
-  const sel = $("cfgProvider");
-  if (!saved || !sel) return false;
-  return !Array.from(sel.options).some((o) => o.value === saved);
+  const c = _llmCfg || {};
+  const sel = $("cfgQuickProvider");
+  if (!sel) return false;
+  const visible = Array.from(sel.options).map((o) => o.value);
+  return [c.quickProvider, c.deepProvider, c.provider]
+    .some((id) => id && !visible.includes(id));
 }
 
 // Põe os DOIS campos de modelo no formato do provedor do SEU nível. Devolve true se
@@ -3872,19 +3919,16 @@ function normalizeConfigModels(opts) {
   return changed;
 }
 
-// Provedor de um nível NO CONFIG (lê os selects): avançado → por-nível; senão o simples.
+// Provedor de um nível NO CONFIG: lê o select daquele nível — cada um tem o seu
+// (task 017), não há mais provedor único por trás.
 function _cfgLevelProvider(level) {
-  const adv = $("cfgAdvanced") && $("cfgAdvanced").checked;
-  if (adv) {
-    const sel = level === "deep" ? $("cfgDeepProvider") : $("cfgQuickProvider");
-    if (sel && sel.value) return sel.value;
-  }
-  return ($("cfgProvider") && $("cfgProvider").value) || "";
+  const sel = level === "deep" ? $("cfgDeepProvider") : $("cfgQuickProvider");
+  return (sel && sel.value) || "";
 }
 
 // Realimenta cada combo do config com os modelos do SEU provedor de nível (task 014):
-// no avançado o Rápido lista o provedor do Rápido e o Pesado o do Pesado; no simples
-// os dois listam o provedor único.
+// o Rápido lista o provedor do Rápido e o Pesado o do Pesado. Com os dois no mesmo
+// provedor as duas listas coincidem — é o mesmo caminho, sem caso especial.
 function applyModelCombosForProviders() {
   if (_modelCombos.cfgQuick) _modelCombos.cfgQuick.setItems(_itemsForProvider(_cfgLevelProvider("quick")));
   if (_modelCombos.cfgDeep) _modelCombos.cfgDeep.setItems(_itemsForProvider(_cfgLevelProvider("deep")));
@@ -4112,11 +4156,22 @@ async function refreshModelsForProvider(provider, { apiKey = "", baseUrl = "", s
 }
 
 // Entry-point do provedor SIMPLES/base (mesma assinatura de antes — mantém os callers).
+// Testa a chave e puxa os modelos dos provedores EM USO — os dois níveis (task 017).
+// Provedores iguais nos dois = uma requisição só. O status ✅/❌ é o do provedor-base
+// (o do PESADO), que é o dono da chave digitada.
 async function refreshModels() {
   const form = _readConfigForm();
-  return refreshModelsForProvider(form.provider, {
-    apiKey: form.apiKey, baseUrl: form.baseUrl, status: true,
+  // SEQUENCIAL de propósito: o controle de cancelamento (_modelsAbort/_modelsSeq) é
+  // um só, pra a digitação da chave descartar respostas velhas — dois pedidos em
+  // paralelo se cancelariam.
+  await refreshModelsForProvider(form.deepProvider, {
+    apiKey: form.apiKey, baseUrl: form.deepBaseUrl, status: true,
   });
+  if (form.quickProvider && form.quickProvider !== form.deepProvider) {
+    await refreshModelsForProvider(form.quickProvider, {
+      apiKey: "", baseUrl: form.quickBaseUrl,
+    });
+  }
 }
 
 // Debounce pra não disparar a cada tecla ao digitar/colar a chave.

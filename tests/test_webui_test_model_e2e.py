@@ -87,11 +87,12 @@ def live_server(tmp_path, monkeypatch):
 
 
 def _open_config_with_key(page, base, quick, deep):
-    """Abre a config, escolhe OpenAI, cola a chave e os dois modelos."""
+    """Abre a config, põe OpenAI nos DOIS níveis (task 017), cola a chave e os modelos."""
     page.goto(base)
     page.click("#configBtn")
     page.wait_for_selector("#configPanel:not(.hidden)")
-    page.select_option("#cfgProvider", "openai")
+    page.select_option("#cfgQuickProvider", "openai")
+    page.select_option("#cfgDeepProvider", "openai")
     page.fill("#cfgKey", "sk-e2e-secret")
     page.fill("#cfgQuick", quick)
     page.fill("#cfgDeep", deep)

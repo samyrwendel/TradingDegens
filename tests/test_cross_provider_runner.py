@@ -152,3 +152,33 @@ def test_config_do_servidor_sem_overrides_fica_intacta():
     # apply_llm_overrides(base, None) é chamado só pra LER a config — não pode mexer
     # no modelo do servidor (que já está no formato do provedor dele).
     assert apply_llm_overrides(_BASE, None) == dict(_BASE)
+
+
+# ------------------------------ endpoint POR NÍVEL (task 017) -------------------
+# Com provedor por nível como caminho PRIMÁRIO, um self-host (Ollama/compatível) num
+# nível não pode arrastar o endpoint dele pro client do outro nível.
+@pytest.mark.unit
+def test_endpoint_por_nivel_nao_vaza_de_um_nivel_pro_outro():
+    from tradingagents.graph.trading_graph import resolve_level_specs
+
+    cfg = apply_llm_overrides(_BASE, {
+        "advanced": True, "quick_provider": "ollama", "deep_provider": "openai",
+        "quick_model": "qwen3:latest", "deep_model": "gpt-5.5",
+        "quick_base_url": "http://localhost:11434/v1",
+        "allow_server_key": True})
+    assert cfg["quick_backend_url"] == "http://localhost:11434/v1"
+    specs = resolve_level_specs(cfg, byok_key=None)
+    assert specs["quick"]["base_url"] == "http://localhost:11434/v1"
+    assert specs["deep"]["base_url"] != "http://localhost:11434/v1"
+
+
+@pytest.mark.unit
+def test_endpoint_base_continua_valendo_quando_o_nivel_nao_tem_o_seu():
+    from tradingagents.graph.trading_graph import resolve_level_specs
+
+    cfg = apply_llm_overrides({**_BASE, "backend_url": "http://base:1234/v1"}, {
+        "advanced": True, "quick_provider": "openai", "deep_provider": "openai",
+        "allow_server_key": True})
+    specs = resolve_level_specs(cfg, byok_key=None)
+    assert specs["quick"]["base_url"] == "http://base:1234/v1"
+    assert specs["deep"]["base_url"] == "http://base:1234/v1"
