@@ -14,13 +14,19 @@ Semeia o histórico no store real (mesmo caminho do usuário) e checa DOM + esti
 computado. Skip limpo sem Playwright/Chromium.
 """
 
+import os
 import threading
 
 import pytest
 
+from tradingagents.webui.auth import OwnerAuth
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
+
+# Senha do dono pro servidor de teste — apagar do histórico é owner-gated (task
+# 20260827-004: protege o track record público). Só o teste de remoção loga.
+_OWNER_PW = "dono-watchlist"
 
 pytestmark = pytest.mark.integration
 
@@ -57,13 +63,16 @@ def live(tmp_path):
         base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
                      "deep_think_llm": "gpt-5.5", "quick_think_llm": "gpt-5.4-mini"},
         store=store)
-    httpd = make_server("127.0.0.1", 0, runner=runner)
+    # Owner auth ligado (a leitura segue pública; só o DELETE do histórico exige dono).
+    os.environ["TRADINGDEGENS_OWNER_TOKEN"] = _OWNER_PW
+    httpd = make_server("127.0.0.1", 0, runner=runner, auth=OwnerAuth())
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         yield f"http://127.0.0.1:{port}", store
     finally:
         httpd.shutdown()
+        os.environ.pop("TRADINGDEGENS_OWNER_TOKEN", None)
 
 
 _SEED_NAMES = ("(names)=>{for(const k in names){_nameCache.set(k,names[k]);} "
@@ -216,6 +225,11 @@ def test_remove_button_deletes_ticker(live):
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         page.on("dialog", lambda d: d.accept())     # confirma o "remover?"
         page.goto(base, wait_until="networkidle")
+        # Apagar do histórico é owner-gated (task 20260827-004): loga como dono antes.
+        page.evaluate("""async (pw) => {
+          await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'},
+            credentials:'same-origin', body: JSON.stringify({password: pw})});
+        }""", _OWNER_PW)
         page.evaluate(_SEED_NAMES, {"MCD": "McDonald's Corp.", "BTC": "Bitcoin"})
         page.wait_for_selector('.history li[data-ticker="MCD"] .h-remove')
 

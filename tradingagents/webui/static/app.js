@@ -2618,8 +2618,12 @@ async function removeTicker(ticker) {
   if (!t) return;
   if (!confirm(`Remover ${t} do histórico? As análises salvas deste ativo serão apagadas.`)) return;
   try {
-    const res = await fetch("/api/history/" + encodeURIComponent(t), { method: "DELETE" });
-    if (res.ok) await loadHistory();
+    // credentials same-origin: manda o cookie de sessão do DONO — apagar é owner-gated
+    // no servidor (protege o track record público). Público leva 403 e a lista fica.
+    const res = await fetch("/api/history/" + encodeURIComponent(t),
+                            { method: "DELETE", credentials: "same-origin" });
+    if (res.ok) { await loadHistory(); return; }
+    if (res.status === 403) alert("Só o dono logado pode remover ativos do histórico.");
   } catch (e) { /* fonte fora do ar: mantém a lista como está */ }
 }
 

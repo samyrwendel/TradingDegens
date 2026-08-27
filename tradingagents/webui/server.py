@@ -695,6 +695,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": self._redact_key(f"{type(exc).__name__}: {exc}")}, 500)
 
     def do_DELETE(self) -> None:  # noqa: N802
+        # O histórico é PÚBLICO pra LEITURA de propósito (track record — avaliar
+        # acertos/erros das análises). Mas APAGAR é só do DONO: sem este portão,
+        # qualquer visitante poderia destruir o histórico inteiro de um ativo. Gate no
+        # TOPO → toda rota DELETE é owner-only por padrão (a leitura pública em
+        # /api/history e /api/runs segue intacta, são do_GET). Público → 403 owner_only.
+        if not self._owner_or_403():
+            return
         # Remover um ATIVO da lista lateral (watchlist): apaga do histórico todas
         # as análises salvas daquele ticker. A lista é por ativo, então o × remove
         # o ativo inteiro. Idempotente (removed=0 se já não existe).
