@@ -37,6 +37,40 @@ def test_recent_limit(tmp_path):
     assert len(store.recent(limit=4)) == 4
 
 
+def test_watchlist_only_grows_beyond_recent_window(tmp_path):
+    # Lista de observação (task 011): TODO ticker já pesquisado aparece, mesmo que seus
+    # runs tenham saído da janela dos 25 mais recentes. 30 runs de T0..T29 + um run
+    # ANTIGO de OLD (o 1º de todos): recent(25) não o vê, watchlist() SIM.
+    store = HistoryStore(tmp_path)
+    store.save(_rec("old", "OLD", "Buy"))          # o mais antigo de todos
+    for i in range(30):
+        store.save(_rec(f"r{i}", f"T{i}", "Hold"))
+    recent = [r["ticker"] for r in store.recent(25)]
+    assert "OLD" not in recent                       # caiu da janela dos 25
+    wl = store.watchlist()
+    tickers = [w["ticker"] for w in wl]
+    assert "OLD" in tickers                          # a watchlist só CRESCE
+    assert len(tickers) == 31 and len(set(tickers)) == 31   # um por ticker, todos
+
+
+def test_watchlist_one_per_ticker_most_recent_with_count(tmp_path):
+    store = HistoryStore(tmp_path)
+    store.save(_rec("m1", "MCD", "Buy"))
+    store.save(_rec("b1", "BTC", "Hold"))
+    store.save(_rec("m2", "MCD", "Sell"))            # mais recente do MCD
+    wl = store.watchlist()
+    # ordenado pela atividade mais recente: MCD (m2) no topo, depois BTC
+    assert [w["ticker"] for w in wl] == ["MCD", "BTC"]
+    mcd = next(w for w in wl if w["ticker"] == "MCD")
+    assert mcd["run_id"] == "m2" and mcd["verdict"] == "Sell"   # o run mais recente
+    assert mcd["count"] == 2                          # 2 análises do MCD
+    assert next(w for w in wl if w["ticker"] == "BTC")["count"] == 1
+
+
+def test_watchlist_empty_when_no_history(tmp_path):
+    assert HistoryStore(tmp_path).watchlist() == []
+
+
 def test_get_unknown_returns_none(tmp_path):
     assert HistoryStore(tmp_path).get("nope") is None
 

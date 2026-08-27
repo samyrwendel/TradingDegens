@@ -1932,18 +1932,39 @@ class AnalysisRunner:
         live.sort(key=lambda r: r.started_at, reverse=True)
         return [self._running_summary(r) for r in live]
 
-    def history(self, limit: int = 25) -> list[dict[str, Any]]:
-        """Recent run summaries newest-first, with the live in-process runs
-        (status ``running``) merged in front.
+    def history(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Lista de OBSERVAÇÃO: UM item por ticker já pesquisado (persistente, só
+        cresce — task 011), com o run mais recente daquele ticker, mais os runs em
+        andamento (status ``running``) sobrepostos no topo.
 
-        A running run is not on disk yet, so it can only come from the in-memory
-        table; a run that just finished is deduped out of the live set so it is
-        not listed twice while it is briefly in both places.
+        Antes devolvia só os ``limit`` runs mais recentes: um ativo pesquisado há
+        tempo sumia quando seus runs saíam da janela. Agora varre o index inteiro
+        (``store.watchlist()``) — nenhum ticker cai por causa de limite de runs. Um
+        ticker em andamento aparece "rodando", preservando a contagem de análises já
+        persistidas. ``limit`` é ignorado (mantido por compatibilidade de assinatura).
         """
+        wl = self.store.watchlist()
+        count_by_ticker = {
+            (w.get("ticker") or "").upper(): w.get("count", 1) for w in wl
+        }
         live = self.active_runs()
-        seen = {r["run_id"] for r in live}
-        persisted = [r for r in self.store.recent(limit) if r.get("run_id") not in seen]
-        return live + persisted
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for lr in live:                       # runs em andamento no topo
+            t = (lr.get("ticker") or "").upper()
+            if t in seen:
+                out.append(lr)                # 2 runs do mesmo ticker rodando: mantém os dois
+                continue
+            seen.add(t)
+            # +1: o próprio run em andamento (ainda não persistido no index)
+            out.append({**lr, "count": count_by_ticker.get(t, 0) + 1})
+        for w in wl:                          # os demais tickers da watchlist
+            t = (w.get("ticker") or "").upper()
+            if t in seen:
+                continue
+            seen.add(t)
+            out.append(w)
+        return out
 
     def delete_ticker(self, ticker: str) -> int:
         """Remove do histórico persistido todas as análises de um ticker (a lista

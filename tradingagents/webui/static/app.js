@@ -2452,10 +2452,28 @@ function currentHistoryTickers() {
     .filter(Boolean);
 }
 
+// Só os tickers cujo item está VISÍVEL na viewport (task 011): a lista de observação
+// só cresce e pode ter centenas de ativos — o poller de preço não pode puxar todos de
+// uma vez. Busca-se o preço só do que está na tela; ao rolar, os novos visíveis entram.
+function visibleHistoryTickers() {
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  const out = [];
+  document.querySelectorAll(".history li[data-ticker]").forEach((li) => {
+    const r = li.getBoundingClientRect();
+    if (r.bottom >= 0 && r.top <= vh) {   // intersecta a viewport (com folga natural)
+      const t = li.getAttribute("data-ticker");
+      if (t) out.push(t);
+    }
+  });
+  return out;
+}
+
 // Busca o preço live dos tickers visíveis e aplica NOS SPANS, sem repintar a lista
 // (evita a "dança"). Reusa o cache do servidor (~45s) — chamadas repetidas são baratas.
 async function refreshPrices(tickers) {
-  const src = tickers && tickers.length ? tickers : currentHistoryTickers();
+  // Sem lista explícita → só os VISÍVEIS (task 011): não martela a fonte com centenas
+  // de ativos fora da tela numa watchlist grande.
+  const src = tickers && tickers.length ? tickers : visibleHistoryTickers();
   const uniq = [...new Set(src.map((t) => (t || "").toUpperCase()).filter(Boolean))];
   if (!uniq.length || _priceFetching) return;
   _priceFetching = true;
@@ -2473,11 +2491,25 @@ async function refreshPrices(tickers) {
   finally { _priceFetching = false; }
 }
 
-// Só busca os tickers AINDA sem preço em cache (novos na lista) — não re-bate a
-// fonte a cada repintura de 5s; o poller periódico cuida de atualizar os existentes.
+// Só busca os tickers VISÍVEIS ainda sem preço em cache (novos na tela) — não re-bate a
+// fonte a cada repintura de 5s, nem puxa a watchlist inteira (task 011); o poller
+// periódico atualiza os visíveis já cacheados.
 function refreshNewPrices() {
-  const missing = currentHistoryTickers().filter((t) => !_priceCache.has((t || "").toUpperCase()));
+  const missing = visibleHistoryTickers().filter((t) => !_priceCache.has((t || "").toUpperCase()));
   if (missing.length) refreshPrices(missing);
+}
+
+// Ao ROLAR a lista de observação, carrega o preço dos ativos que acabaram de entrar na
+// tela (task 011). Debounce curto pra não disparar a cada pixel de scroll.
+let _histScrollTimer = null;
+function bindHistoryScrollPrices() {
+  const box = document.querySelector(".sidebar .history") || document.getElementById("history");
+  if (!box || box._priceScrollBound) return;
+  box._priceScrollBound = true;
+  box.addEventListener("scroll", () => {
+    clearTimeout(_histScrollTimer);
+    _histScrollTimer = setTimeout(refreshNewPrices, 150);
+  }, { passive: true });
 }
 
 function startPriceAutoRefresh() {
@@ -2565,7 +2597,10 @@ function paintHistory() {
   const item = (r, n) => {
     const running = r.status === "running";
     const v = (r.verdict || r.status || "").toString();
-    const badge = n > 1 ? `<span class="h-count" title="${n} análises">${n}</span>` : "";
+    // contagem de análises do ticker: vem do backend (watchlist varre o index inteiro,
+    // task 011); ``n`` (ocorrências na lista) é fallback pra payloads antigos.
+    const cnt = r.count || n;
+    const badge = cnt > 1 ? `<span class="h-count" title="${cnt} análises">${cnt}</span>` : "";
     // marcador de término em 2º plano (só em run já concluído, some ao abrir)
     const flag = !running && _finishedFlags.get(r.run_id);
     const flagHtml = flag
@@ -3566,6 +3601,7 @@ function init() {
   document.addEventListener("visibilitychange", onVisibleForeground);
   startHistoryAutoRefresh();
   startPriceAutoRefresh();
+  bindHistoryScrollPrices();   // preço lazy: carrega ao rolar a lista (task 011)
   initColResizer();
 }
 

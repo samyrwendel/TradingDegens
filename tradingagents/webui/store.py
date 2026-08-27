@@ -59,6 +59,46 @@ class HistoryStore:
                 break
         return out
 
+    def watchlist(self) -> list[dict[str, Any]]:
+        """Lista de observação: UM resumo por TICKER único já pesquisado — TODOS,
+        persistente, a lista **só cresce** (só o ``delete_ticker`` remove).
+
+        Ao contrário do ``recent(limit)`` (janela dos N runs mais recentes, onde um
+        ativo pesquisado há tempo SOME quando seus runs saem da janela), aqui o index
+        INTEIRO é varrido e devolve-se, por ticker, o run MAIS RECENTE dele + a
+        contagem de análises (``count``). Ordenado pela atividade mais recente (o
+        ticker pesquisado por último no topo). Linhas ilegíveis são ignoradas.
+        """
+        if not self.index_path.exists():
+            return []
+        with self._lock:
+            with open(self.index_path, "r", encoding="utf-8") as fh:
+                lines = fh.readlines()
+        latest: dict[str, dict[str, Any]] = {}
+        counts: dict[str, int] = {}
+        order: list[str] = []
+        for line in reversed(lines):          # mais novo primeiro
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = (rec.get("ticker") or "").strip().upper()
+            if not t:
+                continue
+            if t not in latest:               # 1ª ocorrência (varrendo do fim) = mais recente
+                latest[t] = rec
+                order.append(t)
+            counts[t] = counts.get(t, 0) + 1
+        out: list[dict[str, Any]] = []
+        for t in order:
+            rec = dict(latest[t])
+            rec["count"] = counts[t]
+            out.append(rec)
+        return out
+
     def delete_ticker(self, ticker: str) -> int:
         """Remove every run of ``ticker`` from the index and delete its JSON files.
 

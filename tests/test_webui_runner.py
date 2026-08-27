@@ -235,6 +235,32 @@ def test_stock_run_has_no_derivatives_report(tmp_path):
     assert snap["result"]["derivatives_report"] == ""
 
 
+def test_history_is_watchlist_that_only_grows(tmp_path):
+    # Lista de observação (task 011): history() mostra UM item por ticker já pesquisado,
+    # persistente e SÓ CRESCE — um ativo antigo (fora da janela dos 25 runs) continua
+    # na lista, com o veredito do run mais recente e a contagem de análises.
+    store = HistoryStore(tmp_path)
+
+    def rec(rid, tk, verdict):
+        return {"run_id": rid, "ticker": tk, "date": "2026-08-22", "asset_type": "stock",
+                "status": "done", "verdict": verdict, "cost_usd": 0.01, "elapsed": 1.0,
+                "finished_at": "2026-08-22T12:00:00", "result": {"verdict": verdict}}
+
+    store.save(rec("old", "OLD", "Buy"))            # o mais antigo
+    for i in range(30):
+        store.save(rec(f"r{i}", f"T{i}", "Hold"))
+    store.save(rec("old2", "OLD", "Sell"))          # 2ª análise do OLD (mais recente)
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=store, graph_factory=_factory())
+    hist = runner.history()
+    tickers = {r["ticker"] for r in hist}
+    assert "OLD" in tickers                          # não caiu por causa do limite
+    old = next(r for r in hist if r["ticker"] == "OLD")
+    assert old["run_id"] == "old2" and old["verdict"] == "Sell"   # o mais recente
+    assert old["count"] == 2                          # duas análises do OLD
+    assert len([r for r in hist if r["ticker"] == "OLD"]) == 1    # um item por ticker
+
+
 def test_runner_persists_to_history(tmp_path):
     store = HistoryStore(tmp_path)
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
