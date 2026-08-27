@@ -236,9 +236,22 @@ details.section.erick > summary { color: #9cc7f5; }
 .progress-label { color: var(--text); font-size: 14px; }
 .progress-meta { color: var(--muted); font-size: var(--fs-12); font-family: var(--mono); white-space: nowrap; }
 .progress-meta .dot { margin: 0 6px; }
-/* Controles PARAR/PAUSAR da run em andamento (task 026): à direita, discretos. */
-.progress-ctl { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
-.progress-ctl .btn-secondary, .progress-ctl .btn-ghost { padding: 4px 12px; font-size: var(--fs-12); }
+/* Controles PARAR/PAUSAR da run em andamento (task 026 / 008): o botão PARAR precisa
+   SALTAR AOS OLHOS durante a run — antes caía num secundário escuro (chrome default do
+   navegador: borda outset preta, sem raio) e o Samyr não o via. Agora tem estilo próprio
+   (raio, borda sólida, negrito) e o PARAR é vermelho (ação destrutiva + a mais importante
+   durante a run), preenchendo no hover. flex-wrap garante que nunca sejam CORTADOS numa
+   tela estreita (o html tem overflow-x:hidden — o que passa da borda some, não rola). */
+.progress-ctl { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 0 0 12px; }
+.progress-ctl .btn-secondary, .progress-ctl .btn-ghost {
+  padding: 6px 14px; font-size: var(--fs-12); font-weight: var(--fw-bold);
+  border-radius: var(--radius); border: 1px solid var(--border); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; line-height: 1; white-space: nowrap;
+}
+.progress-ctl .btn-secondary:disabled, .progress-ctl .btn-ghost:disabled { opacity: .55; cursor: not-allowed; }
+/* PARAR = ação destrutiva e a mais importante durante a run: vermelho, sempre visível. */
+#stopRunBtn.btn-secondary { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+#stopRunBtn.btn-secondary:hover:not(:disabled) { background: var(--red); color: #fff; border-color: var(--red); }
 /* Barra de RETOMAR (task 026): aparece quando há uma análise pausada resumível. */
 .resume-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 16px; background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--radius); }
