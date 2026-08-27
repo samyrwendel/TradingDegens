@@ -28,6 +28,21 @@ def create_llm_client(
     """
     provider_lower = provider.lower()
 
+    # Assinatura Claude via CLI OAuth (task 20260826-030): custo por token = $0.
+    # Fala a API Anthropic normal, mas roteia por um PROXY LOCAL que injeta o Bearer
+    # da assinatura (o token OAuth do CLI vive só no proxy, nunca aqui). Por isso a
+    # ``base_url`` é FORÇADA pro proxy (ignora qualquer base_url do cliente) e a
+    # ``api_key`` é dummy — a auth real é do proxy. Owner-gated no runner (a
+    # assinatura é do dono; público nunca cai aqui). Reusa o AnthropicClient, então
+    # streaming/custo/effort/temperature valem igual.
+    if provider_lower in ("claude-cli", "claude_cli", "claude-subscription"):
+        from .anthropic_client import AnthropicClient
+        from .claude_cli_proxy import proxy_base_url
+        kwargs.pop("api_key", None)
+        return AnthropicClient(
+            model, base_url=proxy_base_url(), api_key="claude-cli-oauth", **kwargs
+        )
+
     # Native (non-OpenAI) APIs are matched first so their string check doesn't
     # import the OpenAI client. Everything else is OpenAI-compatible and routes
     # through the provider registry (single source of truth).

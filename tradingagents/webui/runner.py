@@ -88,6 +88,27 @@ _MAX_QUESTION_CHARS = 500
 _MODEL_TEST_PROMPT = "Responda apenas: ok"
 _MODEL_TEST_SAMPLE_CHARS = 120
 
+# Provedores que usam a credencial/assinatura do DONO (não uma chave BYOK do usuário):
+# ``claude-cli`` roda pela assinatura Claude via proxy local ($0/token). São OWNER-ONLY
+# — nem um BYOK falso destrava; só o dono logado (o servidor marca allow_server_key).
+# Defesa em profundidade: mesmo que a UI mostre, o servidor barra aqui.
+_OWNER_ONLY_PROVIDERS = frozenset({"claude-cli", "claude_cli", "claude-subscription"})
+_OWNER_ONLY_MESSAGE = "Este provedor usa a assinatura do dono — entre como dono pra usá-lo."
+_OWNER_ONLY_CODE = "owner_only"
+
+
+def _owner_only_blocked(config: dict, overrides: dict) -> bool:
+    """True quando um provedor owner-only é pedido sem autorização de dono.
+
+    ``allow_server_key`` é ``True`` só pro dono logado (o servidor marca por
+    requisição). Independe de haver ``llm_api_key`` (BYOK falso não destrava)."""
+    provider = (config.get("llm_provider") or "").lower()
+    return (
+        provider in _OWNER_ONLY_PROVIDERS
+        and (overrides or {}).get("allow_server_key") is not True
+    )
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -749,6 +770,16 @@ class AnalysisRunner:
         config["checkpoint_enabled"] = bool(
             self.checkpoint_enabled and config.get("data_cache_dir")
         )
+        # Provedor owner-only (assinatura do dono, ex.: claude-cli): só roda pro dono
+        # logado — nem BYOK falso destrava. Barra ANTES da chave (a assinatura é do
+        # dono; público jamais roteia a análise dele pela cota do dono).
+        if _owner_only_blocked(config, run.overrides):
+            run.error = _OWNER_ONLY_MESSAGE
+            run.error_code = _OWNER_ONLY_CODE
+            run.result = None
+            run.finished_at = time.time()
+            run.finished_stamp = timeutil.stamp()
+            return "error"
         # Gating da chave do servidor (defesa em profundidade — o server já recusa
         # antes de criar a run): requisição PÚBLICA (allow_server_key=False, que o
         # server marca explicitamente pra quem não é dono) sem chave própria NÃO roda
@@ -1407,9 +1438,17 @@ class AnalysisRunner:
         if record is None:
             return None
 
+        # Provedor owner-only (assinatura do dono, ex.: claude-cli): idem análise —
+        # a pergunta ancorada só roda pro dono logado.
+        _ask_cfg = apply_llm_overrides(self.base_config, overrides)
+        if _owner_only_blocked(_ask_cfg, overrides or {}):
+            return {
+                "run_id": record.get("run_id") or run_id, "question": question,
+                "error": _OWNER_ONLY_MESSAGE, "error_code": _OWNER_ONLY_CODE,
+            }
         # Gating da chave do servidor (idem análise): requisição pública explícita
         # sem chave própria não roda a pergunta — nunca usa a env.
-        if (not apply_llm_overrides(self.base_config, overrides).get("llm_api_key")
+        if (not _ask_cfg.get("llm_api_key")
                 and (overrides or {}).get("allow_server_key") is False):
             return {
                 "run_id": record.get("run_id") or run_id, "question": question,
@@ -1750,18 +1789,25 @@ class AnalysisRunner:
             "llm": self._llm_config_info(),
         }
 
-    # Provedores oferecidos na UI de config (BYOK). ``needs_base_url`` marca os que
-    # exigem endpoint (Ollama/self-host); ``key_optional`` os que rodam sem chave
-    # (Ollama local). Os defaults de modelo saem do catálogo (_provider_default_models).
+    # Provedores oferecidos na UI de config (BYOK). Campos:
+    # ``(id, label, needs_base_url, key_optional, owner_only)``.
+    # ``needs_base_url`` marca os que exigem endpoint (Ollama/self-host);
+    # ``key_optional`` os que rodam sem chave (Ollama local, assinatura);
+    # ``owner_only`` os que usam credencial do SERVIDOR/assinatura — só o dono logado
+    # (o front esconde do público; o servidor barra em profundidade).
+    # Os defaults de modelo saem do catálogo (_provider_default_models).
     _BYOK_PROVIDERS = (
-        ("openai", "OpenAI", False, False),
-        ("anthropic", "Anthropic (Claude)", False, False),
-        ("openrouter", "OpenRouter", False, False),
-        ("ollama", "Ollama / Llama (local)", True, True),
-        ("google", "Google (Gemini)", False, False),
-        ("deepseek", "DeepSeek", False, False),
-        ("xai", "xAI (Grok)", False, False),
-        ("openai_compatible", "OpenAI-compatível (self-host)", True, True),
+        ("openai", "OpenAI", False, False, False),
+        ("anthropic", "Anthropic (Claude)", False, False, False),
+        # Assinatura Claude via CLI OAuth (task 20260826-030): custo/token = $0, sem
+        # chave — a auth é server-side (proxy). Só o dono (usa a assinatura dele).
+        ("claude-cli", "Claude assinatura (via CLI · $0/token · dono)", False, True, True),
+        ("openrouter", "OpenRouter", False, False, False),
+        ("ollama", "Ollama / Llama (local)", True, True, False),
+        ("google", "Google (Gemini)", False, False, False),
+        ("deepseek", "DeepSeek", False, False, False),
+        ("xai", "xAI (Grok)", False, False, False),
+        ("openai_compatible", "OpenAI-compatível (self-host)", True, True, False),
     )
 
     def _llm_config_info(self) -> dict[str, Any]:
@@ -1770,7 +1816,7 @@ class AnalysisRunner:
         cfg = self.base_config
         default_provider = (cfg.get("llm_provider") or "openai").lower()
         providers = []
-        for pid, label, needs_base_url, key_optional in self._BYOK_PROVIDERS:
+        for pid, label, needs_base_url, key_optional, owner_only in self._BYOK_PROVIDERS:
             deep, quick = _provider_default_models(pid)
             key_env = get_api_key_env(pid)
             providers.append({
@@ -1778,10 +1824,13 @@ class AnalysisRunner:
                 "label": label,
                 "needs_base_url": needs_base_url,
                 "key_optional": key_optional,
+                # Provedor de assinatura/servidor: o front só mostra pro dono logado.
+                "owner_only": owner_only,
                 "default_deep": deep,
                 "default_quick": quick,
                 # Presença (não o valor) da env de fallback no servidor: deixa o
                 # front dizer "sem chave → usa a do servidor" só quando é verdade.
+                # claude-cli não usa env de key (auth server-side via proxy).
                 "server_key": bool(key_env and os.environ.get(key_env)),
             })
         return {

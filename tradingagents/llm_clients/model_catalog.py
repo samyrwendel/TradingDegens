@@ -78,6 +78,24 @@ _MINIMAX_MODELS: dict[str, list[ModelOption]] = {
 }
 
 
+# Assinatura Claude via CLI OAuth (claude-cli, task 20260826-030): custo/token = $0.
+# Mesmos IDs (aliases) da API Anthropic — resolvem via o proxy da assinatura. O
+# default rápido é o Haiku (mais leve na cota, que é compartilhada com o mainbot);
+# a lista é própria pra não mexer nos defaults do provider ``anthropic`` (pago).
+_CLAUDE_CLI_MODELS: dict[str, list[ModelOption]] = {
+    "quick": [
+        ("Claude Haiku 4.5 - Fastest with near-frontier intelligence", "claude-haiku-4-5"),
+        ("Claude Sonnet 5 - Best speed and intelligence balance", "claude-sonnet-5"),
+    ],
+    "deep": [
+        ("Claude Sonnet 5 - Near-frontier intelligence at Sonnet cost", "claude-sonnet-5"),
+        ("Claude Opus 4.8 - Frontier agentic coding and reasoning", "claude-opus-4-8"),
+        ("Claude Fable 5 - Most capable, long-running agents", "claude-fable-5"),
+        ("Claude Opus 4.7 - Previous frontier, long-running agents", "claude-opus-4-7"),
+    ],
+}
+
+
 MODEL_OPTIONS: ProviderModeOptions = {
     "openai": {
         "quick": [
@@ -104,6 +122,8 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Claude Opus 4.7 - Previous frontier, long-running agents", "claude-opus-4-7"),
         ],
     },
+    # Assinatura Claude via CLI OAuth (task 20260826-030): custo por token = $0.
+    "claude-cli": _CLAUDE_CLI_MODELS,
     "google": {
         "quick": [
             ("Gemini 3.5 Flash - Latest, frontier agentic + coding (GA)", "gemini-3.5-flash"),

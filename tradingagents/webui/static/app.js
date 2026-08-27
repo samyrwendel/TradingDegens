@@ -2628,8 +2628,12 @@ function _providerMeta(id) {
 function renderConfigPanel() {
   const sel = $("cfgProvider");
   if (!sel || !_llmMeta) return;
-  const list = _llmMeta.providers || [];
-  const cur = _llmCfg.provider || _llmMeta.default_provider || "openai";
+  // Provedores owner-only (assinatura do dono, ex.: claude-cli · $0/token) só
+  // aparecem pro dono logado — o público nem os vê (o server barra em profundidade).
+  const list = (_llmMeta.providers || []).filter((p) => _isOwner || !p.owner_only);
+  let cur = _llmCfg.provider || _llmMeta.default_provider || "openai";
+  // provedor salvo é owner-only mas a sessão não é dona: cai no default visível
+  if (!list.some((p) => p.id === cur)) cur = _llmMeta.default_provider || "openai";
   sel.innerHTML = list.map((p) =>
     `<option value="${escapeHtml(p.id)}"${p.id === cur ? " selected" : ""}>${escapeHtml(p.label)}</option>`
   ).join("");

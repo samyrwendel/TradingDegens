@@ -1,0 +1,22 @@
+[Unit]
+# Proxy local da assinatura Claude (CLI OAuth) → API Anthropic, custo/token = $0
+# (TradingDegens task 20260826-030). Injeta o Bearer da assinatura + beta OAuth; o
+# token OAuth vive só aqui (lido de ~/.claude/.credentials.json em modo leitura, sem
+# renovar — o auto-renew-claude.service cuida do refresh). Só escuta em 127.0.0.1.
+# Instalar: copiar pra ~/.config/systemd/user/ e `systemctl --user enable --now claude-cli-proxy`.
+Description=Claude CLI subscription proxy — assinatura ($0/token) → Anthropic (task 20260826-030)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/clawd/tradingagents
+Environment=HOME=/home/clawd
+Environment=CLAUDE_CLI_PROXY_HOST=127.0.0.1
+Environment=CLAUDE_CLI_PROXY_PORT=8791
+ExecStart=/home/clawd/tradingagents/.venv/bin/python -m tradingagents.llm_clients.claude_cli_proxy
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

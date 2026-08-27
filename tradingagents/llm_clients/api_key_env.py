@@ -14,6 +14,9 @@ from __future__ import annotations
 PROVIDER_API_KEY_ENV: dict[str, str | None] = {
     "openai":     "OPENAI_API_KEY",
     "anthropic":  "ANTHROPIC_API_KEY",
+    # Assinatura Claude via CLI OAuth: NÃO usa API key paga — a auth é o token OAuth
+    # da assinatura, injetado server-side pelo proxy local. Sem env de key.
+    "claude-cli": None,
     "google":     "GOOGLE_API_KEY",
     "azure":      "AZURE_OPENAI_API_KEY",
     # Bedrock authenticates via the AWS credential chain, not a single key env.
