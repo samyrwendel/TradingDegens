@@ -47,6 +47,10 @@ _ANNOUNCE_LAG_DAYS = 55
 # Janela (dias) pós-fim-de-trimestre onde procuramos a data real de anúncio no
 # /calendar/earnings — um balanço sai dentro deste intervalo depois do período.
 _ANNOUNCE_WINDOW_DAYS = 100
+# Retrolook (dias) do /calendar/earnings ANCORADO em curr_date (não no fim de trimestre
+# fiscal): pega o balanço mais recente já público em curr_date. > cadência trimestral
+# (~91d) com folga, pra nunca perder o último report por 1 dia.
+_ANNOUNCE_LOOKBACK_DAYS = 120
 # "Bateu recente" para a leitura de liquidação: dentro de ~14 dias corridos da
 # divulgação (≈10 pregões) o resultado ainda é o catalisador ativo da queda.
 _RECENT_DAYS = 14
@@ -126,6 +130,71 @@ def _fetch_announce_date(symbol: str, period_end: date) -> date | None:
     return best
 
 
+def _fetch_recent_announcement(symbol: str, base: date) -> dict | None:
+    """Balanço mais recente JÁ público em ``base``, do ``/calendar/earnings``.
+
+    ANCORADO NA DATA REAL DE DIVULGAÇÃO (janela ``[base - _ANNOUNCE_LOOKBACK_DAYS, base]``),
+    NÃO no fim do trimestre fiscal — que engana em ano fiscal DESLOCADO. Ex.: a NVDA
+    rotula o Q2 já reportado (ago/2026) como ``period='2027-06-30'`` (~1 ano à frente);
+    filtrar por ``period_end <= curr_date`` rejeita o report certo e cai no de um ano
+    atrás. Aqui a seleção é pela DATA de divulgação: só linhas com ``epsActual``
+    (=reportado, o Finnhub só preenche em trimestre divulgado) e ``date <= base``
+    (anti-look-ahead REAL) contam; devolve a MAIS RECENTE, com EPS **e RECEITA**
+    (reportado × estimado). ``None`` quando o plano grátis não cobre a janela (backtest
+    histórico) → o chamador cai na história de surpresas com a guarda por folga."""
+    start = base - timedelta(days=_ANNOUNCE_LOOKBACK_DAYS)
+    try:
+        data = _finnhub_get(
+            "calendar/earnings",
+            {"from": start.isoformat(), "to": base.isoformat(), "symbol": symbol.upper()},
+        )
+    except Exception as exc:  # noqa: BLE001 — calendário é opcional; degrada p/ None
+        logger.info("finnhub calendar unavailable for %s: %s", symbol, exc)
+        return None
+    rows = (data or {}).get("earningsCalendar") if isinstance(data, dict) else None
+    best: dict | None = None
+    best_d: date | None = None
+    for row in rows or []:
+        if not isinstance(row, dict) or row.get("epsActual") is None:
+            continue
+        d = _to_date(row.get("date"))
+        if d is None or d > base:          # divulgação depois de base = futuro → não vaza
+            continue
+        if best_d is None or d > best_d:
+            best, best_d = row, d
+    if best is None:
+        return None
+    return {
+        "date": best_d,
+        "eps_actual": best.get("epsActual"),
+        "eps_estimate": best.get("epsEstimate"),
+        "revenue_actual": best.get("revenueActual"),
+        "revenue_estimate": best.get("revenueEstimate"),
+        "quarter": best.get("quarter"),
+        "year": best.get("year"),
+    }
+
+
+def _match_history_row(rows: list[dict], quarter, year, eps_actual) -> dict | None:
+    """Linha da história de surpresas do MESMO trimestre do anúncio — pra herdar o
+    ``period`` fiscal e o ``surprise``/``surprisePercent`` oficiais. Casa por
+    (quarter, year); se faltar, por EPS reportado. ``None`` se nada casa."""
+    for r in rows:
+        if (quarter is not None and year is not None
+                and r.get("quarter") == quarter and r.get("year") == year):
+            return r
+    if eps_actual is not None:
+        for r in rows:
+            a = r.get("actual")
+            if a is not None:
+                try:
+                    if abs(float(a) - float(eps_actual)) < 1e-6:
+                        return r
+                except (TypeError, ValueError):
+                    continue
+    return None
+
+
 def _pct(actual: float, estimate: float) -> float | None:
     if estimate in (None, 0):
         return None
@@ -163,7 +232,19 @@ def get_reported_earnings(symbol: str, curr_date: str) -> dict | None:
         cache.set_neg(_CATEGORY, k, value=None, error={"type": type(exc).__name__, "msg": str(exc)})
         return None
 
-    result = _select_reported(symbol, rows, base, is_live)
+    # PRIMÁRIO: balanço mais recente pela DATA REAL de divulgação (calendário ancorado
+    # em base) — corrige ano fiscal deslocado (NVDA) e traz a RECEITA. Só cobre near-term
+    # no plano grátis; num backtest histórico volta None e caímos na história de surpresas.
+    ann = None
+    try:
+        ann = _fetch_recent_announcement(symbol, base)
+    except Exception as exc:  # noqa: BLE001 — anúncio é opcional; degrada p/ fallback
+        logger.info("finnhub announcement lookup failed for %s: %s", symbol, exc)
+    result = _build_from_announcement(symbol, ann, rows, base) if ann is not None else None
+    # FALLBACK: sem anúncio no calendário → trimestre reportado mais recente da história
+    # de surpresas, com a guarda por folga (anti-look-ahead do backtest de fiscal normal).
+    if result is None:
+        result = _select_reported(symbol, rows, base, is_live)
     if result is None:
         cache.set_neg(_CATEGORY, k, value=None)
         return None
@@ -171,6 +252,54 @@ def get_reported_earnings(symbol: str, curr_date: str) -> dict | None:
     permanent = base < datetime.now().date()
     cache.set_ok(_CATEGORY, k, result, permanent)
     return result
+
+
+def _build_from_announcement(
+    symbol: str, ann: dict | None, rows: list[dict], base: date
+) -> dict | None:
+    """Monta o resultado a partir do anúncio REAL do calendário (data + EPS + receita),
+    herdando ``period``/``surprise`` da história de surpresas do mesmo trimestre. A
+    recência (``days_since``/``recent``) sai da DATA DE DIVULGAÇÃO — nunca do fim de
+    trimestre fiscal (que engana em ano fiscal deslocado). ``None`` se o anúncio não
+    tem EPS/data utilizáveis."""
+    if not ann:
+        return None
+    actual = ann.get("eps_actual")
+    announce = ann.get("date")
+    if actual is None or announce is None:
+        return None
+    estimate = ann.get("eps_estimate")
+    days_since = (base - announce).days
+    match = _match_history_row(rows, ann.get("quarter"), ann.get("year"), actual)
+    period = _to_date((match or {}).get("period")) if match else None
+    surprise = (match or {}).get("surprise") if match else None
+    surprise_pct = (match or {}).get("surprisePercent") if match else None
+    if surprise_pct is None and estimate is not None:
+        surprise_pct = _pct(float(actual), float(estimate))
+    rev_a = ann.get("revenue_actual")
+    rev_e = ann.get("revenue_estimate")
+    rev_pct = (_pct(float(rev_a), float(rev_e))
+               if rev_a is not None and rev_e is not None else None)
+    beat = surprise_pct is not None and surprise_pct > 0
+    return {
+        "symbol": symbol.upper(),
+        "period": period.isoformat() if period else None,
+        "announce_date": announce.isoformat(),
+        "eps_actual": float(actual),
+        "eps_estimate": float(estimate) if estimate is not None else None,
+        "surprise": float(surprise) if surprise is not None else None,
+        "surprise_pct": float(surprise_pct) if surprise_pct is not None else None,
+        "beat": bool(beat),
+        "recent": 0 <= days_since <= _RECENT_DAYS,
+        "days_since": days_since,
+        "quarter": ann.get("quarter"),
+        "year": ann.get("year"),
+        # RECEITA (task 010): TradingView/Samyr olham receita, não só EPS. None quando
+        # o calendário não trouxe (algumas linhas vêm sem revenue).
+        "revenue_actual": float(rev_a) if rev_a is not None else None,
+        "revenue_estimate": float(rev_e) if rev_e is not None else None,
+        "revenue_surprise_pct": float(rev_pct) if rev_pct is not None else None,
+    }
 
 
 def _select_reported(
@@ -218,6 +347,11 @@ def _select_reported(
             "days_since": days_since,
             "quarter": row.get("quarter"),
             "year": row.get("year"),
+            # Receita não vem no /stock/earnings (só o calendário a traz, task 010):
+            # no fallback fica ausente — schema consistente com o caminho primário.
+            "revenue_actual": None,
+            "revenue_estimate": None,
+            "revenue_surprise_pct": None,
         }
     return None
 
@@ -231,8 +365,23 @@ def _fmt_pct(v: float | None) -> str:
     return "n/d" if v is None else f"{v:+.1f}%".replace(".", ",")
 
 
+def _fmt_big(v: float | None) -> str:
+    """Valor grande (receita) em B/M pt-BR. 96_221_000_000 → '96,22 B'."""
+    if v is None:
+        return "n/d"
+    a = abs(v)
+    if a >= 1e9:
+        return f"{v / 1e9:.2f} B".replace(".", ",")
+    if a >= 1e6:
+        return f"{v / 1e6:.2f} M".replace(".", ",")
+    return f"{v:,.0f}"
+
+
 def format_reported_line(ev: dict) -> str:
-    """Linha markdown pt-BR do resultado reportado (data|período + est×rep + surpresa)."""
+    """Linha markdown pt-BR do resultado reportado (data|período + est×rep + surpresa).
+
+    Quando o calendário trouxe a RECEITA (task 010), acrescenta reportada × estimada →
+    surpresa — o TradingView/Samyr olham receita, não só EPS."""
     emoji = "✅" if ev.get("beat") else "❌"
     verb = "bateu" if ev.get("beat") else "ficou abaixo"
     when = (
@@ -243,8 +392,16 @@ def format_reported_line(ev: dict) -> str:
     q = ev.get("quarter")
     y = ev.get("year")
     qlabel = f" (Q{q} {y})" if q and y else ""
-    return (
+    line = (
         f"{emoji} último resultado ({when}{qlabel}): reportado "
         f"{_fmt_num(ev.get('eps_actual'))} × estimado {_fmt_num(ev.get('eps_estimate'))} "
         f"→ surpresa {_fmt_pct(ev.get('surprise_pct'))} — {verb} o consenso"
     )
+    if ev.get("revenue_actual") is not None:
+        rev = f" · receita {_fmt_big(ev.get('revenue_actual'))}"
+        if ev.get("revenue_estimate") is not None:
+            rev += f" × est. {_fmt_big(ev.get('revenue_estimate'))}"
+        if ev.get("revenue_surprise_pct") is not None:
+            rev += f" → {_fmt_pct(ev.get('revenue_surprise_pct'))}"
+        line += rev
+    return line

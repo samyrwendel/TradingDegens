@@ -30,8 +30,10 @@ def has_key(monkeypatch):
 
 @pytest.fixture()
 def no_calendar(monkeypatch):
-    # Calendário grátis não cobre histórico → sem data de anúncio real.
+    # Calendário grátis não cobre histórico → sem data de anúncio real (nem ancorado no
+    # fim de trimestre, nem ancorado em curr_date) → cai na história de surpresas + folga.
     monkeypatch.setattr(fe, "_fetch_announce_date", lambda symbol, period_end: None)
+    monkeypatch.setattr(fe, "_fetch_recent_announcement", lambda symbol, base: None)
 
 
 @pytest.fixture()
@@ -77,6 +79,9 @@ def test_real_announce_date_becomes_exact_guard(has_key, stub_history, monkeypat
         return None
 
     monkeypatch.setattr(fe, "_fetch_announce_date", announce)
+    # Calendário ancorado em curr_date não cobre (backtest) → exercita o fallback + a
+    # guarda exata por _fetch_announce_date (por período).
+    monkeypatch.setattr(fe, "_fetch_recent_announcement", lambda symbol, base: None)
     # No dia do anúncio: aparece, com data exata e days_since 0 (recent).
     with base_date("2026-08-26"):
         ev = fe.get_reported_earnings("NVDA", "2026-08-26")
@@ -95,6 +100,92 @@ def test_miss_is_flagged(has_key, no_calendar, monkeypatch):
     ev = fe.get_reported_earnings("NVDA", "2026-08-26")
     assert ev["beat"] is False
     assert ev["surprise_pct"] == pytest.approx(-10.0)
+
+
+# Ano fiscal DESLOCADO (NVDA): o Finnhub rotula o Q2 já reportado com period ~1 ano à
+# frente ('2027-06-30'); o Q1 anterior fica '2026-06-30'. O calendário traz a data real.
+_HISTORY_SHIFTED = [
+    {"period": "2027-06-30", "actual": 2.22, "estimate": 2.1384, "surprise": 0.0816,
+     "surprisePercent": 3.8159, "quarter": 2, "year": 2027},
+    {"period": "2026-06-30", "actual": 1.87, "estimate": 1.7922, "surprise": 0.0778,
+     "surprisePercent": 4.341, "quarter": 1, "year": 2027},
+]
+
+
+@pytest.mark.unit
+def test_shifted_fiscal_uses_real_announce_not_period_end(has_key, monkeypatch):
+    """NVDA — ano fiscal DESLOCADO: o report certo (EPS 2,22, divulgado 26/ago) tem
+    period fiscal '2027-06-30' (à frente). A seleção pela DATA REAL de divulgação o
+    escolhe — days_since/recent pela divulgação, não pelo fim de trimestre — e expõe a
+    receita, em vez de cair no de um ano atrás (1,87)."""
+    from datetime import date
+
+    monkeypatch.setattr(fe, "_fetch_surprise_history",
+                        lambda symbol: [dict(r) for r in _HISTORY_SHIFTED])
+    monkeypatch.setattr(fe, "_fetch_recent_announcement", lambda symbol, base: {
+        "date": date(2026, 8, 26), "eps_actual": 2.22, "eps_estimate": 2.1384,
+        "revenue_actual": 96_221_000_000, "revenue_estimate": 94_008_645_045,
+        "quarter": 2, "year": 2027,
+    })
+    with base_date("2026-08-27"):
+        ev = fe.get_reported_earnings("NVDA", "2026-08-27")
+    assert ev["eps_actual"] == pytest.approx(2.22)   # o report certo, não 1,87
+    assert ev["announce_date"] == "2026-08-26"
+    assert ev["days_since"] == 1 and ev["recent"] is True
+    assert ev["period"] == "2027-06-30" and ev["quarter"] == 2 and ev["year"] == 2027
+    assert ev["beat"] is True
+    assert ev["revenue_actual"] == pytest.approx(96_221_000_000)
+    assert ev["revenue_surprise_pct"] == pytest.approx(2.353, abs=0.02)
+    line = fe.format_reported_line(ev)
+    assert "2,22" in line and "96,22 B" in line and "receita" in line
+
+
+@pytest.mark.unit
+def test_normal_fiscal_calendar_exposes_revenue(has_key, monkeypatch):
+    """Fiscal normal (MSFT): o calendário traz a data real + receita reportada × estimada;
+    days_since 29 (não recente pelos 14d, mas bateu)."""
+    from datetime import date
+
+    hist = [{"period": "2026-06-30", "actual": 4.74, "estimate": 4.3274,
+             "surprise": 0.41, "surprisePercent": 9.53, "quarter": 4, "year": 2026}]
+    monkeypatch.setattr(fe, "_fetch_surprise_history", lambda symbol: [dict(r) for r in hist])
+    monkeypatch.setattr(fe, "_fetch_recent_announcement", lambda symbol, base: {
+        "date": date(2026, 7, 29), "eps_actual": 4.74, "eps_estimate": 4.3274,
+        "revenue_actual": 90_007_000_000, "revenue_estimate": 89_373_722_644,
+        "quarter": 4, "year": 2026,
+    })
+    with base_date("2026-08-27"):
+        ev = fe.get_reported_earnings("MSFT", "2026-08-27")
+    assert ev["announce_date"] == "2026-07-29" and ev["days_since"] == 29
+    assert ev["recent"] is False and ev["beat"] is True
+    assert ev["revenue_actual"] == pytest.approx(90_007_000_000)
+    assert ev["revenue_estimate"] == pytest.approx(89_373_722_644)
+    assert ev["revenue_surprise_pct"] is not None
+
+
+@pytest.mark.unit
+def test_recent_announcement_excludes_future_and_picks_latest(monkeypatch):
+    """``_fetch_recent_announcement``: só linhas com ``epsActual`` e ``date <= base``;
+    devolve a MAIS RECENTE. Anti-look-ahead REAL — divulgação depois de base não entra."""
+    from datetime import date
+
+    calendar = {"earningsCalendar": [
+        {"symbol": "NVDA", "date": "2026-08-26", "epsActual": 2.22, "epsEstimate": 2.1384,
+         "revenueActual": 96_221_000_000, "revenueEstimate": 94_008_645_045,
+         "quarter": 2, "year": 2027},
+        {"symbol": "NVDA", "date": "2026-05-27", "epsActual": 1.87, "epsEstimate": 1.7922,
+         "revenueActual": 80_000_000_000, "revenueEstimate": 79_000_000_000,
+         "quarter": 1, "year": 2027},
+        {"symbol": "NVDA", "date": "2026-11-19", "epsActual": None, "epsEstimate": 2.5,
+         "quarter": 3, "year": 2027},   # futuro, sem actual → ignorado
+    ]}
+    monkeypatch.setattr(fe, "_finnhub_get", lambda path, params: calendar)
+    ann = fe._fetch_recent_announcement("NVDA", date(2026, 8, 27))
+    assert ann["date"] == date(2026, 8, 26) and ann["eps_actual"] == pytest.approx(2.22)
+    assert ann["revenue_actual"] == 96_221_000_000
+    # base ANTES do report de agosto: pega o de maio, NÃO vaza o de agosto
+    ann2 = fe._fetch_recent_announcement("NVDA", date(2026, 6, 1))
+    assert ann2["date"] == date(2026, 5, 27) and ann2["eps_actual"] == pytest.approx(1.87)
 
 
 @pytest.mark.unit
