@@ -1275,6 +1275,10 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   border-radius: var(--radius); padding: 16px 18px; margin: 12px 0;
 }
 .error-card.no_credit { background: var(--yellow-dim); border-color: var(--yellow-border); }
+/* Erro PARCIAL (task 015): âmbar, não vermelho — o trabalho foi PRESERVADO, é uma
+   pausa forçada numa etapa, não uma falha total. As etapas concluídas vêm abaixo. */
+.error-card.partial { background: var(--yellow-dim); border-color: var(--yellow-border); }
+.error-card.partial .err-title { color: var(--yellow, #e6b800); }
 .error-card .err-title {
   font-size: var(--fs-14); font-weight: var(--fw-bold); color: var(--text); margin-bottom: 6px;
 }

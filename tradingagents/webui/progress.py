@@ -124,6 +124,19 @@ class ProgressTracker:
             self._phase = "Interrompida"
             self._label = "Interrompida pelo usuário"
 
+    def mark_failed(self) -> None:
+        """Erro no meio (task 015): congela o progresso NA etapa que estava rodando —
+        não zera nem conclui. As etapas já alcançadas seguem em ``reached`` pro
+        stepper, e ``current_label`` diz qual falhou (vai pro result parcial)."""
+        with self._lock:
+            self._phase = "Erro"
+
+    def current_label(self) -> str:
+        """Rótulo da etapa em curso (a que estava rodando) — usado pra marcar qual
+        etapa falhou no result parcial (task 015)."""
+        with self._lock:
+            return self._label
+
     def snapshot(self) -> dict[str, Any]:
         """JSON-serialisable progress view for the status endpoint."""
         with self._lock:

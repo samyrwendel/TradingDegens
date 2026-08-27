@@ -283,6 +283,68 @@ def test_runner_error_path_is_captured(tmp_path):
     snap = _wait(runner, run_id)
     assert snap["status"] == "error"
     assert "boom" in snap["error"]
+    # Nada concluído (o fake não produziu texto de etapa) → sem parcial, result None:
+    # erro honesto de "tela vazia" só quando realmente não há o que preservar.
+    assert snap["result"] is None
+
+
+class _FakeGraphPartial:
+    """Fake que PRODUZ o texto de algumas etapas (raciocínio-ao-vivo) e então ERRA no
+    meio — pra provar que o erro preserva as concluídas (task 015)."""
+
+    def __init__(self, callbacks, texts, raise_exc):
+        self.callbacks = callbacks
+        self.texts = texts
+        self.raise_exc = raise_exc
+
+    def propagate(self, ticker, date, asset_type="stock", timeframe="1d"):
+        from tradingagents.webui.progress import (
+            ProgressCallbackHandler, ThinkingCallbackHandler,
+        )
+        import uuid as _uuid
+        for cb in self.callbacks:
+            if isinstance(cb, ProgressCallbackHandler):
+                # avança o stepper até o nó que vai falhar (Research Manager / juiz)
+                for node in ("Market Analyst", "Bull Researcher", "Research Manager"):
+                    cb.on_chat_model_start({}, [], run_id=_uuid.uuid4(),
+                                           metadata={"langgraph_node": node})
+            if isinstance(cb, ThinkingCallbackHandler):
+                for node, text in self.texts.items():
+                    cb.tracker.set_by_node(node, text)
+        raise self.raise_exc
+
+
+def test_error_midway_preserves_completed_steps_as_partial(tmp_path):
+    """Task 015: um erro no meio NÃO zera a análise — o result parcial traz as etapas
+    concluídas (analistas + debate) e marca a etapa que falhou, em vez de result None."""
+    texts = {
+        "Market Analyst": "Leitura técnica: tendência de alta no diário, acima da MMS200.",
+        "Bull Researcher": "Tese de alta: momentum forte e volume crescente.",
+        "Bear Researcher": "Tese de baixa: valuation esticado após a corrida.",
+    }
+
+    def factory(config, selected_analysts, callbacks):
+        return _FakeGraphPartial(callbacks, texts, RuntimeError("429 rate limit no juiz"))
+
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=factory)
+    run_id = runner.start("AAPL", "2026-08-22")
+    snap = _wait(runner, run_id)
+    assert snap["status"] == "error"
+    r = snap["result"]
+    assert r is not None, "erro no meio deve preservar um result PARCIAL, não None"
+    assert r.get("partial") is True
+    # as etapas concluídas estão preservadas
+    assert "tendência de alta" in r["market_report"]
+    assert "momentum forte" in r["bull"]
+    assert "valuation esticado" in r["bear"]
+    # marca a etapa que falhou e para nela (não zera)
+    assert r.get("failed_step") and r["failed_step"].get("label")
+    # o parcial vai pro histórico (não é 'done', verdict None) mas com o result preservado
+    rec = HistoryStore(tmp_path).get(run_id) if False else runner.store.get(run_id)
+    assert rec["status"] == "error"
+    assert (rec.get("result") or {}).get("partial") is True
+    assert "tendência de alta" in rec["result"]["market_report"]
 
 
 def test_runner_empty_ticker_rejected(tmp_path):

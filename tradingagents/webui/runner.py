@@ -1041,7 +1041,19 @@ class AnalysisRunner:
             provider = (config.get("llm_provider") or "").lower() if isinstance(config, dict) else ""
             run.error = _clean_error(exc, provider, secret)
             run.error_code = _error_code(exc, provider, secret)
-            run.result = None  # sem trace na UI (o técnico fica no log do servidor)
+            # PRESERVAR o trabalho já feito (task 015): um erro no meio NÃO zera a
+            # análise. Monta um result PARCIAL com as etapas concluídas (analistas +
+            # debate, o que o raciocínio-ao-vivo já capturou em memória — vale owner E
+            # BYOK) e marca a etapa que falhou. Vazio (nada concluído) → None honesto.
+            # A run PARA aqui; o dono CONTINUA do ponto via escalar (027)/retomar (022),
+            # que reaproveitam o checkpoint — nunca refaz tudo (só re-run explícito).
+            failed_label = ""
+            try:
+                run.tracker.mark_failed()
+                failed_label = run.tracker.current_label()
+            except Exception:  # noqa: BLE001 — marcar a falha nunca pode derrubar o run
+                pass
+            run.result = self._partial_result_from_thinking(run, failed_label)
             logger.warning(
                 "run %s falhou: %s", run.run_id,
                 _redact_secret(traceback.format_exc()[-3000:], secret),
@@ -1049,6 +1061,72 @@ class AnalysisRunner:
         run.finished_at = time.time()
         run.finished_stamp = timeutil.stamp()
         return final_status
+
+    # node LangGraph (chave do raciocínio-ao-vivo) -> campo do result. Só os nós cujo
+    # TEXTO já foi capturado (etapas concluídas) entram no result parcial (task 015).
+    _THINKING_TO_RESULT = {
+        "Market Analyst": "market_report",
+        "Sentiment Analyst": "sentiment_report",
+        "News Analyst": "news_report",
+        "Fundamentals Analyst": "fundamentals_report",
+        "Erick Analyst": "erick_report",
+        "Bull Researcher": "bull",
+        "Bear Researcher": "bear",
+        "Research Manager": "research_manager",
+        "Trader": "trader_plan",
+        "Portfolio Manager": "risk_decision",
+    }
+
+    def _partial_result_from_thinking(self, run: _Run, failed_label: str):
+        """Result PARCIAL a partir do que o run já produziu (task 015).
+
+        Um erro no meio não pode descartar as etapas concluídas. O raciocínio-ao-vivo
+        (task 008) já captura, EM MEMÓRIA, o texto de cada nó conforme termina — vale
+        pro dono E pro BYOK, sem depender do checkpoint. Aqui viramos isso num result
+        na MESMA forma do sucesso (tolerante a campos faltando), marcado ``partial`` +
+        ``failed_step`` pra a UI mostrar as concluídas e a etapa que parou (em vez de
+        tela vazia). Retorna ``None`` quando NADA concluiu — aí não há o que preservar."""
+        try:
+            snap = run.thinking.snapshot()
+        except Exception:  # noqa: BLE001
+            snap = []
+        by_node = {it.get("id"): (it.get("text") or "") for it in snap if it.get("text")}
+        if not by_node:
+            return None   # nada concluído — erro honesto de tela vazia (não há parcial)
+        result = extract_result({}, "")   # shell na forma canônica (tudo vazio)
+        for node, field in self._THINKING_TO_RESULT.items():
+            txt = by_node.get(node)
+            if txt:
+                result[field] = txt
+        # marca o estado parcial + a etapa que falhou (a UI para nela, não zera)
+        result["partial"] = True
+        result["failed_step"] = {"label": failed_label or ""}
+        result["error"] = run.error
+        result["error_code"] = run.error_code
+        result["timeframe"] = run.timeframe
+        result["verdict_timeframe"] = run.timeframe
+        try:
+            result["timeframes"] = timeframes_for_asset(run.asset_type)
+        except Exception:  # noqa: BLE001
+            pass
+        result["audit"] = {
+            "run_id": run.run_id,
+            "collected_at": timeutil.stamp(),
+            "pipeline_version": _pipeline_version(),
+            "models_by_step": run.thinking.models_snapshot(),
+            "partial": True,
+        }
+        # Fallbacks transparentes que já rolaram antes do erro (task 027-fallback).
+        try:
+            self._apply_fallbacks(result, getattr(run, "_fallback_tracker", None))
+        except Exception:  # noqa: BLE001
+            pass
+        # Escova strings internas de erro dos textos publicados (mesma higiene do sucesso).
+        try:
+            sanitize_result(result)
+        except Exception:  # noqa: BLE001
+            pass
+        return result
 
     @staticmethod
     def _apply_fallbacks(result: dict[str, Any] | None, tracker) -> None:

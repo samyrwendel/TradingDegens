@@ -746,6 +746,85 @@ function bindErrorCard(container) {
   if (esc) esc.addEventListener("click", () => escalateStep(container));
 }
 
+// ---- Erro PARCIAL: preserva as etapas concluídas (task 015) -----------------
+// Um erro no meio NÃO zera a análise: o backend monta um result parcial com o que já
+// rodou (analistas + debate). Aqui a UI mostra essas etapas + um banner "parou nesta
+// etapa" com o caminho pra CONTINUAR do ponto (escalar 027 / retomar 022), em vez da
+// tela vazia de "ERRO" que descartava tudo.
+function _hasAnyReport(r) {
+  if (!r) return false;
+  return ["market_report", "sentiment_report", "news_report", "fundamentals_report",
+    "erick_report", "bull", "bear", "research_manager", "investment_plan",
+    "trader_plan", "risk_decision"].some((k) => (r[k] || "").toString().trim());
+}
+
+// Linha de metadados (data · tipo · custo · tempo · conclusão) — mesma do sucesso.
+function resultMetaHtml(snap) {
+  const finished = snap.finished_at || (snap.result && snap.result.finished_at);
+  return `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
+    `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
+    `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
+    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
+    (finished ? `<span>Interrompido <b>${fmtStamp(finished, true)}</b></span>` : "");
+}
+
+// Banner do erro PARCIAL: nomeia a etapa que falhou, diz que o resto está preservado
+// abaixo, e traz a ação de continuar (abrir config quando é chave/crédito + escalar).
+function partialBannerHtml(snap, r) {
+  const step = (r.failed_step && r.failed_step.label) ? escapeHtml(r.failed_step.label) : "";
+  const msg = snap.error || "Uma etapa falhou.";
+  const wantsConfig = _CFG_ERROR_CODES.has(snap.error_code);
+  const action = wantsConfig
+    ? `<div class="err-foot"><button type="button" class="err-action" data-act="open-config">⚙️ Abrir Configurações</button></div>`
+    : "";
+  const stepLine = step
+    ? `<div class="err-msg">Parou em: <b>${step}</b>. As etapas concluídas abaixo estão <b>preservadas</b> — continue do ponto (escale a etapa ou retome), sem refazer tudo.</div>`
+    : `<div class="err-msg">As etapas concluídas abaixo estão <b>preservadas</b> — continue do ponto, sem refazer tudo.</div>`;
+  return `<div class="error-card partial ${escapeHtml(snap.error_code || "error")}">` +
+    `<div class="err-title">⚠️ Parou nesta etapa — o já feito foi preservado</div>` +
+    `<div class="err-msg">${escapeHtml(msg)}</div>` +
+    stepLine + action +
+    escalateBoxHtml(snap.run_id) +
+    `</div>`;
+}
+
+// Monta o corpo do erro parcial: banner no topo + as etapas concluídas (as mesmas
+// seções do sucesso, só as que têm texto) + rodapé de auditoria parcial.
+function partialReportsHtml(snap, r) {
+  const isCrypto = snap.asset_type === "crypto";
+  const axes = r.axes || {};
+  let html = partialBannerHtml(snap, r);
+  html += fallbackBannerHtml(r.fallbacks);
+  if (r.erick_report && r.erick_report.trim()) {
+    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
+      `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
+  }
+  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
+  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
+  html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
+  html += section("💬 Sentimento", r.sentiment_report);
+  if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);
+  html += section("🎯 Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan, axes.trader);
+  html += section("🛡️ Decisão de Risco (parcial)", r.risk_decision);
+  html += auditFooterHtml(r.audit, null);
+  return html;
+}
+
+// Retomar do ponto (022) numa run que ERROU e é resumível (dono/servidor + checkpoint):
+// o resume continua do último nó concluído, reaproveitando o que já rodou. BYOK não é
+// resumível — nesses casos a barra some (o parcial fica; o full re-run é só por ação).
+function maybeShowErrorResume(snap) {
+  const bar = $("resumeBar");
+  if (!bar) return;
+  if (snap.resumable && snap.run_id) {
+    $("resumeMsg").textContent = "Retome do ponto que falhou — reaproveita as etapas já concluídas.";
+    bar.dataset.runId = snap.run_id;
+    bar.classList.remove("hidden");
+  } else {
+    bar.classList.add("hidden");
+  }
+}
+
 // POST /api/run/<id>/escalate: re-roda SÓ a etapa escolhida com o outro LLM. O
 // servidor é owner-gated e recusa run não-resumível (BYOK) com mensagem honesta.
 async function escalateStep(container) {
@@ -814,8 +893,12 @@ function renderResult(snap) {
   $("progressPanel").classList.add("hidden");
   const panel = $("resultPanel");
   panel.classList.remove("hidden");
+  // Esconde uma barra de Retomar remanescente; o erro PARCIAL resumível a re-mostra.
+  if ($("resumeBar")) $("resumeBar").classList.add("hidden");
 
   if (snap.status === "error") {
+    const er = snap.result || {};
+    const hasPartial = er.partial === true || _hasAnyReport(er);
     $("chartCard").classList.add("hidden");
     $("actionable").classList.add("hidden");
     $("headPrice").classList.add("hidden");
@@ -838,20 +921,38 @@ function renderResult(snap) {
   _timeframes = ["1w", "1d", "4h", "1h", "15m"];
     _verdictTf = snap.verdict_timeframe || "1d";
     syncLaunchBarToOpen();
+    $("bull").innerHTML = ""; $("bear").innerHTML = "";
+    $("bullLead").textContent = ""; $("bearLead").textContent = "";
+    if (hasPartial) {
+      // PRESERVA o trabalho (task 015): mostra as etapas concluídas + banner "parou
+      // nesta etapa" + escalar/retomar do ponto — NUNCA tela vazia que zera tudo.
+      $("verdictBadge").className = "verdict hold";
+      $("verdictBadge").textContent = "PARCIAL";
+      $("resultMeta").innerHTML = resultMetaHtml(snap);
+      const railP = document.querySelector(".rail-theses");
+      if (railP) railP.classList.remove("hidden");
+      renderThesis("bull", er.bull);
+      renderThesis("bear", er.bear);
+      $("sections").innerHTML = partialReportsHtml(snap, er);
+      bindErrorCard($("sections"));
+      maybeShowErrorResume(snap);   // Retomar do ponto (022) numa run resumível (dono)
+      mountAskBox($("askSingle"), snap.run_id);  // dá pra perguntar sobre o que já rodou
+      scrollToOpen(panel);
+      loadHistory();
+      return;
+    }
+    // Nada concluído: erro honesto (sem parcial). Banner + escalar, sem teses vazias.
     $("verdictBadge").className = "verdict sell";
     $("verdictBadge").textContent = "ERRO";
     $("resultMeta").innerHTML = "";
-    $("bull").innerHTML = ""; $("bear").innerHTML = "";
-    $("bullLead").textContent = ""; $("bearLead").textContent = "";
-    // O banner ocupa o lugar do RESULTADO: esconde as teses vazias (Alta/Baixa) —
-    // sem dado, mostrá-las é ruído. A barra ÚNICA (launcher) segue no topo.
     const railTheses = document.querySelector(".rail-theses");
     if (railTheses) railTheses.classList.add("hidden");
+    if ($("resumeBar")) $("resumeBar").classList.add("hidden");
     // Banner de erro HUMANO (sem stack, sem chave): a mensagem acionável do backend
     // + botão pra abrir ⚙️ Configurações quando é problema de chave/crédito.
     $("sections").innerHTML = errorCardHtml(snap.error, snap.error_code, snap.run_id);
     bindErrorCard($("sections"));
-    mountAskBox($("askSingle"), "");  // run com erro não tem dado pra ancorar pergunta
+    mountAskBox($("askSingle"), "");  // run com erro sem parcial não tem o que ancorar
     return;
   }
 
