@@ -549,6 +549,11 @@ class _Run:
         # Raciocínio ao vivo (task 008): captura a saída de cada agente conforme sai,
         # pra o painel revelar o "pensamento" durante o run. Custo zero de LLM.
         self.thinking = ThinkingTracker()
+        # Fallback transparente (task 027-fallback): registra as trocas AUTOMÁTICAS de
+        # provedor por etapa (quando o topo falha por estado do provedor e o motor cai
+        # pro próximo da cadeia sem parar). Preenchido em _execute; surfa por-etapa no
+        # snapshot e no resultado. None até o worker montar o tracker daquele run.
+        self._fallback_tracker = None
 
     def cost(self) -> dict[str, Any]:
         return cost_breakdown(self.usage_cb.usage_metadata)
@@ -572,6 +577,11 @@ class _Run:
             "reused": self.reused,
             "reused_from": self.reused_from,
             "resuming": self.resuming,
+            # Fallback transparente (task 027-fallback): trocas AUTOMÁTICAS de provedor
+            # já ocorridas neste run, visíveis AO VIVO (a análise não parou; trocou e
+            # seguiu). Vazio quando não houve desvio. Lido do tracker, thread-safe.
+            "fallbacks": (self._fallback_tracker.snapshot()
+                          if self._fallback_tracker is not None else []),
             "progress": self.tracker.snapshot(),
             "thinking": self.thinking.snapshot(),
             "cost": self.cost(),
@@ -854,6 +864,18 @@ class AnalysisRunner:
         config["checkpoint_enabled"] = bool(
             self.checkpoint_enabled and config.get("data_cache_dir")
         )
+        # Fallback transparente (task 027-fallback): monta o tracker das trocas deste
+        # run e injeta no config, junto do sinal de DONO (allow_server_key destrava a
+        # cadeia de fallback com chave de servidor). Ambos são TRANSIENTES — o grafo os
+        # tira do config ANTES do set_config global, então não vazam no singleton nem
+        # em record persistido. Sem dono (público/BYOK) → allow_server_key False → a
+        # cadeia fica só no topo (comportamento de hoje). O tracker fica no run pra o
+        # snapshot ao vivo e a enriquecimento do resultado lerem as trocas.
+        from tradingagents.llm_clients.fallback import FallbackTracker
+        fb_tracker = FallbackTracker()
+        run._fallback_tracker = fb_tracker
+        config["_fallback_tracker"] = fb_tracker
+        config["_allow_server_key"] = run.overrides.get("allow_server_key") is True
         # Provedor owner-only (assinatura do dono, ex.: claude-cli): só roda pro dono
         # logado — nem BYOK falso destrava. Barra ANTES da chave (a assinatura é do
         # dono; público jamais roteia a análise dele pela cota do dono).
@@ -964,6 +986,11 @@ class AnalysisRunner:
             # apoiar calado num dado furado (ou usa o verificado, ou sai avisado).
             run.result["verdict_caveat"] = format_verdict_caveat(
                 run.result.get("pre_judge_findings"))
+            # Fallback transparente (task 027-fallback): se houve troca AUTOMÁTICA de
+            # provedor em alguma etapa, marca isso NO resultado — banner de resumo +
+            # selo na etapa que caiu ("fallback X→Y, motivo 429"). A análise não parou;
+            # o leitor SABE que houve o desvio (não silencioso). Vazio → nada muda.
+            self._apply_fallbacks(run.result, fb_tracker)
             run.tracker.mark_done()
             final_status = "done"
         except RunCancelled:
@@ -991,6 +1018,39 @@ class AnalysisRunner:
         run.finished_at = time.time()
         run.finished_stamp = timeutil.stamp()
         return final_status
+
+    @staticmethod
+    def _apply_fallbacks(result: dict[str, Any] | None, tracker) -> None:
+        """Carimba as trocas AUTOMÁTICAS de provedor no resultado (transparência).
+
+        Nada acontece quando não houve desvio — o caminho feliz fica byte-a-byte igual.
+        Havendo troca(s): ``result['fallbacks']`` recebe a lista plana (pro banner de
+        resumo) e cada linha da atribuição por-etapa (``audit.models_by_step``) do nó
+        que caiu ganha um campo ``fallback`` com de→para + motivo, pra o selo aparecer
+        exatamente na etapa onde o motor trocou de provedor."""
+        if not result or tracker is None or not tracker.any():
+            return
+        hops = tracker.snapshot()
+        result["fallbacks"] = hops
+        audit = result.get("audit") or {}
+        steps = audit.get("models_by_step") or []
+        by_node: dict[Any, list[dict[str, Any]]] = {}
+        for h in hops:
+            by_node.setdefault(h.get("node"), []).append(h)
+        for s in steps:
+            node_hops = by_node.get(s.get("node"))
+            if not node_hops:
+                continue
+            last = node_hops[-1]
+            s["fallback"] = {
+                "from_provider": node_hops[0].get("from_provider"),
+                "to_provider": last.get("to_provider"),
+                "reason": last.get("reason"),
+                "code": last.get("code"),
+                "hops": len(node_hops),
+            }
+        audit["models_by_step"] = steps
+        result["audit"] = audit
 
     def _persist(self, run: _Run, status: str) -> None:
         try:

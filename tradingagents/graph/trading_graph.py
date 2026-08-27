@@ -97,6 +97,96 @@ def resolve_level_specs(config: dict, byok_key: str | None = None) -> dict[str, 
     return specs
 
 
+# Ordem PADRÃO da cadeia de fallback (o TAIL, o que vem DEPOIS do topo), começando
+# pelo CLAUDE ($0/token). O TOPO da cadeia de cada nível é SEMPRE o provedor já
+# configurado do nível (modo simples ou o seletor avançado 027 — inalterado); esta
+# ordem é só o fallback quando o topo falha por estado do provedor. Extensível.
+_DEFAULT_FALLBACK_ORDER = ("claude-cli", "openai")
+# Teto de saltos por etapa (cadeia = 1 topo + até N fallbacks).
+_DEFAULT_MAX_HOPS = 2
+# claude via assinatura (proxy): não tem env-key; a auth é do proxy do dono.
+_CLAUDE_CLI_PROVIDERS = frozenset({"claude-cli", "claude_cli", "claude-subscription"})
+
+
+def _catalog_default_model(provider: str, level: str) -> str | None:
+    """Modelo padrão do catálogo pra ``(provider, level)`` — usado só nos LINKS de
+    fallback (o topo já traz o modelo da config). ``None`` se o provedor não tem
+    catálogo (o link é descartado antes de virar um client sem modelo)."""
+    try:
+        from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+    except Exception:  # noqa: BLE001
+        return None
+    opts = MODEL_OPTIONS.get((provider or "").lower())
+    if not isinstance(opts, dict):
+        return None
+    lst = opts.get(level) or []
+    return lst[0][1] if lst else None
+
+
+def _fallback_link_available(provider: str) -> bool:
+    """Se dá pra CONSTRUIR um link de fallback pra ``provider`` com credencial de
+    servidor. claude-cli (assinatura via proxy) e provedores keyless passam; um
+    provedor com env-var de chave só entra se a chave do servidor existir — senão o
+    salto certeiro em 401 é inútil e some da cadeia."""
+    from tradingagents.llm_clients.api_key_env import get_api_key_env
+
+    p = (provider or "").lower()
+    if p in _CLAUDE_CLI_PROVIDERS:
+        return True  # assinatura do dono; se o proxy cair, o próprio invoke pula
+    env_var = get_api_key_env(p)
+    if not env_var:
+        return True  # keyless (ollama/bedrock)
+    return bool(os.environ.get(env_var))
+
+
+def resolve_fallback_chain(config: dict, byok_key: str | None = None,
+                           allow_server_key: bool = False) -> dict[str, list[dict]]:
+    """Cadeia ORDENADA de provedores por nível (deep/quick) pro fallback automático.
+
+    Topo = o provedor JÁ resolvido do nível (:func:`resolve_level_specs` — modo simples
+    ou seletor avançado 027, inalterado). Tail = :data:`_DEFAULT_FALLBACK_ORDER`
+    (claude-cli → openai), deduplicado contra o topo, limitado a ``max_hops`` saltos e
+    filtrado ao que tem credencial de servidor.
+
+    Gates (senão a cadeia é só ``[topo]``, isto é, comportamento de hoje, sem fallback):
+    - **Owner-gated:** só com ``allow_server_key`` (dono logado) — os links de fallback
+      usam a assinatura/chave do servidor (claude-cli é owner-only; openai é server-key).
+    - **BYOK:** se a chave do usuário dirige o nível (``api_key`` no topo), a cadeia fica
+      LIMITADA a esse provedor — não vaza pra outro provedor; se falhar, erro honesto.
+    """
+    base = resolve_level_specs(config, byok_key)
+    enabled = config.get("fallback_enabled", True)
+    try:
+        max_hops = int(config.get("fallback_max_hops", _DEFAULT_MAX_HOPS))
+    except (TypeError, ValueError):
+        max_hops = _DEFAULT_MAX_HOPS
+    max_hops = max(0, max_hops)
+
+    chains: dict[str, list[dict]] = {}
+    for level in ("deep", "quick"):
+        top = dict(base[level])
+        chain = [top]
+        byok_driven = bool(top.get("api_key"))
+        if enabled and allow_server_key and not byok_driven and max_hops > 0:
+            for prov in _DEFAULT_FALLBACK_ORDER:
+                if len(chain) >= 1 + max_hops:
+                    break
+                if any(prov == c["provider"] for c in chain):
+                    continue
+                if not _fallback_link_available(prov):
+                    continue
+                model = _catalog_default_model(prov, level)
+                if not model:
+                    continue  # sem modelo do catálogo → não constrói um client vazio
+                chain.append({
+                    "provider": prov, "model": model,
+                    "base_url": None,  # link usa o endpoint padrão do provedor/proxy
+                    "api_key": None,   # server-key / proxy da assinatura
+                })
+        chains[level] = chain
+    return chains
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -126,6 +216,16 @@ class TradingAgentsGraph:
         # two concurrent users can't clobber each other's key through the global.
         self._llm_api_key = self._pop_llm_api_key(self.config)
 
+        # Fallback transparente (task 027-fallback): o runner injeta, por-run, se a
+        # requisição é de DONO (allow_server_key → destrava a cadeia de fallback com
+        # chave de servidor) e um FallbackTracker pra registrar as trocas. Ambos são
+        # objetos/estado VIVOS — tirados do config ANTES do set_config global pra não
+        # vazarem no singleton compartilhado nem em nenhum record persistido (mesma
+        # razão do _llm_api_key). Ausentes (CLI/testes) → sem fallback, comportamento
+        # de hoje.
+        self._allow_server_key = self._pop_transient(self.config, "_allow_server_key") is True
+        self._fallback_tracker = self._pop_transient(self.config, "_fallback_tracker")
+
         # Update the interface's config
         set_config(self.config)
 
@@ -138,31 +238,23 @@ class TradingAgentsGraph:
         # provider+model+endpoint, so a run can mix (ex.: Rápido=openai server-key,
         # Pesado=claude-cli assinatura $0/token). Absent per-level provider falls back
         # to the single ``llm_provider`` — simple mode is byte-for-byte unchanged.
-        specs = resolve_level_specs(self.config, getattr(self, "_llm_api_key", None))
-        deep_spec, quick_spec = specs["deep"], specs["quick"]
+        #
+        # Fallback automático (task 027-fallback): cada nível vira uma CADEIA — o topo
+        # é o provedor resolvido acima (inalterado); atrás dele, os provedores de
+        # fallback (claude-cli → openai) SÓ pro dono (server-key), pra a análise não
+        # parar quando o topo falha por estado do provedor. Cadeia de 1 = idêntico ao
+        # caminho de hoje (público/BYOK, ou sem link de fallback disponível).
+        chains = resolve_fallback_chain(
+            self.config, getattr(self, "_llm_api_key", None), self._allow_server_key
+        )
 
         # Callbacks (LLM/tool stats + per-step attribution) ride every level.
         common: dict[str, Any] = {}
         if self.callbacks:
             common["callbacks"] = self.callbacks
 
-        deep_client = create_llm_client(
-            provider=deep_spec["provider"],
-            model=deep_spec["model"],
-            base_url=deep_spec["base_url"],
-            **self._get_provider_kwargs(deep_spec["provider"], deep_spec["api_key"]),
-            **common,
-        )
-        quick_client = create_llm_client(
-            provider=quick_spec["provider"],
-            model=quick_spec["model"],
-            base_url=quick_spec["base_url"],
-            **self._get_provider_kwargs(quick_spec["provider"], quick_spec["api_key"]),
-            **common,
-        )
-
-        self.deep_thinking_llm = deep_client.get_llm()
-        self.quick_thinking_llm = quick_client.get_llm()
+        self.deep_thinking_llm = self._build_level_llm("deep", chains["deep"], common)
+        self.quick_thinking_llm = self._build_level_llm("quick", chains["quick"], common)
 
         self.memory_log = TradingMemoryLog(self.config)
 
@@ -211,6 +303,48 @@ class TradingAgentsGraph:
         if isinstance(config, dict):
             return config.pop("llm_api_key", None) or None
         return None
+
+    @staticmethod
+    def _pop_transient(config: Any, key: str) -> Any:
+        """Remove e devolve um valor TRANSIENTE (objeto/estado vivo do runner) do
+        ``config`` — chamado antes do :func:`set_config` pra o valor não vazar no
+        singleton global nem em nenhum record persistido. ``None`` fora de dict."""
+        if isinstance(config, dict):
+            return config.pop(key, None)
+        return None
+
+    def _build_level_llm(self, level: str, chain: list[dict], common: dict[str, Any]) -> Any:
+        """Constrói o LLM de um nível a partir da sua CADEIA de fallback.
+
+        Cadeia de 1 elemento → devolve o client cru (idêntico ao caminho de hoje, sem
+        wrapper). Cadeia de 2+ → embrulha num :class:`FallbackRunnable`, que tenta o
+        topo e cai pro próximo só em erro de estado do provedor, registrando a troca
+        no tracker. Cada membro recebe os MESMOS callbacks, então o que de fato roda
+        reporta seu modelo real (atribuição por-etapa 024P1)."""
+        members: list[dict[str, Any]] = []
+        for spec in chain:
+            client = create_llm_client(
+                provider=spec["provider"],
+                model=spec["model"],
+                base_url=spec["base_url"],
+                **self._get_provider_kwargs(spec["provider"], spec["api_key"]),
+                **common,
+            )
+            members.append({
+                "provider": spec["provider"], "model": spec["model"],
+                "llm": client.get_llm(),
+            })
+        if len(members) == 1:
+            return members[0]["llm"]
+        from tradingagents.llm_clients.fallback import FallbackRunnable
+
+        try:
+            max_hops = int(self.config.get("fallback_max_hops", _DEFAULT_MAX_HOPS))
+        except (TypeError, ValueError):
+            max_hops = _DEFAULT_MAX_HOPS
+        return FallbackRunnable(
+            members, tracker=self._fallback_tracker, level=level, max_hops=max_hops
+        )
 
     def _get_provider_kwargs(
         self, provider: str | None = None, api_key: str | None = None

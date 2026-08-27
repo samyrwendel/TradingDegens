@@ -326,6 +326,17 @@ details.section.erick > summary { color: #9cc7f5; }
 .audit-steps-list li { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; font-size: var(--fs-10); line-height: var(--lh-10); }
 .audit-steps-list .as-step { color: var(--muted); }
 .audit-steps-list .as-model { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+/* Fallback transparente (task 027-fallback): selo âmbar na etapa que trocou de
+   provedor sozinha. Chama atenção sem gritar — é informação, não erro. */
+.audit-steps-list .as-fallback { color: #d9a441; font-size: var(--fs-10); white-space: nowrap; }
+
+/* Banner de resumo do fallback automático: âmbar discreto, no topo do resultado.
+   Diz que a análise NÃO parou (trocou de provedor e concluiu) e lista os desvios. */
+.section.fallback-banner { border-color: #6a5320; background: rgba(217, 164, 65, .06); padding: 10px 12px; }
+.fallback-banner .fb-head { color: #e6c47a; font-size: var(--fs-12); line-height: var(--lh-12); }
+.fallback-banner .fb-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.fallback-banner .fb-list li { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--text); }
+.fallback-banner .fb-step { color: var(--muted); font-family: var(--mono); }
 
 /* Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação, cada
    uma com número, ícone de estado e rótulo. Estados: aguardando (apagada) ·

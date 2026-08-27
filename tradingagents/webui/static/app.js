@@ -547,6 +547,38 @@ function section(title, mdText, axis) {
     `<div class="section-body"><div class="md">${renderMarkdown(mdText)}</div></div></details>`;
 }
 
+// Fallback transparente (task 027-fallback): selo NA etapa que trocou de provedor
+// automaticamente — "⤳ fallback claude-cli → openai (limite/429)". A análise não
+// parou; o dono SABE que houve o desvio. Vazio quando a etapa não teve troca.
+function stepFallbackBadge(fb) {
+  if (!fb || !fb.to_provider) return "";
+  const from = fb.from_provider ? escapeHtml(fb.from_provider) : "?";
+  const to = escapeHtml(fb.to_provider);
+  const why = fb.reason ? ` (${escapeHtml(fb.reason)})` : "";
+  const more = fb.hops > 1 ? ` ·${fb.hops}×` : "";
+  return ` <span class="as-fallback" title="troca automática de provedor — a análise não parou">` +
+    `⤳ fallback ${from} → ${to}${why}${more}</span>`;
+}
+
+// Banner de resumo do fallback automático: aparece no topo do resultado quando houve
+// pelo menos uma troca de provedor. Diz que a análise NÃO parou e lista os desvios,
+// pra a transparência ser VISÍVEL de relance (não escondida no rodapé). Vazio → nada.
+function fallbackBannerHtml(fallbacks) {
+  if (!Array.isArray(fallbacks) || fallbacks.length === 0) return "";
+  const items = fallbacks.map((h) => {
+    const from = h.from_provider ? escapeHtml(h.from_provider) : "?";
+    const to = h.to_provider ? escapeHtml(h.to_provider) : "?";
+    const why = h.reason ? ` — motivo ${escapeHtml(h.reason)}` : "";
+    const step = h.node ? `<span class="fb-step">${escapeHtml(h.node)}</span> ` : "";
+    return `<li>${step}${from} → <b>${to}</b>${why}</li>`;
+  }).join("");
+  const n = fallbacks.length;
+  return `<div class="section fallback-banner">` +
+    `<div class="fb-head">⤳ Fallback automático — ${n} troca(s) de provedor. ` +
+    `A análise <b>não parou</b>: caiu pro próximo provedor saudável e concluiu.</div>` +
+    `<ul class="fb-list">${items}</ul></div>`;
+}
+
 // Rodapé de auditoria (item 10): run_id + timestamp único da coleta + versão do
 // pipeline + modelo por camada de agente. Sem isto não dá pra atribuir regressão
 // entre runs. Só renderiza quando o run trouxe o bloco audit.
@@ -570,7 +602,8 @@ function auditFooterHtml(audit, asOfPrice) {
       byStep.map((s) => {
         const lbl = stepModelLabel(s);
         return `<li><span class="as-step">${escapeHtml(s.label || s.node || "—")}</span>` +
-          `<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span></li>`;
+          `<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span>` +
+          stepFallbackBadge(s.fallback) + `</li>`;
       }).join("") +
       `</ul></details>`
     : "";
@@ -793,6 +826,9 @@ function renderResult(snap) {
   const axes = r.axes || {};
   // Portão de QA (item 7): a checagem de consistência vai no TOPO das seções.
   html += contradictionsHtml(r.contradictions);
+  // Fallback transparente (task 027-fallback): se o motor trocou de provedor sozinho
+  // em alguma etapa, o banner de resumo abre logo abaixo do QA — visível de relance.
+  html += fallbackBannerHtml(r.fallbacks);
   if (r.erick_report && r.erick_report.trim()) {
     html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${axisTag(axes.erick)}</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
