@@ -3161,6 +3161,12 @@ function renderConfigPanel() {
   $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
   syncProviderFields(cur);
   renderLevelProviders(list, cur);
+  // Config salva pode trazer o modelo no formato do provedor ANTERIOR (o bug: trocou
+  // pra assinatura Claude e ficou "anthropic/claude-opus-5" do OpenRouter → 404).
+  // Normaliza ANTES de montar os combos, com os selects de nível já preenchidos.
+  // Não-estrito: aqui provedor e modelo foram salvos JUNTOS — corrigir o formato é
+  // seguro, trocar um id fora do catálogo (fine-tune próprio) pelo default não é.
+  normalizeConfigModels({ strict: false });   // task 016
   applyModelCombosForProviders();   // combos refletem o provedor de cada nível (task 014)
   renderOwnerBox();
   renderSubscriptionBox();
@@ -3189,13 +3195,49 @@ function renderLevelProviders(list, cur) {
   applyAdvancedVisibility();
 }
 
-// Mostra/esconde a grade avançada conforme o toggle.
+// Mostra/esconde a grade avançada conforme o toggle e REALOCA os campos de modelo
+// (task 016): no avançado, o modelo de cada nível fica AO LADO do provedor daquele
+// nível (Provedor do Rápido → Modelo do Rápido, idem Pesado). Antes os dois campos
+// ficavam lá em cima, junto do provedor simples, parecendo um modelo COMPARTILHADO —
+// era o convite pro mismatch de formato. São os MESMOS inputs (mesmo id, mesmo combo,
+// mesmo estado): só mudam de lugar, sem duplicar fonte de verdade.
 function applyAdvancedVisibility() {
-  const on = $("cfgAdvanced") && $("cfgAdvanced").checked;
+  const on = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
   ["cfgAdvancedGrid", "cfgAdvancedNote"].forEach((id) => {
     const el = $(id);
     if (el) el.classList.toggle("hidden", !on);
   });
+  const grid = $("cfgAdvancedGrid");
+  const byok = $("byokGrid");
+  const qf = $("cfgQuickField");
+  const df = $("cfgDeepField");
+  const dpf = $("cfgDeepProviderField");
+  if (grid && byok && qf && df && dpf) {
+    if (on) {
+      grid.insertBefore(qf, dpf);   // …Provedor do Rápido · Modelo do Rápido…
+      grid.appendChild(df);         // …Provedor do Pesado · Modelo do Pesado
+    } else if (qf.parentNode !== byok) {
+      byok.appendChild(qf);         // volta pro fim da grade simples (ordem original)
+      byok.appendChild(df);
+    }
+  }
+  syncLevelModelLabels();
+}
+
+// Rótulo dos campos de modelo: no avançado diz de QUEM é o modelo e em que provedor
+// ele roda ("Modelo do Rápido (claude-cli)") — o formato do id é o daquele provedor.
+function syncLevelModelLabels() {
+  const on = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
+  [["quick", "cfgQuickLabel", "cfgQuick", "Rápido", "Modelo rápido"],
+   ["deep", "cfgDeepLabel", "cfgDeep", "Pesado", "Modelo pesado"]].forEach(
+    ([lvl, lid, fid, lead, plain]) => {
+      const el = $(lid);
+      if (!el) return;
+      const orig = on ? (_cfgLevelProvider(lvl) || lvl) : lvl;
+      el.innerHTML = `${escapeHtml(on ? "Modelo do " + lead : plain)} `
+        + `<span class="orig">(${escapeHtml(orig)})</span>`;
+      el.setAttribute("for", fid);
+    });
 }
 
 // Conectar assinatura (task 017; multi-provedor 020): a seção só aparece pro DONO
@@ -3547,11 +3589,18 @@ function _readConfigForm() {
   const provId = $("cfgProvider").value;
   const p = _providerMeta(provId);
   const advanced = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
+  const quickProv = (advanced && $("cfgQuickProvider") && $("cfgQuickProvider").value) || provId;
+  const deepProv = (advanced && $("cfgDeepProvider") && $("cfgDeepProvider").value) || provId;
   return {
     provider: provId,
     apiKey: $("cfgKey").value.trim(),
-    quickModel: $("cfgQuick").value.trim(),
-    deepModel: $("cfgDeep").value.trim(),
+    // Modelo SEMPRE no FORMATO do provedor do seu nível (task 016): é este objeto que
+    // vira _llmCfg no Salvar e alimenta o corpo do analyze/Testar — normalizar aqui
+    // impede que um id colado no formato de outro provedor chegue à API. Não-estrito:
+    // o que o usuário DIGITOU é escolha dele (fine-tune, deploy próprio); quem reseta
+    // sobra de outro provedor é a troca de provedor, não a leitura do formulário.
+    quickModel: normalizeModelForProvider(quickProv, $("cfgQuick").value.trim(), "quick", { strict: false }),
+    deepModel: normalizeModelForProvider(deepProv, $("cfgDeep").value.trim(), "deep", { strict: false }),
     baseUrl: (p && p.needs_base_url) ? $("cfgBaseUrl").value.trim() : "",
     // Cross-provider RÁPIDO/PESADO (task 027): provedor por nível no modo avançado.
     advanced,
@@ -3583,6 +3632,10 @@ function onSimpleProviderChange(prov) {
   if (!advanced) {
     $("cfgQuick").value = (p && p.default_quick) || "";
     $("cfgDeep").value = (p && p.default_deep) || "";
+  } else {
+    // no avançado os modelos seguem os provedores POR NÍVEL — mas um nível que caia
+    // no provedor-base (select vazio) precisa do id no formato NOVO (task 016).
+    normalizeConfigModels();
   }
   applyModelCombosForProviders();             // catálogo já reflete o novo provedor
   const suggest = _isOwner && !!_subConnected.anthropic && prov === "anthropic";
@@ -3592,16 +3645,22 @@ function onSimpleProviderChange(prov) {
   renderLaunchModels();
 }
 
-// Troca do provedor de UM nível no avançado (task 014): o modelo daquele nível volta
-// ao default do NOVO provedor e o combo lista os modelos dele (ao vivo se der, senão
-// catálogo). Nunca deixa o nível com um modelo de outro provedor.
+// Troca do provedor de UM nível no avançado (task 014): o modelo daquele nível vai pro
+// FORMATO do novo provedor e o combo lista os modelos dele (ao vivo se der, senão
+// catálogo). Nunca deixa o nível com um modelo de outro provedor. Um id compatível
+// (mesma família, ex.: claude-sonnet-5 do Anthropic pago → assinatura) é PRESERVADO;
+// só o incompatível cai no default (task 016) — antes qualquer troca clobberava.
 function onLevelProviderChange(level) {
   const sel = level === "deep" ? $("cfgDeepProvider") : $("cfgQuickProvider");
   const fid = level === "deep" ? "cfgDeep" : "cfgQuick";
   const dk = level === "deep" ? "default_deep" : "default_quick";
   const prov = sel ? sel.value : "";
   const p = _providerMeta(prov);
-  if ($(fid)) $(fid).value = (p && p[dk]) || "";
+  if ($(fid)) {
+    const cur = $(fid).value.trim();
+    $(fid).value = cur ? normalizeModelForProvider(prov, cur, level) : ((p && p[dk]) || "");
+  }
+  syncLevelModelLabels();
   applyModelCombosForProviders();
   const form = _readConfigForm();
   // a chave BYOK é do provedor-base; um nível diferente lista pela env do dono (ou catálogo).
@@ -3707,6 +3766,110 @@ function _providerCatalogItems(prov) {
 function _itemsForProvider(prov) {
   return (_liveModels[prov] && _liveModels[prov].length) ? _liveModels[prov]
     : _providerCatalogItems(prov);
+}
+
+// ---- Formato do id do modelo POR PROVEDOR (task 016) ------------------------
+// O id NÃO é portável: OpenRouter usa "vendor/modelo" (anthropic/claude-opus-5); a API
+// Anthropic — e a assinatura claude-cli, que fala a mesma API — só entende o id PURO.
+// Trocar de provedor deixando o id do outro formato dava 404 no meio da run. As regras
+// vêm do BACKEND na meta (`id_format`), então front e servidor normalizam igual —
+// aqui é a correção na tela, lá é a rede de proteção final.
+function _idFormat(prov) {
+  const p = _providerMeta(prov);
+  return (p && p.id_format) || { style: "free", families: [], vendor_ns: null };
+}
+
+// Grafia frouxa: o OpenRouter escreve a versão com PONTO (claude-haiku-4.5) onde a
+// API nativa usa TRAÇO (claude-haiku-4-5) — casar assim acha o equivalente certo.
+function _looseId(id) {
+  return String(id || "").trim().toLowerCase().replace(/\./g, "-");
+}
+
+function _matchesFamily(families, id) {
+  if (!families || !families.length) return true;   // sem família: aceita qualquer id
+  const low = String(id || "").toLowerCase();
+  return families.some((f) => low.startsWith(f));
+}
+
+// Namespace "vendor/" de um id puro, pela família (rota inversa, pro OpenRouter).
+function _vendorNsForId(id) {
+  const list = (_llmMeta && _llmMeta.providers) || [];
+  for (const p of list) {
+    const f = p.id_format || {};
+    if (f.vendor_ns && (f.families || []).length && _matchesFamily(f.families, id)) return f.vendor_ns;
+  }
+  return null;
+}
+
+function _providerDefaultFor(prov, level) {
+  const p = _providerMeta(prov);
+  if (!p) return "";
+  return (level === "deep" ? p.default_deep : p.default_quick) || "";
+}
+
+// Id do modelo NO FORMATO do provedor. Tira o "vendor/" sobrando e casa a grafia no
+// catálogo curado (o OpenRouter escreve 4.5, a API nativa 4-5).
+// `opts.strict` decide o resto: na TROCA de provedor (true) um id de outra FAMÍLIA é
+// resto do provedor anterior e cai no default; ao LER o que o usuário digitou (false)
+// só o formato é corrigido — um fine-tune/deploy fora do catálogo é escolha legítima.
+// Id já puro e da família certa passa intacto nos dois casos: o catálogo envelhece e
+// resetar um modelo novo e válido seria pior que o bug.
+function normalizeModelForProvider(prov, model, level, opts) {
+  const strict = !(opts && opts.strict === false);
+  const raw = String(model || "").trim();
+  if (!raw || !prov) return raw;
+  const fmt = _idFormat(prov);
+  if (fmt.style === "free") return raw;
+  if (fmt.style === "vendor_slash") {
+    if (raw.indexOf("/") >= 0) return raw;
+    const ns = _vendorNsForId(raw);
+    return ns ? ns + "/" + raw : raw;
+  }
+  const def = _providerDefaultFor(prov, level);
+  const bare = raw.split("/").pop();
+  if (!bare) return def || raw;
+  if (bare !== raw) {
+    // veio com namespace ⇒ id de OUTRO formato: casa no catálogo, senão tira a barra
+    // (e, no estrito, cai no default — namespace de outro provedor é 404 na certa).
+    const hit = _providerCatalogItems(prov).find((m) => _looseId(m.id) === _looseId(bare));
+    if (hit) return hit.id;
+    return strict ? (def || bare) : bare;
+  }
+  if (_matchesFamily(fmt.families, bare) || !strict) return bare;
+  return def || bare;
+}
+
+// O provedor SALVO sumiu da lista? (provedor owner-only com a sessão deslogada: o
+// select cai no default visível). Aí a tela NÃO representa a escolha do usuário e
+// normalizar contra o provedor visível apagaria os modelos dele — melhor não tocar.
+function _savedProviderHidden() {
+  const saved = (_llmCfg && _llmCfg.provider) || "";
+  const sel = $("cfgProvider");
+  if (!saved || !sel) return false;
+  return !Array.from(sel.options).some((o) => o.value === saved);
+}
+
+// Põe os DOIS campos de modelo no formato do provedor do SEU nível. Devolve true se
+// algo mudou — o caso do bug: config salva com id do provedor anterior (OpenRouter)
+// sobrevivendo à troca pro claude-cli. Quando muda, persiste já normalizado, senão o
+// chip do launcher e a próxima run voltavam a mandar o id velho.
+function normalizeConfigModels(opts) {
+  if (_savedProviderHidden()) return false;
+  let changed = false;
+  [["quick", "cfgQuick"], ["deep", "cfgDeep"]].forEach(([lvl, fid]) => {
+    const el = $(fid);
+    if (!el) return;
+    const norm = normalizeModelForProvider(_cfgLevelProvider(lvl), el.value, lvl, opts);
+    if (norm !== el.value) { el.value = norm; changed = true; }
+  });
+  if (changed) {
+    _llmCfg = _llmCfg || {};
+    if ($("cfgQuick")) _llmCfg.quickModel = $("cfgQuick").value;
+    if ($("cfgDeep")) _llmCfg.deepModel = $("cfgDeep").value;
+    saveLlmCfg(_llmCfg);
+    renderLaunchModels();
+  }
+  return changed;
 }
 
 // Provedor de um nível NO CONFIG (lê os selects): avançado → por-nível; senão o simples.

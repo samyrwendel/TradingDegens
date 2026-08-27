@@ -84,8 +84,8 @@
         <label for="cfgBaseUrl">Base URL <span class="orig">(endpoint)</span></label>
         <input id="cfgBaseUrl" type="text" autocomplete="off" placeholder="http://localhost:11434/v1" />
       </div>
-      <div class="field">
-        <label for="cfgQuick">Modelo rápido <span class="orig">(quick)</span></label>
+      <div class="field" id="cfgQuickField">
+        <label for="cfgQuick" id="cfgQuickLabel">Modelo rápido <span class="orig">(quick)</span></label>
         <!-- combobox pesquisável: digita e a lista real da chave FILTRA em tempo
              real, casando id E nome (ex.: "glm 5.2" acha z-ai/glm-5.2). Aceita id
              livre não listado (fallback). Teclado: ↑/↓ move, Enter escolhe, Esc fecha. -->
@@ -96,8 +96,8 @@
           <ul class="combo-list hidden" id="cfgQuickOpts" role="listbox"></ul>
         </div>
       </div>
-      <div class="field">
-        <label for="cfgDeep">Modelo pesado <span class="orig">(deep)</span></label>
+      <div class="field" id="cfgDeepField">
+        <label for="cfgDeep" id="cfgDeepLabel">Modelo pesado <span class="orig">(deep)</span></label>
         <div class="combo" data-combo="cfgDeep">
           <input id="cfgDeep" type="text" autocomplete="off" role="combobox"
                  aria-autocomplete="list" aria-expanded="false" aria-controls="cfgDeepOpts"
@@ -108,26 +108,29 @@
     </div>
 
     <!-- Cross-provider RÁPIDO/PESADO (task 027): modo Avançado escolhe o provedor de
-         CADA nível separadamente (ex.: Rápido=openai + Pesado=claude-cli $0/token). Os
-         campos de modelo acima passam a valer por nível. Simples é o default. -->
+         CADA nível separadamente (ex.: Rápido=openai + Pesado=claude-cli $0/token). No
+         avançado os campos de MODELO acima MIGRAM pra esta grade (task 016), cada um ao
+         lado do provedor do seu nível — o modelo é do provedor daquele nível, no formato
+         dele; não é um campo compartilhado. Simples é o default. -->
     <label class="cfg-adv-toggle" for="cfgAdvanced">
       <input type="checkbox" id="cfgAdvanced" />
       Avançado — provedor por nível (Rápido × Pesado, cross-provider)
     </label>
     <div class="config-grid cfg-advanced-grid hidden" id="cfgAdvancedGrid">
-      <div class="field">
+      <div class="field" id="cfgQuickProviderField">
         <label for="cfgQuickProvider">Provedor do Rápido <span class="orig">(quick)</span></label>
         <select id="cfgQuickProvider"></select>
       </div>
-      <div class="field">
+      <div class="field" id="cfgDeepProviderField">
         <label for="cfgDeepProvider">Provedor do Pesado <span class="orig">(deep)</span></label>
         <select id="cfgDeepProvider"></select>
       </div>
     </div>
     <p class="config-note cfg-advanced-note hidden" id="cfgAdvancedNote">
       No modo avançado, o <b>Rápido</b> (analistas · debate · trader · risco) e o
-      <b>Pesado</b> (pesquisa · juiz) rodam provedores diferentes; os campos de modelo
-      acima valem por nível. Um nível sem credencial é barrado antes de rodar.
+      <b>Pesado</b> (pesquisa · juiz) rodam provedores diferentes, cada um com o
+      <b>seu modelo</b> ao lado (no formato daquele provedor). Um nível sem credencial
+      é barrado antes de rodar.
     </p>
 
     <p class="config-note byok-note hidden" id="byokOptionalNote">

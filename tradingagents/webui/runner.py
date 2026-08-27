@@ -24,6 +24,7 @@ from typing import Any
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from tradingagents.agents.utils.rating import RATING_PT
+from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
 from tradingagents.webui import ask as ask_module, timeutil
 from tradingagents.webui.compare import (
     build_column,
@@ -307,6 +308,26 @@ def apply_llm_overrides(base_config: dict[str, Any],
             _, q_def = _provider_default_models(qp)
             if not ov.get("quick_model") and q_def:
                 config["quick_think_llm"] = q_def
+
+    # NORMALIZAÇÃO DE FORMATO (task 016): o id de modelo não é portável entre
+    # provedores — OpenRouter usa ``vendor/modelo``, a API Anthropic (e a assinatura
+    # claude-cli) só entende o id PURO. Um id salvo no formato do provedor ANTERIOR
+    # chegava intacto até o client e virava 404 ("model: anthropic/claude-opus-5"
+    # no claude-cli). Aqui, com o provedor de CADA nível já resolvido, o id vira o
+    # formato daquele provedor. Rede de proteção final: vale pro simples, pro
+    # por-nível, pra run E pro "Testar modelo" (ambos passam por aqui).
+    # ``strict=False`` de propósito: só o FORMATO é corrigido. Quem reseta um modelo
+    # de outra família é a troca de provedor na UI (que sabe que o id é resto do
+    # provedor anterior); aqui um id fora do catálogo pode ser um fine-tune/deploy
+    # próprio do usuário — trocá-lo pelo default seria ignorar a escolha dele.
+    base_provider = (config.get("llm_provider") or "").strip().lower()
+    for mode, prov_key, model_key in (("deep", "deep_think_provider", "deep_think_llm"),
+                                      ("quick", "quick_think_provider", "quick_think_llm")):
+        lvl_provider = (config.get(prov_key) or base_provider or "").strip().lower()
+        current = config.get(model_key)
+        if lvl_provider and current:
+            config[model_key] = normalize_model_id(lvl_provider, str(current), mode,
+                                                   strict=False)
     return config
 
 
@@ -2195,6 +2216,10 @@ class AnalysisRunner:
                 # DIRETO daqui ao trocar de provedor — sem esperar /models e sem
                 # mismatch (ex.: Anthropic com modelo OpenAI). [] = custom-only.
                 "models": _provider_catalog_models(pid),
+                # Regras de FORMATO do id deste provedor (task 016): o front usa
+                # pra normalizar o modelo ao trocar de provedor com a MESMA regra
+                # do backend (nada de "anthropic/claude-opus-5" num claude-cli).
+                "id_format": id_format_meta(pid),
                 # Presença (não o valor) da env de fallback no servidor: deixa o
                 # front dizer "sem chave → usa a do servidor" só quando é verdade.
                 # claude-cli não usa env de key (auth server-side via proxy).
