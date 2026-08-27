@@ -122,6 +122,7 @@ def _fake_plan_with_realize():
 def test_section_crypto_cites_intraday_entry_exit_and_weight(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)  # concern testado à parte
     section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
     # The four things the acceptance requires, all present:
     assert "intradiário" in section  # timeframe declared
@@ -138,6 +139,7 @@ def test_section_emits_single_state_enum(monkeypatch):
     the sub-blocks derive from it — no parallel 'Veredito'."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
     section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
     assert "**Estado (Método Erick):** AGIR" in section
     # exactly one state label, no competing 'Veredito' line in the deterministic part
@@ -151,6 +153,7 @@ def test_section_stock_reads_intraday_like_crypto(monkeypatch):
     fallback (fork brief 25/08 item 6)."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
     section = build_erick_method_section("BE", "2026-08-24", "stock")
     assert "4 horas" in section          # swing frame, same as crypto
     assert "não existe para ação" not in section  # the stale claim is gone
@@ -168,6 +171,7 @@ def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
 
     monkeypatch.setattr(em, "build_price_chart", chart)
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
     section = build_erick_method_section("BE", "2019-01-15", "stock")
     assert "diário" in section
     assert "indisponível" in section.lower()
@@ -180,6 +184,41 @@ def test_section_no_candle_is_honest_not_fabricated(monkeypatch):
     section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
     assert "nada inventado" in section.lower()
     assert "**Peso relativo" not in section  # no fake verdict when there is no data
+
+
+def _fake_plan_with_pattern():
+    return {
+        "setup_state": "aguardar_rompimento",
+        "realize_zone": {"label": "topo anterior", "low": 108.0, "high": 112.0, "price": 110.0},
+        "pattern": {
+            "p1": {"date": "2026-08-01", "price": 90.0},
+            "p2": {"date": "2026-08-05", "price": 98.0},
+            "p3": {"date": "2026-08-09", "price": 93.0},
+            "trigger": 98.0, "state": "formando", "direction": "compra",
+        },
+    }
+
+
+def test_section_surfaces_123_trigger_in_method_read(monkeypatch):
+    """GAP1: o gatilho 1-2-3 do 15m/4h aparece DENTRO da leitura do método (self-
+    contained), não só na seção do analista de mercado."""
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_pattern())
+    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
+    section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
+    assert "Gatilho 1-2-3 de compra (4h)" in section
+    assert "rompimento de 98.00" in section
+    assert "em formação" in section
+
+
+def test_pattern_line_venda_uses_perda_wording():
+    plan = {"pattern": {"trigger": 100.0, "state": "acionado", "direction": "venda"}}
+    line = em._pattern_line(plan, "15m")
+    assert "de venda (15m)" in line
+    assert "perda de 100.00" in line
+    assert "acionado" in line
+    # sem padrão → sem linha
+    assert em._pattern_line({"pattern": None}, "4h") is None
 
 
 def test_coverage_is_fail_open(monkeypatch):

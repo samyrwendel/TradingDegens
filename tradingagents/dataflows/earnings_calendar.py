@@ -121,6 +121,17 @@ def get_next_earnings(symbol: str, curr_date: str) -> dict | None:
     return result
 
 
+def _reported_earnings(symbol: str, curr_date: str) -> dict | None:
+    """Resultado reportado do âncora (Finnhub), fail-open → None. Seam p/ monkeypatch."""
+    try:
+        from .finnhub_earnings import get_reported_earnings
+
+        return get_reported_earnings(symbol, curr_date)
+    except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra a seção
+        logger.info("reported earnings unavailable for %s: %s", symbol, exc)
+        return None
+
+
 def _fmt_event(ev: dict) -> str:
     when = " (após o fechamento)" if ev.get("after_close") else ""
     est = ""
@@ -169,6 +180,18 @@ def build_earnings_section(
             )
         else:
             lines.append(f"- **{anchor_name}** (âncora): próximo resultado em {_fmt_event(ev_a)}.")
+
+    # RESULTADO já reportado do âncora (o CATALISADOR da leitura do Erick) — reportado
+    # × estimado + surpresa, via Finnhub. É o dado que define "bateu → liquidação de
+    # longs" vs "decepcionou → fraqueza". Ausente (sem chave/fonte) = honesto, sem
+    # inventar. Mostra o do próprio ativo quando ele é o âncora.
+    reported_symbol = symbol.upper() if symbol.upper() == anchor_name else anchor_name
+    reported_tag = "" if symbol.upper() == anchor_name else " (âncora)"
+    rep = _reported_earnings(reported_symbol, curr_date)
+    if rep is not None:
+        from .finnhub_earnings import format_reported_line
+
+        lines.append(f"- **{reported_symbol}**{reported_tag}: {format_reported_line(rep)}.")
 
     lines.append("")
     lines.append(

@@ -114,6 +114,9 @@ def _ema_read(chart: dict) -> dict | None:
 _TREND_PT = {"alta": "alta (médias empilhadas)", "baixa": "baixa (médias invertidas)",
              "transicao": "transição (médias entrelaçadas)"}
 
+# Rótulo compacto do frame para a linha do gatilho 1-2-3 (evita parênteses aninhados).
+_COMPACT_FRAME = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "diário", "1w": "semanal"}
+
 
 def _estado(acao: str, trend: str) -> str:
     """The single method state enum (item 6b): AGIR | AGUARDAR | CAIXA, computed ONCE
@@ -197,9 +200,48 @@ def _saida(plan: dict, read: dict) -> str:
             "liquidação, não por alvo fixo ('pega a maior parte e sai antes de reverter')")
 
 
+def _drop_nature_line(
+    symbol: str, curr_date: str, asset_type: str, mechanical_estado: str
+) -> str | None:
+    """Bloco 'natureza da queda' (liquidação × fraqueza). Fail-open → None. Seam
+    isolado para monkeypatch nos testes (espelha ``_fine_timing``)."""
+    try:
+        from tradingagents.agents.utils.drop_nature import build_drop_nature_line
+
+        return build_drop_nature_line(
+            symbol, curr_date, asset_type, mechanical_estado=mechanical_estado
+        )
+    except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra o relatório
+        logger.info("drop-nature enrichment failed for %s: %s", symbol, exc)
+        return None
+
+
+_PAT_DIR_PT = {"compra": "de compra", "venda": "de venda"}
+_PAT_STATE_PT = {
+    "acionado": "acionado",
+    "rompeu_retracou": "rompeu e retraçou (não confirmado)",
+    "formando": "em formação",
+}
+
+
+def _pattern_line(plan: dict | None, frame_label: str) -> str | None:
+    """Gatilho 1-2-3 do frame (o outro pilar do método além do recuo à EMA 8/21),
+    a partir do plano já computado. ``None`` quando não há padrão detectado."""
+    pat = (plan or {}).get("pattern")
+    if not pat:
+        return None
+    direction = _PAT_DIR_PT.get(pat.get("direction"), pat.get("direction") or "")
+    state = _PAT_STATE_PT.get(pat.get("state"), pat.get("state") or "")
+    trigger = pat.get("trigger")
+    verb = "perda de" if pat.get("direction") == "venda" else "rompimento de"
+    trig_txt = f"{verb} {_fmt(trigger)}" if trigger is not None else "gatilho sem nível"
+    return f"**Gatilho 1-2-3 {direction} ({frame_label}):** {trig_txt} — {state}."
+
+
 def _fine_timing(symbol: str, curr_date: str) -> str | None:
     """Linha de timing fino no 15m (cripto ou ação — a fonte keyless intradiária
-    existe pros dois agora). Fail-open -> None quando não há candle."""
+    existe pros dois agora): estado do setup + gatilho 1-2-3 do 15m, o timing do
+    método. Fail-open -> None quando não há candle."""
     try:
         plan = build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
     except Exception:  # noqa: BLE001
@@ -214,7 +256,13 @@ def _fine_timing(symbol: str, curr_date: str) -> str | None:
         "intradiario_indisponivel": None,
     }
     txt = labels.get(state)
-    return f"**Timing fino (15m):** {txt}" if txt else None
+    if not txt:
+        return None
+    line = f"**Timing fino (15m):** {txt}"
+    pat_line = _pattern_line(plan, "15m")
+    if pat_line:
+        line += "\n" + pat_line
+    return line
 
 
 def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> str:
@@ -252,7 +300,8 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
     decision = _decide(read)
     # ONE canonical state (item 6b); all sub-blocks below render from it.
     decision["estado"] = _estado(decision["acao"], read["trend"])
-    saida = _saida(build_actionable_plan_dict(symbol, curr_date, frame), read)
+    swing_plan = build_actionable_plan_dict(symbol, curr_date, frame)
+    saida = _saida(swing_plan, read)
     trend_pt = _TREND_PT.get(read["trend"], read["trend"])
     caixa = decision["estado"] == "CAIXA"
 
@@ -272,6 +321,12 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
         f"**Peso relativo do trade:** {decision['peso']} — {decision['peso_racional']}.",
     ]
 
+    # Gatilho 1-2-3 do frame de swing (o outro pilar do método além do recuo à EMA
+    # 8/21), agora DENTRO da leitura do método — não só na seção de mercado.
+    swing_pat = _pattern_line(swing_plan, _COMPACT_FRAME.get(frame, frame))
+    if swing_pat:
+        lines.append(swing_pat)
+
     fine = _fine_timing(symbol, curr_date)
     if fine:
         lines += ["", fine]
@@ -284,6 +339,13 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
     if caixa:
         lines.append("**Caixa é posição:** ficar de fora aqui é decisão ativa — "
                      "caixa elevado por escolha, aguardando o ponto.")
+
+    # Natureza da queda (liquidação de longs saudável × fraqueza) — a REGRA de
+    # leitura do método aplicada aos dados (regime de fundo + âncora que bateu +
+    # tipo da queda). Determinística e fail-open; só aparece quando há queda a ler.
+    drop = _drop_nature_line(symbol, curr_date, asset_type, decision["estado"])
+    if drop:
+        lines += ["", drop]
 
     return "\n".join(lines) + degraded_note
 
