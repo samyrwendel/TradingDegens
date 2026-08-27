@@ -154,6 +154,16 @@ class _Handler(BaseHTTPRequestHandler):
             val = (body.get(bkey) or "").strip()
             if val:
                 ov[okey] = val
+        # Modo AVANÇADO (task 027): provedor por-nível (RÁPIDO/PESADO) cross-provider.
+        # Os modelos reusam deep_think_llm/quick_think_llm acima; aqui vêm só os
+        # provedores de cada nível e o flag que liga o caminho avançado no runner.
+        if body.get("advanced"):
+            ov["advanced"] = True
+            for bkey, okey in (("deep_provider", "deep_provider"),
+                               ("quick_provider", "quick_provider")):
+                val = (body.get(bkey) or "").strip().lower()
+                if val:
+                    ov[okey] = val
         # Só o DONO logado destrava a chave do servidor: marca allow_server_key
         # SEMPRE (True pro dono, False pro público) — assim o runner recusa a
         # requisição pública sem chave própria e nunca cai na env do servidor.
@@ -612,6 +622,27 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "nada pra retomar (run não resumível ou desconhecida)"}, 404)
                 else:
                     self._send_json({"ok": True, **res})
+            elif path.startswith("/api/run/") and path.endswith("/escalate"):
+                # ESCALAR uma etapa que falhou com OUTRO LLM (task 027 parte B): re-roda
+                # SÓ ela reaproveitando o checkpoint (022). Owner-only — a escalação roda
+                # pela credencial do servidor; run BYOK não é retomável (indisponível
+                # honesto no runner). Corpo: {level: quick|deep, provider, model}.
+                if not self._owner_or_403():
+                    return
+                body = self._read_json_body()
+                run_id = path[len("/api/run/"):-len("/escalate")]
+                res = self.runner.escalate(
+                    run_id,
+                    (body.get("level") or "").strip().lower(),
+                    provider=(body.get("provider") or "").strip().lower(),
+                    model=(body.get("model") or "").strip(),
+                )
+                if res is None:
+                    self._send_json({"error": "execução desconhecida ou sem checkpoint"}, 404)
+                elif not res.get("ok"):
+                    self._send_json({"error": res.get("error"), "error_code": res.get("code")}, 409)
+                else:
+                    self._send_json(res)
             elif path == "/api/compare":
                 # Manual confront (task 018): meta-judge over two EXISTING runs of
                 # the same ticker (no pipeline re-run). Returns a ready snapshot.

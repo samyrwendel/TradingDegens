@@ -68,6 +68,35 @@ def _coerce_max_retries(value):
     return n
 
 
+# Levels the graph builds, in (config-prefix, model-key) form. deep = PESADO
+# (pesquisa/juiz), quick = RÁPIDO (analistas/debate/trader/risco) — o mapa que o
+# resto do motor já usa. Um único ponto de verdade pros dois níveis.
+_LEVELS = {"deep": "deep_think_llm", "quick": "quick_think_llm"}
+
+
+def resolve_level_specs(config: dict, byok_key: str | None = None) -> dict[str, dict]:
+    """Resolve ``(provider, model, base_url, api_key)`` para cada nível de LLM.
+
+    Cross-provider RÁPIDO/PESADO (task 027): cada nível pode rodar um provedor+modelo
+    DIFERENTE. Provedor por-nível ausente → cai no único ``llm_provider`` (modo
+    simples, inalterado). A chave BYOK pertence ao provedor-base e é repassada SÓ pro
+    nível cujo provedor casa com ele — nunca vaza um provedor no outro (uma chave
+    OpenAI jamais chega num client Anthropic). Retorna ``{"deep": {...}, "quick": {...}}``.
+    """
+    base_provider = (config.get("llm_provider") or "").lower()
+    base_url = config.get("backend_url")
+    specs: dict[str, dict] = {}
+    for prefix, model_key in _LEVELS.items():
+        provider = (config.get(f"{prefix}_think_provider") or base_provider).lower()
+        specs[prefix] = {
+            "provider": provider,
+            "model": config.get(model_key),
+            "base_url": config.get(f"{prefix}_backend_url") or base_url,
+            "api_key": byok_key if provider == base_provider else None,
+        }
+    return specs
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -104,24 +133,32 @@ class TradingAgentsGraph:
         os.makedirs(self.config["data_cache_dir"], exist_ok=True)
         os.makedirs(self.config["results_dir"], exist_ok=True)
 
-        # Initialize LLMs with provider-specific thinking configuration
-        llm_kwargs = self._get_provider_kwargs()
+        # Per-level provider/model/credential — cross-provider RÁPIDO/PESADO (task
+        # 027). Each level (deep = PESADO, quick = RÁPIDO) may run a DIFFERENT
+        # provider+model+endpoint, so a run can mix (ex.: Rápido=openai server-key,
+        # Pesado=claude-cli assinatura $0/token). Absent per-level provider falls back
+        # to the single ``llm_provider`` — simple mode is byte-for-byte unchanged.
+        specs = resolve_level_specs(self.config, getattr(self, "_llm_api_key", None))
+        deep_spec, quick_spec = specs["deep"], specs["quick"]
 
-        # Add callbacks to kwargs if provided (passed to LLM constructor)
+        # Callbacks (LLM/tool stats + per-step attribution) ride every level.
+        common: dict[str, Any] = {}
         if self.callbacks:
-            llm_kwargs["callbacks"] = self.callbacks
+            common["callbacks"] = self.callbacks
 
         deep_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["deep_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            provider=deep_spec["provider"],
+            model=deep_spec["model"],
+            base_url=deep_spec["base_url"],
+            **self._get_provider_kwargs(deep_spec["provider"], deep_spec["api_key"]),
+            **common,
         )
         quick_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["quick_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            provider=quick_spec["provider"],
+            model=quick_spec["model"],
+            base_url=quick_spec["base_url"],
+            **self._get_provider_kwargs(quick_spec["provider"], quick_spec["api_key"]),
+            **common,
         )
 
         self.deep_thinking_llm = deep_client.get_llm()
@@ -175,18 +212,24 @@ class TradingAgentsGraph:
             return config.pop("llm_api_key", None) or None
         return None
 
-    def _get_provider_kwargs(self) -> dict[str, Any]:
-        """Get provider-specific kwargs for LLM client creation."""
-        kwargs = {}
-        provider = self.config.get("llm_provider", "").lower()
+    def _get_provider_kwargs(
+        self, provider: str | None = None, api_key: str | None = None
+    ) -> dict[str, Any]:
+        """Provider-specific kwargs for ONE LLM level's client.
 
-        # BYOK: forward the per-run key (pulled out of config in __init__) as an
-        # explicit client kwarg. It takes precedence over the server env key and,
-        # for key-required providers, satisfies the "key present" check without one.
-        # getattr guards callers that build the graph without __init__ (tests).
-        llm_api_key = getattr(self, "_llm_api_key", None)
-        if llm_api_key:
-            kwargs["api_key"] = llm_api_key
+        ``provider`` defaults to the base ``llm_provider`` (simple mode: both levels
+        share it). In cross-provider mode each level passes its own provider so the
+        effort/thinking knob matches the model that actually runs that level.
+        ``api_key`` is the credential resolved for THIS level (BYOK for the base
+        provider, else ``None`` so the client falls back to the server env key)."""
+        kwargs: dict[str, Any] = {}
+        provider = (provider or self.config.get("llm_provider", "")).lower()
+
+        # BYOK: forward the level's resolved key as an explicit client kwarg. It
+        # takes precedence over the server env key and, for key-required providers,
+        # satisfies the "key present" check without one.
+        if api_key:
+            kwargs["api_key"] = api_key
 
         if provider == "google":
             thinking_level = self.config.get("google_thinking_level")
@@ -198,7 +241,9 @@ class TradingAgentsGraph:
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
 
-        elif provider == "anthropic":
+        elif provider in ("anthropic", "claude-cli", "claude_cli", "claude-subscription"):
+            # claude-cli reusa o AnthropicClient (via proxy), então o mesmo knob de
+            # effort vale — o Pesado pela assinatura respeita o effort configurado.
             effort = self.config.get("anthropic_effort")
             if effort:
                 kwargs["effort"] = effort

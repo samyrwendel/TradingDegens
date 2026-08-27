@@ -106,6 +106,30 @@
         </div>
       </div>
     </div>
+
+    <!-- Cross-provider RÁPIDO/PESADO (task 027): modo Avançado escolhe o provedor de
+         CADA nível separadamente (ex.: Rápido=openai + Pesado=claude-cli $0/token). Os
+         campos de modelo acima passam a valer por nível. Simples é o default. -->
+    <label class="cfg-adv-toggle" for="cfgAdvanced">
+      <input type="checkbox" id="cfgAdvanced" />
+      Avançado — provedor por nível (Rápido × Pesado, cross-provider)
+    </label>
+    <div class="config-grid cfg-advanced-grid hidden" id="cfgAdvancedGrid">
+      <div class="field">
+        <label for="cfgQuickProvider">Provedor do Rápido <span class="orig">(quick)</span></label>
+        <select id="cfgQuickProvider"></select>
+      </div>
+      <div class="field">
+        <label for="cfgDeepProvider">Provedor do Pesado <span class="orig">(deep)</span></label>
+        <select id="cfgDeepProvider"></select>
+      </div>
+    </div>
+    <p class="config-note cfg-advanced-note hidden" id="cfgAdvancedNote">
+      No modo avançado, o <b>Rápido</b> (analistas · debate · trader · risco) e o
+      <b>Pesado</b> (pesquisa · juiz) rodam provedores diferentes; os campos de modelo
+      acima valem por nível. Um nível sem credencial é barrado antes de rodar.
+    </p>
+
     <p class="config-note byok-note hidden" id="byokOptionalNote">
       Opcional: como dono, você já roda com a chave do servidor. Preencha só se quiser
       usar outra chave nesta sessão.

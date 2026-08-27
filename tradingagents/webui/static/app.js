@@ -71,6 +71,13 @@ function llmRequestParts() {
   if (c.deepModel) body.deep_think_llm = c.deepModel;
   if (c.quickModel) body.quick_think_llm = c.quickModel;
   if (c.baseUrl) body.backend_url = c.baseUrl;
+  // Cross-provider RÁPIDO/PESADO (task 027): no modo avançado, cada nível manda o
+  // seu provedor; os modelos por nível reusam deep_think_llm/quick_think_llm acima.
+  if (c.advanced) {
+    body.advanced = true;
+    if (c.quickProvider) body.quick_provider = c.quickProvider;
+    if (c.deepProvider) body.deep_provider = c.deepProvider;
+  }
   return { headers, body };
 }
 
@@ -579,7 +586,7 @@ function auditFooterHtml(audit, asOfPrice) {
 // Erros de chave/crédito (no_credit/invalid_key) ganham um botão que abre o painel
 // de Configurações; os demais só a mensagem + dica de tentar de novo.
 const _CFG_ERROR_CODES = new Set(["no_credit", "invalid_key"]);
-function errorCardHtml(message, code) {
+function errorCardHtml(message, code, runId) {
   const msg = message || "Falha ao rodar a análise.";
   const wantsConfig = _CFG_ERROR_CODES.has(code);
   const action = wantsConfig
@@ -588,14 +595,73 @@ function errorCardHtml(message, code) {
   return `<div class="error-card ${escapeHtml(code || "error")}">` +
     `<div class="err-title">⚠️ Não deu pra concluir</div>` +
     `<div class="err-msg">${escapeHtml(msg)}</div>` +
-    `<div class="err-foot">${action}</div></div>`;
+    `<div class="err-foot">${action}</div>` +
+    escalateBoxHtml(runId) +
+    `</div>`;
 }
+
+// Escalonamento de etapa (task 027 parte B): SÓ o dono vê. Re-roda a etapa que
+// falhou com outro provedor+modelo, reaproveitando o checkpoint (022). O servidor
+// barra se a run não é retomável (BYOK) — a mensagem honesta aparece aqui.
+function escalateBoxHtml(runId) {
+  if (!_isOwner || !runId) return "";
+  const provs = ((_llmMeta && _llmMeta.providers) || [])
+    .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`).join("");
+  return `<div class="err-escalate" data-run-id="${escapeHtml(runId)}">
+    <div class="err-escalate-title">Escalar uma etapa com outro LLM</div>
+    <div class="err-escalate-row">
+      <select data-esc="level" aria-label="Nível a escalar">
+        <option value="quick">Rápido (analistas · debate)</option>
+        <option value="deep">Pesado (pesquisa · juiz)</option>
+      </select>
+      <select data-esc="provider" aria-label="Provedor">${provs}</select>
+      <input data-esc="model" type="text" autocomplete="off" placeholder="modelo (opcional)" />
+      <button type="button" class="err-action" data-act="escalate">Escalar etapa</button>
+    </div>
+    <span class="cfg-status err-escalate-status" data-esc="status"></span>
+  </div>`;
+}
+
 function bindErrorCard(container) {
   const btn = container && container.querySelector('[data-act="open-config"]');
   if (btn) btn.addEventListener("click", () => {
     $("configPanel").classList.remove("hidden");
     scrollToOpen($("configPanel"));
   });
+  const esc = container && container.querySelector('[data-act="escalate"]');
+  if (esc) esc.addEventListener("click", () => escalateStep(container));
+}
+
+// POST /api/run/<id>/escalate: re-roda SÓ a etapa escolhida com o outro LLM. O
+// servidor é owner-gated e recusa run não-resumível (BYOK) com mensagem honesta.
+async function escalateStep(container) {
+  const box = container.querySelector(".err-escalate");
+  if (!box) return;
+  const runId = box.dataset.runId;
+  const level = box.querySelector('[data-esc="level"]').value;
+  const provider = box.querySelector('[data-esc="provider"]').value;
+  const model = box.querySelector('[data-esc="model"]').value.trim();
+  const status = box.querySelector('[data-esc="status"]');
+  status.textContent = "escalando…"; status.className = "cfg-status err-escalate-status";
+  try {
+    const res = await fetch("/api/run/" + encodeURIComponent(runId) + "/escalate", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ level, provider, model }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      status.textContent = "re-rodando a etapa (reaproveita o que já rodou)…";
+      status.classList.add("ok");
+      watchRun(runId);
+    } else {
+      status.textContent = (data && data.error) || "não deu pra escalar";
+      status.classList.add("err");
+    }
+  } catch (e) {
+    status.textContent = "erro de rede ao escalar";
+    status.classList.add("err");
+  }
 }
 
 function renderResult(snap) {
@@ -667,7 +733,7 @@ function renderResult(snap) {
     if (railTheses) railTheses.classList.add("hidden");
     // Banner de erro HUMANO (sem stack, sem chave): a mensagem acionável do backend
     // + botão pra abrir ⚙️ Configurações quando é problema de chave/crédito.
-    $("sections").innerHTML = errorCardHtml(snap.error, snap.error_code);
+    $("sections").innerHTML = errorCardHtml(snap.error, snap.error_code, snap.run_id);
     bindErrorCard($("sections"));
     mountAskBox($("askSingle"), "");  // run com erro não tem dado pra ancorar pergunta
     return;
@@ -2642,9 +2708,40 @@ function renderConfigPanel() {
   $("cfgDeep").value = _llmCfg.deepModel || "";
   $("cfgBaseUrl").value = _llmCfg.baseUrl || "";
   syncProviderFields(cur);
+  renderLevelProviders(list, cur);
   renderOwnerBox();
   renderSubscriptionBox();
   updateConfigBadge();
+}
+
+// Cross-provider RÁPIDO/PESADO (task 027): popula os selects de provedor por nível
+// (Rápido/Pesado) com a MESMA lista visível do provedor simples, e reflete o estado
+// avançado salvo. Cada nível default = o provedor simples atual.
+function renderLevelProviders(list, cur) {
+  const qs = $("cfgQuickProvider");
+  const ds = $("cfgDeepProvider");
+  const adv = $("cfgAdvanced");
+  if (!qs || !ds || !adv) return;
+  const opts = (selected) => list.map((p) =>
+    `<option value="${escapeHtml(p.id)}"${p.id === selected ? " selected" : ""}>${escapeHtml(p.label)}</option>`
+  ).join("");
+  let q = _llmCfg.quickProvider || cur;
+  let d = _llmCfg.deepProvider || cur;
+  if (!list.some((p) => p.id === q)) q = cur;
+  if (!list.some((p) => p.id === d)) d = cur;
+  qs.innerHTML = opts(q);
+  ds.innerHTML = opts(d);
+  adv.checked = !!_llmCfg.advanced;
+  applyAdvancedVisibility();
+}
+
+// Mostra/esconde a grade avançada conforme o toggle.
+function applyAdvancedVisibility() {
+  const on = $("cfgAdvanced") && $("cfgAdvanced").checked;
+  ["cfgAdvancedGrid", "cfgAdvancedNote"].forEach((id) => {
+    const el = $(id);
+    if (el) el.classList.toggle("hidden", !on);
+  });
 }
 
 // Conectar assinatura (task 017; multi-provedor 020): a seção só aparece pro DONO
@@ -2991,12 +3088,17 @@ async function ownerLogout() {
 function _readConfigForm() {
   const provId = $("cfgProvider").value;
   const p = _providerMeta(provId);
+  const advanced = !!($("cfgAdvanced") && $("cfgAdvanced").checked);
   return {
     provider: provId,
     apiKey: $("cfgKey").value.trim(),
     quickModel: $("cfgQuick").value.trim(),
     deepModel: $("cfgDeep").value.trim(),
     baseUrl: (p && p.needs_base_url) ? $("cfgBaseUrl").value.trim() : "",
+    // Cross-provider RÁPIDO/PESADO (task 027): provedor por nível no modo avançado.
+    advanced,
+    quickProvider: advanced && $("cfgQuickProvider") ? $("cfgQuickProvider").value : "",
+    deepProvider: advanced && $("cfgDeepProvider") ? $("cfgDeepProvider").value : "",
   };
 }
 
@@ -3030,6 +3132,9 @@ function bindConfig() {
     fillModelLists([]); $("cfgQuick").value = ""; $("cfgDeep").value = "";
     refreshModels();
   });
+  // Cross-provider (task 027): o toggle Avançado mostra os provedores por nível.
+  const adv = $("cfgAdvanced");
+  if (adv) adv.addEventListener("change", () => { applyAdvancedVisibility(); setCfgStatus(""); });
   // Ao DIGITAR/COLAR a chave: testa e puxa os modelos automaticamente (debounce).
   $("cfgKey").addEventListener("input", scheduleModels);
   $("cfgKey").addEventListener("paste", () => setTimeout(refreshModels, 0));

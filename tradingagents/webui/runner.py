@@ -109,6 +109,60 @@ def _owner_only_blocked(config: dict, overrides: dict) -> bool:
     )
 
 
+# Rótulos pt-BR dos dois níveis de LLM (cross-provider, task 027).
+_LEVEL_PT = {"deep": "Modelo Pesado", "quick": "Modelo Rápido"}
+
+
+def levels_credential_error(config: dict, overrides: dict) -> tuple[str | None, str | None]:
+    """Valida a credencial de CADA nível (RÁPIDO/PESADO) ANTES de rodar.
+
+    Cross-provider (task 027): cada nível pode apontar pra um provedor diferente e
+    cada um precisa da SUA credencial — um nível apontando pra provedor sem
+    credencial vira erro claro ANTES de rodar (não cai na env, não roda pela metade).
+    Retorna ``(code, message)`` do primeiro nível bloqueado, ou ``(None, None)``.
+
+    Regra por nível: owner-only (claude-cli/assinatura) exige dono
+    (``allow_server_key``); provedor com env-var de chave exige BYOK do provedor-base
+    OU a env do servidor (só dono). Provedor sem chave (ollama/bedrock) passa.
+    Complementa ``_owner_only_blocked`` (que só olha o ``llm_provider`` base) cobrindo
+    o caso de um NÍVEL owner-only enquanto o outro não é.
+    """
+    from tradingagents.llm_clients.api_key_env import get_api_key_env
+    from tradingagents.graph.trading_graph import resolve_level_specs
+
+    specs = resolve_level_specs(config, config.get("llm_api_key"))
+    allow_server_key = (overrides or {}).get("allow_server_key")
+
+    # owner-only primeiro (mais restritivo): a assinatura é do dono — exige dono
+    # explícito, mesma regra do ``_owner_only_blocked`` (mas por-nível, cobrindo o
+    # caso de UM nível ser claude-cli enquanto o outro não).
+    for lvl in ("deep", "quick"):
+        if specs[lvl]["provider"] in _OWNER_ONLY_PROVIDERS and allow_server_key is not True:
+            return _OWNER_ONLY_CODE, f"{_LEVEL_PT[lvl]}: {_OWNER_ONLY_MESSAGE}"
+
+    # Checagem proativa "sem credencial ANTES de rodar" (env-key): só dispara pro
+    # DONO (``allow_server_key is True``), que roda pela env do servidor — aí um nível
+    # sem chave erra antes em vez de cair meio-rodado. O caminho público já é barrado
+    # pelo gate de chave; o interno/confiável (flag ausente) cai na env como antes.
+    if allow_server_key is True:
+        for lvl in ("deep", "quick"):
+            provider = specs[lvl]["provider"]
+            if provider in _OWNER_ONLY_PROVIDERS:
+                continue  # a auth é do proxy da assinatura, sem env-key
+            env_var = get_api_key_env(provider)
+            if not env_var:
+                continue  # provedor sem chave (ollama/bedrock/openai_compatible keyless)
+            has_byok = bool(specs[lvl]["api_key"])
+            has_server = bool(os.environ.get(env_var))
+            if not (has_byok or has_server):
+                return (
+                    NEED_KEY_CODE,
+                    f"{_LEVEL_PT[lvl]} ({provider}): sem credencial para este nível — "
+                    "configure a chave do provedor ou entre como dono.",
+                )
+    return None, None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +258,29 @@ def apply_llm_overrides(base_config: dict[str, Any],
         # Consumida pelo TradingAgentsGraph (que a tira do config antes do global)
         # e pelo _answer_llm; jamais entra no record persistido.
         config["llm_api_key"] = ov["api_key"]
+
+    # Modo AVANÇADO (task 027): provedor+modelo POR-NÍVEL, cross-provider. RÁPIDO
+    # (quick) e PESADO (deep) podem rodar provedores diferentes (ex.: Rápido=openai
+    # server-key, Pesado=claude-cli assinatura $0/token). O provedor-base vira o do
+    # PESADO (a chave BYOK, se houver, pertence a ele; o outro nível resolve a sua).
+    if ov.get("advanced"):
+        dp = (ov.get("deep_provider") or "").strip().lower()
+        qp = (ov.get("quick_provider") or "").strip().lower()
+        if dp:
+            config["deep_think_provider"] = dp
+            config["llm_provider"] = dp
+        if qp:
+            config["quick_think_provider"] = qp
+        # Modelos por-nível já lidos acima (deep_model/quick_model). Sem modelo
+        # explícito num nível → puxa o padrão do catálogo daquele provedor pra casar.
+        if dp:
+            d_def, _ = _provider_default_models(dp)
+            if not ov.get("deep_model") and d_def:
+                config["deep_think_llm"] = d_def
+        if qp:
+            _, q_def = _provider_default_models(qp)
+            if not ov.get("quick_model") and q_def:
+                config["quick_think_llm"] = q_def
     return config
 
 
@@ -747,8 +824,15 @@ class AnalysisRunner:
         run.status = final_status
         # Terminal reached in-process → drop the resume descriptor so the next boot
         # doesn't re-run a finished analysis. (A kill before here leaves it behind,
-        # which is exactly what makes the run recoverable.) PAUSAR é a exceção: guarda.
-        if not (final_status == "cancelled" and run.pause_keep_resume):
+        # which is exactly what makes the run recoverable.) Exceções que GUARDAM o
+        # descritor: PAUSAR (retoma do último nó) e ERRO numa run RESUMÍVEL — pra o dono
+        # ESCALAR a etapa que falhou com outro LLM (task 027), reaproveitando o
+        # checkpoint. O boot não re-roda a errada: ``resume_interrupted`` vê o record
+        # terminal e limpa o descritor.
+        keep = (final_status == "cancelled" and run.pause_keep_resume) or (
+            final_status == "error" and self._run_is_resumable(run)
+        )
+        if not keep:
             self.active.remove(run.run_id)
 
     def _execute(self, run: _Run) -> str:
@@ -787,6 +871,16 @@ class AnalysisRunner:
         if not config.get("llm_api_key") and run.overrides.get("allow_server_key") is False:
             run.error = NEED_KEY_MESSAGE
             run.error_code = NEED_KEY_CODE
+            run.result = None
+            run.finished_at = time.time()
+            run.finished_stamp = timeutil.stamp()
+            return "error"
+        # Cross-provider (027): valida a credencial de CADA nível (RÁPIDO/PESADO)
+        # ANTES de rodar — um nível sem credencial erra aqui, não roda pela metade.
+        lvl_code, lvl_msg = levels_credential_error(config, run.overrides)
+        if lvl_code:
+            run.error = lvl_msg
+            run.error_code = lvl_code
             run.result = None
             run.finished_at = time.time()
             run.finished_stamp = timeutil.stamp()
@@ -1170,6 +1264,54 @@ class AnalysisRunner:
             return None
         self._reenqueue(desc)
         return {"run_id": run_id, "resuming": True}
+
+    def escalate(self, run_id: str, level: str,
+                 provider: str | None = None, model: str | None = None) -> dict[str, Any] | None:
+        """ESCALAR uma etapa que falhou/degradou com OUTRO LLM (task 027 parte B).
+
+        Re-roda SÓ a etapa incompleta reaproveitando o checkpoint (022): o thread_id
+        é ticker+data+forma-do-grafo (NÃO inclui modelo), então trocar o provedor+
+        modelo do nível mantém os nós já concluídos e re-executa só o que faltou com o
+        LLM escalado. ``level`` ∈ {``quick``, ``deep``}: quick = analistas/debate/
+        trader/risco, deep = pesquisa/juiz.
+
+        Só uma run RESUMÍVEL (dono/servidor, checkpoint ligado) pode escalar — uma run
+        BYOK não é retomável (a chave não persiste) e retorna indisponível HONESTO.
+        ``None`` só quando não existe descritor algum pro id. Idempotente: se já está
+        rodando, é no-op."""
+        if level not in ("quick", "deep"):
+            return {"ok": False, "code": "bad_level",
+                    "error": "nível inválido para escalonamento (use 'quick' ou 'deep')."}
+        with self._lock:
+            cur = self._runs.get(run_id)
+        if cur is not None and getattr(cur, "status", "") == "running":
+            return {"ok": True, "run_id": run_id, "escalating": True}  # já rodando: no-op
+        desc = self.active.get(run_id)
+        if not desc:
+            return None
+        if not desc.get("resumable"):
+            return {"ok": False, "code": "not_resumable",
+                    "error": ("Escalonamento indisponível: esta análise não é retomável "
+                              "(rodou com chave própria, que não fica salva). Rode de novo.")}
+        # Aplica o override do nível escalado por cima do descritor (modo avançado).
+        ov = dict(desc.get("overrides") or {})
+        ov["allow_server_key"] = True
+        ov["advanced"] = True
+        prov = (provider or "").strip().lower()
+        if prov:
+            ov[f"{level}_provider"] = prov
+        if (model or "").strip():
+            ov[f"{level}_model"] = model.strip()
+        if not ov.get(f"{level}_provider") and not ov.get(f"{level}_model"):
+            return {"ok": False, "code": "no_target",
+                    "error": "informe o provedor e/ou o modelo do LLM para escalar."}
+        desc = dict(desc)
+        desc["overrides"] = ov
+        self.active.put(run_id, desc)
+        self._reenqueue(desc)
+        return {"ok": True, "run_id": run_id, "escalating": True,
+                "level": level, "provider": ov.get(f"{level}_provider"),
+                "model": ov.get(f"{level}_model")}
 
     # ----------------------------------------------------- compare (Fase 3) ----
     def start_compare(self, ticker: str, date: str,

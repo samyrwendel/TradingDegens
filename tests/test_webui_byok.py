@@ -219,11 +219,14 @@ def test_pop_llm_api_key_keeps_key_out_of_global_config():
 
 
 def test_get_provider_kwargs_forwards_user_key():
+    # Cross-provider (task 027): a chave BYOK é resolvida por-nível (via
+    # resolve_level_specs) e PASSADA explícita ao helper — nunca lida de dentro,
+    # pra uma chave de um provedor jamais vazar no client de outro. O contrato BYOK
+    # (a chave chega ao client) segue coberto ponta-a-ponta pelos testes de run.
     from tradingagents.graph.trading_graph import TradingAgentsGraph
     g = object.__new__(TradingAgentsGraph)
     g.config = {"llm_provider": "openai"}
-    g._llm_api_key = "sk-USER"
-    kwargs = g._get_provider_kwargs()
+    kwargs = g._get_provider_kwargs("openai", "sk-USER")
     assert kwargs["api_key"] == "sk-USER"
 
 

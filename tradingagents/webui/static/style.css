@@ -1087,6 +1087,23 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 }
 .config-grid .field select:focus,
 .config-grid .field input:focus { outline: none; border-color: var(--accent); }
+/* Cross-provider RÁPIDO/PESADO (task 027): toggle Avançado + grade por nível. */
+.cfg-adv-toggle {
+  display: flex; align-items: center; gap: 8px; margin: 12px 0 8px;
+  color: var(--text); font-size: var(--fs-14); cursor: pointer; user-select: none;
+}
+.cfg-adv-toggle input { accent-color: var(--accent); }
+.cfg-advanced-grid { margin-top: 4px; }
+/* Escalonamento de etapa no card de erro (task 027 parte B) — só o dono vê. */
+.err-escalate { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.err-escalate-title { font-size: var(--fs-13); color: var(--muted); margin-bottom: 8px; }
+.err-escalate-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.err-escalate-row select,
+.err-escalate-row input {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 7px 10px; font-size: var(--fs-13); font-family: var(--font);
+}
+.err-escalate-status { display: inline-block; margin-top: 8px; }
 .config-actions {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px;
 }
