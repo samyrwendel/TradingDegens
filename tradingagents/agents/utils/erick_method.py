@@ -118,23 +118,36 @@ _TREND_PT = {"alta": "alta (médias empilhadas)", "baixa": "baixa (médias inver
 _COMPACT_FRAME = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "diário", "1w": "semanal"}
 
 
-def _estado(acao: str, trend: str) -> str:
+def _estado(acao: str, trend: str, drop_cls: str | None = None) -> str:
     """The single method state enum (item 6b): AGIR | AGUARDAR | CAIXA, computed ONCE
     so every sub-block renders from it (no 'Veredito AGUARDAR' vs 'Estado AGIR').
 
+    A natureza da queda (``drop_cls``) é a FONTE DE VERDADE quando presente:
+    * ``fraqueza`` → CAIXA (estrutura rompida veta, mesmo um AGIR mecânico);
+    * ``liquidacao_saudavel`` numa tendência de "baixa" → AGUARDAR (a inversão das
+      EMAs curtas é o SINTOMA da liquidação, não um downtrend a ler como CAIXA).
+
+    ``drop_cls=None`` (default) reproduz a mecânica de hoje BYTE-A-BYTE:
     * AGIR — there is an entry at the pullback now;
     * CAIXA — downtrend / no setup: cash IS the active position (filtro do método);
     * AGUARDAR — a valid pullback/breakout is still forming.
     """
+    if drop_cls == "fraqueza":
+        return "CAIXA"
     if acao == "AGIR":
         return "AGIR"
     if trend == "baixa":
-        return "CAIXA"
+        return "AGUARDAR" if drop_cls == "liquidacao_saudavel" else "CAIXA"
     return "AGUARDAR"
 
 
-def _decide(r: dict) -> dict:
+def _decide(r: dict, drop_cls: str | None = None) -> dict:
     """Do read de EMA para o veredito do método: agir/aguardar, entrada e PESO.
+
+    A natureza da queda (``drop_cls``) manda ANTES da pilha de médias: ``fraqueza``
+    zera a entrada (caixa) e ``liquidacao_saudavel`` numa tendência de baixa/transição
+    lê o recuo à média que sobe como comprável (posição inicial no toque, aguardar o
+    toque senão). ``drop_cls=None`` (default) reproduz a mecânica de hoje BYTE-A-BYTE.
 
     Peso relativo sempre FRACIONADO (o método nunca entra 100% de uma vez) e
     responde em termos relativos — cheia / meia / inicial / caixa — não em %
@@ -142,6 +155,30 @@ def _decide(r: dict) -> dict:
     """
     trend, at_media, extended, below = r["trend"], r["at_media"], r["extended"], r["below"]
     e8, e21 = r["e8"], r["e21"]
+
+    # Natureza da queda ANTES das médias (fonte única). Nunca rebaixa uma leitura de
+    # alta já válida — só reenquadra a baixa/transição da liquidação e veta a fraqueza.
+    if drop_cls == "fraqueza":
+        return {
+            "acao": "AGUARDAR",
+            "entrada": f"estrutura rompida (fraqueza) — sem entrada; caixa até um novo setup à média (EMA 21 {_fmt(e21)})",
+            "peso": "caixa",
+            "peso_racional": "filtro do método: estrutura rompida, sem entrada contra o gráfico quebrado — caixa é a posição",
+        }
+    if drop_cls == "liquidacao_saudavel" and trend in ("baixa", "transicao"):
+        if at_media:
+            return {
+                "acao": "AGIR",
+                "entrada": f"liquidação de longs — recuo comprável na média (EMA 8 {_fmt(e8)} · EMA 21 {_fmt(e21)}); é o ponto de entrada",
+                "peso": "posição inicial",
+                "peso_racional": "recuo comprável numa liquidação saudável: fração inicial na média que sobe, com espaço para somar — nunca 100% de uma vez",
+            }
+        return {
+            "acao": "AGUARDAR",
+            "entrada": f"liquidação de longs — aguardar o toque na EMA 21 ({_fmt(e21)}) que sobe antes de montar (recuo comprável, ainda sem toque)",
+            "peso": "caixa",
+            "peso_racional": "recuo comprável, mas o preço ainda não tocou a média — caixa até o ponto de entrada",
+        }
 
     if trend == "alta":
         if at_media:
@@ -200,20 +237,56 @@ def _saida(plan: dict, read: dict) -> str:
             "liquidação, não por alvo fixo ('pega a maior parte e sai antes de reverter')")
 
 
-def _drop_nature_line(
-    symbol: str, curr_date: str, asset_type: str, mechanical_estado: str
-) -> str | None:
-    """Bloco 'natureza da queda' (liquidação × fraqueza). Fail-open → None. Seam
-    isolado para monkeypatch nos testes (espelha ``_fine_timing``)."""
+def _drop_nature(symbol: str, curr_date: str, asset_type: str) -> dict | None:
+    """Classifica a natureza da queda ANTES da decisão (fonte única do módulo).
+    Fail-open → None. Seam isolado para monkeypatch nos testes."""
     try:
-        from tradingagents.agents.utils.drop_nature import build_drop_nature_line
+        from tradingagents.agents.utils.drop_nature import classify_drop_nature_safe
 
-        return build_drop_nature_line(
-            symbol, curr_date, asset_type, mechanical_estado=mechanical_estado
-        )
+        return classify_drop_nature_safe(symbol, curr_date, asset_type)
     except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra o relatório
-        logger.info("drop-nature enrichment failed for %s: %s", symbol, exc)
+        logger.info("drop-nature classify failed for %s: %s", symbol, exc)
         return None
+
+
+def _render_drop_nature(res: dict | None, estado: str | None) -> str | None:
+    """Texto da 'natureza da queda' a partir da classificação JÁ FEITA (DEPOIS que o
+    Estado já derivou dela). Sem re-leitura. Fail-open → None. Seam de monkeypatch."""
+    try:
+        from tradingagents.agents.utils.drop_nature import render_drop_nature_line
+
+        return render_drop_nature_line(res, estado)
+    except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra o relatório
+        logger.info("drop-nature render failed: %s", exc)
+        return None
+
+
+def _sell_breakdown_15m(symbol: str, curr_date: str) -> bool:
+    """True quando o 15m tem um 1-2-3 de VENDA acionado — o sinal mais rápido de que
+    o recuo virou ruptura (mitigação 1 do caveat). Fail-open → False: na dúvida NÃO
+    veta (não inventa um rompimento que a fonte não confirma)."""
+    try:
+        plan = build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
+    except Exception:  # noqa: BLE001
+        return False
+    pat = (plan or {}).get("pattern") or {}
+    return pat.get("direction") == "venda" and pat.get("state") == "acionado"
+
+
+def _liquidation_veto(decision: dict, drop_cls: str | None, sell_15m: bool) -> tuple[dict, bool]:
+    """Mitigação 1: um 1-2-3 de venda no 15m impede a liquidação de promover a leitura
+    além de AGUARDAR (não vira AGIR). Devolve ``(decision, vetado)`` — não muta a
+    entrada. Só age em ``liquidacao_saudavel`` que ia AGIR; o resto passa intacto."""
+    if drop_cls == "liquidacao_saudavel" and decision.get("acao") == "AGIR" and sell_15m:
+        capped = {
+            **decision,
+            "acao": "AGUARDAR",
+            "peso": "caixa",
+            "peso_racional": "1-2-3 de venda no 15m — o recuo virou ruptura; "
+                             "a liquidação não promove a entrada além de aguardar",
+        }
+        return capped, True
+    return decision, False
 
 
 _PAT_DIR_PT = {"compra": "de compra", "venda": "de venda"}
@@ -265,13 +338,30 @@ def _fine_timing(symbol: str, curr_date: str) -> str | None:
     return line
 
 
-def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> str:
+def _estado_note(drop_cls: str | None, estado: str) -> str:
+    """Nota curta que explica a DERIVAÇÃO do Estado a partir da natureza da queda
+    (quando ela mandou), pra ler de cima pra baixo dar a mesma conclusão do enum."""
+    if drop_cls == "fraqueza":
+        return ("Deriva da natureza da queda (fraqueza: estrutura rompida) — "
+                "não da pilha curta de médias.")
+    if drop_cls == "liquidacao_saudavel" and estado in ("AGIR", "AGUARDAR"):
+        return ("Deriva da natureza da queda (liquidação saudável: recuo comprável) — "
+                "não da pilha curta de médias.")
+    return ""
+
+
+def build_erick_method_section(
+    symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
+) -> str:
     """Seção markdown pt-BR do método Erick — determinística e ancorada em dado.
 
     O método lê no 4h (frame de swing) + timing fino no 15m para QUALQUER ativo —
     cripto no candle da exchange, ação no intradiário keyless do yfinance. Se a
     fonte não tem candle pro símbolo/data, cai no diário e declara o degradê. Nunca
     inventa nível: sem candle, diz que a leitura intradiária está indisponível.
+
+    ``drop`` é a classificação da natureza da queda JÁ FEITA pelo analista (fonte
+    única, compartilhada com o juiz). ``None`` → classifica aqui uma vez.
     """
     frame = _SWING_FRAME
     chart = build_price_chart(symbol, curr_date, timeframe=frame)
@@ -297,13 +387,43 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
             f"Sem candle suficiente para a leitura de EMA neste frame — nada inventado."
         )
 
-    decision = _decide(read)
-    # ONE canonical state (item 6b); all sub-blocks below render from it.
-    decision["estado"] = _estado(decision["acao"], read["trend"])
+    # Natureza da queda classificada ANTES da decisão (fonte única). Se o analista
+    # não passou a classificação, classifica aqui — uma vez.
+    if drop is None:
+        drop = _drop_nature(symbol, curr_date, asset_type)
+    drop_cls = (drop or {}).get("classification")
+
+    decision = _decide(read, drop_cls)
+    # Mitigação 1: veto no timing fino — 1-2-3 de venda no 15m trava a promoção da
+    # liquidação além de AGUARDAR (o recuo virou ruptura). Fail-open → não veta.
+    sell_15m = _sell_breakdown_15m(symbol, curr_date)
+    decision, vetoed = _liquidation_veto(decision, drop_cls, sell_15m)
+    # ONE canonical state (item 6b), agora derivado da natureza da queda.
+    decision["estado"] = _estado(decision["acao"], read["trend"], drop_cls)
+
+    # Mitigação 2: LOG da taxa de flip — quando a liquidação promove o Estado que a
+    # mecânica leria como CAIXA (medir num backtest se o gate filtra algo).
+    mech = _decide(read, None)
+    mech_estado = _estado(mech["acao"], read["trend"], None)
+    if drop_cls == "liquidacao_saudavel" and mech_estado == "CAIXA" and decision["estado"] != "CAIXA":
+        logger.info(
+            "erick-drop-flip %s %s: estado %s->%s por liquidacao_saudavel (veto15m=%s)",
+            symbol, curr_date, mech_estado, decision["estado"], vetoed,
+        )
+
     swing_plan = build_actionable_plan_dict(symbol, curr_date, frame)
     saida = _saida(swing_plan, read)
     trend_pt = _TREND_PT.get(read["trend"], read["trend"])
     caixa = decision["estado"] == "CAIXA"
+    # Texto da natureza da queda a partir da classificação já feita (sem re-leitura):
+    # o Estado já veio dela, o texto só explica de onde. Vem ANTES do Estado abaixo.
+    drop_line = _render_drop_nature(drop, decision["estado"])
+    estado_note = _estado_note(drop_cls, decision["estado"])
+    estado_txt = ("**Estado (Método Erick):** "
+                  f"{decision['estado']} — estado único do método neste run; a "
+                  "leitura abaixo deriva dele (sem veredito paralelo).")
+    if estado_note:
+        estado_txt += " " + estado_note
 
     lines = [
         head,
@@ -313,9 +433,15 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
         "",
         f"**Regime (médias):** {trend_pt} — preço {_fmt(read['close'])}, "
         f"EMA 8 {_fmt(read['e8'])} · EMA 21 {_fmt(read['e21'])} · EMA 50 {_fmt(read['e50'])}.",
+    ]
+    # 🩸 Natureza da queda ANTES do Estado: ler de cima pra baixo dá a MESMA conclusão
+    # que o enum (a classificação é a fonte de onde o Estado veio, não uma re-leitura
+    # anexada no fim que o contradiz).
+    if drop_line:
+        lines += ["", drop_line]
+    lines += [
         "",
-        f"**Estado (Método Erick):** {decision['estado']} — estado único do método "
-        "neste run; a leitura abaixo deriva dele (sem veredito paralelo).",
+        estado_txt,
         f"**Entrada (recuo à média):** {decision['entrada']}.",
         f"**Saída (antes da reversão):** {saida}.",
         f"**Peso relativo do trade:** {decision['peso']} — {decision['peso_racional']}.",
@@ -340,28 +466,22 @@ def build_erick_method_section(symbol: str, curr_date: str, asset_type: str) -> 
         lines.append("**Caixa é posição:** ficar de fora aqui é decisão ativa — "
                      "caixa elevado por escolha, aguardando o ponto.")
 
-    # Natureza da queda (liquidação de longs saudável × fraqueza) — a REGRA de
-    # leitura do método aplicada aos dados (regime de fundo + âncora que bateu +
-    # tipo da queda). Determinística e fail-open; só aparece quando há queda a ler.
-    drop = _drop_nature_line(symbol, curr_date, asset_type, decision["estado"])
-    if drop:
-        lines += ["", drop]
-
     return "\n".join(lines) + degraded_note
 
 
 def ensure_erick_method_coverage(
-    report: str, symbol: str, curr_date: str, asset_type: str
+    report: str, symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
 ) -> str:
     """Anexa a seção determinística do método ao relatório do analista `erick`.
 
     Espelha os outros guardas de cobertura (multi-timeframe, derivativos,
     price-structure): a prosa do LLM molda; esta seção garante o núcleo
-    operável (timeframe, recuo à média, saída, peso). Fail-open: qualquer erro
-    devolve o relatório intacto.
+    operável (timeframe, recuo à média, saída, peso). ``drop`` propaga a
+    classificação já feita (fonte única). Fail-open: qualquer erro devolve o
+    relatório intacto.
     """
     try:
-        section = build_erick_method_section(symbol, curr_date, asset_type)
+        section = build_erick_method_section(symbol, curr_date, asset_type, drop=drop)
     except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra o relatório
         logger.warning("erick-method coverage failed for %s: %s", symbol, exc)
         return report

@@ -382,6 +382,9 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         "fundamentals_report": final_state.get("fundamentals_report", "") or "",
         # On-demand "Modo Erick": empty string unless the erick analyst ran.
         "erick_report": final_state.get("erick_report", "") or "",
+        # Natureza da queda classificada (fonte única — o meta-juiz/UI leem o CAMPO,
+        # não a prosa). {} num run Padrão ou quando a classificação ficou indisponível.
+        "drop_nature": final_state.get("erick_drop_nature") or {},
         # Filled by the runner for crypto from the engine's deterministic
         # derivatives data path (named source, "unavailable" not fabricated).
         "derivatives_report": "",
@@ -1111,6 +1114,12 @@ class AnalysisRunner:
             res = rec.get("result") or {}
             if not res or res.get("compare"):
                 continue  # nada a reusar / não é leitura simples
+            # Invalidação de 1º deploy (task 005 — coerência do drop_nature): um
+            # registro erick gravado ANTES do fix não tem o campo ``drop_nature`` e
+            # reapareceria com o Estado antigo (contraditório). Não reusa — força
+            # recomputar; o novo registro já traz o campo e volta a reusar normalmente.
+            if want == "erick" and "drop_nature" not in res:
+                continue
             if not self._is_reuse_fresh(rec, date):
                 continue
             return rec
@@ -1505,6 +1514,10 @@ class AnalysisRunner:
             if res.get("compare"):
                 continue  # a comparison record is not a single-method reading
             has_erick = bool((res.get("erick_report") or "").strip())
+            # Invalidação de 1º deploy (task 005): registro erick pré-coerência (sem
+            # ``drop_nature``) não é reusável — reapareceria com o Estado antigo.
+            if has_erick and "drop_nature" not in res:
+                continue
             if has_erick == want_erick:
                 return rec
         return None

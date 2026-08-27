@@ -110,6 +110,35 @@ def test_build_column_reads_record():
     assert "Padrão" in c["label"] and c["date"] == "2026-08-22"
 
 
+def test_build_column_carries_drop_nature():
+    rec = {"run_id": "x", "date": "2026-08-26", "status": "done",
+           "result": {"verdict": "Hold", "verdict_timeframe": "4h",
+                      "drop_nature": {"classification": "liquidacao_saudavel"}}}
+    c = build_column(rec, "erick")
+    assert c["drop_nature"] == {"classification": "liquidacao_saudavel"}
+    # ausência → {} (nunca KeyError pro meta-juiz)
+    assert build_column({"result": {}}, "padrao")["drop_nature"] == {}
+
+
+def test_meta_injects_drop_nature_as_closed_data():
+    """O juiz recebe a classificação da queda como DADO FECHADO (fonte única): trata
+    como entrada, não reclassifica; e sinaliza quando a prosa foi corrigida."""
+    erick = {"verdict": "Buy", "timeframe": "4h", "method": "erick", "date": "2026-08-26",
+             "actionable": {}, "drop_nature": {"classification": "liquidacao_saudavel",
+                                               "coherence_flags": {"removed": 2}}}
+    padrao = {"verdict": "Hold", "timeframe": "1d", "method": "padrao", "date": "2026-08-26"}
+    m = deterministic_meta(padrao, erick)
+    assert m["drop_nature"]["classification"] == "liquidacao_saudavel"
+    sig = m["significado"].lower()
+    assert "já está classificada" in sig and "não reclassifique" in sig
+    assert "liquidação de longs" in sig
+    assert "baixa confiança na prosa" in sig          # coherence_flags sinalizado
+    # indefinido/indisponível não injeta nota (nada decisivo a fechar)
+    erick2 = {**erick, "drop_nature": {"classification": "indefinido"}}
+    m2 = deterministic_meta(padrao, erick2)
+    assert "reclassifique" not in m2["significado"].lower()
+
+
 # ------------------------------------------------------- runner integration ---
 def test_start_compare_two_columns_and_meta(tmp_path):
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},

@@ -68,6 +68,11 @@ class AgentState(MessagesState):
     # empty string otherwise. The intraday-EMA method read (recuo à média, saída,
     # peso relativo). See agents/analysts/erick_analyst.py.
     erick_report: Annotated[str, "Report from the Erick-method Analyst (optional)"]
+    # Natureza da queda (liquidação × fraqueza) classificada UMA vez pelo analista
+    # erick: classification/reasons/anchor/coherence_flags. Fonte única — o juiz lê
+    # este campo, não a prosa. Precisa estar no schema senão o LangGraph descarta a
+    # chave (só propaga o que o estado declara).
+    erick_drop_nature: Annotated[dict, "Classified drop nature for Modo Erick (single source; the judge reads this field, not the prose)"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

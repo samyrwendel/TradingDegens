@@ -142,6 +142,39 @@ def test_historical_always_reuses_regardless_of_ttl(tmp_path):
     assert len(calls) == 1
 
 
+# ----------------------- invalidação de 1º deploy: erick pré-coerência (task 005) ---
+def _save_erick_record(store, run_id, with_drop):
+    """Grava um registro erick DONE — com ou sem o campo ``drop_nature`` (pré-fix)."""
+    result = {"verdict": "Hold", "verdict_timeframe": "1d", "erick_report": "## método"}
+    if with_drop:
+        result["drop_nature"] = {"classification": "liquidacao_saudavel"}
+    store.save({
+        "run_id": run_id, "ticker": "AAPL", "date": "2020-01-02", "asset_type": "stock",
+        "status": "done", "verdict": "Hold", "verdict_timeframe": "1d", "method": "erick",
+        "cost_usd": 0.0, "elapsed": 1, "finished_at": "2020-01-02T00:00:00",
+        "result": result,
+    })
+
+
+def test_prefix_erick_record_without_drop_nature_is_invalidated(tmp_path):
+    """Um registro erick gravado ANTES da coerência (sem ``drop_nature``) NÃO é
+    reusado — reapareceria com o Estado antigo, contraditório. O novo (com o campo)
+    volta a reusar normalmente. Padrão nunca é afetado."""
+    store = HistoryStore(tmp_path)
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)}, store=store,
+                            graph_factory=lambda *a, **k: None)
+    _save_erick_record(store, "old", with_drop=False)
+    # nenhum dos dois caminhos de reúso (single-run e confronto) devolve o pré-fix
+    assert runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "erick") is None
+    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=True) is None
+    # já um registro pós-fix (com o campo) reusa
+    _save_erick_record(store, "new", with_drop=True)
+    rec = runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "erick")
+    assert rec and rec["run_id"] == "new"
+    rec2 = runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=True)
+    assert rec2 and rec2["run_id"] == "new"
+
+
 # ----------------------------------- resume descriptors + boot resume (P1/2/5) ---
 def test_active_descriptor_written_while_running_and_cleared(tmp_path):
     """A run drops a resume descriptor the moment it starts and clears it on

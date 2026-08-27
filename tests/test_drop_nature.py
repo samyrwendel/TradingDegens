@@ -52,13 +52,17 @@ def test_liquidacao_when_anchor_beat_and_structure_intact(monkeypatch):
 
 
 @pytest.mark.unit
-def test_liquidacao_line_reframes_mechanical_cash(monkeypatch):
+def test_liquidacao_line_explains_state_derivation(monkeypatch):
+    # A linha explica a DERIVAÇÃO do Estado (já computado A PARTIR da classificação),
+    # não uma re-leitura que o contradiz: liquidação + Estado AGUARDAR ⇒ "e não CAIXA".
     _wire(monkeypatch, _snap(), _ANCHOR_UP, _BEAT)
-    line = dn.build_drop_nature_line("AVGO", "2026-08-26", "stock", mechanical_estado="CAIXA")
+    line = dn.build_drop_nature_line("AVGO", "2026-08-26", "stock", estado="AGUARDAR")
     assert "liquidação de longs" in line.lower()
     assert "segue comprador" in line.lower()
-    # Re-leitura do CAIXA mecânico como recuo comprável.
-    assert "recuo comprável" in line.lower() or "comprável" in line.lower()
+    assert "deriva desta classificação" in line.lower()
+    assert "aguardar" in line.lower() and "não caixa" in line.lower()
+    # A string de "re-leitura" contraditória saiu de vez.
+    assert "re-leitura" not in line.lower()
 
 
 @pytest.mark.unit
@@ -70,7 +74,7 @@ def test_fraqueza_when_breakdown_and_no_beat(monkeypatch):
     _wire(monkeypatch, weak, {"trend": "baixa", "above_ma50": False}, _MISS)
     res = dn.classify_drop_nature("SOXL", "2026-08-26", "stock")
     assert res["classification"] == "fraqueza"
-    line = dn.build_drop_nature_line("SOXL", "2026-08-26", "stock", mechanical_estado="CAIXA")
+    line = dn.build_drop_nature_line("SOXL", "2026-08-26", "stock", estado="CAIXA")
     assert "evitar" in line.lower()
 
 
@@ -108,3 +112,79 @@ def test_liquidacao_requires_pullback_not_breakdown(monkeypatch):
     _wire(monkeypatch, broke, _ANCHOR_UP, _BEAT)
     res = dn.classify_drop_nature("AVGO", "2026-08-26", "stock")
     assert res["classification"] != "liquidacao_saudavel"
+
+
+# ---------------------------------------- classify_safe (fonte única) ----------
+@pytest.mark.unit
+def test_classify_safe_returns_dict_and_none_on_error(monkeypatch):
+    _wire(monkeypatch, _snap(), _ANCHOR_UP, _BEAT)
+    res = dn.classify_drop_nature_safe("AVGO", "2026-08-26", "stock")
+    assert res and res["classification"] == "liquidacao_saudavel"
+    # Qualquer exceção na classificação vira None (fail-open) — nunca propaga.
+    monkeypatch.setattr(dn, "classify_drop_nature", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert dn.classify_drop_nature_safe("AVGO", "2026-08-26", "stock") is None
+
+
+# ---------------------------------------- guardrail de coerência ---------------
+_LIQ = {"classification": "liquidacao_saudavel", "reasons": ["queda de -17,0% recuou a uma média que sobe"]}
+_FRA = {"classification": "fraqueza", "reasons": ["queda de -17,0% com estrutura rompida"]}
+
+
+@pytest.mark.unit
+def test_guardrail_strips_contradicting_sentence_for_liquidacao():
+    text = ("A queda é liquidação de longs, recuo comprável à média. "
+            "Melhor evitar esta queda: a tendência de baixa virou fraqueza. "
+            "O âncora bateu o resultado.")
+    out, flags = dn.enforce_drop_nature_coherence(text, _LIQ)
+    assert flags["removed"] == 1
+    assert "evitar esta queda" not in out.lower()
+    assert "recuo comprável" in out.lower()          # a frase coerente fica
+    assert "âncora bateu" in out.lower()
+    assert "coerência" in out.lower()                # nota anexada
+
+
+@pytest.mark.unit
+def test_guardrail_strips_contradicting_sentence_for_fraqueza():
+    text = ("A estrutura rompeu, caixa é a posição. "
+            "Ainda assim a queda é uma oportunidade de compra comprável.")
+    out, flags = dn.enforce_drop_nature_coherence(text, _FRA)
+    assert flags["removed"] == 1
+    assert "oportunidade de compra" not in out.lower()
+    assert "caixa é a posição" in out.lower()
+
+
+@pytest.mark.unit
+def test_guardrail_untouched_for_indefinido_and_none():
+    text = "A queda pode ser evitar ou comprável, sinais mistos."
+    out, flags = dn.enforce_drop_nature_coherence(text, {"classification": "indefinido"})
+    assert out == text and flags["removed"] == 0
+    # drop=None (fail-open): prosa intacta byte-a-byte.
+    out2, flags2 = dn.enforce_drop_nature_coherence(text, None)
+    assert out2 == text and flags2["removed"] == 0
+
+
+@pytest.mark.unit
+def test_guardrail_no_offender_returns_text_unchanged():
+    text = "A queda é liquidação de longs, recuo comprável. O âncora bateu."
+    out, flags = dn.enforce_drop_nature_coherence(text, _LIQ)
+    assert out == text and flags["removed"] == 0
+
+
+# ---------------------------------------- campo estruturado --------------------
+@pytest.mark.unit
+def test_drop_nature_field_shape_and_indisponivel():
+    res = {
+        "classification": "liquidacao_saudavel",
+        "reasons": ["r1", "r2"],
+        "evidence": {"anchor": {"name": "NVDA", "beat_recent": True, "trend": "alta",
+                                "earnings": {"huge": "raw snapshot"}}},
+    }
+    field = dn.drop_nature_field(res, {"removed": 1})
+    assert field["classification"] == "liquidacao_saudavel"
+    assert field["reasons"] == ["r1", "r2"]
+    assert field["anchor"] == {"name": "NVDA", "beat_recent": True, "trend": "alta"}
+    assert field["coherence_flags"] == {"removed": 1}
+    assert "earnings" not in field["anchor"]          # snapshot cru não vaza
+    # None → indisponivel (nunca quebra o campo).
+    empty = dn.drop_nature_field(None)
+    assert empty["classification"] == "indisponivel" and empty["anchor"] == {}

@@ -36,7 +36,35 @@ from tradingagents.agents.utils.crypto_coverage import (
 from tradingagents.agents.utils.earnings_coverage import (
     ensure_earnings_coverage,
 )
+from tradingagents.agents.utils.drop_nature import (
+    classify_drop_nature_safe,
+    drop_nature_field,
+    enforce_drop_nature_coherence,
+)
 from tradingagents.agents.utils.erick_method import ensure_erick_method_coverage
+
+
+# Regra 10 CONDICIONADA à classificação JÁ FEITA (fonte única): o LLM recebe a
+# natureza da queda decidida e a instrução de NÃO contradizê-la — não reclassifica.
+_DROP_RULE = {
+    "liquidacao_saudavel": (
+        "A natureza da queda deste ativo JÁ está classificada como LIQUIDAÇÃO DE "
+        "LONGS (saudável): é combustível, um recuo COMPRÁVEL à média que sobe — segue "
+        "comprador no recuo. NÃO escreva 'evitar', 'fraqueza', 'downtrend' nem 'a "
+        "tendência virou' sobre esta queda; trate-a como recuo comprável, não ruptura."
+    ),
+    "fraqueza": (
+        "A natureza da queda deste ativo JÁ está classificada como FRAQUEZA: a "
+        "estrutura rompeu, caixa é a posição. NÃO escreva 'liquidação de longs', "
+        "'oportunidade de compra' nem 'comprável' sobre esta queda, mesmo que o "
+        "âncora tenha batido — a força do setor não resgata o gráfico rompido."
+    ),
+    "indefinido": (
+        "A natureza da queda deste ativo está INDEFINIDA (sinais mistos ou sem queda "
+        "relevante): diga o que falta para classificar; nunca chute uma leitura "
+        "bullish nem a rebaixe sem evidência."
+    ),
+}
 
 
 def create_erick_analyst(llm):
@@ -58,6 +86,14 @@ def create_erick_analyst(llm):
             tools.append(get_crypto_derivatives)
             tools.append(get_crypto_context)
 
+        # Natureza da queda classificada UMA vez, ANTES do prompt (fonte única do run):
+        # o LLM recebe a regra 10 já condicionada à classe, a prosa é depois checada
+        # contra ela (guardrail) e a mesma classificação alimenta a seção do método e
+        # o campo estruturado que o juiz lê. Fail-open → None (drop_cls 'indefinido').
+        drop = classify_drop_nature_safe(symbol, current_date, asset_type)
+        drop_cls = (drop or {}).get("classification") or "indefinido"
+        drop_rule = _DROP_RULE.get(drop_cls, _DROP_RULE["indefinido"])
+
         system_message = (
             """Você é o analista que decide pelo MÉTODO ERICK SEKIAMA — modelado de 59 transcrições, dos gráficos dele (EMA 8/21 no 15m/4h, na Quantfury), da carteira real (62% em caixa) e do racional escrito de cada posição. Você NÃO é o analista de mercado: ele descreve indicadores; você DECIDE como o Erick decide. Suas regras (siga-as, não as recite):
 
@@ -69,10 +105,12 @@ def create_erick_analyst(llm):
 6. **Caixa é posição.** Ficar de fora é decisão ATIVA. Se não há ponto de recuo à média agora, ficar em caixa é uma resposta legítima do método (o **Estado** determinístico dirá AGUARDAR ou CAIXA), não uma omissão.
 7. **Tático × estrutural.** Separe explicitamente o trade tático de curto prazo da tese estrutural de longo. Diga qual dos dois é a sua leitura.
 8. **Peso relativo do trade.** Responda "quanto entrar" em termos RELATIVOS conforme a confirmação: posição cheia (alinhamento pleno), meia posição (confirmação parcial), posição inicial (só um começo, aguardando somar) ou caixa (sem gatilho). NUNCA chute um valor absoluto em % ou em dinheiro.
-9. **Filtros.** Evite comprar no sentimento extremo sem confirmação; desconfie de alavancagem alta no mercado. Em cripto, leia funding/OI/liquidações e o medo & ganância como filtro — não como gatilho isolado.
-10. **Natureza da queda: liquidação × fraqueza.** Uma queda-pós-balanço com a tendência de FUNDO intacta (MMS200 subindo, recuo a uma média que sobe) e o ÂNCORA em alta que BATEU o resultado é LIQUIDAÇÃO DE LONGS (combustível — segue comprador no recuo), NÃO downtrend. Só é FRAQUEZA (evitar) quando a estrutura ROMPE (1-2-3 de venda acionado / MMS200 caindo) E o âncora não bateu. Não é viés fixo de alta — é a regra de leitura aplicada aos dados. A seção determinística **"🩸 Natureza da queda"** deste relatório já classifica isso; use-a como fonte e não a contradiga.
+9. **Filtros.** Evite comprar no sentimento extremo sem confirmação; desconfie de alavancagem alta no mercado. Em cripto, leia funding/OI/liquidações e o medo & ganância como filtro — não como gatilho isolado."""
+            + f"""
+10. **Natureza da queda: liquidação × fraqueza (JÁ classificada neste run).** {drop_rule} A seção determinística **"🩸 Natureza da queda"** deste relatório é a fonte única dessa classificação — trate-a como entrada fechada e não a contradiga.
 
-Ancore CADA nível em dado de ferramenta — nunca invente um número. Chame get_price_timeframes para a tendência de fundo (semanal + diário). As EMAs 8/21 do método JÁ vêm calculadas na seção determinística de estrutura/método deste relatório — NÃO peça 'ema' (nem 'ema8'/'ema21') ao get_indicators: a fonte não conhece esse nome e a chamada falha. Se usar get_indicators, escolha só nomes VÁLIDOS: close_10_ema, close_50_sma, close_200_sma, rsi, macd, macds, macdh, atr, boll, boll_ub, boll_lb, vwma. Antes de fechar, chame get_verified_market_snapshot e trate-o como fonte da verdade para qualquer preço/indicador exato; se algo conflitar, aponte a divergência em vez de inventar um número reconciliado."""
+Ancore CADA nível em dado de ferramenta — nunca invente um número."""
+            + """ Chame get_price_timeframes para a tendência de fundo (semanal + diário). As EMAs 8/21 do método JÁ vêm calculadas na seção determinística de estrutura/método deste relatório — NÃO peça 'ema' (nem 'ema8'/'ema21') ao get_indicators: a fonte não conhece esse nome e a chamada falha. Se usar get_indicators, escolha só nomes VÁLIDOS: close_10_ema, close_50_sma, close_200_sma, rsi, macd, macds, macdh, atr, boll, boll_ub, boll_lb, vwma. Antes de fechar, chame get_verified_market_snapshot e trate-o como fonte da verdade para qualquer preço/indicador exato; se algo conflitar, aponte a divergência em vez de inventar um número reconciliado."""
             + (
                 (
                     " Este é um ativo CRIPTO, 24/7 em perpétuo. Chame get_crypto_derivatives"
@@ -121,15 +159,23 @@ NÃO emita um veredito próprio de AGIR/AGUARDAR nem um ponto de recuo/nível op
         result = chain.invoke(state["messages"])
 
         report = ""
+        coherence_flags: dict = {}
 
         if len(result.tool_calls) == 0:
+            # Guardrail de coerência: remove da prosa do LLM as frases que contradizem
+            # a classificação da queda (a seção determinística é a fonte única) ANTES
+            # de anexar a seção do método. Fail-open dentro da função (drop=None não toca).
+            content, coherence_flags = enforce_drop_nature_coherence(
+                result.content, drop
+            )
             # Terminou de escrever: garante o núcleo do método (timeframe
             # intradiário, recuo à média EMA 8/21, saída, PESO relativo),
-            # determinístico e ancorado na série cacheada/date-guarded. Em cripto,
+            # determinístico e ancorado na série cacheada/date-guarded. A mesma
+            # classificação (drop) alimenta a seção — não reclassifica. Em cripto,
             # anexa também funding/OI e medo & ganância — os filtros do método —
             # reusando os mesmos guardas do analista de mercado.
             report = ensure_erick_method_coverage(
-                result.content, symbol, current_date, asset_type
+                content, symbol, current_date, asset_type, drop=drop
             )
             if is_crypto:
                 report = ensure_crypto_derivatives_coverage(
@@ -151,6 +197,9 @@ NÃO emita um veredito próprio de AGIR/AGUARDAR nem um ponto de recuo/nível op
         return {
             "messages": [result],
             "erick_report": report,
+            # Campo estruturado da natureza da queda — fonte única que o juiz/UI leem
+            # (não a prosa). Mesmo classificação usada na regra 10 e na seção do método.
+            "erick_drop_nature": drop_nature_field(drop, coherence_flags),
         }
 
     return erick_analyst_node

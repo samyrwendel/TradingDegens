@@ -100,6 +100,8 @@ def build_column(record: dict, method: str) -> dict:
         "final_decision": r.get("final_trade_decision", "") or "",
         "trader_plan": r.get("trader_plan", "") or "",
         "erick_report": r.get("erick_report", "") or "",
+        # Campo estruturado da natureza da queda → meta-juiz (dado fechado, não prosa).
+        "drop_nature": r.get("drop_nature") or {},
         "actionable": r.get("actionable") or {},
         # Chart of THIS reading (its own timeframe/EMA/1-2-3/bands) so the compare
         # view can show both charts side by side (task 019).
@@ -190,6 +192,12 @@ def meta_judge(a: dict, b: dict) -> dict:
         agree, have_both, va, vb, tfa, tfb, la, lb, diff_method, diff_tf, a, b
     )
 
+    # Natureza da queda já classificada pelo módulo (fonte única): injeta como DADO
+    # FECHADO — o juiz trata como entrada, não reclassifica a partir da prosa.
+    drop_note, drop_field = _drop_nature_note(a, b)
+    if drop_note:
+        significado += drop_note
+
     return {
         "agreement": agreement,
         "verdict": meta_verdict,
@@ -201,7 +209,33 @@ def meta_judge(a: dict, b: dict) -> dict:
         "concordancia": concordancia,
         "divergencia": divergencia,
         "significado": significado,
+        "drop_nature": drop_field,
     }
+
+
+def _drop_nature_note(a: dict, b: dict) -> tuple[str, dict]:
+    """Nota de DADO FECHADO da natureza da queda pro juiz + o campo estruturado.
+
+    A classificação já foi feita pelo módulo do método (fonte única): o juiz a trata
+    como ENTRADA, não reclassifica a partir da prosa. Se a prosa teve contradições
+    removidas (coherence_flags), avisa que a confiança baixa é na PROSA, não no campo.
+    Devolve ``(nota, campo)`` — ``("", {})`` quando não há classificação decisiva."""
+    erick = (a if a.get("method") == "erick"
+             else b if b.get("method") == "erick" else None)
+    field = (erick or {}).get("drop_nature") or {}
+    cls = field.get("classification")
+    if not cls or cls in ("indefinido", "indisponivel"):
+        return "", field
+    cls_pt = {
+        "liquidacao_saudavel": "liquidação de longs (saudável — recuo comprável)",
+        "fraqueza": "fraqueza (estrutura rompida — evitar)",
+    }.get(cls, cls)
+    note = (f" A natureza da queda já está classificada como {cls_pt}; trate como "
+            "entrada fechada, não reclassifique.")
+    if (field.get("coherence_flags") or {}).get("removed"):
+        note += (" A prosa do módulo teve trecho(s) contraditório(s) removidos — "
+                 "baixa confiança na prosa, não no campo.")
+    return note, field
 
 
 def _same_method_error(a, b, la, lb, va, vb, da, db) -> dict:

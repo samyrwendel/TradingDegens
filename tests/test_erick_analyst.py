@@ -103,6 +103,59 @@ def test_decide_transition_at_average_initial_only():
     assert d["peso"] == "posição inicial"
 
 
+# ------------------------------------- drop_nature manda no _decide/_estado -----
+from tradingagents.agents.utils.erick_method import _estado, _liquidation_veto
+
+
+def test_default_none_is_byte_for_byte_with_mechanical():
+    """Fail-open: drop_cls=None (default) reproduz a mecânica de hoje BYTE-A-BYTE —
+    não regride os testes/chamadores que passam None."""
+    for trend, kw in [("alta", {"at_media": True}), ("alta", {"extended": True}),
+                      ("alta", {}), ("baixa", {"below": True}),
+                      ("transicao", {"at_media": True}), ("transicao", {})]:
+        r = _read(trend, **kw)
+        assert _decide(r) == _decide(r, None)
+        d = _decide(r)
+        assert _estado(d["acao"], trend) == _estado(d["acao"], trend, None)
+
+
+def test_fraqueza_vetoes_even_a_mechanical_agir():
+    """fraqueza → CAIXA, mesmo com um AGIR mecânico (estrutura rompida veta)."""
+    d = _decide(_read("alta", at_media=True), drop_cls="fraqueza")
+    assert d["acao"] == "AGUARDAR" and d["peso"] == "caixa"
+    # o Estado é a fonte única: fraqueza carimba CAIXA independentemente da ação/trend.
+    assert _estado("AGIR", "alta", "fraqueza") == "CAIXA"
+
+
+def test_liquidacao_downtrend_at_media_acts_initial():
+    """liquidação + baixa + toque na média → AGIR / posição inicial (recuo comprável)."""
+    d = _decide(_read("baixa", at_media=True), drop_cls="liquidacao_saudavel")
+    assert d["acao"] == "AGIR" and d["peso"] == "posição inicial"
+    assert _estado(d["acao"], "baixa", "liquidacao_saudavel") == "AGIR"
+
+
+def test_liquidacao_downtrend_no_touch_waits_not_cash_state():
+    """liquidação + baixa SEM toque → AGUARDAR; o Estado é AGUARDAR (não CAIXA): a
+    inversão das EMAs curtas é o sintoma da liquidação, não um downtrend."""
+    d = _decide(_read("baixa"), drop_cls="liquidacao_saudavel")
+    assert d["acao"] == "AGUARDAR" and d["peso"] == "caixa"
+    assert _estado("AGUARDAR", "baixa", "liquidacao_saudavel") == "AGUARDAR"
+    # sem a natureza da queda, a mesma baixa leria CAIXA (mecânica de hoje).
+    assert _estado("AGUARDAR", "baixa", None) == "CAIXA"
+
+
+def test_liquidation_veto_caps_promotion_at_aguardar():
+    """Mitigação 1: 1-2-3 de venda no 15m impede a liquidação de virar AGIR."""
+    agir = {"acao": "AGIR", "peso": "posição inicial", "entrada": "x", "peso_racional": "y"}
+    capped, vetoed = _liquidation_veto(agir, "liquidacao_saudavel", sell_15m=True)
+    assert vetoed and capped["acao"] == "AGUARDAR" and capped["peso"] == "caixa"
+    # sem venda no 15m → passa intacto; e só age em liquidação que ia AGIR.
+    same, v2 = _liquidation_veto(agir, "liquidacao_saudavel", sell_15m=False)
+    assert same == agir and v2 is False
+    other, v3 = _liquidation_veto(agir, "fraqueza", sell_15m=True)
+    assert other == agir and v3 is False
+
+
 # ---------------------------------------------- section (synthetic data) -------
 def _fake_uptrend_at_media_chart():
     # last close hugging EMA8/21 (recuo concluído) in a stacked-up regime
@@ -122,7 +175,7 @@ def _fake_plan_with_realize():
 def test_section_crypto_cites_intraday_entry_exit_and_weight(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
-    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)  # concern testado à parte
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)  # concern testado à parte
     section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
     # The four things the acceptance requires, all present:
     assert "intradiário" in section  # timeframe declared
@@ -139,7 +192,7 @@ def test_section_emits_single_state_enum(monkeypatch):
     the sub-blocks derive from it — no parallel 'Veredito'."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
-    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
     section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
     assert "**Estado (Método Erick):** AGIR" in section
     # exactly one state label, no competing 'Veredito' line in the deterministic part
@@ -153,7 +206,7 @@ def test_section_stock_reads_intraday_like_crypto(monkeypatch):
     fallback (fork brief 25/08 item 6)."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
-    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
     section = build_erick_method_section("BE", "2026-08-24", "stock")
     assert "4 horas" in section          # swing frame, same as crypto
     assert "não existe para ação" not in section  # the stale claim is gone
@@ -171,7 +224,7 @@ def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
 
     monkeypatch.setattr(em, "build_price_chart", chart)
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
-    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
     section = build_erick_method_section("BE", "2019-01-15", "stock")
     assert "diário" in section
     assert "indisponível" in section.lower()
@@ -204,7 +257,7 @@ def test_section_surfaces_123_trigger_in_method_read(monkeypatch):
     contained), não só na seção do analista de mercado."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_pattern())
-    monkeypatch.setattr(em, "_drop_nature_line", lambda *a, **k: None)
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
     section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
     assert "Gatilho 1-2-3 de compra (4h)" in section
     assert "rompimento de 98.00" in section
@@ -228,3 +281,61 @@ def test_coverage_is_fail_open(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", _boom)
     # enrichment must never break the report
     assert ensure_erick_method_coverage("PROSE", "BTC-USD", "2026-08-24", "crypto") == "PROSE"
+
+
+# ---------------------------- coerência: drop_nature manda no Estado da seção ----
+def _fake_downtrend_at_media_chart():
+    # EMAs invertidas (baixa) com o preço colado na média (recuo concluído) — o
+    # cenário de uma liquidação: pilha curta invertida, mas recuo comprável.
+    return {"candles": [{"c": 98.2}], "ema": {"8": [98.0], "21": [98.2], "50": [99.0]}}
+
+
+_LIQ_DROP = {"classification": "liquidacao_saudavel",
+             "reasons": ["queda de -17,0% recuou a uma média que sobe (MMS200)"]}
+
+
+def test_section_drop_nature_before_estado_and_derives_it(monkeypatch):
+    """Coerência: numa liquidação, a «🩸 Natureza da queda» vem ANTES do Estado, e o
+    Estado (AGIR) DERIVA dela — não uma re-leitura anexada no fim que o contradiz."""
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP)
+    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
+    assert "**Estado (Método Erick):** AGIR" in section
+    # a natureza da queda aparece ACIMA do Estado (ordem = coerência de leitura)
+    assert section.index("🩸 Natureza da queda") < section.index("Estado (Método Erick)")
+    assert "Deriva da natureza da queda" in section
+    assert "posição inicial" in section
+    # a string de re-leitura contraditória não existe mais
+    assert "Re-leitura" not in section
+    # e nenhuma frase "evitar/fraqueza" contradizendo a liquidação na parte determinística
+    assert "fraqueza: evitar" not in section
+
+
+def _fake_plan_sell_triggered():
+    return {"setup_state": "sem_setup",
+            "pattern": {"trigger": 97.0, "state": "acionado", "direction": "venda"}}
+
+
+def test_section_mitigation1_15m_sell_caps_liquidacao_at_aguardar(monkeypatch):
+    """Mitigação 1 provada na seção: liquidação que iria AGIR, com 1-2-3 de venda no
+    15m, é vetada a AGUARDAR (o recuo virou ruptura)."""
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_sell_triggered())
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP)
+    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
+    assert "**Estado (Método Erick):** AGUARDAR" in section
+    assert "**Estado (Método Erick):** AGIR" not in section
+
+
+def test_section_fail_open_drop_none_matches_mechanical(monkeypatch):
+    """fail-open: _drop_nature=None reproduz a leitura mecânica byte-a-byte (a seção
+    é idêntica à de antes do fix, sem bloco de natureza da queda)."""
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
+    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
+    # baixa sem natureza da queda → CAIXA (mecânica de hoje), sem bloco de queda.
+    assert "**Estado (Método Erick):** CAIXA" in section
+    assert "🩸 Natureza da queda" not in section
+    assert "Deriva da natureza da queda" not in section

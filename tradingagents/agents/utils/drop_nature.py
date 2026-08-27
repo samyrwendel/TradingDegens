@@ -24,6 +24,7 @@ o relatório nem inventa sinal.
 from __future__ import annotations
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -247,27 +248,35 @@ def classify_drop_nature(
     return {"classification": "indefinido", "reasons": reasons, "evidence": evidence}
 
 
+def classify_drop_nature_safe(
+    symbol: str, curr_date: str, asset_type: str = "stock", anchor: str | None = None
+) -> dict | None:
+    """Classify blindado — o ponto de entrada ÚNICO de quem precisa da classificação
+    ANTES da decisão. Devolve o dict de :func:`classify_drop_nature` (pode ser
+    ``indefinido``) ou ``None`` só quando a própria classificação estoura. Nunca
+    levanta: um erro vira ``None`` e o chamador segue com a mecânica de hoje."""
+    try:
+        return classify_drop_nature(symbol, curr_date, asset_type, anchor)
+    except Exception as exc:  # noqa: BLE001 — jamais quebra quem depende da leitura
+        logger.info("drop-nature classify_safe failed for %s: %s", symbol, exc)
+        return None
+
+
 # --------------------------------------------------------------- markdown ------
 _HEAD = "**🩸 Natureza da queda (liquidação × fraqueza):**"
 
 
-def build_drop_nature_line(
-    symbol: str, curr_date: str, asset_type: str = "stock", anchor: str | None = None,
-    mechanical_estado: str | None = None,
-) -> str | None:
-    """Bloco pt-BR da natureza da queda para a seção do método. ``None`` quando não
-    há queda a classificar (indefinido por ausência de queda) — não polui o relatório.
+def render_drop_nature_line(res: dict | None, estado: str | None = None) -> str | None:
+    """Texto pt-BR da natureza da queda a partir de uma classificação JÁ FEITA.
 
-    Quando classifica LIQUIDAÇÃO SAUDÁVEL e o Estado mecânico é CAIXA/AGUARDAR (as
-    EMAs curtas do 4h invertem na queda), acrescenta a RE-LEITURA: é recuo comprável,
-    não downtrend a evitar — sem sobrescrever o enum determinístico, mas dando a regra."""
-    try:
-        res = classify_drop_nature(symbol, curr_date, asset_type, anchor)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("drop-nature line failed for %s: %s", symbol, exc)
+    SEM re-leitura/correção: quando esta linha aparece no relatório, o **Estado** já
+    foi computado A PARTIR desta mesma classificação (:func:`classify_drop_nature`),
+    então o texto só EXPLICA de onde o Estado veio — nunca contradiz nem sobrescreve.
+    ``None`` quando não há queda a classificar (indefinido por ausência de queda) ou
+    quando não há classificação — não polui o relatório."""
+    if not res:
         return None
-
-    cls = res["classification"]
+    cls = res.get("classification")
     reasons = res.get("reasons") or []
     # Sem queda relevante → não anexa (evita ruído quando não há o que classificar).
     if cls == "indefinido" and reasons and reasons[0].startswith("sem queda relevante"):
@@ -278,13 +287,119 @@ def build_drop_nature_line(
         tail = (
             " → **liquidação de longs (saudável): segue comprador no recuo à média**."
         )
-        if mechanical_estado in ("CAIXA", "AGUARDAR"):
+        if estado in ("AGIR", "AGUARDAR"):
             tail += (
-                " Re-leitura: o Estado mecânico acima vem das EMAs curtas do 4h, que "
-                "invertem na liquidação — pelo método isto é recuo COMPRÁVEL (some no "
-                "recuo à média), não downtrend a evitar."
+                f" As EMAs curtas do 4h invertem numa liquidação; por isso o Estado "
+                f"acima é {estado} e não CAIXA — deriva desta classificação, não da "
+                "pilha curta."
             )
         return f"{_HEAD} {why}{tail}"
     if cls == "fraqueza":
-        return f"{_HEAD} {why} → **fraqueza: evitar** (caixa é a posição)."
+        return (
+            f"{_HEAD} {why} → **fraqueza: evitar** — caixa é a posição, e o Estado "
+            "acima é CAIXA por causa disto."
+        )
     return f"{_HEAD} {why} → leitura indefinida (sem chute)."
+
+
+def build_drop_nature_line(
+    symbol: str, curr_date: str, asset_type: str = "stock", anchor: str | None = None,
+    estado: str | None = None,
+) -> str | None:
+    """Conveniência: classifica (:func:`classify_drop_nature_safe`) e renderiza numa
+    chamada. O motor NÃO usa mais este caminho — ele classifica ANTES (fonte única) e
+    renderiza DEPOIS via :func:`render_drop_nature_line`. Mantido para chamadores que
+    só querem o bloco sem separar as duas etapas."""
+    return render_drop_nature_line(
+        classify_drop_nature_safe(symbol, curr_date, asset_type, anchor), estado
+    )
+
+
+# --------------------------------------------------- guardrail de coerência ----
+# A prosa do LLM (item 10 condicionado) às vezes escapa e contradiz o enum
+# determinístico. O guardrail remove da prosa as frases que negam a classificação —
+# a seção «🩸 Natureza da queda» é a fonte única, então a prosa nunca a contradiz.
+_STRIP_CONTRADICTIONS = True
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+# Palavra de "queda" — precisa estar na frase pra ela ser SOBRE a queda em questão.
+_DROP_WORDS = ("queda", "recuo", "correção", "correcao", "selloff", "sell-off", "pullback")
+# Termos que CONTRADIZEM cada classe (a frase precisa ter uma drop_word + um destes).
+_CONTRA_WORDS = {
+    "liquidacao_saudavel": (
+        "evitar", "não comprar", "nao comprar", "downtrend", "tendência de baixa",
+        "tendencia de baixa", "fraqueza", "ficar de fora", "sair do ativo",
+    ),
+    "fraqueza": (
+        "liquidação de longs", "liquidacao de longs", "oportunidade de compra",
+        "comprável", "compravel", "combustível", "combustivel",
+    ),
+}
+_CLASS_PT = {"liquidacao_saudavel": "liquidação saudável", "fraqueza": "fraqueza"}
+
+
+def _contradicts(sent: str, contra: tuple[str, ...]) -> bool:
+    """Uma frase contradiz a classe se fala DA queda (drop_word) E carrega um termo
+    contrário. Casamento lexical simples — limite conhecido: pode pegar uma frase que
+    NEGA a contradição ("não é fraqueza"); custo aceito (o enum é a fonte única)."""
+    low = sent.lower()
+    if not any(w in low for w in _DROP_WORDS):
+        return False
+    return any(c in low for c in contra)
+
+
+def enforce_drop_nature_coherence(
+    text: str | None, res: dict | None
+) -> tuple[str | None, dict]:
+    """Remove da prosa do LLM as frases que contradizem a classificação da queda.
+
+    Só age em ``liquidacao_saudavel``/``fraqueza`` (``indefinido``/ausente não toca:
+    não há o que contradizer). Com ``_STRIP_CONTRADICTIONS`` remove as frases e anexa
+    uma nota; senão só sinaliza. Devolve ``(texto, flags)`` — ``flags`` conta o que
+    foi removido/sinalizado e a classe, pra o campo estruturado e o juiz."""
+    flags = {"classification": (res or {}).get("classification"), "removed": 0,
+             "flagged": 0, "sentences": []}
+    if not text or not res:
+        return text, flags
+    contra = _CONTRA_WORDS.get(res.get("classification"))
+    if not contra:
+        return text, flags  # indefinido / indisponível → prosa intacta
+
+    offenders = [s for s in _SENT_SPLIT.split(text) if _contradicts(s, contra)]
+    if not offenders:
+        return text, flags
+    flags["sentences"] = offenders
+    if not _STRIP_CONTRADICTIONS:
+        flags["flagged"] = len(offenders)
+        return text, flags
+
+    kept = [s for s in _SENT_SPLIT.split(text) if not _contradicts(s, contra)]
+    flags["removed"] = len(offenders)
+    cls_pt = _CLASS_PT.get(res.get("classification"), res.get("classification"))
+    note = (
+        f"\n\n> ⚠️ Coerência: {len(offenders)} trecho(s) contradiziam a classificação "
+        f"({cls_pt}) e foram removidos. A seção «🩸 Natureza da queda» é a fonte única."
+    )
+    return (" ".join(s for s in kept if s).strip() + note), flags
+
+
+def drop_nature_field(res: dict | None, coherence_flags: dict | None = None) -> dict:
+    """Campo estruturado da natureza da queda (o que o juiz/UI leem — não a prosa).
+
+    Só ``{classification, reasons, anchor:{name,beat_recent,trend}, coherence_flags}``
+    — sem os snapshots crus (grandes). ``None`` → ``classification="indisponivel"``."""
+    if not res:
+        return {
+            "classification": "indisponivel", "reasons": [], "anchor": {},
+            "coherence_flags": coherence_flags or {},
+        }
+    anchor = (res.get("evidence") or {}).get("anchor") or {}
+    return {
+        "classification": res.get("classification"),
+        "reasons": list(res.get("reasons") or []),
+        "anchor": {
+            "name": anchor.get("name"),
+            "beat_recent": anchor.get("beat_recent"),
+            "trend": anchor.get("trend"),
+        },
+        "coherence_flags": coherence_flags or {},
+    }
