@@ -307,6 +307,9 @@ details.section.erick > summary { color: #9cc7f5; }
   cursor: pointer; list-style: none; padding: 9px 13px;
   font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold);
   color: var(--text); display: flex; align-items: center; gap: 8px;
+  /* dois selos (timeframe + modelo, task 009) + rótulo longo estouram no mobile:
+     deixa quebrar em linha nova em vez de espremer o rótulo e cortar o selo. */
+  flex-wrap: wrap; row-gap: 6px;
 }
 .tk-sum::-webkit-details-marker { display: none; }
 .tk-sum::after { content: "▸"; margin-left: auto; color: var(--muted); font-weight: 400; }
@@ -331,6 +334,17 @@ details.section.erick > summary { color: #9cc7f5; }
 }
 .tk-model:empty { display: none; }
 
+/* Selo de TIMEFRAME(s) da etapa (task 009): mesmo formato do selo de modelo, mas
+   tinta de acento pra distinguir "em que tempo gráfico" de "qual LLM". Ao lado do
+   modelo; some quando o nó não opera num tempo gráfico (:empty). */
+.tk-tf {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: 400; color: var(--accent); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; flex: none;
+}
+.tk-tf:empty { display: none; }
+
 /* Atribuição POR ETAPA no rodapé de auditoria (task 024): lista colapsável de qual
    provedor/modelo rodou cada etapa — o registro auditável do que de fato correu. */
 .audit-steps { margin-top: 6px; }
@@ -338,7 +352,10 @@ details.section.erick > summary { color: #9cc7f5; }
 .audit-steps-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .audit-steps-list li { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; font-size: var(--fs-10); line-height: var(--lh-10); }
 .audit-steps-list .as-step { color: var(--muted); }
+/* modelo + timeframe da etapa juntos à direita (task 009) */
+.audit-steps-list .as-meta { display: inline-flex; align-items: baseline; gap: 8px; flex: none; }
 .audit-steps-list .as-model { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+.audit-steps-list .as-tf { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
 /* Fallback transparente (task 027-fallback): selo âmbar na etapa que trocou de
    provedor sozinha. Chama atenção sem gritar — é informação, não erro. */
 .audit-steps-list .as-fallback { color: #d9a441; font-size: var(--fs-10); white-space: nowrap; }
@@ -1415,6 +1432,15 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   line-height: 1.5;
   font-weight: 400;
   white-space: nowrap;
+}
+
+/* Selo de timeframe(s) no cabeçalho da seção do analista (task 009): igual ao axis-tag
+   mas com tinta de acento — "em que tempo gráfico esta leitura opera" de relance. */
+.sec-tf {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 999px;
+  color: var(--accent); font-size: var(--fs-12); line-height: 1.5;
+  font-weight: 400; white-space: nowrap; font-family: var(--mono);
 }
 
 /* Checagem de consistência (item 7): portão de QA pré-publicação. Verde discreto

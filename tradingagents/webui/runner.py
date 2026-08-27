@@ -551,7 +551,9 @@ class _Run:
         self.tracker = ProgressTracker(selected_analysts)
         # Raciocínio ao vivo (task 008): captura a saída de cada agente conforme sai,
         # pra o painel revelar o "pensamento" durante o run. Custo zero de LLM.
-        self.thinking = ThinkingTracker()
+        # timeframe (task 009): alimenta o selo de tempo-gráfico por etapa (Mercado
+        # ancora o timing no frame de referência da run quando ele é intradiário).
+        self.thinking = ThinkingTracker(timeframe=self.timeframe)
         # Fallback transparente (task 027-fallback): registra as trocas AUTOMÁTICAS de
         # provedor por etapa (quando o topo falha por estado do provedor e o motor cai
         # pro próximo da cadeia sem parar). Preenchido em _execute; surfa por-etapa no

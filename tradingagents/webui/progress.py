@@ -209,6 +209,35 @@ _THINKING_INDEX = {
     for i, (node, label, phase, debate) in enumerate(_THINKING_NODES)
 }
 
+# Timeframe REAL que cada etapa analisou (task 009): tornar VISÍVEL em quais tempos
+# gráficos cada analista opera, ao lado do selo de modelo (024P1). Reflete o que o
+# motor DE FATO lê — não o "configurado":
+#   • Analista de Mercado: SEMPRE semanal + diário (a cobertura multi-timeframe é
+#     não-opcional em market_analyst; ensure_multi_timeframe_coverage garante o frame
+#     semanal no relatório). Quando a run tem um frame de REFERÊNCIA intradiário
+#     (4h/1h/15m), o mercado ancora a metade de timing nele — some ao selo.
+#   • Método Erick: opera no intradiário 4h (swing) + 15m (timing) — _SWING_FRAME/
+#     _FINE_FRAME em erick_method; semanal/diário só de fundo. (Se a fonte intradiária
+#     cai, o método degrada pro diário e DECLARA no corpo do relatório; o selo mostra
+#     os frames de operação do método.)
+#   • Demais nós (sentimento, notícias, fundamentos, debate, juiz, trader, risco): não
+#     operam num tempo gráfico de preço → sem selo (não força TF onde não se aplica).
+_TF_PT = {"1w": "semanal", "1d": "diário", "4h": "4h", "1h": "1h", "15m": "15m"}
+
+
+def node_timeframe(node: str, run_tf: str | None = None) -> str | None:
+    """Descritor de timeframe(s) que o nó ``node`` de fato analisa, ou ``None`` quando
+    não se aplica. ``run_tf`` é o frame de referência da run (só afeta o Mercado, que
+    ancora o timing no frame intradiário quando a run não é diária/semanal)."""
+    if node == "Market Analyst":
+        base = "semanal · diário"
+        if run_tf and run_tf not in ("1d", "1w"):
+            base = f"{base} · {_TF_PT.get(run_tf, run_tf)}"
+        return base
+    if node == "Erick Analyst":
+        return "4h · 15m"
+    return None
+
 # Cap por card: os pareceres cabem folgado; o teto evita despejar um payload gigante
 # a cada poll (2s) e protege o mobile. O texto integral vem no resultado final.
 _THINKING_CAP = 8000
@@ -261,8 +290,11 @@ class ThinkingTracker:
     vivo. Thread-safe: o callback escreve na thread do grafo, o snapshot é lido na
     thread HTTP. Só EXPÕE o que o grafo já gera — zero custo extra de LLM."""
 
-    def __init__(self) -> None:
+    def __init__(self, timeframe: str | None = None) -> None:
         self._lock = threading.Lock()
+        # Frame de referência da run (task 009): alimenta o selo de timeframe por etapa
+        # (o Mercado ancora o timing no frame intradiário quando a run não é diária).
+        self._run_tf = timeframe
         self._texts: dict[str, str] = {}     # node -> último texto (recortado)
         # Atribuição por etapa (task 024, parte 1): node -> {provider, model} que
         # REALMENTE rodou aquela etapa, lido do callback do LLM (metadata ls_* do
@@ -301,6 +333,8 @@ class ThinkingTracker:
                     "order": order, "len": len(txt), "text": txt,
                     # atribuição por etapa: qual LLM rodou este card (None até o 1º start)
                     "provider": attr.get("provider"), "model": attr.get("model"),
+                    # timeframe(s) que a etapa analisou (task 009): None onde não se aplica
+                    "timeframe": node_timeframe(node, self._run_tf),
                 })
         items.sort(key=lambda it: it["order"])
         return items
@@ -318,6 +352,8 @@ class ThinkingTracker:
                 rows.append({
                     "node": node, "label": label, "phase": phase, "order": order,
                     "provider": attr.get("provider"), "model": attr.get("model"),
+                    # timeframe(s) reais da etapa (task 009), pro rodapé de auditoria
+                    "timeframe": node_timeframe(node, self._run_tf),
                 })
         rows.sort(key=lambda r: r["order"])
         return rows

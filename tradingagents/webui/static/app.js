@@ -458,8 +458,10 @@ function renderThinking(items) {
       card.open = true;   // abre conforme chega — o Samyr quer VER o pensamento
       const sum = document.createElement("summary");
       sum.className = "tk-sum";
-      // rótulo do agente + selo do LLM que rodou esta etapa (atribuição, task 024)
+      // rótulo do agente + selo de TIMEFRAME(s) da etapa (task 009) + selo do LLM que
+      // rodou esta etapa (atribuição, task 024). Os dois selos vivem no mesmo lugar.
       sum.innerHTML = `<span class="tk-label">${escapeHtml(it.label)}</span>` +
+        `<span class="tk-tf" data-tk-tf></span>` +
         `<span class="tk-model" data-tk-model></span>`;
       const body = document.createElement("div");
       body.className = "tk-body md";
@@ -471,6 +473,10 @@ function renderThinking(items) {
       );
       box.insertBefore(card, after || null);
     }
+    // Timeframe(s) que a etapa analisou (task 009): selo ao lado do modelo. Só nos
+    // nós que operam num tempo gráfico (Mercado, Erick); vazio → some (CSS :empty).
+    const tfSlot = card.querySelector("[data-tk-tf]");
+    if (tfSlot) tfSlot.textContent = stepTfLabel(it);
     // Atribuição por etapa: qual LLM rodou este card (aparece assim que o 1º start
     // reporta o modelo; some se ainda não veio). Atualiza a cada poll.
     const modelSlot = card.querySelector("[data-tk-model]");
@@ -489,6 +495,14 @@ function renderThinking(items) {
 function stepModelLabel(it) {
   if (!it || !it.model) return "";
   return it.provider ? `${it.provider} · ${it.model}` : it.model;
+}
+
+// Selo de TIMEFRAME(s) da etapa (task 009): "⏱ semanal · diário" (Mercado) / "⏱ 4h · 15m"
+// (Erick). Vazio nos nós que não operam num tempo gráfico (some via CSS :empty). O TF vem
+// do backend (real do motor, não configurado) — nunca inventa aqui.
+function stepTfLabel(it) {
+  if (!it || !it.timeframe) return "";
+  return "⏱ " + it.timeframe;
 }
 
 // Escapa um id pra usar em querySelector([data-tk="..."]) sem quebrar com caracteres
@@ -541,9 +555,24 @@ function contradictionsHtml(findings) {
     `<div class="section-body"><ul class="consistency-list">${items}</ul></div></details>`;
 }
 
-function section(title, mdText, axis) {
+// Selo de TIMEFRAME(s) no cabeçalho da seção do analista (task 009) — espelha o
+// node_timeframe do backend (progress.py) pras seções persistentes do resultado.
+// Mercado = semanal · diário (+ frame de referência quando a run é intradiária);
+// Erick = 4h · 15m. HONESTO: o que o motor lê, não o configurado. Vazio → não aparece.
+function tfTag(node) {
+  let tf = "";
+  if (node === "market") {
+    tf = "semanal · diário";
+    if (_verdictTf && _verdictTf !== "1d" && _verdictTf !== "1w") tf += " · " + _verdictTf;
+  } else if (node === "erick") {
+    tf = "4h · 15m";
+  }
+  return tf ? ` <span class="sec-tf">⏱ ${escapeHtml(tf)}</span>` : "";
+}
+
+function section(title, mdText, axis, tfNode) {
   if (!mdText || !mdText.trim()) return "";
-  return `<details class="section"><summary>${escapeHtml(title)}${axisTag(axis)}</summary>` +
+  return `<details class="section"><summary>${escapeHtml(title)}${tfNode ? tfTag(tfNode) : ""}${axisTag(axis)}</summary>` +
     `<div class="section-body"><div class="md">${renderMarkdown(mdText)}</div></div></details>`;
 }
 
@@ -601,8 +630,10 @@ function auditFooterHtml(audit, asOfPrice) {
       `<ul class="audit-steps-list">` +
       byStep.map((s) => {
         const lbl = stepModelLabel(s);
+        // TF real da etapa (task 009) ao lado do modelo — só onde se aplica (Mercado/Erick).
+        const tf = s.timeframe ? `<span class="as-tf">⏱ ${escapeHtml(s.timeframe)}</span>` : "";
         return `<li><span class="as-step">${escapeHtml(s.label || s.node || "—")}</span>` +
-          `<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span>` +
+          `<span class="as-meta">${tf}<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span></span>` +
           stepFallbackBadge(s.fallback) + `</li>`;
       }).join("") +
       `</ul></details>`
@@ -830,7 +861,7 @@ function renderResult(snap) {
   // em alguma etapa, o banner de resumo abre logo abaixo do QA — visível de relance.
   html += fallbackBannerHtml(r.fallbacks);
   if (r.erick_report && r.erick_report.trim()) {
-    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${axisTag(axes.erick)}</summary>` +
+    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
   }
   // For crypto, the deterministic derivatives feed goes first and open — it is
@@ -840,7 +871,7 @@ function renderResult(snap) {
       `<div class="section-body"><div class="md">${renderMarkdown(r.derivatives_report)}</div></div></details>`;
   }
   html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
-  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico);
+  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
   html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
   html += section("💬 Sentimento", r.sentiment_report);
   if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);

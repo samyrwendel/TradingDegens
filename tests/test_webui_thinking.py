@@ -101,6 +101,8 @@ def test_callback_captures_real_model_from_metadata():
     assert rows == [{
         "node": "Portfolio Manager", "label": rows[0]["label"], "phase": "Risco",
         "order": rows[0]["order"], "provider": "anthropic", "model": "claude-sonnet-5",
+        # timeframe por etapa (task 009): Portfolio Manager não opera num tempo gráfico
+        "timeframe": None,
     }]
 
 
@@ -142,3 +144,31 @@ def test_no_attribution_until_a_start_reports_a_model():
     card = t.snapshot()[0]
     assert card["provider"] is None and card["model"] is None
     assert t.models_snapshot() == []
+
+
+def test_step_timeframe_only_where_it_applies():
+    """Task 009 — selo de timeframe por etapa: Mercado = semanal · diário, Erick =
+    4h · 15m; os demais nós não operam num tempo gráfico → None (sem selo). O TF sai
+    tanto no snapshot ao vivo quanto no models_snapshot de auditoria."""
+    t = ThinkingTracker()
+    for node in ("Market Analyst", "Erick Analyst", "News Analyst", "Portfolio Manager"):
+        t.set_by_node(node, f"leitura detalhada do no {node} para o teste")
+        t.set_model(node, "openai", "gpt-5.4")
+    tf = {it["id"]: it["timeframe"] for it in t.snapshot()}
+    assert tf["Market Analyst"] == "semanal · diário"
+    assert tf["Erick Analyst"] == "4h · 15m"
+    assert tf["News Analyst"] is None and tf["Portfolio Manager"] is None
+    # o rodapé de auditoria carrega o mesmo TF
+    mtf = {r["node"]: r["timeframe"] for r in t.models_snapshot()}
+    assert mtf["Market Analyst"] == "semanal · diário" and mtf["Erick Analyst"] == "4h · 15m"
+
+
+def test_market_timeframe_stamps_intraday_reference_frame():
+    """Task 009 — numa run intradiária o Mercado ancora o timing no frame de
+    referência (some ao selo: semanal · diário · 4h). Diária/semanal não acrescenta."""
+    t = ThinkingTracker(timeframe="4h")
+    t.set_by_node("Market Analyst", "leitura do mercado no frame intradiario 4h")
+    assert t.snapshot()[0]["timeframe"] == "semanal · diário · 4h"
+    t1d = ThinkingTracker(timeframe="1d")
+    t1d.set_by_node("Market Analyst", "leitura do mercado no frame diario padrao")
+    assert t1d.snapshot()[0]["timeframe"] == "semanal · diário"
