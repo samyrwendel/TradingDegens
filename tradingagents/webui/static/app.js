@@ -1278,6 +1278,7 @@ function renderLaunchBar() {
     return `<button type="button" class="${cls}" data-method="${m}" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
   }).join("");
   updateDateChip();
+  renderLaunchModels();
   const rerun = $("rerunBtn");
   if (rerun) {
     rerun.disabled = !_openTicker;
@@ -1285,6 +1286,180 @@ function renderLaunchBar() {
       ? `Reanalisar ${_openTicker} hoje (método ${methodLabel(_openView)})`
       : "Abra um ativo pra reanalisar";
   }
+}
+
+// ---- Seletor compacto de modelos no launcher (task 012) ---------------------
+// O modelo rápido/pesado vivia SÓ dentro do #configPanel, atrás do botão "Chaves" —
+// quem procurava "escolher modelo" nunca achava (mesmo padrão do botão Parar que
+// estava escondido). Aqui os dois chips ficam na PRÓPRIA barra de análise, mostram o
+// modelo EM USO e abrem um popover pesquisável pra ESCOLHER da lista real do provedor
+// (não digitar). A escolha aplica na hora, persiste em _llmCfg e espelha nos campos
+// do config (#cfgQuick/#cfgDeep). O cross-provider por nível (task 027) segue no
+// config, alcançável pelo link "avançado" do popover — mantido "junto".
+
+// Provedor efetivo de um nível: no avançado (027) cada nível tem o seu; senão o simples.
+function _effLevelProvider(level) {
+  const c = _llmCfg || {};
+  if (c.advanced) return (level === "deep" ? c.deepProvider : c.quickProvider) || c.provider ||
+    (_llmMeta && _llmMeta.default_provider) || "";
+  return c.provider || (_llmMeta && _llmMeta.default_provider) || "";
+}
+
+// Modelo padrão do provedor pra um nível (mostrado quando o campo está vazio).
+function _providerDefaultModel(level) {
+  const p = _providerMeta(_effLevelProvider(level));
+  if (p) return (level === "deep" ? p.default_deep : p.default_quick) || "";
+  return _llmMeta ? ((level === "deep" ? _llmMeta.default_deep : _llmMeta.default_quick) || "") : "";
+}
+
+// Nome curto pra caber no chip (cauda após a última "/"); o título mantém o id inteiro.
+function _shortModel(id) {
+  const s = String(id || "");
+  const i = s.lastIndexOf("/");
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
+function renderLaunchModels() {
+  const host = $("launchModels");
+  if (!host) return;
+  const chip = (level) => {
+    const icon = level === "deep" ? "🧠" : "⚡";
+    const lead = level === "deep" ? "pesado" : "rápido";
+    const set = (level === "deep" ? _llmCfg.deepModel : _llmCfg.quickModel) || "";
+    const eff = set || _providerDefaultModel(level);
+    const shown = eff ? _shortModel(eff) : "padrão";
+    const prov = _effLevelProvider(level);
+    const title = `Modelo ${lead}${prov ? " · " + prov : ""}: ${eff || "padrão do provedor"} — clique pra escolher`;
+    const cls = ["lb-model-pick", set ? "" : "is-default"].filter(Boolean).join(" ");
+    return `<button type="button" class="${cls}" data-level="${level}" title="${escapeHtml(title)}" aria-haspopup="listbox">`
+      + `<span class="lbm-icon" aria-hidden="true">${icon}</span>`
+      + `<span class="lbm-lead">${lead}</span>`
+      + `<span class="lbm-model">${escapeHtml(shown)}</span></button>`;
+  };
+  host.innerHTML = chip("quick") + chip("deep");
+}
+
+// Popover pesquisável (singleton) ancorado no chip. Reusa filterModels/_priceLabel/
+// _modelItems — a MESMA lista do config; se ainda não veio, dispara refreshModels().
+let _lbPop = null;   // { el, level, input, list, view, active }
+
+function _closeLaunchModelPop() {
+  if (_lbPop && _lbPop.el && _lbPop.el.parentNode) _lbPop.el.parentNode.removeChild(_lbPop.el);
+  document.removeEventListener("mousedown", _lbPopOutside, true);
+  document.removeEventListener("keydown", _lbPopEsc, true);
+  _lbPop = null;
+}
+function _lbPopOutside(e) {
+  if (!_lbPop) return;
+  if (!_lbPop.el.contains(e.target) && !e.target.closest(".lb-model-pick")) _closeLaunchModelPop();
+}
+function _lbPopEsc(e) {
+  if (e.key === "Escape" && _lbPop) { e.preventDefault(); e.stopPropagation(); _closeLaunchModelPop(); }
+}
+
+// Aplica (ou limpa, val="") o modelo do nível: na hora, persiste e espelha no config.
+function _lbChooseModel(level, val) {
+  const key = level === "deep" ? "deepModel" : "quickModel";
+  _llmCfg = _llmCfg || {};
+  _llmCfg[key] = val || "";
+  saveLlmCfg(_llmCfg);
+  const cfgId = level === "deep" ? "cfgDeep" : "cfgQuick";
+  if ($(cfgId)) $(cfgId).value = val || "";       // espelha no campo do config
+  updateConfigBadge();
+  renderLaunchModels();
+  _closeLaunchModelPop();
+}
+
+function _lbRenderPopList() {
+  const p = _lbPop; if (!p) return;
+  p.view = filterModels(_modelItems, p.input.value).slice(0, MODEL_LIST_MAX);
+  p.active = -1;
+  if (!_modelItems.length) {
+    p.list.innerHTML = `<li class="combo-empty" aria-disabled="true">carregando modelos… (Enter usa o texto digitado)</li>`;
+    return;
+  }
+  if (!p.view.length) {
+    p.list.innerHTML = `<li class="combo-empty" aria-disabled="true">nenhum modelo casa — Enter usa o texto digitado</li>`;
+    return;
+  }
+  p.list.innerHTML = p.view.map((it, i) => {
+    const price = _priceLabel(it);
+    const name = (it.name && it.name !== it.id) ? `<span class="combo-name">${escapeHtml(it.name)}</span>` : "";
+    const priceEl = price ? `<span class="combo-price">${escapeHtml(price)}</span>` : "";
+    return `<li class="combo-opt${i === p.active ? " is-active" : ""}" role="option" data-val="${escapeHtml(it.id)}">`
+      + `<span class="combo-id">${escapeHtml(it.id)}</span>${name}${priceEl}</li>`;
+  }).join("");
+}
+
+function _lbPopMove(delta) {
+  const p = _lbPop; if (!p || !p.view.length) return;
+  p.active = (p.active + delta + p.view.length) % p.view.length;
+  Array.from(p.list.children).forEach((li, i) => li.classList.toggle("is-active", i === p.active));
+  const el = p.list.children[p.active];
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+function openLaunchModelPicker(level, btn) {
+  if (_lbPop && _lbPop.level === level) { _closeLaunchModelPop(); return; }   // toggle
+  _closeLaunchModelPop();
+  const lead = level === "deep" ? "pesado" : "rápido";
+  const prov = _effLevelProvider(level);
+  const el = document.createElement("div");
+  el.className = "lb-model-pop";
+  el.innerHTML =
+    `<div class="lbp-head">${level === "deep" ? "🧠" : "⚡"} Modelo ${lead}` +
+    (prov ? ` <span class="lbp-prov">${escapeHtml(prov)}</span>` : "") + `</div>` +
+    `<input type="text" class="lbp-search" autocomplete="off" role="combobox" aria-autocomplete="list" ` +
+      `placeholder="filtrar modelos… (id ou nome)" />` +
+    `<ul class="lbp-list" role="listbox"></ul>` +
+    `<div class="lbp-foot">` +
+      `<button type="button" class="lbp-default">padrão do provedor</button>` +
+      `<button type="button" class="lbp-adv" title="Provedor por nível (Rápido × Pesado, cross-provider)">⚙️ avançado</button>` +
+    `</div>`;
+  const group = btn.closest(".lb-model") || btn.parentNode;
+  group.appendChild(el);
+  const input = el.querySelector(".lbp-search");
+  const list = el.querySelector(".lbp-list");
+  _lbPop = { el, level, input, list, view: [], active: -1 };
+  _lbRenderPopList();
+  // Lista ainda não carregada: puxa os modelos reais (owner usa a env do servidor;
+  // BYOK usa a chave) e re-renderiza quando chegar, se o popover ainda for deste nível.
+  if (!_modelItems.length) {
+    refreshModels().then(() => { if (_lbPop && _lbPop.level === level) _lbRenderPopList(); });
+  }
+  input.addEventListener("input", _lbRenderPopList);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); _lbPopMove(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); _lbPopMove(-1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (_lbPop.active >= 0 && _lbPop.view[_lbPop.active]) _lbChooseModel(level, _lbPop.view[_lbPop.active].id);
+      else if (input.value.trim()) _lbChooseModel(level, input.value.trim());   // texto livre (fallback)
+    }
+  });
+  list.addEventListener("mousedown", (e) => {
+    const li = e.target.closest("[data-val]");
+    if (!li) return;
+    e.preventDefault();
+    _lbChooseModel(level, li.getAttribute("data-val"));
+  });
+  el.querySelector(".lbp-default").addEventListener("click", () => _lbChooseModel(level, ""));
+  el.querySelector(".lbp-adv").addEventListener("click", () => { _closeLaunchModelPop(); openConfigAdvanced(); });
+  document.addEventListener("mousedown", _lbPopOutside, true);
+  document.addEventListener("keydown", _lbPopEsc, true);
+  setTimeout(() => input.focus(), 0);
+}
+
+// Abre o config já no Avançado (cross-provider por nível, task 027) e rola até ele —
+// mantém o avançado "junto" do seletor sem duplicá-lo no launcher.
+function openConfigAdvanced() {
+  const panel = $("configPanel");
+  if (panel) panel.classList.remove("hidden");
+  const adv = $("cfgAdvanced");
+  if (adv && !adv.checked) { adv.checked = true; applyAdvancedVisibility(); }
+  if (!_modelItems.length) refreshModels();
+  const grid = $("cfgAdvancedGrid") || panel;
+  if (grid && grid.scrollIntoView) grid.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 // Ao abrir um ativo (resultado / comparação / run com erro), a barra passa a apontar
@@ -1317,6 +1492,15 @@ function bindLaunchBar() {
     mEl.addEventListener("click", (e) => {
       const b = e.target.closest("button.lb-method");
       if (b) { _barMethod = b.dataset.method; renderLaunchBar(); }
+    });
+  }
+  // Seletor compacto de modelos (task 012): chip → popover pesquisável.
+  const modelsEl = $("launchModels");
+  if (modelsEl && !modelsEl._bound) {
+    modelsEl._bound = true;
+    modelsEl.addEventListener("click", (e) => {
+      const b = e.target.closest("button.lb-model-pick");
+      if (b) openLaunchModelPicker(b.dataset.level, b);
     });
   }
   const chip = $("dateChip");
@@ -2822,6 +3006,7 @@ function renderConfigPanel() {
   renderOwnerBox();
   renderSubscriptionBox();
   updateConfigBadge();
+  renderLaunchModels();   // reflete os modelos salvos nos chips do launcher (task 012)
 }
 
 // Cross-provider RÁPIDO/PESADO (task 027): popula os selects de provedor por nível
@@ -3252,6 +3437,7 @@ function bindConfig() {
     saveLlmCfg(_readConfigForm());
     setCfgStatus("salvo ✓", "ok");
     updateConfigBadge();
+    renderLaunchModels();   // config salvo → chips do launcher refletem na hora (task 012)
   });
   $("cfgClear").addEventListener("click", () => {
     saveLlmCfg({});

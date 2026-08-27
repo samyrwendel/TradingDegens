@@ -18,7 +18,7 @@
     </div>
     <div class="top-right">
       <button type="button" class="config-btn" id="configBtn"
-              title="Provedor e chave de API (traga a sua)">⚙️ <span id="configBtnLabel">Chaves</span></button>
+              title="Provedor, modelos e chave de API (traga a sua)">⚙️ <span id="configBtnLabel">Chaves</span></button>
       <div class="net-note" id="netNote">rede Tailscale</div>
     </div>
   </header>
@@ -29,7 +29,7 @@
        do servidor (fallback). Só provider/modelo/base_url vão no corpo do POST. -->
   <section class="panel config-panel hidden" id="configPanel">
     <div class="config-head">
-      <h2 class="section-title">🔑 Provedor &amp; chave de API</h2>
+      <h2 class="section-title">🔑 Provedor, modelos &amp; chave de API</h2>
       <button type="button" class="config-close" id="configClose" aria-label="Fechar">✕</button>
     </div>
     <p class="config-note">
@@ -201,6 +201,16 @@
             <div class="lb-group lb-method">
               <span class="lb-glabel">método</span>
               <div class="lb-methods" id="launchMethods" role="group" aria-label="Método da análise"></div>
+            </div>
+            <!-- Seletor COMPACTO de modelo (task 012): o rápido/pesado morava só atrás
+                 do botão "Chaves" — impossível de achar procurando "modelo". Aqui os
+                 dois chips mostram o modelo em uso e abrem um popover PESQUISÁVEL pra
+                 ESCOLHER (não digitar), refletindo/sincronizando com os campos do
+                 config (#cfgQuick/#cfgDeep). O cross-provider por nível (027) segue no
+                 config, alcançável pelo link "avançado" do popover. -->
+            <div class="lb-group lb-model">
+              <span class="lb-glabel">modelos</span>
+              <div class="lb-models" id="launchModels" role="group" aria-label="Modelo rápido e pesado da análise"></div>
             </div>
           </div>
           <div class="lb-actions">
