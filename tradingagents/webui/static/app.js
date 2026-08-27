@@ -9,6 +9,13 @@ let TZ_LABEL = "GMT-4 (Manaus)";
 // só a VISÃO — qual run está sendo acompanhado ao vivo, quais estavam rodando na
 // última atualização da lista, e quais terminaram sozinhos (ganham "pronto").
 let _watchedRunId = "";              // run cujo progresso está na tela agora
+// Cancelamento PENDENTE (task 013): o cancel é cooperativo — a run só encerra no
+// próximo limite de nó/LLM. Enquanto o pedido está pendente E a run segue 'running',
+// o botão fica TRAVADO em 'parando…' e o poll NÃO o reabre (senão o usuário acha que
+// o clique não pegou e clica de novo). Guarda o run_id pedido; some quando vira terminal.
+let _cancelPending = "";
+let _cancelPause = false;             // o pedido foi Pausar (true) ou Parar (false)?
+const _STOP_LABEL = "⏹ Parar análise";
 let _openRunId = "";                 // run simples aberto (lado A de um confronto manual)
 let _openMethod = "padrao";          // método da análise aberta (Erick EMA 8/21 / Padrão MMS) — troca de TF mantém a estrutura do método
 let _openView = "padrao";            // o que a barra de reanálise destaca: "padrao" | "erick" | "compare" (compare = view de comparação aberta). Clicar o destaque = "Atualizar" (reanalisa hoje preservando o método).
@@ -286,12 +293,45 @@ function updateRunControls(snap) {
   const pauseBtn = $("pauseRunBtn");
   if (pauseBtn) pauseBtn.classList.toggle("hidden", !(alive && snap.resumable));
   const stopBtn = $("stopRunBtn");
-  if (alive) { if (stopBtn) stopBtn.disabled = false; if (pauseBtn) pauseBtn.disabled = false; }
+  // Cancel pendente DESTA run e ela ainda viva: mantém 'parando…' travado — não
+  // reabre (task 013). Senão libera normalmente enquanto a run está viva.
+  const pending = _cancelPending && _cancelPending === (snap.run_id || _watchedRunId) && alive;
+  if (pending) {
+    applyCancelPendingUI();
+  } else if (alive) {
+    if (stopBtn) stopBtn.disabled = false;
+    if (pauseBtn) pauseBtn.disabled = false;
+  }
   if (!_runCtlBound) {
     _runCtlBound = true;
     if (stopBtn) stopBtn.addEventListener("click", () => stopRun(false));
     if (pauseBtn) pauseBtn.addEventListener("click", () => stopRun(true));
   }
+}
+
+// Trava visual do 'parando…' enquanto o cancelamento está pendente (task 013): botão
+// desabilitado, rótulo claro no botão E no progresso, classe .is-stopping (pulso) pra
+// mostrar que registrou. Idempotente — o poll a re-aplica a cada 2s sem piscar.
+function applyCancelPendingUI() {
+  const stopBtn = $("stopRunBtn"), pauseBtn = $("pauseRunBtn");
+  if (stopBtn) {
+    stopBtn.disabled = true;
+    stopBtn.classList.add("is-stopping");
+    stopBtn.textContent = _cancelPause ? "⏸ pausando…" : "⏹ parando…";
+  }
+  if (pauseBtn) pauseBtn.disabled = true;
+  const lbl = $("progressLabel");
+  if (lbl) lbl.textContent = _cancelPause
+    ? "pausando — aguarde o passo atual encerrar…"
+    : "interrompendo — aguarde o passo atual encerrar…";
+}
+
+// Solta a trava do 'parando…' (cancel falhou, terminou, ou troca de run): restaura o
+// rótulo/estado do botão pra reuso limpo.
+function clearCancelPending() {
+  _cancelPending = "";
+  const stopBtn = $("stopRunBtn");
+  if (stopBtn) { stopBtn.classList.remove("is-stopping"); stopBtn.textContent = _STOP_LABEL; }
 }
 
 // Parar (pause=false) ou Pausar (true) a run em andamento. Cooperativo: o servidor
@@ -300,18 +340,24 @@ function updateRunControls(snap) {
 async function stopRun(pause) {
   const runId = _watchedRunId;
   if (!runId) return;
-  const stopBtn = $("stopRunBtn"), pauseBtn = $("pauseRunBtn");
-  if (stopBtn) stopBtn.disabled = true;
-  if (pauseBtn) pauseBtn.disabled = true;
-  $("progressLabel").textContent = pause ? "pausando…" : "parando…";
+  if (_cancelPending === runId) return;            // já pedido — 1 clique basta (013)
+  // Trava o estado 'parando…' JÁ, antes do await: o poll seguinte não reabre o botão.
+  _cancelPending = runId;
+  _cancelPause = !!pause;
+  applyCancelPendingUI();
   try {
     const { headers } = llmRequestParts();
-    await fetch("/api/run/" + encodeURIComponent(runId) + "/cancel", {
+    const res = await fetch("/api/run/" + encodeURIComponent(runId) + "/cancel", {
       method: "POST", credentials: "same-origin",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ pause: !!pause }),
     });
+    // Só MANTÉM 'parando…' se o servidor confirmou (200). Não-200 = não registrou →
+    // destrava e avisa, pra o usuário poder tentar de novo (013).
+    if (!res.ok) throw new Error("cancel HTTP " + res.status);
   } catch (e) {
+    clearCancelPending();
+    const stopBtn = $("stopRunBtn"), pauseBtn = $("pauseRunBtn");
     if (stopBtn) stopBtn.disabled = false;
     if (pauseBtn) pauseBtn.disabled = false;
     $("formError").textContent = "não consegui " + (pause ? "pausar" : "parar") + " — tente de novo";
@@ -324,6 +370,7 @@ async function stopRun(pause) {
 function renderCancelled(snap) {
   clearInterval(pollTimer); pollTimer = null;
   clearActiveRun();
+  clearCancelPending();          // cancel efetivado: solta a trava do 'parando…' (013)
   $("progressPanel").classList.add("hidden");
   const ctl = $("progressCtl"); if (ctl) ctl.classList.add("hidden");
   $("runBtn").disabled = false;
@@ -384,7 +431,10 @@ function renderProgress(snap) {
   }
   const p = snap.progress || {};
   $("progressPhase").textContent = p.phase || "…";
-  $("progressLabel").textContent = p.label || "";
+  // Cancel pendente: NÃO deixa o p.label do poll sobrescrever o 'interrompendo…' —
+  // updateRunControls (acima) já pôs a mensagem certa (task 013).
+  const pendingHere = _cancelPending && _cancelPending === (snap.run_id || _watchedRunId);
+  if (!pendingHere) $("progressLabel").textContent = p.label || "";
   $("progressElapsed").textContent = (snap.elapsed || 0) + "s";
   $("progressCost").textContent = fmtCost(snap.cost);
   $("barFill").style.width = (p.percent || 0) + "%";
@@ -736,6 +786,8 @@ function renderResult(snap) {
   // PARAR/PAUSAR (task 026): run cancelada não tem resultado — libera a UI com um aviso
   // honesto (não é erro, não abre painel de resultado vazio). Vale pra todo caller.
   if (snap.status === "cancelled") { renderCancelled(snap); return; }
+  // Terminou (done/error) antes do cancel pegar: solta a trava do 'parando…' (013).
+  if (_cancelPending && _cancelPending === (snap.run_id || _watchedRunId)) clearCancelPending();
   $("comparePanel").classList.add("hidden");
   // Run de comparação (Padrão × Erick): view própria, lado a lado.
   if ((snap.result || {}).compare) { renderCompare(snap); return; }
@@ -2448,6 +2500,7 @@ else if (_histMq.addListener) _histMq.addListener(syncHistoryCollapse);
 // timer por vez; o guard em poll() descarta respostas tardias do run que saímos.
 function watchRun(runId) {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (_cancelPending && _cancelPending !== runId) clearCancelPending();   // run nova: sem trava herdada (013)
   _watchedRunId = runId;
   saveActiveRun(runId, _openTicker);   // persiste pra reengatar após refresh / 2º plano
   poll(runId);

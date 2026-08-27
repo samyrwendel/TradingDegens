@@ -299,6 +299,12 @@ details.section.erick > summary { color: #9cc7f5; }
 /* PARAR = ação destrutiva e a mais importante durante a run: vermelho, sempre visível. */
 #stopRunBtn.btn-secondary { background: var(--red-dim); color: var(--red); border-color: var(--red); }
 #stopRunBtn.btn-secondary:hover:not(:disabled) { background: var(--red); color: #fff; border-color: var(--red); }
+/* 'parando…' pendente (task 013): registrou o clique e aguarda o passo atual encerrar.
+   Pulso sutil pra mostrar que está trabalhando, mesmo desabilitado (não reabre no poll). */
+#stopRunBtn.is-stopping { opacity: 1; animation: stop-pulse 1.1s ease-in-out infinite; }
+#stopRunBtn.is-stopping:disabled { opacity: 1; cursor: progress; }
+@keyframes stop-pulse { 0%, 100% { opacity: .55; } 50% { opacity: .9; } }
+@media (prefers-reduced-motion: reduce) { #stopRunBtn.is-stopping { animation: none; opacity: .8; } }
 /* Barra de RETOMAR (task 026): aparece quando há uma análise pausada resumível. */
 .resume-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 16px; background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--radius); }
