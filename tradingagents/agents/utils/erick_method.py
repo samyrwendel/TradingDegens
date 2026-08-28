@@ -569,6 +569,42 @@ def _tier3(d: dict, factors: dict | None) -> dict:
     return d
 
 
+def _gate_faltam(r: dict, drop_cls: str | None, factors: dict | None) -> list[str]:
+    """Por que a porta TIER 2 NÃO abriu — as condições citadas que faltam/contradizem.
+
+    Só é consultada quando o cenário é o da porta (frame menor em baixa, sem fraqueza,
+    tese do frame maior em alta): nesses casos o leitor merece saber qual condição
+    segurou o CAIXA. Fora do cenário, devolve [] (a porta nem se aplica)."""
+    if factors is None or drop_cls == "fraqueza":
+        return []
+    if r.get("trend") != "baixa":
+        return []
+    tese = factors.get("tese") or {}
+    if tese.get("regime") != "alta":
+        return []
+    faltam = []
+    decel = factors.get("decel") or {}
+    if decel.get("decelerando") is not True:
+        faltam.append("queda não desacelerando" if decel.get("decelerando") is False
+                      else f"queda desacelerando NÃO MEDIDA — {decel.get('detail')}")
+    earnings = factors.get("earnings") or {}
+    if earnings.get("na_janela") is not False:
+        if earnings.get("na_janela") is True:
+            faltam.append(f"balanço dentro da janela ({earnings.get('leitura')})")
+        else:
+            faltam.append(f"balanço NÃO MEDIDO — {earnings.get('leitura')}")
+    ancora = factors.get("ancora") or {}
+    if not ancora.get("em_alta"):
+        faltam.append(f"âncora {ancora.get('nome') or 'do setor'} fora de alta"
+                      if ancora else "âncora do setor ausente nesta run")
+    frame_tese = tese.get("frame")
+    div_tese = (tese.get("divergencias") or {}).get(frame_tese) or {}
+    if div_tese.get("measured") and div_tese.get("kind") == "bearish":
+        faltam.append(f"divergência bearish no frame da tese ({frame_tese}) — "
+                      f"{div_tese.get('detail')}")
+    return faltam
+
+
 def _decide_base(
     r: dict, drop: dict | None = None, fine_veto: bool = False,
     factors: dict | None = None,
@@ -1021,6 +1057,12 @@ def build_erick_method_section(
                   f"**🚪 Porta TIER 2 aberta:** tese de alta no frame maior "
                   f"({_FRAME_LABEL.get(tese['frame'], tese['frame'])}) sobrepondo o "
                   f"downtrend do {frame_label} — rebaixado a TIMING, não veto de tese."]
+    else:
+        faltam = _gate_faltam(read, drop_cls, factors)
+        if faltam:
+            lines += ["",
+                      "**🚪 Porta TIER 2 não abriu** (tese de alta no frame maior, mas o "
+                      "downtrend segue como filtro): " + "; ".join(faltam) + "."]
     lines += [
         "",
         estado_txt,

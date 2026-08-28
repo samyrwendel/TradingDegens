@@ -679,3 +679,31 @@ def test_section_intc_gate_full_acceptance(monkeypatch):
     # ausência declarada, nunca neutra
     assert "Não medido nesta run" in section
     assert "mensal (1mo)" in section
+
+
+def test_section_names_why_gate_did_not_open(monkeypatch):
+    """A porta fechada com tese alta no frame maior declara QUAL condição segurou o
+    CAIXA — caso real do INTC 27/08: divergência bearish no semanal fechou a porta
+    mesmo com tese alta, balanço longe e âncora em alta."""
+    def chart(s, d, timeframe="1d"):
+        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+                else _chart_swing_baixa_desacel(s, d, timeframe))
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: {"setup_state": "sem_setup"})
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: {
+        "classification": "indefinido", "reasons": [],
+        "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
+    monkeypatch.setattr(em, "_earnings_read", lambda s, d: {
+        "status": "ok", "ev": {"date": "2026-10-22", "days_ahead": 56}, "dias": 56,
+        "na_janela": False, "ausente": None,
+        "leitura": "sem balanço até 2026-10-22 (56 dias)"})
+    # divergência bearish medida no frame da TESE fecha a porta
+    f = _factors_full()
+    f["tese"]["divergencias"]["1w"] = {"measured": True, "kind": "bearish",
+                                       "detail": "topo do preço subiu e o do RSI caiu"}
+    monkeypatch.setattr(em, "_factors", lambda *a, **k: f)
+    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    assert "Porta TIER 2 não abriu" in section
+    assert "divergência bearish no frame da tese" in section
+    assert "**Estado (Método Erick):** CAIXA" in section
