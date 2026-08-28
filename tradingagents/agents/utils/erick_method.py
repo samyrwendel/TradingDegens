@@ -520,7 +520,53 @@ def _gate_abre(r: dict, drop_cls: str | None, factors: dict | None) -> bool:
     return not (div_tese.get("measured") and div_tese.get("kind") == "bearish")
 
 
-def _decide(
+def _peso_step(peso: str, delta: int) -> str:
+    """Anda um degrau na escada do peso-de-posição (clamped nas pontas)."""
+    i = _PESO_ORDEM.index(peso)
+    return _PESO_ORDEM[max(0, min(i + delta, len(_PESO_ORDEM) - 1))]
+
+
+def _tier3(d: dict, factors: dict | None) -> dict:
+    """TIER 3 — modificador de TAMANHO: muda o PESO, nunca a direção (``acao``).
+
+    * balanço DENTRO da janela → desce um degrau ([11:35] "não teria posição
+      tão relevante… reduziria agora"; [14:39] "mais seguro proteger o capital").
+    * divergência bearish medida no frame de swing → teto ``posição inicial``
+      (a alta perdeu força; [01:01] BTC subiu criando divergência no 4h → não
+      soma tamanho em cima dela).
+
+    ``caixa`` é piso e teto de si mesmo — o TIER 3 não mexe. ``factors=None``
+    → devolve o dict intocado (byte-a-byte). O mapa exato
+    contagem-de-confirmação→degrau segue `a calibrar` (spec §8): aqui só os
+    dois modificadores citados, um degrau cada.
+    """
+    if not factors or d["peso"] == "caixa":
+        return d
+    notes: list[str] = []
+    peso = d["peso"]
+
+    earnings = factors.get("earnings") or {}
+    if earnings.get("na_janela") is True:
+        peso = _peso_step(peso, -1)
+        notes.append(f"balanço na janela ({earnings.get('leitura')}) — "
+                     "protege o capital, desce um degrau")
+
+    div = factors.get("divergencia") or {}
+    if div.get("measured") and div.get("kind") == "bearish":
+        if _PESO_ORDEM.index(peso) > 1:
+            peso = _PESO_ORDEM[1]
+        notes.append(f"divergência bearish medida no frame de swing "
+                     f"({div.get('detail')}) — teto de posição inicial")
+
+    if not notes:
+        return d
+    d = dict(d)
+    d["peso"] = peso
+    d["peso_racional"] = d["peso_racional"] + " · TIER 3: " + "; ".join(notes)
+    return d
+
+
+def _decide_base(
     r: dict, drop: dict | None = None, fine_veto: bool = False,
     factors: dict | None = None,
 ) -> dict:
@@ -652,6 +698,16 @@ def _decide(
         "peso": "caixa",
         "peso_racional": "filtro do método: sem entrada contra médias invertidas; caixa é a posição",
     }
+
+
+def _decide(
+    r: dict, drop: dict | None = None, fine_veto: bool = False,
+    factors: dict | None = None,
+) -> dict:
+    """A decisão completa: a mecânica (``_decide_base``) + o modificador de tamanho
+    (TIER 3). O TIER 3 só anda no peso, nunca na direção — e com ``factors=None``
+    devolve a mecânica byte-a-byte."""
+    return _tier3(_decide_base(r, drop, fine_veto, factors), factors)
 
 
 def _saida(plan: dict, read: dict) -> str:

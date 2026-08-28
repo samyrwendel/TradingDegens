@@ -595,3 +595,39 @@ def test_decide_without_factors_is_byte_for_byte():
         assert _decide(r) == _decide(r, None, False, None)
         d = _decide(r)
         assert _estado(d["acao"], trend) == _estado(d["acao"], trend, None, False)
+
+
+# ------------------------------------------------- TIER 3: modificador de tamanho
+def test_tier3_earnings_window_steps_down():
+    """Balanço na janela desce UM degrau (meia→inicial), sem tocar na ação."""
+    factors = _factors_full(earnings=dict(_factors_full()["earnings"], na_janela=True,
+                                          leitura="balanço em 7 dia(s)"))
+    d = _decide(_read("alta", at_media=True), None, False, factors)
+    assert d["acao"] == "AGIR" and d["peso"] == "posição inicial"
+    assert "TIER 3" in d["peso_racional"] and "balanço na janela" in d["peso_racional"]
+
+
+def test_tier3_bearish_divergence_caps_at_initial():
+    """Divergência bearish medida no swing → teto posição inicial (não soma tamanho)."""
+    factors = _factors_full(divergencia={"measured": True, "kind": "bearish",
+                                         "detail": "topo do preço subiu e o do RSI caiu"})
+    d = _decide(_read("alta", at_media=True), None, False, factors)
+    assert d["acao"] == "AGIR" and d["peso"] == "posição inicial"
+    assert "divergência bearish" in d["peso_racional"]
+
+
+def test_tier3_never_touches_cash_or_direction():
+    """caixa é piso de si mesmo; a fraqueza (veto) não é negociável pelo TIER 3."""
+    factors = _factors_full(earnings=dict(_factors_full()["earnings"], na_janela=True))
+    d = _decide(_read("baixa", below=True), {"classification": "fraqueza"}, False, factors)
+    assert d["acao"] == "AGUARDAR" and d["peso"] == "caixa"
+    assert "TIER 3" not in d["peso_racional"]
+
+
+def test_tier3_floor_is_cash_and_none_is_noop():
+    """inicial + balanço na janela → caixa (piso). factors=None → intocado."""
+    factors = _factors_full(earnings=dict(_factors_full()["earnings"], na_janela=True))
+    d = _decide(_read("transicao", at_media=True), None, False, factors)
+    assert d["peso"] == "caixa"
+    d2 = _decide(_read("alta", at_media=True), None, False, None)
+    assert d2["peso"] == "meia posição" and "TIER 3" not in d2["peso_racional"]
