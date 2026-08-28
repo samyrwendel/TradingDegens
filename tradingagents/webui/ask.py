@@ -114,7 +114,35 @@ def _zone_line(label_pt: str, zone: dict | None) -> tuple[str, bool]:
     lo, hi = _num(zone.get("low")), _num(zone.get("high"))
     band = f" (faixa {lo}–{hi})" if lo and hi else ""
     head = f"{lbl} → " if lbl else ""
-    return f"{label_pt}: {head}{price}{band}.", True
+    note = f" — ⚠️ {zone['overlap_note']}" if zone.get("overlap_note") else ""
+    return f"{label_pt}: {head}{price}{band}{note}.", True
+
+
+def _pullback_dist_line(actionable: dict, price_chart: dict) -> tuple[str, bool]:
+    """O recuo à média quando o plano não tem zona de pullback: a DISTÂNCIA do preço
+    às EMAs 8/21 (o dado que a run JÁ computou). O toque em curso é fato — declarar
+    'sem nível definido' com o preço a 0,1% da média é o dado presente e a frase
+    muda (a família do bug do INTC: dado existe, decisão não lê)."""
+    raw_price = actionable.get("price")
+    price = _num(raw_price)
+    if price is None:
+        return "Recuo/gatilho a aguardar: sem nível definido.", False
+    ema = price_chart.get("ema") or {}
+    bits = []
+    for w in ("8", "21"):
+        val = _num(_last_valid(ema.get(w)))
+        if val:
+            dist = f"{float(raw_price) / float(_last_valid(ema.get(w))) - 1:+.2%}".replace(".", ",")
+            bits.append(f"EMA {w} ({val}): {dist}")
+    if not bits:
+        return "Recuo/gatilho a aguardar: sem nível definido.", False
+    # Toque em curso: dentro de 0,4% da EMA 21 (tolerância do método Erick)
+    e21_raw = _last_valid(ema.get("21"))
+    tocando = (e21_raw is not None
+               and abs(float(raw_price) / float(e21_raw) - 1) <= 0.004)
+    head = ("Recuo à média EM CURSO — preço " if tocando
+            else "Recuo/gatilho a aguardar — distância do preço: ")
+    return head + " · ".join(bits) + ".", True
 
 
 def price_facts(actionable: dict | None, price_chart: dict | None) -> list[str]:
@@ -159,7 +187,14 @@ def price_facts(actionable: dict | None, price_chart: dict | None) -> list[str]:
     for label_pt, key in (("Zona de compra", "buy_zone"),
                           ("Zona de realização", "realize_zone"),
                           ("Recuo/gatilho a aguardar", "pullback_zone")):
-        line, ok = _zone_line(label_pt, actionable.get(key))
+        zone = actionable.get(key)
+        has_zone = isinstance(zone, dict) and _num(zone.get("price")) is not None
+        if key == "pullback_zone" and not has_zone:
+            # Sem zona no plano, o recuo ainda é FATO mensurável: a distância às EMAs
+            # (dado que a run já computou) — nunca o mudo "sem nível definido".
+            line, ok = _pullback_dist_line(actionable, price_chart)
+        else:
+            line, ok = _zone_line(label_pt, zone)
         lines.append(line)
         has_number = has_number or ok
 

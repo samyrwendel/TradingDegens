@@ -1130,6 +1130,20 @@ def build_actionable_plan(
     realize_zone = _banded(realize_zone, atr)
     pullback_zone = _banded(pullback_zone, None if pullback_is_trigger else atr)
 
+    # Reconciliação compra×realização: âncoras distintas com bandas que se cobrem
+    # (ex.: EMA 21 e topo anterior a 0,7 de distância com ±0,5·ATR) NÃO são duas
+    # zonas independentes — comprar e realizar no mesmo preço é setup degenerado.
+    # Declara a sobreposição no molde do same_as_realize do alvo, nunca esconde.
+    if (
+        buy_zone is not None and realize_zone is not None
+        and buy_zone.get("high") is not None and realize_zone.get("low") is not None
+        and buy_zone["high"] >= realize_zone["low"]
+    ):
+        note = ("faixa de compra cobre a de realização — sem espaço entre a média "
+                "e o alvo: setup degenerado, não duas zonas independentes")
+        buy_zone["overlap_note"] = note
+        realize_zone["overlap_note"] = note
+
     # Onde INVALIDA, onde é o STOP e onde é o ALVO — mais o R:R que transforma
     # "tem 1-2-3" em trade operável. Ancorados no ponto 3 e no swing anterior da
     # série; sem padrão, os quatro ficam None (a tela diz "sem nível definido").

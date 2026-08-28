@@ -67,15 +67,18 @@ def _last(seq):
 
 
 def _fmt_zone(zone) -> str | None:
-    """Faixa {label, price, low, high} -> texto. Banda quando há ATR, senão ponto."""
+    """Faixa {label, price, low, high} -> texto. Banda quando há ATR, senão ponto.
+    Zona com sobreposição declarada (compra×realização) carrega o aviso — não finge
+    duas zonas independentes."""
     if not zone:
         return None
     label = zone.get("label") or ""
     low, high, price = zone.get("low"), zone.get("high"), zone.get("price")
+    note = f" (⚠️ {zone['overlap_note']})" if zone.get("overlap_note") else ""
     if low is not None and high is not None:
-        return f"{label}: {_fmt(low)}–{_fmt(high)}"
+        return f"{label}: {_fmt(low)}–{_fmt(high)}{note}"
     if price is not None:
-        return f"{label}: {_fmt(price)}"
+        return f"{label}: {_fmt(price)}{note}"
     return label or None
 
 

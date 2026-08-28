@@ -249,3 +249,38 @@ def test_ask_joins_list_content_parts(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_answer_llm", lambda cbs, ov=None: _FakeLLM(parts))
     out = runner.ask("r-single", "e aí?")
     assert out["answer"] == "parte 1 parte 2"
+
+
+# --- defeito A: recuo mudo quando o toque está em curso ------------------------
+
+def test_price_facts_declares_pullback_distance_when_zone_absent():
+    """Sem pullback_zone, o recuo ainda é FATO mensurável: a distância às EMAs
+    entra no grounding — nunca o mudo 'sem nível definido' (bug do TSM: preço a
+    0,1% da EMA 21 e a tela dizia que não havia nível)."""
+    r = _single_record()["result"]
+    facts = A.price_facts(r["actionable"], r["price_chart"])
+    blob = "\n".join(facts)
+    assert "distância do preço" in blob
+    assert "EMA 8 (136,93)" in blob and "EMA 21 (134,07)" in blob
+    assert "Recuo/gatilho a aguardar: sem nível definido." not in blob
+
+
+def test_price_facts_declares_touch_in_course_within_tolerance():
+    """Preço a 0,12% da EMA 21 (dentro da tolerância de 0,4%) → o grounding diz
+    que o recuo está EM CURSO, com as distâncias."""
+    r = _single_record()["result"]
+    r["actionable"]["price"] = 134.23   # 0,12% acima da EMA 21 (134,07)
+    facts = A.price_facts(r["actionable"], r["price_chart"])
+    blob = "\n".join(facts)
+    assert "Recuo à média EM CURSO" in blob
+    assert "+0,12%" in blob
+
+
+def test_price_facts_pullback_absent_stays_absent_without_data():
+    """Sem preço E sem EMAs → o contrato honesto se mantém: [] (run sem base
+    numérica) — a distância às médias nunca é inventada."""
+    facts = A.price_facts(
+        {"buy_zone": None, "realize_zone": None, "pullback_zone": None, "price": None},
+        {"ema": {}},
+    )
+    assert facts == []

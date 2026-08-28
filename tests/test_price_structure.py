@@ -622,3 +622,43 @@ def test_weekly_resample_aggregates_and_guards_forming_week(monkeypatch):
     assert row["High"] == float(span["High"].max())
     assert row["Low"] == float(span["Low"].min())
     assert row["Close"] == float(span["Close"].iloc[-1])
+
+
+@pytest.mark.unit
+def test_overlapping_buy_and_realize_declares_degeneracy(monkeypatch):
+    """Defeito B (TSM): âncoras distintas (EMA 21 × topo anterior) com bandas que se
+    cobrem NÃO são duas zonas independentes — comprar e realizar no mesmo preço é
+    setup degenerado, e o plano DECLARA a sobreposição (overlap_note em ambas).
+    Curva calibrada: EMA21@126,87 e topo@128,37, bandas ±0,5·ATR se cobrindo."""
+    closes = ([100 + 0.3 * i for i in range(100)]          # alta suave → 129,7
+              + [129.7 - 0.8 * i for i in range(1, 6)]     # recuo → 125,7
+              + [126.4, 126.7, 127.0, 127.6,               # rali curto: topo próximo
+                 127.0, 126.8, 126.6, 126.4, 126.2])
+    dates = pd.bdate_range("2025-01-01", periods=len(closes))
+    c = pd.Series(closes, dtype=float)
+    df = pd.DataFrame({
+        "Date": dates.strftime("%Y-%m-%d"),
+        "Open": c.shift(1).fillna(c).values,
+        "High": (c * 1.006).values,
+        "Low": (c * 0.994).values,
+        "Close": c.values,
+        "Volume": [1000] * len(closes),
+    })
+    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
+    plan = ps.build_actionable_plan_dict("SYN", CURR, method="erick")
+    bz, rz = plan.get("buy_zone") or {}, plan.get("realize_zone") or {}
+    # a curva FOI construída para sobrepor — se deixar de sobrepor, o teste avisa
+    assert bz.get("high") is not None and rz.get("low") is not None
+    assert bz["high"] >= rz["low"], "curva de teste perdeu a sobreposição"
+    assert "overlap_note" in bz and "overlap_note" in rz
+    assert "setup degenerado" in bz["overlap_note"]
+    assert bz["overlap_note"] == rz["overlap_note"]
+
+
+@pytest.mark.unit
+def test_non_overlapping_zones_carry_no_warning(synth):
+    """Bandas afastadas (o caso comum) continuam limpas — o aviso é só pra
+    sobreposição real, não vira ruído em toda run."""
+    plan = ps.build_actionable_plan_dict("SYN", CURR)
+    for zone in (plan.get("buy_zone"), plan.get("realize_zone")):
+        assert not (zone or {}).get("overlap_note")
