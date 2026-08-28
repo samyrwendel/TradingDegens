@@ -859,6 +859,54 @@ def _estado_note(
     return ""
 
 
+def _traco_line(
+    read: dict, drop_cls: str | None, fine_veto: bool,
+    factors: dict, gate: bool, decision: dict,
+) -> str | None:
+    """O TRAÇO da decisão (spec §4): qual fator COMANDOU o Estado, o que ele
+    SOBREPÔS e quais tiers foram consultados — dado compacto e ordenado, não prosa.
+
+    Mata a caixa-preta: sem isto, ordenar a decisão vira um novo gatilho opaco.
+    Os AUSENTES ficam no parágrafo próprio ("Não medido nesta run") — aqui só a
+    hierarquia que efetivamente decidiu.
+    """
+    tese = factors.get("tese") or {}
+    earnings = factors.get("earnings") or {}
+    ancora = factors.get("ancora") or {}
+
+    tiers = [f"T0 tese {tese.get('regime') or 'ausente'}"
+             + (f" ({_COMPACT_FRAME.get(tese['frame'], tese['frame'])})" if tese.get("frame") else "")]
+    tiers.append(f"T1 veto {'FRAQUEZA' if drop_cls == 'fraqueza' else 'livre'}")
+    if gate:
+        tiers.append("T2 porta ABERTA (5 condições)")
+    elif drop_cls == "liquidacao_saudavel":
+        tiers.append("T2 liquidação saudável")
+    if "TIER 3" in decision.get("peso_racional", ""):
+        tiers.append("T3 rebaixou o peso")
+    if earnings.get("leitura"):
+        tiers.append(f"balanço: {earnings['leitura']}")
+    if ancora.get("nome"):
+        tiers.append(f"âncora {ancora['nome']}"
+                     + (" em alta" if ancora.get("em_alta") else " fora de alta"))
+    if fine_veto:
+        tiers.append("veto 15m ativo")
+
+    if drop_cls == "fraqueza":
+        comandou, sobrepos = "natureza da queda (fraqueza — TIER 1)", "leitura de médias"
+    elif gate:
+        comandou = f"tese do frame maior (TIER 0, {tese.get('frame')})"
+        sobrepos = "downtrend do frame menor — rebaixado a TIMING"
+    elif drop_cls == "liquidacao_saudavel":
+        comandou, sobrepos = "natureza da queda (liquidação saudável — TIER 2)", "baixa crua das EMAs curtas"
+    elif read["trend"] == "alta" and read["at_media"]:
+        comandou, sobrepos = "pilha de EMAs do swing + toque na média", "nada — leitura mecânica"
+    else:
+        comandou, sobrepos = f"pilha de EMAs do swing ({read['trend']})", "nada — leitura mecânica"
+
+    return ("**Traço da decisão:** " + " · ".join(tiers) +
+            f" — **comandou:** {comandou}; **sobrepôs:** {sobrepos}.")
+
+
 def build_erick_method_section(
     symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
 ) -> str:
@@ -977,6 +1025,12 @@ def build_erick_method_section(
         f"**Saída (antes da reversão):** {saida}.",
         f"**Peso relativo do trade:** {decision['peso']} — {decision['peso_racional']}.",
     ]
+
+    # O traço (spec §4): logo após o Peso, fecha o bloco decisório dizendo quem
+    # mandou e o que ele sobrepôs — a caixa-preta morre aqui.
+    traco = _traco_line(read, drop_cls, fine_veto, factors, gate, decision)
+    if traco:
+        lines.append(traco)
 
     # Gatilho 1-2-3 do frame de swing (o outro pilar do método além do recuo à EMA
     # 8/21), agora DENTRO da leitura do método — não só na seção de mercado.

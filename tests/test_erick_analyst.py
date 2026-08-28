@@ -631,3 +631,51 @@ def test_tier3_floor_is_cash_and_none_is_noop():
     assert d["peso"] == "caixa"
     d2 = _decide(_read("alta", at_media=True), None, False, None)
     assert d2["peso"] == "meia posição" and "TIER 3" not in d2["peso_racional"]
+
+
+# ------------------------------------------------------------- traço de saída ----
+def _chart_tesa(s, d, timeframe="1d"):
+    closes = [100.0 + i * 0.5 for i in range(60)]
+    last = closes[-1]
+    return {"candles": [{"c": c} for c in closes],
+            "ema": {"8": [last], "21": [last - 1.0], "50": [last - 2.0]}}
+
+
+def _chart_swing_baixa_desacel(s, d, timeframe="4h"):
+    # queda íngreme com a mudança de inclinação DENTRO da janela de 11 barras
+    closes = [100.0 - i * 1.0 for i in range(54)] + [47.0 - 0.1 * i for i in range(1, 7)]
+    last = closes[-1]
+    return {"candles": [{"c": c} for c in closes],
+            "ema": {"8": [last - 0.3], "21": [last + 0.4], "50": [last + 1.2]}}
+
+
+def test_section_intc_gate_full_acceptance(monkeypatch):
+    """Aceitação spec §5.1 na SEÇÃO: downtrend 4h + tese semanal alta + queda
+    desacelerando + sem balanço na janela + âncora NVDA em alta → AGUARDAR /
+    posição inicial, com o traço nomeando quem comandou e o que sobrepôs."""
+    def chart(s, d, timeframe="1d"):
+        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+                else _chart_swing_baixa_desacel(s, d, timeframe))
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: {"setup_state": "sem_setup"})
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: {
+        "classification": "indefinido", "reasons": [],
+        "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
+    monkeypatch.setattr(em, "_earnings_read", lambda s, d: {
+        "status": "ok", "ev": {"date": "2026-10-22", "days_ahead": 56}, "dias": 56,
+        "na_janela": False, "ausente": None,
+        "leitura": "sem balanço até 2026-10-22 (56 dias)"})
+    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    # O fix: Estado NÃO é mais CAIXA pelo motivo errado
+    assert "**Estado (Método Erick):** AGUARDAR" in section
+    assert "**Estado (Método Erick):** CAIXA" not in section
+    # peso inicial (não caixa) e a porta nomeada
+    assert "**Peso relativo do trade:** posição inicial" in section
+    assert "Porta TIER 2 aberta" in section
+    # o traço diz quem mandou e o que sobrepôs
+    assert "comandou:** tese do frame maior (TIER 0, 1w)" in section
+    assert "sobrepôs:** downtrend do frame menor" in section
+    # ausência declarada, nunca neutra
+    assert "Não medido nesta run" in section
+    assert "mensal (1mo)" in section
