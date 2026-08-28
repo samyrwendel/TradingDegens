@@ -5,8 +5,9 @@ invalida e onde é o TP e o SL". O gráfico marcava os três pontos e a linha do
 — e parava aí, o que não dá para operar.
 
 Aqui provamos NA TELA:
-  1. compra — legenda ganha invalidação / stop (SL) / alvo (TP), a nota escreve a
-     FRASE da invalidação ("o setup morre se perder X") e a faixa do setup mostra o R:R;
+  1. compra — os três níveis PINTADOS no candle, cada um com rótulo e preço na
+     própria linha/faixa ("stop (SL) 128,50"), entrada na legenda, chip de R:R dentro
+     do gráfico, e a nota com a FRASE da invalidação ("o setup morre se perder X");
   2. reconciliação — quando o alvo É a região de realização, sai UMA faixa só dizendo
      "realização = alvo (TP)"; quando a realização é o próprio gatilho, ela não é
      desenhada de novo (a linha do 1-2-3 já está lá);
@@ -86,11 +87,15 @@ _SEED_JS = r"""
   renderHeadPrice(plan);
   renderActionable(plan);
   renderChartCard(chart, 'SYN', plan);
+  const cv = document.getElementById('priceChart');
   return {
     legend: document.getElementById('chartLegend').textContent,
     note: document.getElementById('chartNote').textContent,
     strip: document.getElementById('actionable').textContent,
     zones: planZones(plan).map((z) => z.tag),
+    // rótulos DESENHADOS no candle + chip de R:R (expostos em dataset pelo draw)
+    painted: JSON.parse(cv.dataset.levelLabels || '[]'),
+    rrChip: cv.dataset.rr || '',
   };
 }
 """
@@ -165,6 +170,11 @@ def test_compra_mostra_invalidacao_stop_alvo_e_rr(live_server):
             assert "Risco/retorno" in out["strip"] and "1,02:1" in out["strip"]
             # a realização que É o gatilho não vira uma segunda faixa
             assert "realização (alvo)" not in out["zones"]
+            # PINTADO no candle: cada nível com rótulo E preço no próprio gráfico
+            assert "invalidação 131,00" in out["painted"]
+            assert "stop (SL) 128,50" in out["painted"]
+            assert "alvo (TP) 176,00" in out["painted"]
+            assert out["rrChip"] == "R:R 1,02:1"   # chip do R:R dentro do gráfico
         finally:
             browser.close()
 
@@ -196,6 +206,9 @@ def test_alvo_igual_a_realizacao_desenha_uma_faixa_so(live_server):
             assert "alvo (TP)" not in tags          # não há uma SEGUNDA faixa de alvo
             assert "realização (alvo)" not in tags  # nem a etiqueta antiga sozinha
             assert "mesmo nível da região de realização" in out["note"]
+            # e no candle sai UM rótulo só, dizendo que são o mesmo nível
+            pintados = [t for t in out["painted"] if "176,00" in t]
+            assert pintados == ["realização = alvo (TP) 176,00"]
         finally:
             browser.close()
 
@@ -237,6 +250,12 @@ def test_venda_nao_herda_esqueleto_de_long(live_server):
             assert "voltar acima" in out["note"]
             assert "fundo anterior" in out["note"]
             assert "1,93:1" in out["strip"]
+            # PINTADO no candle, no sentido de VENDA: stop acima, alvo abaixo
+            assert "invalidação 152,00" in out["painted"]
+            assert "stop (SL) 154,50" in out["painted"]
+            assert "alvo (TP) 112,00" in out["painted"]
+            assert "topo anterior (resistência) 152,00" in out["painted"]
+            assert out["rrChip"] == "R:R 1,93:1"
         finally:
             browser.close()
 
@@ -259,5 +278,9 @@ def test_sem_base_diz_sem_nivel_definido(live_server):
             assert "morre se perder" in out["note"]
             assert "128,5" in out["note"]
             assert "alvo (TP)" not in out["zones"]
+            # sem alvo e sem R:R nada é pintado no lugar deles
+            assert not any(t.startswith("alvo (TP)") for t in out["painted"])
+            assert out["rrChip"] == ""
+            assert "invalidação 131,00" in out["painted"]   # o que TEM base, pinta
         finally:
             browser.close()

@@ -1935,10 +1935,13 @@ function patColor(pat) {
 // folga de ATR). O ALVO reusa o dourado da realização de propósito: é a mesma
 // função (onde se realiza), e quando os dois são o mesmo nível vira UMA faixa só.
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc",
-                      stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad" };
-// O dourado é a cor de "onde se realiza". Quando o topo overhead NÃO é o alvo
-// (setup de venda), ele sai em cinza-neutro: é contexto de estrutura, não nível
-// de ação — assim o dourado na tela quer dizer alvo, sempre.
+                      stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad",
+                      target: "#26de81" };
+// Cor POR PAPEL: vermelho para o que tira do trade (invalidação clara, stop
+// forte), verde-alvo para o TP, dourado para a realização quando não há padrão,
+// cinza-neutro para o topo overhead que NÃO é alvo (setup de venda) — ali ele é
+// contexto de estrutura, não nível de ação. Cada faixa/linha ainda carrega o
+// PRÓPRIO rótulo desenhado no gráfico, então cor parecida nunca vira dúvida.
 // O estado de cada gráfico (dados + janela de zoom h/v + geometria) mora no próprio
 // elemento <canvas> (canvas._chart/_actionable/_view/_vview/_yGeom/_autoY), pra que o
 // gráfico principal e os dois da comparação sejam independentes.
@@ -2270,8 +2273,8 @@ function planZones(a) {
   const tg = a.target;
   if (tg && tg.price != null) {
     const twin = tg.same_as_realize && out.find((z) => z.color === ZONE_COLORS.realize && z.price === tg.price);
-    if (twin) twin.tag = "realização = alvo (TP)";
-    else out.push({ ...tg, color: ZONE_COLORS.realize, tag: "alvo (TP)" });
+    if (twin) { twin.tag = "realização = alvo (TP)"; twin.color = ZONE_COLORS.target; }
+    else out.push({ ...tg, color: ZONE_COLORS.target, tag: "alvo (TP)" });
   }
   // Invalidação e stop são LINHAS (nível exato), não faixas: a invalidação é o
   // ponto 3 da série e o stop é ela com a folga de ATR declarada pelo backend.
@@ -2470,6 +2473,26 @@ function drawPriceChart(canvas, chart, a) {
   ctx.fillStyle = "#cdd6e4"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
   ctx.fillText(tfText, padL + 9, padT + 2 + 8.5);
 
+  // R:R do setup DENTRO do gráfico, colado no carimbo do frame — é a razão que
+  // decide se o 1-2-3 vale o risco, então não pode ficar só num card ao lado.
+  // Verde quando o retorno é maior que o risco, âmbar quando não é (o fato, não
+  // uma regra inventada de "R:R mínimo").
+  const rrPlan = a && a.risk_reward;
+  canvas.dataset.rr = "";
+  if (rrPlan && rrPlan.rr != null) {
+    const rrText = `R:R ${fmtNum(rrPlan.rr)}:1`;
+    canvas.dataset.rr = rrText;
+    const rrCol = rrPlan.rr >= 1 ? "#26de81" : "#ff9f43";
+    ctx.font = "bold 11px ui-monospace, Menlo, monospace";
+    const rrW = ctx.measureText(rrText).width + 14;
+    const rrY = padT + 23;   // 2ª linha: a 1ª divide espaço com a dica de zoom (HTML)
+    roundRect(ctx, padL + 2, rrY, rrW, 17, 4);
+    ctx.globalAlpha = 0.85; ctx.fillStyle = "#111111"; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = rrCol + "88"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = rrCol; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(rrText, padL + 9, rrY + 8.5);
+  }
+
   // plan zones: translucent bands BEHIND the candles (edge labels drawn on top later)
   zones.forEach((z) => {
     const hasBand = z.low != null && z.high != null && z.high > z.low;
@@ -2595,6 +2618,38 @@ function drawPriceChart(canvas, chart, a) {
     ctx.strokeStyle = "rgba(230,234,242,0.5)"; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(padL, yp); ctx.lineTo(padL + plotW, yp); ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  // RÓTULO DE CADA NÍVEL desenhado no próprio gráfico ("stop (SL) 128,50"), na
+  // altura da linha/faixa: o candle sozinho já diz o que é cada nível, sem obrigar
+  // o leitor a cruzar cor com legenda. Empilha com o mesmo de-colisão das pílulas
+  // e começa abaixo do carimbo de frame pra não tampá-lo.
+  canvas.dataset.levelLabels = "[]";
+  if (zones.length) {
+    const tagPills = zones.map((z) => {
+      const band = z.low != null && z.high != null && z.high > z.low;
+      const yl = band ? (y(z.high) + y(z.low)) / 2 : y(z.price);
+      return { y: yl, ry: yl, text: `${z.tag} ${fmtAxis(z.price)}`, color: z.color };
+    });
+    const labelTop = padT + ((a && a.risk_reward && a.risk_reward.rr != null) ? 52 : 30);
+    layoutAxisPills(tagPills, labelTop, padT + plotH - 10, 17);
+    // rótulos realmente PINTADOS ficam observáveis (mesmo padrão do zoom em
+    // dataset.v0/v1): é assim que o E2E prova que estão no candle, não só na legenda
+    canvas.dataset.levelLabels = JSON.stringify(tagPills.map((t) => t.text));
+    ctx.font = "bold 10px ui-monospace, Menlo, monospace";
+    tagPills.forEach((t) => {
+      const w = ctx.measureText(t.text).width + 14;
+      if (Math.abs(t.ry - t.y) > 1) {   // deslocado pra não colar: leader até o nível real
+        ctx.strokeStyle = t.color; ctx.globalAlpha = 0.45; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(padL + 4, t.ry); ctx.lineTo(padL + 4, t.y); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      roundRect(ctx, padL + 4, t.ry - 8, w, 16, 4);
+      ctx.globalAlpha = 0.88; ctx.fillStyle = "#0b0b0b"; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = t.color + "aa"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = t.color; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(t.text, padL + 11, t.ry + 0.5);
+    });
   }
 
   // pílulas de nível na RÉGUA DIREITA (por último, por cima dos números de grade):
