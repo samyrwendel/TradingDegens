@@ -5,6 +5,12 @@ NVDA sai quarta 26/08"). Estes testes injetam um DataFrame de earnings falso (se
 rede) e checam: escolher a próxima data ESTRITAMENTE depois da base, o "após o
 fechamento", o clamp do date_guard, a fonte caída virando "indisponível" (sem
 inventar data), e o vazio em cripto.
+
+Bug L1 (28/08, task 008): o filtro era ``ts <= base`` e ENGOLIA o balanço do
+próprio dia — no dia 27/08 o MRVL divulgava às 16h e a seção dizia "indisponível",
+deixando muda a regra "não aumentar posição antes do balanço" na única hora em que
+ela importa. Agora a próxima data inclui a de HOJE, e "sem agenda" (a fonte
+respondeu e não há data) deixou de se confundir com "fonte fora do ar".
 """
 import pandas as pd
 import pytest
@@ -51,10 +57,36 @@ def test_next_earnings_after_base(fake_yf):
 
 
 @pytest.mark.unit
-def test_skips_dates_at_or_before_base(fake_yf):
+def test_skips_dates_before_base(fake_yf):
     # Base em junho: a de maio (05-20) fica pra trás; a próxima é a de agosto.
     ev = ec.get_next_earnings("NVDA", "2026-06-01")
     assert ev["date"] == "2026-08-26"
+
+
+@pytest.mark.unit
+def test_earnings_do_proprio_dia_nao_some(fake_yf):
+    """L1: com a base NO dia do balanço, o evento é o de HOJE — não o do trimestre
+    que vem. Era exatamente o que sumia (MRVL 27/08, divulgação às 16h)."""
+    ev = ec.get_next_earnings("NVDA", "2026-08-26")
+    assert ev["date"] == "2026-08-26"
+    assert ev["is_today"] is True
+    assert ev["days_ahead"] == 0
+    assert ev["after_close"] is True
+
+
+@pytest.mark.unit
+def test_dia_seguinte_ao_balanco_nao_reaproveita_o_de_ontem(fake_yf):
+    """O inverso do L1: passado o dia, o evento de ontem não pode continuar
+    aparecendo como "próximo" — aí sim não há mais data à frente."""
+    assert ec.get_next_earnings("NVDA", "2026-08-27") is None
+
+
+@pytest.mark.unit
+def test_secao_grita_quando_o_balanco_e_hoje(fake_yf):
+    section = ec.build_earnings_section("NVDA", "2026-08-26", "stock")
+    assert "RESULTADO HOJE" in section
+    assert "não aumentar posição antes do balanço" in section
+    assert "2026-08-26" in section
 
 
 @pytest.mark.unit
@@ -93,10 +125,43 @@ def test_section_shows_symbol_and_anchor(fake_yf):
 
 @pytest.mark.unit
 def test_section_unavailable_wording(monkeypatch):
-    monkeypatch.setattr(ec, "get_next_earnings", lambda sym, cd: None)
+    """Fonte caída: "indisponível", e a seção diz que NÃO SABE se há balanço."""
+    monkeypatch.setattr(ec, "get_next_earnings_status",
+                        lambda sym, cd: (None, ec.STATUS_FONTE_INDISPONIVEL))
     section = ec.build_earnings_section("AMD", "2026-08-01", "stock")
     assert "indisponível" in section.lower()
     assert "inventada" in section.lower()
+    assert "não respondeu" in section.lower()
+
+
+@pytest.mark.unit
+def test_sem_agenda_nao_se_confunde_com_fonte_fora_do_ar(monkeypatch):
+    """L1: as duas causas se leem ao CONTRÁRIO uma da outra — "sem data publicada"
+    é informação (não há risco de evento conhecido); "fonte fora do ar" é
+    ignorância. Não podem sair na mesma frase."""
+    monkeypatch.setattr(ec, "get_next_earnings_status",
+                        lambda sym, cd: (None, ec.STATUS_SEM_AGENDA))
+    section = ec.build_earnings_section("AMD", "2026-08-01", "stock")
+    assert "sem data de resultado publicada" in section
+    assert "não é falha de fonte" in section
+    assert "não respondeu" not in section.lower()
+
+
+@pytest.mark.unit
+def test_status_distingue_as_duas_ausencias(monkeypatch, fake_yf):
+    """O status vem do dado, não do texto: fonte que explode → fonte_indisponivel;
+    fonte que responde vazio → sem_agenda; com evento → ok."""
+    ev, st = ec.get_next_earnings_status("NVDA", "2026-08-01")
+    assert st == ec.STATUS_OK and ev is not None
+
+    _, st_vazio = ec.get_next_earnings_status("NVDA", "2027-01-01")
+    assert st_vazio == ec.STATUS_SEM_AGENDA
+
+    def boom(symbol, base):
+        raise RuntimeError("yahoo 429")
+    monkeypatch.setattr(ec, "_fetch_next_earnings", boom)
+    _, st_caiu = ec.get_next_earnings_status("AMD", "2026-08-01")
+    assert st_caiu == ec.STATUS_FONTE_INDISPONIVEL
 
 
 @pytest.mark.unit

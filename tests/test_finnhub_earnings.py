@@ -219,7 +219,8 @@ def test_format_line_beat_and_miss():
 def test_section_shows_reported_result(monkeypatch):
     from tradingagents.dataflows import earnings_calendar as ec
 
-    monkeypatch.setattr(ec, "get_next_earnings", lambda sym, cd: None)
+    monkeypatch.setattr(ec, "get_next_earnings_status",
+                        lambda sym, cd: (None, ec.STATUS_SEM_AGENDA))
     monkeypatch.setattr(
         ec, "_reported_earnings",
         lambda sym, cd: {"beat": True, "announce_date": "2026-08-26",

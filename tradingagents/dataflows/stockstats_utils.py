@@ -128,19 +128,47 @@ def _assert_ohlcv_not_stale(
         )
 
 
-def _needs_same_day_refresh(data_file, curr_date_dt, today_date) -> bool:
-    """Whether a cached frame must be refetched to reflect the requested day.
+def _cache_covers(cached: pd.DataFrame, curr_date_dt) -> bool:
+    """Whether the cached frame already reaches the requested day.
 
-    The cache file is keyed per day, so without this a run started before the
-    day's bar was final keeps serving that snapshot to every later run (#1150).
-    Two distinct staleness cases exist for a current-day request: the bar may be
-    missing entirely, or present but still in progress — Yahoo publishes a
-    partial daily candle during market hours, whose ``Close`` is not the closing
-    price. Row inspection cannot tell a partial bar from a final one, so the TTL
-    governs every current-day cache. Historical requests always reuse the cache,
-    since those rows are immutable.
+    "Historical rows are immutable" only justifies reusing a cache that actually
+    CONTAINS the requested day. A file whose last row is 24/08 says nothing about
+    25, 26 and 27/08 — those rows are missing, not immutable.
+
+    Covered when the last row is on/after ``curr_date``, or when no business day
+    sits between them (weekend/holiday gap: the market produced no bar, so there
+    is nothing to fetch).
     """
-    if curr_date_dt.date() < today_date.date():
+    dates = _coerce_ohlcv_dates(cached)
+    if dates.empty:
+        return False
+    latest = dates.max().normalize()
+    requested = pd.to_datetime(curr_date_dt).normalize()
+    if latest >= requested:
+        return True
+    return len(pd.bdate_range(latest + pd.Timedelta(days=1), requested)) == 0
+
+
+def _needs_refresh(data_file, cached, curr_date_dt, today_date) -> bool:
+    """Whether a cached frame must be refetched before being served.
+
+    Two distinct staleness cases exist:
+
+    * **dia corrente** — the bar may be missing or still in progress (Yahoo
+      publishes a partial daily candle during market hours, whose ``Close`` is
+      not the closing price). Row inspection cannot tell a partial bar from a
+      final one, so the TTL governs every current-day cache (#1150).
+    * **cache que não alcança o dia pedido** (bug L2, 28/08) — a file frozen with
+      its last row on 24/08 kept being served for a 27/08 analysis because the
+      request was "historical" and historical rows are immutable. They are; the
+      MISSING ones are not. MCD e BE ficaram exatamente assim: o 4h do mesmo
+      símbolo já estava em 27/08 e o diário parado em 24/08, e o ``drop_nature``
+      — que lê só o diário — mediu queda de -1,3% onde a real era -4,6%. Agora um
+      cache que não cobre ``curr_date`` é refetchado, com a mesma TTL segurando a
+      frequência para o caso do pregão que de fato não existiu (feriado).
+    """
+    historical = pd.to_datetime(curr_date_dt).date() < today_date.date()
+    if historical and _cache_covers(cached, curr_date_dt):
         return False
     return time.time() - os.path.getmtime(data_file) > OHLCV_CACHE_TTL_SECONDS
 
@@ -180,34 +208,48 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     # transient rate limit). Treat an empty/columnless cache as a miss and
     # re-fetch rather than serving the poisoned file forever.
     data = None
+    usable_cache = None
     if os.path.exists(data_file):
         cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-        # Serve the cache only when it is usable and not a stale snapshot of the
-        # day being requested (#1150); otherwise fall through and refetch.
-        if (
-            not cached.empty
-            and "Close" in cached.columns
-            and not _needs_same_day_refresh(data_file, curr_date_dt, today_date)
-        ):
-            data = cached
+        # Serve the cache only when it is usable, reaches the requested day and is
+        # not a stale snapshot of it (#1150 + bug L2); otherwise refetch.
+        if not cached.empty and "Close" in cached.columns:
+            usable_cache = cached
+            if not _needs_refresh(data_file, cached, curr_date_dt, today_date):
+                data = cached
 
     if data is None:
-        downloaded = yf_retry(lambda: yf.download(
-            canonical,
-            start=start_str,
-            end=end_str,
-            multi_level_index=False,
-            progress=False,
-            auto_adjust=True,
-        ))
-        downloaded = _ensure_date_column(downloaded.reset_index())
-        # Only cache real data — never persist an empty frame.
-        if downloaded.empty or "Close" not in downloaded.columns:
-            raise NoMarketDataError(
-                symbol, canonical, "Yahoo Finance returned no rows"
+        try:
+            downloaded = yf_retry(lambda: yf.download(
+                canonical,
+                start=start_str,
+                end=end_str,
+                multi_level_index=False,
+                progress=False,
+                auto_adjust=True,
+            ))
+            downloaded = _ensure_date_column(downloaded.reset_index())
+        except Exception:
+            # A revalidação virou obrigatória para o cache que não cobre o dia; se
+            # a fonte estiver fora do ar não se pode perder um cache que antes era
+            # servido. Cai para ele — o guard de série vencida (#1021) ainda mata
+            # o caso de dado antigo demais, então "degradado" nunca vira "errado".
+            if usable_cache is None:
+                raise
+            logger.warning(
+                "OHLCV refresh failed for %s; serving the cached frame (may miss "
+                "the most recent bars)", canonical,
             )
-        downloaded.to_csv(data_file, index=False, encoding="utf-8")
-        data = downloaded
+            data = usable_cache
+        else:
+            # Only cache real data — never persist an empty frame. Um retorno vazio
+            # continua sendo NoMarketDataError (contrato de sempre), não cache velho.
+            if downloaded.empty or "Close" not in downloaded.columns:
+                raise NoMarketDataError(
+                    symbol, canonical, "Yahoo Finance returned no rows"
+                )
+            downloaded.to_csv(data_file, index=False, encoding="utf-8")
+            data = downloaded
 
     data = _clean_dataframe(data)
 

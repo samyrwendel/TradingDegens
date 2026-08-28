@@ -6,10 +6,13 @@ do balanço" — regra dele).
 
 Fonte: ``yfinance`` (``Ticker.get_earnings_dates``), pública e sem chave. Se a
 fonte cair/instável, declara INDISPONÍVEL — nunca inventa uma data. Passa pelo
-cache (DA-058) e respeita o date_guard: a "próxima" data é a primeira ESTRITAMENTE
-depois da data de análise (evento futuro conhecido/agendado naquela data), então
-um backtest numa data passada só vê o próximo balanço agendado a partir dali, e
-lê apenas a DATA (nunca o resultado, que não era conhecido).
+cache (DA-058) e respeita o date_guard: a "próxima" data é a primeira que NÃO é
+anterior à data de análise — ou seja, inclui o BALANÇO DO PRÓPRIO DIA. O filtro
+antigo (``ts <= base``) descartava justamente o evento do dia corrente, que é o
+de MAIOR risco: no dia 27/08 o MRVL divulgava às 16h e a seção imprimia
+"indisponível", deixando a regra "não aumentar posição antes do balanço" muda na
+única hora em que ela importa. Continua sem look-ahead: a data é agendada e
+pública ANTES do evento, e aqui se lê apenas a DATA — nunca o resultado.
 """
 from __future__ import annotations
 
@@ -50,7 +53,7 @@ def _fetch_next_earnings(symbol: str, base: date) -> dict | None:
     best = None  # (date, row)
     for idx, row in df.iterrows():
         ts = _to_date(idx)
-        if ts is None or ts <= base:
+        if ts is None or ts < base:      # inclui o balanço do PRÓPRIO dia (>= base)
             continue
         if best is None or ts < best[0]:
             best = (ts, idx, row)
@@ -74,16 +77,29 @@ def _fetch_next_earnings(symbol: str, base: date) -> dict | None:
         "date": d.isoformat(),
         "after_close": bool(after_close),
         "eps_estimate": est,
+        # É HOJE? O dia do balanço é o de risco máximo — quem lê precisa ver isso
+        # em destaque, não deduzir comparando duas datas.
+        "is_today": d == base,
+        "days_ahead": (d - base).days,
     }
 
 
-def get_next_earnings(symbol: str, curr_date: str) -> dict | None:
-    """Próxima data de resultado de ``symbol`` depois de ``curr_date``.
+# Por que a agenda não veio. As duas causas exigem leitura OPOSTA e não podem
+# aparecer com a mesma frase: "sem agenda" é informação (a empresa não tem data
+# publicada — não há risco de evento conhecido); "fonte fora do ar" é ignorância
+# (pode haver balanço amanhã e não sabemos).
+STATUS_OK = "ok"
+STATUS_SEM_AGENDA = "sem_agenda"
+STATUS_FONTE_INDISPONIVEL = "fonte_indisponivel"
 
-    Retorna ``{"symbol","date","after_close","eps_estimate"}`` ou ``None`` quando
-    não há próximo evento conhecido OU a fonte está indisponível — o chamador
-    trata ``None`` como "indisponível", jamais inventa data. Cacheado (DA-058) e
-    date-guarded.
+
+def get_next_earnings_status(symbol: str, curr_date: str) -> tuple[dict | None, str]:
+    """``(evento, status)`` — o próximo resultado e POR QUE ele falta, se faltar.
+
+    O evento inclui o balanço do PRÓPRIO dia de análise (``is_today``). O status é
+    um de :data:`STATUS_OK` / :data:`STATUS_SEM_AGENDA` / :data:`STATUS_FONTE_INDISPONIVEL`,
+    para que a seção nunca junte "a empresa não tem data marcada" com "a fonte
+    caiu" na mesma frase. Cacheado (DA-058) e date-guarded.
     """
     # Import tardio do guard: date_guard vive na camada de agents e importá-lo no
     # topo criaria um ciclo (agents.__init__ -> erick_analyst -> earnings_coverage
@@ -98,8 +114,14 @@ def get_next_earnings(symbol: str, curr_date: str) -> dict | None:
     k = cache.key(_CATEGORY, symbol.upper(), base.isoformat())
     hit = cache.get(_CATEGORY, k)
     if hit is not None:
-        cache.record_hit(_CATEGORY, negative=(hit.get("kind") == "neg"))
-        return hit.get("value")
+        neg = hit.get("kind") == "neg"
+        cache.record_hit(_CATEGORY, negative=neg)
+        value = hit.get("value")
+        if value is not None:
+            return value, STATUS_OK
+        # o negativo guarda o ERRO quando foi a fonte que caiu; sem erro, foi
+        # resposta boa e vazia = a empresa não tem data publicada
+        return None, (STATUS_FONTE_INDISPONIVEL if hit.get("error") else STATUS_SEM_AGENDA)
 
     cache.record_net(_CATEGORY)
     try:
@@ -107,18 +129,26 @@ def get_next_earnings(symbol: str, curr_date: str) -> dict | None:
     except Exception as exc:  # noqa: BLE001 — fonte instável degrada a "indisponível"
         logger.warning("earnings source failed for %s: %s", symbol, exc)
         cache.set_neg(_CATEGORY, k, value=None, error={"type": type(exc).__name__, "msg": str(exc)})
-        return None
+        return None, STATUS_FONTE_INDISPONIVEL
 
     if result is None:
         # Sem próximo evento conhecido: negativo de TTL curto (a agenda pode surgir).
         cache.set_neg(_CATEGORY, k, value=None)
-        return None
+        return None, STATUS_SEM_AGENDA
 
     # Data passada de análise -> a "próxima data a partir dali" é fato histórico
     # estável (permanente); análise ao vivo expira no fim do dia.
     permanent = base < datetime.now().date()
     cache.set_ok(_CATEGORY, k, result, permanent)
-    return result
+    return result, STATUS_OK
+
+
+def get_next_earnings(symbol: str, curr_date: str) -> dict | None:
+    """Próxima data de resultado de ``symbol`` a partir de ``curr_date`` (inclusive).
+
+    Atalho de :func:`get_next_earnings_status` para quem só quer o evento; ``None``
+    quando não há data conhecida — o motivo vem da função com status."""
+    return get_next_earnings_status(symbol, curr_date)[0]
 
 
 def _reported_earnings(symbol: str, curr_date: str) -> dict | None:
@@ -140,6 +170,33 @@ def _fmt_event(ev: dict) -> str:
     return f"{ev['date']}{when}{est}"
 
 
+def _missing_line(label: str) -> str:
+    """Linha de ausência que DIZ a causa — as duas se leem ao contrário uma da
+    outra e nunca podem sair na mesma frase (ver :data:`STATUS_SEM_AGENDA`)."""
+    return label
+
+
+def _event_line(name: str, tag: str, ev: dict | None, status: str) -> str:
+    if ev is None:
+        if status == STATUS_SEM_AGENDA:
+            return (f"- **{name}**{tag}: **sem data de resultado publicada** para o "
+                    f"período — a fonte respondeu e não há balanço agendado à frente "
+                    f"(não é falha de fonte).")
+        return (f"- **{name}**{tag}: agenda de resultados **indisponível** — a fonte "
+                f"pública não respondeu. Não sabemos se há balanço à frente; nenhuma "
+                f"data inventada.")
+    if ev.get("is_today"):
+        # O dia do balanço é o de risco MÁXIMO — e era exatamente o que sumia antes.
+        janela = ("ainda hoje, após o fechamento" if ev.get("after_close")
+                  else "hoje, antes/na abertura")
+        return (f"- **{name}**{tag}: 🚨 **RESULTADO HOJE** ({_fmt_event(ev)}) — "
+                f"{janela}. Risco de evento no máximo: pelo método, não aumentar "
+                f"posição antes do balanço.")
+    dias = ev.get("days_ahead")
+    prox = f" (em {dias} dia{'s' if dias != 1 else ''})" if isinstance(dias, int) else ""
+    return f"- **{name}**{tag}: próximo resultado em {_fmt_event(ev)}{prox}."
+
+
 def build_earnings_section(
     symbol: str,
     curr_date: str,
@@ -157,14 +214,8 @@ def build_earnings_section(
     head = "## 📅 Calendário de earnings (risco de evento)"
     lines = [head, ""]
 
-    ev = get_next_earnings(symbol, curr_date)
-    if ev is None:
-        lines.append(
-            f"- **{symbol.upper()}**: próximo resultado indisponível "
-            f"(fonte pública fora do ar ou sem agenda) — nenhuma data inventada."
-        )
-    else:
-        lines.append(f"- **{symbol.upper()}**: próximo resultado em {_fmt_event(ev)}.")
+    ev, status = get_next_earnings_status(symbol, curr_date)
+    lines.append(_event_line(symbol.upper(), "", ev, status))
 
     # O âncora (NVDA) é o eixo do evento na leitura do Erick — mostra sempre, a não
     # ser que o próprio ativo já seja o âncora.
@@ -172,14 +223,8 @@ def build_earnings_section(
 
     anchor_name = (anchor or default_anchor(asset_type)).upper()
     if symbol.upper() != anchor_name:
-        ev_a = get_next_earnings(anchor_name, curr_date)
-        if ev_a is None:
-            lines.append(
-                f"- **{anchor_name}** (âncora): próximo resultado indisponível — "
-                f"nenhuma data inventada."
-            )
-        else:
-            lines.append(f"- **{anchor_name}** (âncora): próximo resultado em {_fmt_event(ev_a)}.")
+        ev_a, status_a = get_next_earnings_status(anchor_name, curr_date)
+        lines.append(_event_line(anchor_name, " (âncora)", ev_a, status_a))
 
     # RESULTADO já reportado do âncora (o CATALISADOR da leitura do Erick) — reportado
     # × estimado + surpresa, via Finnhub. É o dado que define "bateu → liquidação de

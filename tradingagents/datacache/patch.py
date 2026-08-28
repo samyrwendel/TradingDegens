@@ -253,34 +253,49 @@ def _make_stable_load_ohlcv(mod):
             )
 
             data = None
+            usable_cache = None
             if os_mod.path.exists(data_file):
                 cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-                if (
-                    not cached.empty
-                    and "Close" in cached.columns
-                    and not mod._needs_same_day_refresh(data_file, curr_date_dt, today_date)
-                ):
-                    data = cached
+                if not cached.empty and "Close" in cached.columns:
+                    usable_cache = cached
+                    # `_needs_refresh` (não mais só "mesmo dia"): um arquivo cujo
+                    # último pregão é anterior ao dia pedido NÃO cobre o pedido, e
+                    # ser "histórico" não o torna válido — foi o bug L2 do MCD/BE.
+                    if not mod._needs_refresh(data_file, cached, curr_date_dt, today_date):
+                        data = cached
 
             if data is None:
                 import yfinance as yf
 
-                downloaded = mod.yf_retry(lambda: yf.download(
-                    canonical,
-                    start=start_str,
-                    end=end_str,
-                    multi_level_index=False,
-                    progress=False,
-                    auto_adjust=True,
-                ))
-                downloaded = mod._ensure_date_column(downloaded.reset_index())
-                if downloaded.empty or "Close" not in downloaded.columns:
-                    raise mod.NoMarketDataError(
-                        symbol, canonical, "Yahoo Finance returned no rows"
+                try:
+                    downloaded = mod.yf_retry(lambda: yf.download(
+                        canonical,
+                        start=start_str,
+                        end=end_str,
+                        multi_level_index=False,
+                        progress=False,
+                        auto_adjust=True,
+                    ))
+                    downloaded = mod._ensure_date_column(downloaded.reset_index())
+                except Exception:
+                    # Fonte fora do ar: servir o cache degradado é melhor que ficar
+                    # sem série. O guard de série vencida (#1021) segue matando o
+                    # dado antigo demais, então degradado nunca vira errado.
+                    if usable_cache is None:
+                        raise
+                    logger.warning(
+                        "ta_datacache: OHLCV refresh failed for %s; serving cached "
+                        "frame (may miss the most recent bars)", canonical,
                     )
-                downloaded.to_csv(data_file, index=False, encoding="utf-8")
-                data = downloaded
-                _cleanup_dated_dupes(os_mod, config["data_cache_dir"], safe_symbol)
+                    data = usable_cache
+                else:
+                    if downloaded.empty or "Close" not in downloaded.columns:
+                        raise mod.NoMarketDataError(
+                            symbol, canonical, "Yahoo Finance returned no rows"
+                        )
+                    downloaded.to_csv(data_file, index=False, encoding="utf-8")
+                    data = downloaded
+                    _cleanup_dated_dupes(os_mod, config["data_cache_dir"], safe_symbol)
 
             data = mod._clean_dataframe(data)
             data = data[data["Date"] <= curr_date_dt]
