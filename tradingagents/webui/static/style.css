@@ -747,6 +747,9 @@ details.section[open] > summary::before { content: "▾"; }
 .degraded-banner .dg-head { color: var(--amber); font-size: 14px; font-weight: var(--fw-bold); }
 .degraded-banner .dg-head b { color: #ffd479; }
 .degraded-banner .dg-sub { color: var(--muted); font-size: var(--fs-12); margin-top: 4px; line-height: 1.5; }
+/* Fonte ausente e texto sinalizado são blocos distintos no mesmo banner — o
+   respiro entre eles evita que virem uma frase só. */
+.degraded-banner .dg-sub + .dg-head { margin-top: 12px; }
 .degraded-banner .dg-list {
   margin: 8px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.5;
 }

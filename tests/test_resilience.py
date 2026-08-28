@@ -49,6 +49,8 @@ def test_resilient_analyst_degrades_after_all_attempts():
     assert ds[0]["label"] == "News Analyst"
     assert ds[0]["report_key"] == "news_report"
     assert "boom" in ds[0]["reason"]
+    # this source really is ABSENT — the banner may say "feito sem" for it
+    assert ds[0]["kind"] == "missing"
 
 
 def test_resilient_analyst_passes_through_success():

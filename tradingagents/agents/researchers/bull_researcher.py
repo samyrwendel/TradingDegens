@@ -4,7 +4,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.debate_utils import (
     clip_report,
-    degraded_note,
+    degraded_entry,
     invoke_debate_turn,
 )
 from tradingagents.dataflows.config import get_config
@@ -69,9 +69,9 @@ Use this information to deliver a compelling bull argument and refute the bear's
         }
 
         result = {"investment_debate_state": new_investment_debate_state}
-        note = degraded_note("Bull Researcher", report)
-        if note:
-            result["degraded_sources"] = [note]
+        entry = degraded_entry("Bull Researcher", report, report_key="investment_debate_state")
+        if entry:
+            result["degraded_sources"] = [entry]
         return result
 
     return bull_node

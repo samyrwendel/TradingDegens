@@ -111,9 +111,52 @@ def invoke_debate_turn(
     return content, report
 
 
-def degraded_note(speaker: str, report: SanityReport | None) -> str:
-    """One-line pt-BR note for ``degraded_sources`` when a turn was not clean."""
+def _reason_pt(report: SanityReport) -> str:
+    """pt-BR ``reason`` for a flagged turn — the WHY the UI lists to the user.
+
+    ``SanityReport.summary()`` is diagnostic shorthand (``severity=suspect
+    invented=20 (1.73%) [...]``); this spells the same facts out in the language
+    the banner is written in.
+    """
+    head = "texto regenerado e ainda degradado" if report.degraded else "texto suspeito"
+    bits: list[str] = []
+    if report.structural:
+        bits.append(f"{len(report.structural)} artefato(s) estrutural(is)")
+    if report.lexical_available and report.invented:
+        sample = ", ".join(report.invented[:4])
+        bits.append(
+            f"{len(report.invented)} termo(s) fora do léxico "
+            f"({report.invented_rate * 100:.2f}%): {sample}"
+        )
+    return head + (" — " + "; ".join(bits) if bits else "")
+
+
+def degraded_entry(
+    speaker: str, report: SanityReport | None, *, report_key: str
+) -> dict[str, str] | None:
+    """Structured ``degraded_sources`` entry for a turn that was not clean.
+
+    Returns ``None`` for a clean turn (nothing to report). The shape is the one
+    :func:`tradingagents.graph.resilience.make_resilient_analyst` also emits —
+    ``label``/``report_key``/``reason`` — because a single consumer (the webui
+    banner) reads both producers and needs to NAME the source and show WHY.
+    Returning a bare string here is what made the UI render the placeholder
+    "Análise feita SEM a fonte: fonte" with no reason at all.
+
+    ``kind`` separates the two very different meanings the channel carries:
+
+    * ``"missing"`` — the source is ABSENT; the analysis ran without it.
+    * ``"suspect"`` — the turn IS in the analysis, its text was just flagged.
+
+    A debate turn is always ``"suspect"``: the guard ships the turn (it is the
+    cleaner of two generations), so telling the user the analysis was made
+    "without" it would be false.
+    """
     if report is None or report.clean:
-        return ""
-    label = "regenerado/degradado" if report.degraded else "texto suspeito"
-    return f"{speaker} ({label}: {report.summary()})"
+        return None
+    return {
+        "label": speaker,
+        "report_key": report_key,
+        "reason": _reason_pt(report),
+        "kind": "suspect",
+    }

@@ -12,7 +12,7 @@ from tradingagents.agents.researchers.bull_researcher import create_bull_researc
 from tradingagents.agents.utils.debate_utils import (
     REGEN_NUDGE,
     clip_report,
-    degraded_note,
+    degraded_entry,
     invoke_debate_turn,
 )
 from tradingagents.agents.utils.text_sanity import sanity_report
@@ -120,21 +120,37 @@ def test_keeps_first_when_retry_no_better():
 
 
 # --------------------------------------------------------------------------
-# degraded_note
+# degraded_entry — the STRUCTURED entry the UI banner reads
 # --------------------------------------------------------------------------
 
-def test_degraded_note_empty_for_clean():
-    assert degraded_note("Bull Researcher", sanity_report(CLEAN)) == ""
+def test_degraded_entry_none_for_clean():
+    assert degraded_entry("Bull Researcher", sanity_report(CLEAN),
+                          report_key="investment_debate_state") is None
 
 
-def test_degraded_note_names_speaker_for_degraded():
-    note = degraded_note("Bull Researcher", sanity_report(CORRUPT))
-    assert note.startswith("Bull Researcher")
-    assert "degradado" in note
+def test_degraded_entry_is_structured_and_names_the_speaker():
+    # Regression (task 20260828-003): this used to be a bare string, so the UI
+    # rendered "Análise feita SEM a fonte: fonte" with no reason listed.
+    entry = degraded_entry("Bull Researcher", sanity_report(CORRUPT),
+                           report_key="investment_debate_state")
+    assert isinstance(entry, dict)
+    assert entry["label"] == "Bull Researcher"
+    assert entry["report_key"] == "investment_debate_state"
+    assert entry["reason"] and "degradado" in entry["reason"]
+    # a debate turn SHIPS — it is flagged text, not an absent source
+    assert entry["kind"] == "suspect"
 
 
-def test_degraded_note_handles_none():
-    assert degraded_note("Bull Researcher", None) == ""
+def test_degraded_entry_reason_is_pt_br_not_diagnostic_shorthand():
+    entry = degraded_entry("Bull Researcher", sanity_report(CORRUPT),
+                           report_key="investment_debate_state")
+    assert "severity=" not in entry["reason"]
+    assert "artefato" in entry["reason"]
+
+
+def test_degraded_entry_handles_none():
+    assert degraded_entry("Bull Researcher", None,
+                          report_key="investment_debate_state") is None
 
 
 # --------------------------------------------------------------------------
@@ -166,7 +182,10 @@ def test_bull_node_marks_degraded_source_when_unrecoverable():
     node = create_bull_researcher(llm)
     out = node(_min_state())
     assert out["degraded_sources"]
-    assert out["degraded_sources"][0].startswith("Bull Researcher")
+    entry = out["degraded_sources"][0]
+    assert entry["label"] == "Bull Researcher"
+    assert entry["reason"]
+    assert entry["kind"] == "suspect"
 
 
 def test_bull_node_clean_turn_has_no_degraded_source():

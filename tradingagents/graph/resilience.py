@@ -71,12 +71,20 @@ def make_resilient_analyst(node, report_key: str, label: str, attempts: int = 2)
         )
         # Structured entry aggregated onto the run state (reducer=add) so the UI can
         # name the failed source, say the analysis was done without it, and offer a
-        # "reavaliar com essa fonte" control.
+        # "reavaliar com essa fonte" control. ``kind="missing"`` because this source
+        # really is ABSENT — the debate guard emits ``kind="suspect"`` for a turn
+        # that IS in the analysis with flagged text, and the banner must not tell
+        # the user those two are the same thing.
         return {
             "messages": [AIMessage(content=note)],
             report_key: note,
             "degraded_sources": [
-                {"label": label, "report_key": report_key, "reason": reason}
+                {
+                    "label": label,
+                    "report_key": report_key,
+                    "reason": reason,
+                    "kind": "missing",
+                }
             ],
         }
 

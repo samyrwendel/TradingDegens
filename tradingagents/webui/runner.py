@@ -36,6 +36,7 @@ from tradingagents.webui.contradiction_checker import (
     check_contradictions,
     format_verdict_caveat,
 )
+from tradingagents.webui.degraded import normalize_degraded, normalize_result
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
     NEED_KEY_MESSAGE,
@@ -421,9 +422,10 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         # (COMPRAR/AUMENTAR/MANTER/REDUZIR/VENDER). The module texts are READINGS
         # that feed this; only this field (and the verdict badge) is the veredito.
         "final_decision": RATING_PT.get(signal, signal),
-        # Sources that degraded (failed after the auto-retry) — the UI names them,
-        # says the analysis ran without them, and offers a "reavaliar" control.
-        "degraded": list(final_state.get("degraded_sources") or []),
+        # Sources that degraded — the UI NAMES each one and shows why. Normalized
+        # here because the state can still carry the pre-fix free-text note when a
+        # run is resumed from an older checkpoint (task 20260828-003).
+        "degraded": normalize_degraded(final_state.get("degraded_sources")),
         "final_trade_decision": final_state.get("final_trade_decision", "") or "",
         "bull": debate.get("bull_history", "") or "",
         "bear": debate.get("bear_history", "") or "",
@@ -1255,7 +1257,7 @@ class AnalysisRunner:
                 continue
             if (summ.get("method") or "padrao").lower() != want:
                 continue
-            rec = self.store.get(summ["run_id"])
+            rec = self._record(summ["run_id"])
             if not rec or rec.get("status") != "done":
                 continue
             res = rec.get("result") or {}
@@ -1371,7 +1373,7 @@ class AnalysisRunner:
             if not rid:
                 continue
             # Já concluída em disco (crash entre persist e remove) → só limpa.
-            rec = self.store.get(rid)
+            rec = self._record(rid)
             if rec and rec.get("status") in ("done", "error"):
                 self.active.remove(rid)
                 continue
@@ -1760,7 +1762,7 @@ class AnalysisRunner:
         status = self._execute(sub)
         self._persist(sub, status)
         sub.status = status
-        return self.store.get(sub_id) or {
+        return self._record(sub_id) or {
             "run_id": sub_id, "ticker": crun.ticker, "date": crun.date,
             "asset_type": crun.asset_type, "status": status, "error": sub.error,
             "verdict_timeframe": crun.timeframe, "result": sub.result,
@@ -1781,7 +1783,7 @@ class AnalysisRunner:
                 continue
             if (summ.get("verdict_timeframe") or _DEFAULT_TIMEFRAME) != timeframe:
                 continue
-            rec = self.store.get(summ["run_id"])
+            rec = self._record(summ["run_id"])
             if not rec or rec.get("status") != "done":
                 continue
             res = rec.get("result") or {}
@@ -1822,6 +1824,20 @@ class AnalysisRunner:
         except Exception:
             pass
 
+    def _record(self, run_id: str) -> dict[str, Any] | None:
+        """Disk record for a run, with its ``degraded`` list normalized.
+
+        The single door to :meth:`HistoryStore.get` — records written before the
+        structured-entry fix (task 20260828-003) still carry the free-text note,
+        and this path feeds the UI, the confronto AND the reuse lookup, so a stale
+        record would otherwise carry the nameless "fonte" placeholder forward into
+        brand-new runs.
+        """
+        rec = self.store.get(run_id)
+        if isinstance(rec, dict):
+            normalize_result(rec.get("result"))
+        return rec
+
     def _load_record(self, run_id: str) -> dict[str, Any] | None:
         """Full record for a run — from the live table (its snapshot) or disk."""
         with self._lock:
@@ -1837,7 +1853,7 @@ class AnalysisRunner:
                 "cost": snap.get("cost"), "elapsed": snap.get("elapsed"),
                 "result": snap.get("result"),
             }
-        return self.store.get(run_id)
+        return self._record(run_id)
 
     def confront(self, id_a: str, id_b: str,
                  overrides: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2171,7 +2187,7 @@ class AnalysisRunner:
                 snap["refreshing"] = dict(pending)
             return snap
         # fall back to persisted history for a run this process didn't start
-        record = self.store.get(run_id)
+        record = self._record(run_id)
         if record is None:
             return None
         return {

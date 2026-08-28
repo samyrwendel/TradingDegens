@@ -4,7 +4,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.debate_utils import (
     clip_report,
-    degraded_note,
+    degraded_entry,
     invoke_debate_turn,
 )
 from tradingagents.dataflows.config import get_config
@@ -67,9 +67,9 @@ Engage actively by analyzing both sides critically, addressing weaknesses in the
         }
 
         result = {"risk_debate_state": new_risk_debate_state}
-        note = degraded_note("Neutral Analyst", report)
-        if note:
-            result["degraded_sources"] = [note]
+        entry = degraded_entry("Neutral Analyst", report, report_key="risk_debate_state")
+        if entry:
+            result["degraded_sources"] = [entry]
         return result
 
     return neutral_node

@@ -124,10 +124,27 @@ def test_extract_result_missing_fields_default_empty():
 def test_extract_result_surfaces_degraded_sources():
     fs = dict(FINAL_STATE)
     fs["degraded_sources"] = [
-        {"label": "News Analyst", "report_key": "news_report", "reason": "RuntimeError: down"}
+        {"label": "News Analyst", "report_key": "news_report",
+         "reason": "RuntimeError: down", "kind": "missing"}
     ]
     r = extract_result(fs, "Buy")
     assert r["degraded"] == fs["degraded_sources"]
+
+
+def test_extract_result_normalizes_a_resumed_legacy_degraded_note():
+    """Regression (task 20260828-003): a checkpoint written before the structured
+    entry existed carries a bare string; the UI must still NAME the source."""
+    fs = dict(FINAL_STATE)
+    fs["degraded_sources"] = [
+        "Bear Researcher (texto suspeito: severity=suspect invented=20 (1.73%) [DILUÇÃO])"
+    ]
+    r = extract_result(fs, "Buy")
+    assert r["degraded"] == [{
+        "label": "Bear Researcher",
+        "report_key": "",
+        "reason": "texto suspeito: severity=suspect invented=20 (1.73%) [DILUÇÃO]",
+        "kind": "suspect",
+    }]
 
 
 def test_extract_result_exposes_single_canonical_final_decision():

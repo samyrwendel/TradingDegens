@@ -1170,9 +1170,14 @@ function compareColumn(c, slot) {
   const openBtn = c.run_id
     ? `<button type="button" class="cmp-open" data-id="${escapeHtml(c.run_id)}">abrir análise completa →</button>`
     : "";
-  const deg = (Array.isArray(c.degraded) && c.degraded.length)
-    ? `<div class="cmp-degraded">⚠️ Feito sem: ${c.degraded.map((d) => escapeHtml((d && (d.label || d.report_key)) || "fonte")).join(" · ")}</div>`
-    : "";
+  // Mesma separação do banner: "feito sem" só vale pra fonte AUSENTE; turno com
+  // texto sinalizado entrou na leitura e é anunciado como tal.
+  const degItems = (Array.isArray(c.degraded) ? c.degraded : []).filter(Boolean);
+  const degMissing = degItems.filter((d) => d.kind !== "suspect");
+  const degSuspect = degItems.filter((d) => d.kind === "suspect");
+  const deg =
+    (degMissing.length ? `<div class="cmp-degraded">⚠️ Feito sem: ${degMissing.map(degradedName).join(" · ")}</div>` : "") +
+    (degSuspect.length ? `<div class="cmp-degraded">🔎 Texto sinalizado: ${degSuspect.map(degradedName).join(" · ")}</div>` : "");
   const err = c.status === "error"
     ? `<div class="cmp-err">Leitura indisponível: ${escapeHtml(c.error || "falha")}</div>`
     : "";
@@ -2029,26 +2034,61 @@ function renderTfSelector() {
   renderReevalBtn();
 }
 
-// Banner de fonte degradada: nomeia a(s) fonte(s) que falhou(aram) MESMO após a
-// nova tentativa automática, deixa explícito que a análise foi feita SEM ela(s), e
-// oferece reavaliar incluindo-a(s) — o "informar + decidir" que o Samyr pediu, sem
-// congelar o run server-side. Some quando nada degradou.
+// Nome humano de uma entrada degradada. O backend SEMPRE manda label (os dois
+// produtores são estruturados e a fronteira normaliza registro antigo), então o
+// "fonte" aqui é último recurso pra dado irrecuperável — não o caso normal.
+function degradedName(d) {
+  return escapeHtml((d && (d.label || d.report_key)) || "fonte");
+}
+
+// Banner de fonte degradada. Separa as DUAS coisas que o motor reporta pelo mesmo
+// canal, porque elas dizem o oposto uma da outra:
+//   • kind="missing" — a fonte caiu mesmo após a nova tentativa automática; a
+//     análise foi feita SEM ela. Cabe "trate como ausente" e reavaliar com ela.
+//   • kind="suspect" — o turno ESTÁ na análise, só saiu com o texto sinalizado
+//     pelo verificador de sanidade. Dizer "feito sem" aqui seria mentira.
+// Em ambos os casos a fonte é nomeada e o motivo vai na lista. Some quando nada
+// degradou.
 function renderDegraded(list) {
   const el = $("degradedBanner");
   if (!el) return;
   if (!Array.isArray(list) || !list.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
-  const names = list.map((d) => escapeHtml((d && (d.label || d.report_key)) || "fonte")).join(" · ");
-  const plural = list.length > 1;
-  const reasons = list
-    .filter((d) => d && d.reason)
-    .map((d) => `<li><b>${escapeHtml(d.label || d.report_key || "fonte")}</b>: ${escapeHtml(d.reason)}</li>`)
+  const items = list.filter(Boolean);
+  const suspect = items.filter((d) => d.kind === "suspect");
+  const missing = items.filter((d) => d.kind !== "suspect");
+  const heads = [];
+  if (missing.length) {
+    const plural = missing.length > 1;
+    heads.push(
+      `<div class="dg-head">⚠️ Análise feita <b>SEM</b> ${plural ? "as fontes" : "a fonte"}: ` +
+      `<b>${missing.map(degradedName).join(" · ")}</b></div>` +
+      `<div class="dg-sub">Tentei automaticamente mais uma vez antes de seguir. As leituras acima ` +
+      `não incluem ${plural ? "essas fontes" : "essa fonte"} — trate como ausente, não como sinal.</div>`
+    );
+  }
+  if (suspect.length) {
+    const plural = suspect.length > 1;
+    heads.push(
+      `<div class="dg-head">🔎 Texto sinalizado ${plural ? "nos turnos" : "no turno"} de: ` +
+      `<b>${suspect.map(degradedName).join(" · ")}</b></div>` +
+      `<div class="dg-sub">${plural ? "Essas leituras entraram" : "Essa leitura entrou"} na análise — ` +
+      `não ${plural ? "foram" : "foi"} descartada. O verificador de sanidade achou sinal de texto ` +
+      `corrompido/inventado, então leia ${plural ? "esses trechos" : "esse trecho"} com desconfiança.</div>`
+    );
+  }
+  const reasons = items
+    .filter((d) => d.reason)
+    .map((d) => `<li><b>${degradedName(d)}</b>: ${escapeHtml(d.reason)}</li>`)
     .join("");
+  // Reavaliar faz sentido nos dois casos (a fonte que caiu tende a voltar; o turno
+  // sinalizado tende a sair limpo numa nova geração) — só o texto do botão muda.
+  const btnLabel = missing.length
+    ? `⟳ Reavaliar com ${missing.length > 1 ? "essas fontes" : "essa fonte"}`
+    : "⟳ Refazer a análise";
   el.innerHTML =
-    `<div class="dg-head">⚠️ Análise feita <b>SEM</b> ${plural ? "as fontes" : "a fonte"}: <b>${names}</b></div>` +
-    `<div class="dg-sub">Tentei automaticamente mais uma vez antes de seguir. As leituras acima ` +
-    `não incluem ${plural ? "essas fontes" : "essa fonte"} — trate como ausente, não como sinal.</div>` +
+    heads.join("") +
     (reasons ? `<ul class="dg-list">${reasons}</ul>` : "") +
-    `<button type="button" class="dg-btn" id="reevalSourcesBtn">⟳ Reavaliar com ${plural ? "essas fontes" : "essa fonte"}</button>`;
+    `<button type="button" class="dg-btn" id="reevalSourcesBtn">${btnLabel}</button>`;
   el.classList.remove("hidden");
   const btn = $("reevalSourcesBtn");
   // Reavaliar = rodar a análise inteira de novo (mesmo TF do veredito): a fonte
