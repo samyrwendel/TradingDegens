@@ -100,7 +100,6 @@ def test_price_snapshot_no_shares_no_market_cap():
 def test_price_snapshot_carries_canonical_50_200_averages():
     """Item 6: the 50d/200d averages come off the SAME date-guarded series the chart
     draws (one canonical value), not yfinance's live figures."""
-    import pandas as pd
 
     d = _daily(300)
     snap = fa.price_snapshot(d, shares=None)
@@ -172,3 +171,118 @@ def test_instrument_context_backward_compatible_without_price():
     ctx = build_instrument_context("AAOI", "stock")
     assert "Reference price for this run" not in ctx
     assert "`AAOI`" in ctx
+
+
+# ------------------------------------------ multi-fonte (2+ fontes por insumo) ----
+def _av_payload(quarters: list[dict]) -> str:
+    import json
+
+    return json.dumps({"quarterlyReports": quarters})
+
+
+def _av_quarter(end: str, ocf: float, capex: float) -> dict:
+    return {"fiscalDateEnding": end, "operatingCashflow": str(ocf),
+            "capitalExpenditures": str(capex)}
+
+
+@pytest.mark.unit
+def test_av_quarterly_to_frame_shapes_yfinance_equivalent():
+    """O reshape do AV devolve o DataFrame que ttm_sum espera: row 'Free Cash
+    Flow' = OCF − capex por trimestre, colunas = datas."""
+    payload = _av_payload([
+        _av_quarter("2026-06-30", 100.0, -30.0),
+        _av_quarter("2026-03-31", 90.0, -20.0),
+        _av_quarter("2025-12-31", 80.0, -10.0),
+        _av_quarter("2025-09-30", 70.0, -40.0),
+    ])
+    frame = fa._av_quarterly_to_frame(payload, "2026-08-27")
+    assert frame is not None
+    fcf, quarters = fa.ttm_sum(frame, fa._FCF_ALIASES)
+    # 100-30=70 · 90-20=70 · 80-10=70 · 70-40=30 → 240
+    assert round(fcf, 1) == 240.0
+    assert quarters == ["2026-06-30", "2026-03-31", "2025-12-31", "2025-09-30"]
+
+
+@pytest.mark.unit
+def test_quarterly_cashflow_falls_back_to_alpha_vantage(monkeypatch):
+    """yfinance morto + chave AV presente → tabela vem do AV com fonte nomeada."""
+    import tradingagents.dataflows.alpha_vantage_common as avc
+    import tradingagents.dataflows.alpha_vantage_fundamentals as avf
+
+    monkeypatch.setattr(avc, "get_api_key", lambda: "k-av")
+
+    def boom():
+        raise RuntimeError("yfinance down")
+
+    import yfinance as yf
+    monkeypatch.setattr(yf, "Ticker", lambda s: (_ for _ in ()).throw(RuntimeError("yf down")))
+
+    payload = _av_payload([
+        _av_quarter("2026-06-30", 100.0, -30.0),
+        _av_quarter("2026-03-31", 90.0, -20.0),
+        _av_quarter("2025-12-31", 80.0, -10.0),
+        _av_quarter("2025-09-30", 70.0, -40.0),
+    ])
+    monkeypatch.setattr(avf, "get_cashflow", lambda t, curr_date=None: payload)
+    frame, fonte = fa._fetch_quarterly_cashflow("INTC", "2026-08-27")
+    assert fonte == "alpha_vantage"
+    fcf, _ = fa.ttm_sum(frame, fa._FCF_ALIASES)
+    assert round(fcf, 1) == 240.0
+
+
+@pytest.mark.unit
+def test_quarterly_cashflow_without_av_key_stays_none(monkeypatch):
+    """Sem chave AV e yfinance morto → (None, None): ausência declarada, nunca
+    fonte inventada."""
+    import yfinance as yf
+
+    import tradingagents.dataflows.alpha_vantage_common as avc
+
+    monkeypatch.setattr(avc, "get_api_key", lambda: None)
+    monkeypatch.setattr(yf, "Ticker", lambda s: (_ for _ in ()).throw(RuntimeError("yf down")))
+    assert fa._fetch_quarterly_cashflow("INTC", "2026-08-27") == (None, None)
+
+
+@pytest.mark.unit
+def test_shares_falls_back_to_finnhub(monkeypatch):
+    import yfinance as yf
+
+    import tradingagents.dataflows.finnhub_fundamentals as fh
+
+    monkeypatch.setattr(yf, "Ticker", lambda s: (_ for _ in ()).throw(RuntimeError("yf down")))
+    monkeypatch.setattr(fh, "get_shares", lambda s: 5_044_000_000.0)
+    sh, fonte = fa._fetch_shares("INTC", "2026-08-27")
+    assert fonte == "finnhub" and sh == pytest.approx(5_044_000_000.0)
+
+
+@pytest.mark.unit
+def test_fcf_crosscheck_renders_when_sources_diverge():
+    """Divergência >15% → linha com os DOIS números e o limiar declarado."""
+    line = fa._fcf_crosscheck_from(2.83e9, 4.54e9)
+    assert line is not None
+    assert "4.54 bilhões" in line and "2.83 bilhões" in line
+    assert "limiar provisório" in line
+
+
+@pytest.mark.unit
+def test_fcf_crosscheck_silent_when_agreeing():
+    """Divergência dentro do limiar → None (sem ruído em toda run)."""
+    assert fa._fcf_crosscheck_from(2.83e9, 3.0e9) is None
+    assert fa._fcf_crosscheck_from(2.83e9, None) is None
+
+
+@pytest.mark.unit
+def test_render_names_the_fcf_source():
+    """A seção cita de ONDE veio o FCF TTM — número sem fonte é o que escondeu
+    o drift do info.freeCashflow até hoje."""
+    sec = fa.render_anchors_section(
+        {"price": 92.09, "as_of": "2026-08-27"},
+        {"fcf_ttm": 2.83e9, "quarters": ["2026-06-30"], "fonte": "yfinance"},
+    )
+    assert "[fonte: yfinance]" in sec
+
+
+@pytest.mark.unit
+def test_render_without_source_stays_clean():
+    sec = fa.render_anchors_section({"price": 92.09}, {"fcf_ttm": 2.83e9})
+    assert "[fonte:" not in sec
