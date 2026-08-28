@@ -336,6 +336,33 @@ def _pattern_line(plan: dict | None, frame_label: str) -> str | None:
     return f"**Gatilho 1-2-3 {direction} ({frame_label}):** {trig_txt} — {state}."
 
 
+def _levels_line(plan: dict | None) -> str | None:
+    """Onde INVALIDA, stop, alvo e R:R do 1-2-3 — numa linha, a partir do plano já
+    computado. É exatamente o que o método prega: o stop não é percentual, é a
+    perda de estrutura (com folga de ATR declarada). ``None`` sem padrão; cada
+    item sem base sai como "sem nível", nunca um número inventado."""
+    plan = plan or {}
+    if not plan.get("pattern"):
+        return None
+    inval, stop = plan.get("invalidation"), plan.get("stop")
+    target, rr = plan.get("target"), plan.get("risk_reward")
+    bits = [
+        f"invalida em {_fmt(inval['price'])} ({inval.get('label') or 'estrutura'})"
+        if inval and inval.get("price") is not None else "invalidação sem nível",
+        f"stop {_fmt(stop['price'])} ({stop.get('basis') or 'estrutura'})"
+        if stop and stop.get("price") is not None else "stop sem nível",
+        f"alvo {_fmt(target['price'])} ({target.get('label') or ''})".strip()
+        if target and target.get("price") is not None else "alvo sem nível",
+    ]
+    if rr and rr.get("rr") is not None:
+        bits.append(f"R:R {rr['rr']:.2f}:1 (entrada {_fmt(rr.get('entry'))} — {rr.get('entry_basis')})")
+    elif rr and rr.get("note"):
+        bits.append(f"R:R não calculável — {rr['note'].rstrip('.')}")
+    else:
+        bits.append("R:R sem base")
+    return "**Stop / alvo do 1-2-3:** " + " · ".join(bits) + "."
+
+
 def _fine_timing(plan: dict | None) -> str | None:
     """Linha de timing fino no 15m a partir do plano JÁ computado (:func:`_fine_plan`)
     — render PURO, sem rebuild (o mesmo plano alimenta o veto): estado do setup +
@@ -479,6 +506,11 @@ def build_erick_method_section(
     swing_pat = _pattern_line(swing_plan, _COMPACT_FRAME.get(frame, frame))
     if swing_pat:
         lines.append(swing_pat)
+        # O padrão sem os níveis é meia informação: quem lê precisa saber onde o
+        # setup morre, onde fica o stop e quanto se arrisca para ganhar quanto.
+        lvl = _levels_line(swing_plan)
+        if lvl:
+            lines.append(lvl)
 
     fine = _fine_timing(fine_plan)
     if fine:

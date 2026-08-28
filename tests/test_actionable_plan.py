@@ -121,6 +121,9 @@ def test_data_failure_never_fabricates(monkeypatch):
     assert d["setup_state"] == "sem_dado"
     assert d["price"] is None
     assert d["buy_zone"] is None and d["realize_zone"] is None and d["pullback_zone"] is None
+    # sem série não há estrutura → sem invalidação, sem stop, sem alvo, sem R:R
+    assert d["invalidation"] is None and d["stop"] is None
+    assert d["target"] is None and d["risk_reward"] is None
 
 
 @pytest.mark.unit
@@ -131,6 +134,7 @@ def test_dict_is_json_serializable(synth):
     assert set(d) == {
         "symbol", "as_of", "price", "timeframe", "horizon",
         "setup_state", "buy_zone", "realize_zone", "pullback_zone", "pattern",
+        "invalidation", "stop", "target", "risk_reward",
     }
 
 

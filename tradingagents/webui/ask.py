@@ -173,6 +173,48 @@ def price_facts(actionable: dict | None, price_chart: dict | None) -> list[str]:
         )
         has_number = True
 
+    # Onde INVALIDA / stop / alvo / R:R — os níveis que tornam o padrão operável.
+    # Entram no grounding pelo mesmo contrato das zonas: número real ou a frase
+    # "sem nível definido", nunca um nível preenchido pelo modelo.
+    inval = actionable.get("invalidation")
+    if isinstance(inval, dict) and _num(inval.get("price")) is not None:
+        lines.append(
+            f"Invalidação do padrão: {_num(inval['price'])} — {inval.get('meaning') or ''}".strip()
+        )
+        has_number = True
+    else:
+        lines.append("Invalidação do padrão: sem nível definido.")
+
+    stop = actionable.get("stop")
+    if isinstance(stop, dict) and _num(stop.get("price")) is not None:
+        lines.append(f"Stop (SL): {_num(stop['price'])} ({stop.get('basis') or 'estrutura'}).")
+        has_number = True
+    else:
+        lines.append("Stop (SL): sem nível definido.")
+
+    tgt = actionable.get("target")
+    if isinstance(tgt, dict) and _num(tgt.get("price")) is not None:
+        lo, hi = _num(tgt.get("low")), _num(tgt.get("high"))
+        band = f" (faixa {lo}–{hi})" if lo and hi else ""
+        same = " — mesmo nível da zona de realização" if tgt.get("same_as_realize") else ""
+        lines.append(f"Alvo (TP) do padrão: {_num(tgt['price'])}{band} — {tgt.get('label') or ''}{same}.")
+        has_number = True
+    else:
+        lines.append("Alvo (TP) do padrão: sem nível definido.")
+
+    rr = actionable.get("risk_reward")
+    if isinstance(rr, dict) and _num(rr.get("rr")) is not None:
+        lines.append(
+            f"Risco/retorno: {_num(rr['rr'])}:1 — entrada {_num(rr.get('entry'))} "
+            f"({rr.get('entry_basis') or ''}), risco {_num(rr.get('risk'))}, "
+            f"retorno {_num(rr.get('reward'))}."
+        )
+        has_number = True
+    elif isinstance(rr, dict):
+        lines.append(f"Risco/retorno: não calculável — {rr.get('note') or 'sem base'}.")
+    else:
+        lines.append("Risco/retorno: sem base (stop ou alvo indefinido).")
+
     # Zonas "sem nível definido" sozinhas não contam como base numérica.
     return lines if has_number else []
 

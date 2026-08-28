@@ -106,6 +106,15 @@ _ATR_PERIOD = 14
 _ZONE_HALF_ATR = 0.5
 _BAND_BASIS = f"±{_ZONE_HALF_ATR:g}·ATR{_ATR_PERIOD}"
 
+# Folga do STOP. O stop não é percentual chutado: ele fica ALÉM do nível que
+# invalida a estrutura por meio ATR — a mesma leitura de volatilidade que dá
+# largura às zonas — pra que o ruído normal da barra não tire o trade antes de a
+# estrutura realmente quebrar. Sem base de ATR o stop degrada para o PRÓPRIO nível
+# de invalidação (estrutura pura, folga zero declarada) — nunca uma folga inventada.
+_STOP_ATR_SLACK = 0.5
+_STOP_BASIS = f"invalidação + folga de {_STOP_ATR_SLACK:g}·ATR{_ATR_PERIOD}"
+_STOP_BASIS_NO_ATR = "invalidação exata (sem base de ATR para folga)"
+
 # Estrutura CIENTE DO MÉTODO (fork brief 24/08). O "recuo à média" que cada método
 # opera é numa família de médias DIFERENTE, então a detecção passa a keyar na média
 # do método — o confronto Padrão × Erick deixa de ser o mesmo overlay 2x:
@@ -518,6 +527,52 @@ def _fmt_region(r: BuyRegion) -> str:
     )
 
 
+def _levels_lines(
+    symbol: str, curr_date: str, timeframe: str, method: str
+) -> list[str]:
+    """Bullets de INVALIDAÇÃO / STOP / ALVO / R:R para a seção do relatório.
+
+    Reusa o plano acionável (mesma derivação da tela, ver :func:`_pattern_levels`),
+    então relatório e gráfico nunca discordam de um nível. Cada item sem base sai
+    como "sem nível definido" — o mesmo contrato das zonas."""
+    plan = build_actionable_plan_dict(symbol, curr_date, timeframe, method)
+    inval, stop = plan.get("invalidation"), plan.get("stop")
+    target, rr = plan.get("target"), plan.get("risk_reward")
+    lines = ["", "**Níveis operáveis do padrão** (derivados da estrutura, nada arbitrado):"]
+
+    if inval and inval.get("price") is not None:
+        lines.append(f"- **Invalidação**: {inval['price']:,.2f} — {inval['meaning']}")
+    else:
+        lines.append("- **Invalidação**: sem nível definido.")
+
+    if stop and stop.get("price") is not None:
+        lines.append(f"- **Stop (SL)**: {stop['price']:,.2f} ({stop['basis']}).")
+    else:
+        lines.append("- **Stop (SL)**: sem nível definido.")
+
+    if target and target.get("price") is not None:
+        band = ""
+        if target.get("low") is not None and target.get("high") is not None:
+            band = f" — faixa {target['low']:,.2f}–{target['high']:,.2f}"
+        same = " — **é o mesmo nível da região de realização**" if target.get("same_as_realize") else ""
+        lines.append(
+            f"- **Alvo (TP)**: {target['price']:,.2f} ({target['label']}){band}{same}."
+        )
+    else:
+        lines.append("- **Alvo (TP)**: sem nível definido (nenhum swing anterior à frente da entrada).")
+
+    if rr and rr.get("rr") is not None:
+        lines.append(
+            f"- **Risco/retorno**: **{rr['rr']:.2f}:1** — entrada {rr['entry']:,.2f} "
+            f"({rr['entry_basis']}), risco {rr['risk']:,.2f}, retorno {rr['reward']:,.2f}."
+        )
+    elif rr:
+        lines.append(f"- **Risco/retorno**: não calculável — {rr.get('note') or 'sem base'}.")
+    else:
+        lines.append("- **Risco/retorno**: sem base (stop ou alvo indefinido).")
+    return lines
+
+
 def build_price_structure_section(
     symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
     method: str = _DEFAULT_METHOD,
@@ -613,6 +668,7 @@ def build_price_structure_section(
                 f"{p.p3['date']} — {p.p3['price']:,.2f}",
                 f"- **Gatilho**: rompimento de {p.trigger:,.2f} — {gatilho}.",
             ]
+        lines += _levels_lines(symbol, curr_date, timeframe, method)
     else:
         lines.append("### Padrão 1-2-3")
         lines.append("_Nenhum padrão 1-2-3 identificado no histórico disponível._")
@@ -741,6 +797,13 @@ class ActionablePlan:
     realize_zone: dict[str, Any] | None   # prior swing high overhead — banded
     pullback_zone: dict[str, Any] | None  # recuo to await / 1-2-3 trigger
     pattern: dict[str, Any] | None = None  # detected 1-2-3 (compra|venda) or None
+    # Níveis operáveis do 1-2-3 — derivados da estrutura do padrão (ver
+    # :func:`_pattern_levels`), NUNCA de um percentual chutado. Todos ``None``
+    # quando não há padrão detectado: a tela diz "sem nível definido".
+    invalidation: dict[str, Any] | None = None   # onde o padrão deixa de existir
+    stop: dict[str, Any] | None = None           # invalidação + folga de ATR
+    target: dict[str, Any] | None = None         # alvo (TP) do setup
+    risk_reward: dict[str, Any] | None = None    # R:R a partir de entrada/stop/alvo
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -754,6 +817,10 @@ class ActionablePlan:
             "realize_zone": self.realize_zone,
             "pullback_zone": self.pullback_zone,
             "pattern": self.pattern,
+            "invalidation": self.invalidation,
+            "stop": self.stop,
+            "target": self.target,
+            "risk_reward": self.risk_reward,
         }
 
 
@@ -771,6 +838,197 @@ def _nearest_overhead_high(
     if best is None:
         return None
     return {"label": f"topo anterior {best[0]}", "price": best[1]}
+
+
+def _nearest_support_low(
+    df: pd.DataFrame, lows: list[int], price: float, fmt: str = "%Y-%m-%d"
+):
+    """Nearest prior swing low sitting BELOW ``price`` — the support a SHORT
+    realizes into. Mirror of :func:`_nearest_overhead_high`; a venda setup must
+    never inherit the long's overhead target (schemas.py already warns about the
+    inverted skeleton). ``None`` when price is in new-low air, so the caller
+    reports "sem nível definido" instead of inventing a target."""
+    best: tuple[str, float] | None = None
+    for i in lows:
+        lo = float(df["Low"].iloc[i])
+        if lo < price and (best is None or lo > best[1]):
+            best = (df["Date"].iloc[i].strftime(fmt), round(lo, 2))
+    if best is None:
+        return None
+    return {"label": f"fundo anterior {best[0]}", "price": best[1]}
+
+
+def _entry_ref(pattern: Pattern123, price: float, compra: bool) -> tuple[float, str]:
+    """Entrada de referência do setup e o motivo dela, escrito.
+
+    Enquanto o padrão não acionou, a entrada é o GATILHO (é onde se entra). Depois
+    de acionado o gatilho já ficou para trás, então a referência honesta é o PREÇO
+    ATUAL — é o que ainda resta de trade para quem lê a tela agora."""
+    if pattern.state == "acionado":
+        return float(price), "preço atual (padrão já acionado)"
+    return float(pattern.trigger), (
+        "gatilho — rompimento da máxima do ponto 2" if compra
+        else "gatilho — perda da mínima do ponto 2"
+    )
+
+
+def _pattern_levels(
+    pattern: Pattern123 | None,
+    df: pd.DataFrame,
+    lows: list[int],
+    highs: list[int],
+    price: float,
+    atr: float | None,
+    realize_zone: dict[str, Any] | None,
+    fmt: str = "%Y-%m-%d",
+) -> tuple[dict | None, dict | None, dict | None, dict | None]:
+    """``(invalidação, stop, alvo, risco_retorno)`` derivados do 1-2-3 detectado.
+
+    Tudo sai de ESTRUTURA real da série — nenhum nível é inventado nem arredondado
+    "pra ficar bonito":
+
+    * **invalidação** — o ponto 3, que é o que sustenta o padrão. Num 1-2-3 de
+      compra o ponto 3 é o fundo ascendente: perdê-lo mata a premissa de fundos
+      subindo. Num 1-2-3 de venda o ponto 3 é o topo descendente: voltar acima
+      dele mata a premissa de topos caindo. É o preço de uma barra real.
+    * **stop** — a invalidação com folga de ``_STOP_ATR_SLACK·ATR`` (abaixo na
+      compra, acima na venda). Sem ATR, o stop É a invalidação e o motivo fica
+      declarado — jamais um percentual chutado.
+    * **alvo** — o swing anterior à frente da ENTRADA (topo acima na compra, fundo
+      abaixo na venda). Medir a partir da entrada, e não do preço, é o que impede o
+      absurdo de um 1-2-3 ainda não acionado ter como "alvo" o próprio gatilho (o
+      topo do ponto 2 é justamente o nível que se rompe para entrar). A venda usa o
+      seu próprio lado da estrutura — não herda o esqueleto do long.
+    * **risco/retorno** — só quando stop E alvo existem e estão do lado certo da
+      entrada; caso contrário ``rr=None`` com o motivo escrito.
+
+    Sem padrão detectado devolve ``(None, None, None, None)`` — a tela mostra
+    "sem nível definido" em vez de fabricar um esqueleto de trade.
+    """
+    if pattern is None:
+        return None, None, None, None
+
+    compra = pattern.direction != "venda"
+    inval_price = float(pattern.p3["price"])
+    if compra:
+        invalidation = {
+            "label": f"perda do ponto 3 ({pattern.p3['date']})",
+            "price": round(inval_price, 2),
+            "meaning": (
+                f"o setup morre se perder {inval_price:,.2f} — abaixo do ponto 3 "
+                "o fundo ascendente deixa de ser ascendente e o 1-2-3 de compra "
+                "não existe mais."
+            ),
+        }
+    else:
+        invalidation = {
+            "label": f"retomada do ponto 3 ({pattern.p3['date']})",
+            "price": round(inval_price, 2),
+            "meaning": (
+                f"o setup morre se voltar acima de {inval_price:,.2f} — acima do "
+                "ponto 3 o topo descendente deixa de ser descendente e o 1-2-3 de "
+                "venda não existe mais."
+            ),
+        }
+
+    if atr is not None and atr > 0:
+        slack = _STOP_ATR_SLACK * atr
+        stop_price = inval_price - slack if compra else inval_price + slack
+        stop_basis = _STOP_BASIS
+    else:
+        stop_price = inval_price
+        stop_basis = _STOP_BASIS_NO_ATR
+    stop = {
+        "label": "stop (SL)",
+        "price": round(stop_price, 2),
+        "anchor": round(inval_price, 2),
+        "atr": atr,
+        "basis": stop_basis,
+    }
+
+    entry, entry_basis = _entry_ref(pattern, price, compra)
+    raw_target = (
+        _nearest_overhead_high(df, highs, entry, fmt) if compra
+        else _nearest_support_low(df, lows, entry, fmt)
+    )
+    target = _banded(raw_target, atr)
+    if target is not None:
+        # Reconciliação com a região de realização: quando o alvo do padrão É o
+        # mesmo nível, a tela desenha UM só e diz que são o mesmo (nunca dois).
+        rz_price = (realize_zone or {}).get("price")
+        target["same_as_realize"] = rz_price is not None and rz_price == target["price"]
+
+    risk_reward = _risk_reward(entry, entry_basis, stop, target, compra)
+    return invalidation, stop, target, risk_reward
+
+
+def _risk_reward(
+    entry: float, entry_basis: str, stop: dict | None,
+    target: dict | None, compra: bool,
+) -> dict | None:
+    """R:R do setup a partir de níveis REAIS (entrada, stop, alvo).
+
+    ``None`` quando falta stop ou alvo — sem os dois não há razão a calcular, e
+    inventar uma seria pior que não mostrar nada. Quando os níveis existem mas
+    estão do lado errado da entrada (alvo já para trás, stop além da entrada),
+    devolve ``rr=None`` com o motivo em ``note`` — a tela diz por que não há R:R
+    em vez de exibir um número sem sentido.
+    """
+    if stop is None or target is None or target.get("price") is None:
+        return None
+    stop_p, tgt_p = float(stop["price"]), float(target["price"])
+    risk = entry - stop_p if compra else stop_p - entry
+    reward = tgt_p - entry if compra else entry - tgt_p
+    out = {
+        "entry": round(entry, 2),
+        "entry_basis": entry_basis,
+        "risk": round(abs(risk), 2),
+        "reward": round(abs(reward), 2),
+        "rr": None,
+        "note": None,
+    }
+    if risk <= 0:
+        out["note"] = "stop do lado errado da entrada — sem risco mensurável neste ponto."
+        return out
+    if reward <= 0:
+        out["note"] = "o alvo já ficou para trás da entrada — sem retorno a projetar."
+        return out
+    out["rr"] = round(reward / risk, 2)
+    return out
+
+
+# Papel da região de realização quando existe um 1-2-3 na tela. Sem padrão ela é
+# o alvo de sempre; com padrão pode ser o MESMO nível do alvo, o próprio gatilho
+# (aí a linha do 1-2-3 já a desenha) ou, num setup de venda, apenas a resistência
+# acima — jamais o "alvo" de um short.
+_REALIZE_ROLE = {
+    "alvo": "realização (alvo)",
+    "gatilho": "realização = gatilho do 1-2-3",
+    "resistencia": "topo anterior (resistência)",
+}
+
+
+def _reconcile_realize(
+    realize_zone: dict[str, Any] | None,
+    pattern: Pattern123 | None,
+    target: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Carimba ``role``/``role_label`` na região de realização (ver :data:`_REALIZE_ROLE`).
+
+    Não mexe em nenhum preço — só nomeia o papel do nível, pra que a tela nunca
+    mostre dois "alvos" concorrentes nem chame de alvo de um short um topo que
+    está acima do preço."""
+    if realize_zone is None:
+        return None
+    role = "alvo"
+    if pattern is not None:
+        if pattern.direction == "venda":
+            role = "resistencia"
+        elif target is not None and target.get("same_as_realize"):
+            role = "alvo"
+        elif realize_zone.get("price") == pattern.trigger:
+            role = "gatilho"
+    return {**realize_zone, "role": role, "role_label": _REALIZE_ROLE[role]}
 
 
 def build_actionable_plan(
@@ -823,7 +1081,7 @@ def build_actionable_plan(
     as_of = df["Date"].iloc[-1].strftime(fmt)
 
     struct = detect_price_structure(symbol, curr_date, timeframe, method)
-    _lows, highs = _swings(df, _method_k(method))
+    lows, highs = _swings(df, _method_k(method))
 
     # Região de compra — a RISING moving average the detector already identified.
     buy_zone = None
@@ -872,11 +1130,20 @@ def build_actionable_plan(
     realize_zone = _banded(realize_zone, atr)
     pullback_zone = _banded(pullback_zone, None if pullback_is_trigger else atr)
 
+    # Onde INVALIDA, onde é o STOP e onde é o ALVO — mais o R:R que transforma
+    # "tem 1-2-3" em trade operável. Ancorados no ponto 3 e no swing anterior da
+    # série; sem padrão, os quatro ficam None (a tela diz "sem nível definido").
+    invalidation, stop, target, risk_reward = _pattern_levels(
+        struct.pattern, df, lows, highs, price, atr, realize_zone, fmt
+    )
+    realize_zone = _reconcile_realize(realize_zone, struct.pattern, target)
+
     return ActionablePlan(
         symbol=symbol, as_of=as_of, price=price, timeframe=tf_ref,
         horizon=_HORIZON[setup_state], setup_state=setup_state,
         buy_zone=buy_zone, realize_zone=realize_zone, pullback_zone=pullback_zone,
         pattern=struct.pattern.as_dict() if struct.pattern is not None else None,
+        invalidation=invalidation, stop=stop, target=target, risk_reward=risk_reward,
     )
 
 

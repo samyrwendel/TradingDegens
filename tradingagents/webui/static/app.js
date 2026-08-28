@@ -1843,10 +1843,21 @@ function renderActionable(a) {
   const el = $("actionable");
   if (!a || !a.setup_state) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   const [emo, label] = SETUP_PT[a.setup_state] || ["⚪", a.setup_state];
+  // O R:R entra aqui (e não no gráfico) porque é RAZÃO, não nível de preço — os
+  // níveis que o compõem (stop e alvo) já estão desenhados na linha do preço.
+  const rr = a.risk_reward;
+  let rrHtml = "";
+  if (rr && rr.rr != null) {
+    const detail = `entrada ${fmtNum(rr.entry)} (${rr.entry_basis || ""}) · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`;
+    rrHtml = `<span class="act-fact" title="${escapeHtml(detail)}"><span class="act-k">⚖️ Risco/retorno</span> ${fmtNum(rr.rr)}:1</span>`;
+  } else if (rr && rr.note) {
+    rrHtml = `<span class="act-fact" title="${escapeHtml(rr.note)}"><span class="act-k">⚖️ Risco/retorno</span> não calculável</span>`;
+  }
   el.innerHTML =
     `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}</span>` +
     `<span class="act-fact"><span class="act-k">🕐 Horizonte</span> ${escapeHtml(a.horizon || "—")}</span>` +
-    `<span class="act-fact"><span class="act-k">📐 Timeframe</span> ${escapeHtml(a.timeframe || "—")}</span>`;
+    `<span class="act-fact"><span class="act-k">📐 Timeframe</span> ${escapeHtml(a.timeframe || "—")}</span>` +
+    rrHtml;
   el.classList.remove("hidden");
 }
 
@@ -1918,8 +1929,16 @@ function patColor(pat) {
   return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
 }
 // Faixas do plano acionável desenhadas no gráfico: compra (verde), realização /
-// alvo (dourado), recuo a aguardar (púrpura, só quando difere da compra).
-const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc" };
+// alvo (dourado), recuo a aguardar (púrpura, só quando difere da compra) e os
+// níveis que tornam o setup operável — invalidação (vermelho claro, pontilhado:
+// onde o 1-2-3 deixa de existir) e stop (vermelho, tracejado: a invalidação com a
+// folga de ATR). O ALVO reusa o dourado da realização de propósito: é a mesma
+// função (onde se realiza), e quando os dois são o mesmo nível vira UMA faixa só.
+const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc",
+                      stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad" };
+// O dourado é a cor de "onde se realiza". Quando o topo overhead NÃO é o alvo
+// (setup de venda), ele sai em cinza-neutro: é contexto de estrutura, não nível
+// de ação — assim o dourado na tela quer dizer alvo, sempre.
 // O estado de cada gráfico (dados + janela de zoom h/v + geometria) mora no próprio
 // elemento <canvas> (canvas._chart/_actionable/_view/_vview/_yGeom/_autoY), pra que o
 // gráfico principal e os dois da comparação sejam independentes.
@@ -2000,10 +2019,31 @@ function renderChartCard(chart, ticker, actionable) {
     const [demo, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     const verb = pat.direction === "venda" ? "perda de" : "rompimento de";
     notes.push(`${demo} Padrão 1-2-3 ${dlabel}: gatilho ${verb} ${fmtNum(pat.trigger)} — <b>${PAT_STATE[pat.state] || pat.state}</b>.`);
+    // Onde INVALIDA (a frase inteira, não só o número), stop, alvo e R:R — sem
+    // base, cada um diz "sem nível definido" em vez de exibir número inventado.
+    const a2 = actionable || {};
+    notes.push(a2.invalidation && a2.invalidation.price != null
+      ? `🛑 <b>Invalidação</b>: ${escapeHtml(a2.invalidation.meaning || "")}`
+      : "🛑 <b>Invalidação</b>: sem nível definido.");
+    notes.push(a2.stop && a2.stop.price != null
+      ? `🧷 <b>Stop (SL)</b>: ${fmtNum(a2.stop.price)} — ${escapeHtml(a2.stop.basis || "")}.`
+      : "🧷 <b>Stop (SL)</b>: sem nível definido.");
+    notes.push(a2.target && a2.target.price != null
+      ? `🎯 <b>Alvo (TP)</b>: ${fmtNum(a2.target.price)} — ${escapeHtml(a2.target.label || "")}` +
+        (a2.target.same_as_realize ? " (é o mesmo nível da região de realização)." : ".")
+      : "🎯 <b>Alvo (TP)</b>: sem nível definido.");
+    const rr2 = a2.risk_reward;
+    if (rr2 && rr2.rr != null) {
+      notes.push(`⚖️ <b>Risco/retorno ${fmtNum(rr2.rr)}:1</b> — entrada ${fmtNum(rr2.entry)} (${escapeHtml(rr2.entry_basis || "")}), risco ${fmtNum(rr2.risk)}, retorno ${fmtNum(rr2.reward)}.`);
+    } else if (rr2 && rr2.note) {
+      notes.push(`⚖️ <b>Risco/retorno</b>: não calculável — ${escapeHtml(rr2.note)}`);
+    } else {
+      notes.push("⚖️ <b>Risco/retorno</b>: sem base (stop ou alvo indefinido).");
+    }
   }
   if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
-  $("chartNote").innerHTML = notes.join(" ");
+  $("chartNote").innerHTML = notes.map((n) => `<span class="cn-line">${n}</span>`).join("");
 
   drawPriceChart(cv, chart, cv._actionable);
   bindChartZoom(cv);
@@ -2216,8 +2256,35 @@ function planZones(a) {
     const waiting = a.setup_state === "aguardar_pullback";
     out.push({ ...buy, color: ZONE_COLORS.buy, tag: waiting ? "compra (recuo à média)" : "compra" });
   }
+  // A região de realização só se chama "alvo" quando de fato é: num setup de VENDA
+  // ela é o topo acima (resistência, nunca o alvo de um short) e, quando coincide
+  // com o gatilho do 1-2-3, a linha do próprio padrão já a desenha — não se traça
+  // o mesmo nível duas vezes. O backend carimba esse papel em ``role``.
   const rz = a.realize_zone;
-  if (rz && rz.price != null) out.push({ ...rz, color: ZONE_COLORS.realize, tag: "realização (alvo)" });
+  if (rz && rz.price != null && rz.role !== "gatilho") {
+    const rzColor = rz.role === "resistencia" ? ZONE_COLORS.resist : ZONE_COLORS.realize;
+    out.push({ ...rz, color: rzColor, tag: rz.role_label || "realização (alvo)" });
+  }
+  // Alvo (TP) do padrão. Mesmo nível da realização → NÃO desenha um segundo: a
+  // faixa que já está lá passa a dizer que ela é o alvo.
+  const tg = a.target;
+  if (tg && tg.price != null) {
+    const twin = tg.same_as_realize && out.find((z) => z.color === ZONE_COLORS.realize && z.price === tg.price);
+    if (twin) twin.tag = "realização = alvo (TP)";
+    else out.push({ ...tg, color: ZONE_COLORS.realize, tag: "alvo (TP)" });
+  }
+  // Invalidação e stop são LINHAS (nível exato), não faixas: a invalidação é o
+  // ponto 3 da série e o stop é ela com a folga de ATR declarada pelo backend.
+  const inv = a.invalidation;
+  if (inv && inv.price != null) {
+    out.push({ label: inv.label, price: inv.price, low: null, high: null,
+               color: ZONE_COLORS.invalid, tag: "invalidação", dash: [2, 3] });
+  }
+  const st = a.stop;
+  if (st && st.price != null) {
+    out.push({ label: st.label, price: st.price, low: null, high: null,
+               color: ZONE_COLORS.stop, tag: "stop (SL)", dash: [6, 4] });
+  }
   const pb = a.pullback_zone;
   const buyPrice = buy && buy.price;
   const isBand = pb && pb.low != null && pb.high != null;
@@ -2414,7 +2481,7 @@ function drawPriceChart(canvas, chart, a) {
       ctx.strokeRect(padL + 0.5, yTop + 0.5, plotW - 1, Math.max(2, yBot - yTop));
     } else {
       const yy = y(z.price);
-      ctx.strokeStyle = z.color + "aa"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
+      ctx.strokeStyle = z.color + "aa"; ctx.setLineDash(z.dash || [5, 4]); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
       ctx.setLineDash([]); ctx.lineWidth = 1;
     }
