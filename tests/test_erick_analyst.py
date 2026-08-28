@@ -9,7 +9,17 @@ import pytest
 
 import tradingagents.agents.utils.erick_method as em
 from tradingagents.agents.utils.erick_method import (
+    _days_ahead,
     _decide,
+    _drop_decelerating,
+    _estado,
+    _fine_sell_triggered,
+    _gate_abre,
+    _liq_entry_ref,
+    _rsi_divergence,
+    _rsi_series,
+    _swing_points,
+    _tese_read,
     build_erick_method_section,
     ensure_erick_method_coverage,
 )
@@ -17,6 +27,19 @@ from tradingagents.graph.analyst_execution import build_analyst_execution_plan
 from tradingagents.graph.conditional_logic import ConditionalLogic
 from tradingagents.webui.progress import build_plan
 from tradingagents.webui.runner import extract_result, select_analysts_for_asset
+
+
+@pytest.fixture(autouse=True)
+def _no_earnings_network(monkeypatch):
+    """A camada de ponderação consulta o calendário de balanço em TODA decisão —
+    sem isto os testes de seção batem no yfinance de verdade. Hermético e
+    determinístico: sem agenda publicada (na_janela=False, informação, não erro)."""
+    monkeypatch.setattr(
+        em, "_earnings_read",
+        lambda s, d: {"status": "sem_agenda", "ev": None, "dias": None,
+                      "na_janela": False, "ausente": None,
+                      "leitura": "sem data de balanço publicada — sem risco de evento conhecido"},
+    )
 
 
 # --------------------------------------------------------------- wiring --------
@@ -104,12 +127,6 @@ def test_decide_transition_at_average_initial_only():
 
 
 # ------------------------------------- drop_nature manda no _decide/_estado -----
-from tradingagents.agents.utils.erick_method import (
-    _estado,
-    _fine_sell_triggered,
-    _liq_entry_ref,
-)
-
 # Uma liquidação COM a evidência do classificador: o eixo de entrada é a média DIÁRIA
 # que sobe (MMS200) — NUNCA a EMA 4h invertida (que é o sintoma da liquidação).
 _LIQ_DROP_EVID = {
@@ -395,3 +412,186 @@ def test_section_fail_open_drop_none_matches_mechanical(monkeypatch):
     assert "**Estado (Método Erick):** CAIXA" in section
     assert "🩸 Natureza da queda" not in section
     assert "Deriva da natureza da queda" not in section
+
+
+# -------------------------- camada de ponderação: TIER 0 / TIER 2 / TIER 3 --------
+_real_earnings_read = em._earnings_read
+
+
+def test_days_ahead_prefers_field_then_recomputes():
+    assert _days_ahead({"days_ahead": 56}, "2026-08-27") == 56
+    # payload antigo do cache sem o campo → recalcula da data
+    assert _days_ahead({"date": "2026-10-22"}, "2026-08-27") == 56
+    assert _days_ahead(None, "2026-08-27") is None
+    assert _days_ahead({"date": "lixo"}, "2026-08-27") is None
+
+
+def test_rsi_series_is_wilder_and_pads_none():
+    closes = [float(i) for i in range(1, 60)]  # alta monotônica
+    rsi = _rsi_series(closes)
+    assert all(v is None for v in rsi[:14])
+    assert rsi[14] == 100.0            # só ganhos → RSI 100
+    assert rsi[-1] > 99.0
+    assert _rsi_series([1.0, 2.0]) == [None, None]
+
+
+def test_swing_points_finds_local_extremes():
+    vals = [1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 2.0]
+    highs, lows = _swing_points(vals, k=1)
+    assert highs == [2, 7] and lows == [4]  # 2<3>2 e 3<4>3; fundo único no 4
+
+
+def test_rsi_divergence_bearish_measured():
+    """Topo do preço MAIS ALTO com RSI fazendo topo mais baixo = bearish medida.
+    Curva validada: rali forte 80→109 (RSI 100) · recuo · rali fraco → 110 (RSI 83)."""
+    closes = [80 + i * (29 / 20) for i in range(21)]     # rali forte → 109
+    closes += [109 - i * 1.8 for i in range(1, 6)]       # recuo → 100
+    closes += [100 + i * 0.5 for i in range(1, 21)]      # rali fraco → 110
+    closes += [110 - i * 1.5 for i in range(1, 4)]       # cauda p/ confirmar o swing
+    out = _rsi_divergence({"candles": [{"c": c} for c in closes]})
+    assert out["measured"] is True
+    assert out["kind"] == "bearish"
+    assert "109" in out["detail"] and "110" in out["detail"]
+
+
+def test_rsi_divergence_short_series_is_not_measured():
+    out = _rsi_divergence({"candles": [{"c": 100.0}] * 10})
+    assert out["measured"] is False
+    assert "série curta" in out["detail"]
+
+
+def test_drop_decelerating_three_states():
+    def chart(closes):
+        return {"candles": [{"c": c} for c in closes]}
+
+    # queda que encolhe: -10 nas 5 anteriores, -5 nas últimas 5 → desacelerando
+    decel = _drop_decelerating(chart([100, 98, 96, 94, 92, 90, 88, 87, 86, 85.5, 85]))
+    assert decel["decelerando"] is True
+    # queda que acelera: -5 antes, -20 agora → NÃO
+    accel = _drop_decelerating(chart([100, 99, 98, 97, 96, 95, 93, 91, 89, 87, 85]))
+    assert accel["decelerando"] is False
+    # série curta → None (NÃO MEDIDA, não False)
+    short = _drop_decelerating(chart([100.0, 99.0, 98.0]))
+    assert short["decelerando"] is None
+    # sem queda prévia → False com motivo
+    rise = _drop_decelerating(chart([100.0 + i for i in range(11)]))
+    assert rise["decelerando"] is False and "sem queda prévia" in rise["detail"]
+
+
+def test_earnings_read_tri_state(monkeypatch):
+    """A fonte do calendário tem TRÊS estados e os dois negativos não podem virar a
+    mesma frase: sem agenda é informação; fonte caída é ignorância (na_janela=None)."""
+    import tradingagents.dataflows.earnings_calendar as ec
+
+    monkeypatch.setattr(em, "_earnings_read", _real_earnings_read)  # desfaz o autouse
+
+    def _status(ret):
+        monkeypatch.setattr(ec, "get_next_earnings_status", lambda s, d: ret)
+        return em._earnings_read
+
+    read = _status((None, ec.STATUS_SEM_AGENDA))
+    out = read("X", "2026-08-27")
+    assert out["na_janela"] is False and out["ausente"] is None
+
+    read = _status((None, ec.STATUS_FONTE_INDISPONIVEL))
+    out = read("X", "2026-08-27")
+    assert out["na_janela"] is None and out["ausente"] is not None
+
+    read = _status(({"date": "2026-10-22", "days_ahead": 56}, ec.STATUS_OK))
+    out = read("X", "2026-08-27")
+    assert out["na_janela"] is False and out["dias"] == 56
+
+    read = _status(({"date": "2026-08-27", "is_today": True}, ec.STATUS_OK))
+    out = read("X", "2026-08-27")
+    assert out["na_janela"] is True and out["dias"] == 0
+
+
+def test_tese_read_declares_monthly_absent(monkeypatch):
+    def chart(s, d, timeframe="1d"):
+        # ambos os frames de tese em alta (pilha empilhada); série longa p/ o RSI
+        closes = [100.0 + i * 0.5 for i in range(60)]
+        last = closes[-1]
+        return {"candles": [{"c": c} for c in closes],
+                "ema": {"8": [last], "21": [last - 1.0], "50": [last - 2.0]}}
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    tese = _tese_read("INTC", "2026-08-27")
+    assert tese["regime"] == "alta" and tese["frame"] == "1w"
+    assert tese["leituras"] == {"1w": "alta", "1d": "alta"}
+    assert any("mensal (1mo)" in a for a in tese["ausentes"])
+
+
+# ------------------------------------------- a PORTA TIER 2 (o fix do INTC) ------
+def _factors_full(**over):
+    """Fatores do INTC 27/08: as 5 condições presentes. Cada teste da guarda
+    remove/neutraliza UMA — a porta tem que fechar."""
+    f = {
+        "tese": {"regime": "alta", "frame": "1w", "leituras": {"1w": "alta", "1d": "alta"},
+                 "divergencias": {"1w": {"measured": False, "kind": None, "detail": ""},
+                                  "1d": {"measured": False, "kind": None, "detail": ""}},
+                 "ausentes": []},
+        "earnings": {"status": "ok", "ev": {"date": "2026-10-22", "days_ahead": 56},
+                     "dias": 56, "na_janela": False, "ausente": None,
+                     "leitura": "sem balanço até 2026-10-22 (56 dias)"},
+        "divergencia": {"measured": False, "kind": None, "detail": ""},
+        "decel": {"decelerando": True, "detail": ""},
+        "ancora": {"nome": "NVDA", "em_alta": True, "bateu_balanco": True},
+        "ausentes": [],
+    }
+    f.update(over)
+    return f
+
+
+def test_gate_intc_opens_and_decides_initial():
+    """Aceitação spec §5.1: downtrend 4h + tese semanal alta + as demais condições
+    → AGUARDAR / posição inicial — NÃO caixa. O 4h foi rebaixado a TIMING."""
+    factors = _factors_full()
+    d = _decide(_read("baixa", below=True), None, False, factors)
+    assert d["acao"] == "AGUARDAR"
+    assert d["peso"] == "posição inicial"
+    assert "TIMING" in d["entrada"]
+    # o Estado espelha: AGUARDAR (não CAIXA-tese)
+    assert _estado(d["acao"], "baixa", None, True) == "AGUARDAR"
+    assert _estado(d["acao"], "baixa", None, False) == "CAIXA"
+
+
+@pytest.mark.parametrize("label,over,drop_cls", [
+    ("sem_tese_alta", {"tese": dict(_factors_full()["tese"], regime="baixa")}, None),
+    ("tese_ausente", {"tese": dict(_factors_full()["tese"], regime=None)}, None),
+    ("queda_nao_desacelera", {"decel": {"decelerando": False, "detail": ""}}, None),
+    ("decel_nao_medido", {"decel": {"decelerando": None, "detail": ""}}, None),
+    ("balanco_na_janela", {"earnings": dict(_factors_full()["earnings"], na_janela=True)}, None),
+    ("balanco_nao_medido", {"earnings": dict(_factors_full()["earnings"], na_janela=None)}, None),
+    ("ancora_fora_de_alta", {"ancora": {"nome": "NVDA", "em_alta": False, "bateu_balanco": True}}, None),
+    ("ancora_ausente", {"ancora": None}, None),
+    ("divergencia_bearish_na_tese", {"tese": dict(_factors_full()["tese"],
+        divergencias={"1w": {"measured": True, "kind": "bearish", "detail": ""},
+                      "1d": {"measured": False, "kind": None, "detail": ""}})}, None),
+    ("fraqueza_veta", {}, "fraqueza"),
+])
+def test_gate_fail_closed_any_condition_missing(label, over, drop_cls):
+    """A porta NÃO afrouxa: qualquer condição ausente/não medida/contrária → fecha e
+    vale o filtro de hoje (caixa contra médias invertidas)."""
+    factors = _factors_full(**over)
+    assert _gate_abre(_read("baixa", below=True), drop_cls, factors) is False
+    d = _decide(_read("baixa", below=True), {"classification": drop_cls} if drop_cls else None,
+                False, factors)
+    assert d["peso"] == "caixa"
+
+
+def test_gate_never_touches_non_downtrend_or_without_factors():
+    """A porta só existe no ramo da baixa; sem factors=None ela é fechada por
+    construção (invariante byte-a-byte dos outros ramos preservado)."""
+    assert _gate_abre(_read("alta", at_media=True), None, _factors_full()) is False
+    assert _gate_abre(_read("baixa", below=True), None, None) is False
+
+
+def test_decide_without_factors_is_byte_for_byte():
+    """factors=None (default) reproduz a mecânica de hoje BYTE-A-BYTE — o mesmo
+    contrato do drop=None."""
+    for trend, kw in [("alta", {"at_media": True}), ("baixa", {"below": True}),
+                      ("transicao", {})]:
+        r = _read(trend, **kw)
+        assert _decide(r) == _decide(r, None, False, None)
+        d = _decide(r)
+        assert _estado(d["acao"], trend) == _estado(d["acao"], trend, None, False)
