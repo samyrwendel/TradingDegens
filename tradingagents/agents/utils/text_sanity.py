@@ -66,6 +66,12 @@ _UNIT_SUFFIX = frozenset(
         "bps", "pp", "yr", "q", "fy", "usd", "brl", "eur", "pt", "am", "pm",
         "ema", "sma", "wma", "ma", "rsi", "macd", "atr", "adx", "vwap",
         "th", "st", "nd", "rd",
+        # Unidades técnicas que aparecem sem espaço na prosa dos analistas. Sem
+        # elas o detector chamava de corrupção o nó de litografia ("2nm", "3nm")
+        # e as capacidades de hardware — falso positivo puro, medido no histórico.
+        "nm", "um", "cm", "km", "kg", "ton", "gb", "tb", "mb", "kb",
+        "ghz", "mhz", "khz", "ms", "ns", "kw", "mw", "gw", "kwh", "mwh",
+        "gbps", "mbps", "fps", "dpi", "px", "vcpu", "rpm",
     }
 )
 _ROMAN = frozenset("ivxlcdm")
@@ -86,6 +92,19 @@ _FINANCE_ALLOW = frozenset({
     "sobrecomprado", "sobrecomprada", "sobrevendido", "sobrevendida", "chatbot",
     "chatbots", "blockchain", "buyback", "buybacks", "hashrate", "uptrend",
     "downtrend", "backtest", "backtesting",
+    # Vocabulário que os analistas realmente escrevem e que NÃO está na wordlist
+    # base do Debian (/usr/share/dict/american-english), então era contado como
+    # palavra inventada e empurrava a taxa por cima do limiar. Medido nos turnos
+    # sinalizados do histórico: em 2 dos 3 casos lexicais era ISTO, não corrupção.
+    "downside", "upside", "contrarian", "repricing", "repriced", "reprice",
+    "overvalued", "overvaluation", "undervalued", "undervaluation",
+    "underperform", "underperformed", "underperformance", "outperform",
+    "outperformed", "outperformance", "megacap", "megacaps", "smallcap",
+    "smallcaps", "midcap", "midcaps", "adopters", "adopter", "endpoint",
+    "endpoints", "ransomware", "malware", "hyperscaler", "hyperscalers",
+    "churn", "backlog", "commoditização", "commoditizado", "commoditizados",
+    "commoditizada", "commoditizadas", "multiperíodo", "multiperíodos",
+    "intradiário", "intradiária", "intradiários", "intradiárias",
 })
 
 

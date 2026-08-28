@@ -72,6 +72,17 @@ def test_structural_allows_units_and_multipliers():
     assert structural_anomalies("negocia a 35x com MMS de 200d no 4h e 50sma") == []
 
 
+def test_structural_allows_technical_units(subtests=None):
+    """Regressão (task 20260828-004): nó de litografia e capacidade de hardware.
+
+    Um turno inteiro do AAPL foi marcado como corrompido por causa de "2nm"/"3nm" —
+    zero palavra inventada nele. Prosa técnica normal não é corrupção.
+    """
+    text = ("a transição para 2nm e 3nm com 8GB de RAM, clock de 3GHz, latência de "
+            "5ms e link de 10Gbps na fábrica de 300mm")
+    assert structural_anomalies(text) == []
+
+
 def test_structural_clean_text_has_no_hits():
     assert structural_anomalies(CLEAN_PT) == []
 
@@ -128,6 +139,39 @@ def test_invented_words_catches_non_words():
 def test_invented_words_spares_bilingual_jargon():
     text = "o setup de breakout com bom momentum e hashrate crescente, buyback à vista"
     assert invented_words(text) == []
+
+
+@pt_speller
+def test_invented_words_spares_the_jargon_the_analysts_actually_write():
+    """Regressão (task 20260828-004): vocabulário real dos turnos sinalizados.
+
+    Nenhuma destas está na wordlist base do Debian, então todas contavam como
+    "palavra inventada" e empurravam a taxa por cima do limiar — foi o que marcou
+    2 dos 3 casos lexicais do histórico, incluindo o run do print do Samyr.
+    """
+    text = ("o downside vem do repricing dos megacaps: o ativo foi repriced no "
+            "endpoint de segurança contra ransomware, e o contrarian aponta "
+            "overvaluation com os early adopters já dentro, num setup intradiário "
+            "de commoditização multiperíodo que underperformed o índice")
+    assert invented_words(text) == []
+
+
+@pt_speller
+def test_allowlist_does_not_swallow_an_invented_pt_conjugation():
+    """A lista é de palavras REAIS, não de prefixos: "repricing" passa, mas
+    "reprecia" — conjugação que o modelo inventou — continua sinalizada."""
+    assert [w.lower() for w in invented_words(
+        "o repricing é real mas o mercado reprecia o papel todo dia " * 3
+    )] .count("reprecia") >= 1
+
+
+@pt_speller
+def test_real_pt_garbling_still_surfaces_after_the_allowlist_grew():
+    """A precisão subiu sem perder o alvo: o texto garbled continua pegando."""
+    text = ("o investidor ficou frutsrado com os pregõeles e a mionha posição, "
+            "aconte que a probababilidade dos últimesos não userê o comprã")
+    hits = {w.lower() for w in invented_words(text)}
+    assert len({"frutsrado", "pregõeles", "mionha", "probababilidade"} & hits) >= 3
 
 
 @pt_speller
