@@ -80,3 +80,54 @@ def test_callback_handler_swallows_missing_metadata():
     h.on_tool_start({}, "x")
     h.on_llm_start({}, [], metadata=None)
     assert t.snapshot()["index"] == 0
+
+
+# ----------------- retomada: o que voltou do checkpoint aparece pronto (task 002) ---
+def test_mark_resumed_marks_checkpointed_stages_done():
+    """As etapas que a retomada trouxe prontas entram CONCLUÍDAS e marcadas
+    ``reused`` — o LangGraph não re-executa nó concluído, então sem isto o stepper
+    pintaria de cinza justamente o trabalho preservado."""
+    t = ProgressTracker(["market", "social", "news", "fundamentals"])
+    t.mark_resumed(["Market Analyst", "Sentiment Analyst"])
+    snap = t.snapshot()
+    states = {s["node"]: s["state"] for s in snap["steps"]}
+    assert states["Market Analyst"] == "reused"
+    assert states["Sentiment Analyst"] == "reused"
+    assert states["News Analyst"] == "pending"
+    assert snap["percent"] > 0                       # a barra já nasce no ponto real
+    assert "preservada" in snap["label"]
+
+
+def test_mark_resumed_then_running_stage_is_active():
+    """Depois da retomada, a etapa que o motor de fato roda vira a corrente — as
+    preservadas continuam verdes atrás dela."""
+    t = ProgressTracker(["market", "social", "news", "fundamentals"])
+    t.mark_resumed(["Market Analyst"])
+    t.note_node("Sentiment Analyst")
+    states = {s["node"]: s["state"] for s in t.snapshot()["steps"]}
+    assert states["Market Analyst"] == "reused"
+    assert states["Sentiment Analyst"] == "running"
+
+
+def test_mark_resumed_ignores_unknown_nodes():
+    """Nó fora do mapa não vira etapa fantasma no stepper."""
+    t = ProgressTracker(["market"])
+    t.mark_resumed(["tools_market", "Msg Clear Market"])
+    assert all(s["state"] == "pending" for s in t.snapshot()["steps"])
+    assert t.snapshot()["reached"] == []
+
+
+def test_steps_mirror_the_legacy_reached_view_on_a_plain_run():
+    """Numa run normal o estado por etapa bate com o cruzamento plan×reached que a
+    UI usava antes — a novidade não muda o que já estava certo."""
+    t = ProgressTracker(["market", "news"])
+    t.note_node("Market Analyst")
+    t.note_node("News Analyst")
+    snap = t.snapshot()
+    states = {s["node"]: s["state"] for s in snap["steps"]}
+    assert states["Market Analyst"] == "done"
+    assert states["News Analyst"] == "running"
+    assert states["Portfolio Manager"] == "pending"
+    t.mark_done()
+    done = {s["node"]: s["state"] for s in t.snapshot()["steps"]}
+    assert done["News Analyst"] == "done"            # concluir fecha a corrente

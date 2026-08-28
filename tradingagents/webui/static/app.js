@@ -9,6 +9,8 @@ let TZ_LABEL = "GMT-4 (Manaus)";
 // só a VISÃO — qual run está sendo acompanhado ao vivo, quais estavam rodando na
 // última atualização da lista, e quais terminaram sozinhos (ganham "pronto").
 let _watchedRunId = "";              // run cujo progresso está na tela agora
+let _refreshBusy = "";               // etapa cujo "atualizar" (task 002) está em voo
+let _refreshSeen = false;            // o servidor já confirmou o refresh no snapshot
 // Cancelamento PENDENTE (task 013): o cancel é cooperativo — a run só encerra no
 // próximo limite de nó/LLM. Enquanto o pedido está pendente E a run segue 'running',
 // o botão fica TRAVADO em 'parando…' e o poll NÃO o reabre (senão o usuário acha que
@@ -437,7 +439,18 @@ function renderProgress(snap) {
   // Cancel pendente: NÃO deixa o p.label do poll sobrescrever o 'interrompendo…' —
   // updateRunControls (acima) já pôs a mensagem certa (task 013).
   const pendingHere = _cancelPending && _cancelPending === (snap.run_id || _watchedRunId);
-  if (!pendingHere) $("progressLabel").textContent = p.label || "";
+  // Atualizar etapa em voo (task 002): pausar → rebobinar → re-entrar é UM gesto pro
+  // usuário. Enquanto o servidor confirma o refresh, a tela diz o que está havendo em
+  // vez de piscar "pausada" e sumir com o progresso.
+  if (snap.refreshing) {
+    _refreshSeen = true;
+    $("progressPhase").textContent = "Atualizando";
+    $("progressLabel").textContent =
+      "🔄 atualizando “" + (snap.refreshing.label || "etapa") + "” com dados frescos…";
+  } else {
+    if (_refreshSeen) { _refreshSeen = false; _refreshBusy = ""; }
+    if (!pendingHere) $("progressLabel").textContent = p.label || "";
+  }
   $("progressElapsed").textContent = (snap.elapsed || 0) + "s";
   $("progressCost").textContent = fmtCost(snap.cost);
   $("barFill").style.width = (p.percent || 0) + "%";
@@ -466,19 +479,101 @@ function renderProgress(snap) {
     return;
   }
 
-  // Análise única: chips dos analistas (plano + alcançados).
+  // Análise única: chips das etapas.
   cmpStepsEl.classList.add("hidden");
   steps.classList.remove("hidden");
-  if (p.plan && p.plan.length && steps.childElementCount !== p.plan.length) {
-    steps.innerHTML = p.plan.map((s) => `<li data-label="${escapeHtml(s.label)}">${escapeHtml(s.label.split(" — ")[0])}</li>`).join("");
-  }
-  const reachedLabels = new Set((p.reached || []).map((r) => r.label));
+  renderSteps(steps, p, snap);
+}
+
+// Chips das etapas. O ESTADO vem do motor (progress.steps[].state), não de um
+// cruzamento plan×reached no front: só o motor distingue a etapa que ESTE run
+// executou da que voltou PRONTA do checkpoint numa retomada — e essa precisa
+// aparecer verde, senão a tela pinta de cinza justamente o trabalho preservado
+// (task 002). Snapshot antigo/sem `steps` cai no cruzamento de antes, intacto.
+// Cada etapa concluída ganha o 🔄 "atualizar": re-roda SÓ ela com dado fresco.
+function renderSteps(steps, p, snap) {
   const activeLabel = p.label;
-  [...steps.children].forEach((li) => {
-    const label = li.getAttribute("data-label");
-    li.classList.toggle("done", reachedLabels.has(label) && label !== activeLabel);
-    li.classList.toggle("active", label === activeLabel && snap.status === "running");
+  const reached = new Set((p.reached || []).map((r) => r.label));
+  const list = (p.steps && p.steps.length) ? p.steps : (p.plan || []).map((s) => ({
+    label: s.label, node: s.node || "",
+    state: reached.has(s.label) ? (s.label === activeLabel ? "running" : "done") : "pending",
+  }));
+  if (!list.length) return;
+  const canRefresh = !!(_isOwner && snap.resumable && (snap.run_id || _watchedRunId));
+  // Assinatura do que a lista DESENHA: sem isto o innerHTML seria refeito a cada
+  // poll de 2s e o botão piscaria/perderia o clique. Só re-renderiza no que mudou.
+  const sig = list.map((s) => (s.node || s.label) + ":" + s.state).join("|") +
+    "|" + (canRefresh ? "1" : "0") + "|" + (snap.status || "") + "|" + _refreshBusy;
+  if (steps.dataset.sig === sig) return;
+  steps.dataset.sig = sig;
+  steps.innerHTML = list.map((s) => {
+    const st = s.state || "pending";
+    const done = st === "done" || st === "reused";
+    const cls = [done ? "done" : "", st === "reused" ? "reused" : "",
+                 (st === "running" && snap.status === "running") ? "active" : ""]
+      .filter(Boolean).join(" ");
+    const short = escapeHtml(String(s.label || "").split(" — ")[0]);
+    // ♻ = veio pronta do checkpoint, custo zero (DA-058: reúso é dito, não fingido).
+    const mark = st === "reused"
+      ? '<span class="step-reused" title="reaproveitada de onde a análise parou — custo zero">♻</span>'
+      : "";
+    const busy = _refreshBusy && _refreshBusy === s.node;
+    const btn = (canRefresh && done && s.node)
+      ? `<button type="button" class="step-refresh${busy ? " is-busy" : ""}"` +
+        ` data-node="${escapeHtml(s.node)}"${busy ? " disabled" : ""}` +
+        ` title="Atualizar esta etapa com dados frescos — re-roda só ela"` +
+        ` aria-label="Atualizar ${short} com dados frescos">🔄</button>`
+      : "";
+    return `<li class="${cls}" data-label="${escapeHtml(s.label)}"` +
+      ` data-state="${escapeHtml(st)}"><span class="step-name">${short}</span>` +
+      `${mark}${btn}</li>`;
+  }).join("");
+  bindStepRefresh(steps);
+}
+
+let _stepsBound = false;
+function bindStepRefresh(steps) {
+  if (_stepsBound) return;
+  _stepsBound = true;
+  steps.addEventListener("click", (ev) => {
+    const btn = ev.target.closest && ev.target.closest(".step-refresh");
+    if (btn) refreshStep(btn.getAttribute("data-node"), btn);
   });
+}
+
+// POST /api/run/<id>/refresh-step: re-roda SÓ aquela etapa com DADO FRESCO,
+// reaproveitando as anteriores do checkpoint. Não é o "Escalar etapa" (027, que
+// troca o LLM) — aqui o modelo é o mesmo e o que muda é o número. Owner-gated no
+// servidor, que recusa run não-resumível (BYOK) com mensagem honesta.
+async function refreshStep(node, btn) {
+  const runId = _watchedRunId;
+  if (!runId || !node || _refreshBusy) return;
+  _refreshBusy = node;
+  if (btn) { btn.disabled = true; btn.classList.add("is-busy"); }
+  const fail = (msg) => {
+    _refreshBusy = ""; _refreshSeen = false;
+    $("formError").textContent = msg;
+    if (btn) { btn.disabled = false; btn.classList.remove("is-busy"); }
+  };
+  try {
+    const { headers } = llmRequestParts();
+    const res = await fetch("/api/run/" + encodeURIComponent(runId) + "/refresh-step", {
+      method: "POST", credentials: "same-origin",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ node }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      fail((data && data.error) || "não deu pra atualizar essa etapa");
+      return;
+    }
+    $("formError").textContent = "";
+    // o servidor pausa → rebobina → re-entra; se o poll tinha parado (run pausada
+    // ou terminada na tela), reengata pra acompanhar a etapa voltando a rodar.
+    if (!pollTimer) watchRun(runId);
+  } catch (e) {
+    fail("erro de rede ao atualizar a etapa");
+  }
 }
 
 // Raciocínio AO VIVO (task 008): renderiza os pareceres dos agentes conforme
@@ -515,7 +610,8 @@ function renderThinking(items) {
       // rodou esta etapa (atribuição, task 024). Os dois selos vivem no mesmo lugar.
       sum.innerHTML = `<span class="tk-label">${escapeHtml(it.label)}</span>` +
         `<span class="tk-tf" data-tk-tf></span>` +
-        `<span class="tk-model" data-tk-model></span>`;
+        `<span class="tk-model" data-tk-model></span>` +
+        `<span class="tk-reused" data-tk-reused></span>`;
       const body = document.createElement("div");
       body.className = "tk-body md";
       card.appendChild(sum);
@@ -534,6 +630,11 @@ function renderThinking(items) {
     // reporta o modelo; some se ainda não veio). Atualiza a cada poll.
     const modelSlot = card.querySelector("[data-tk-model]");
     if (modelSlot) modelSlot.textContent = stepModelLabel(it);
+    // Parecer que voltou PRONTO do checkpoint numa retomada (task 002): marca de
+    // reaproveitado no lugar do selo de modelo — nenhum LLM rodou pra produzi-lo
+    // agora, e dizer isso é mais honesto que deixar o card sem explicação.
+    const reusedSlot = card.querySelector("[data-tk-reused]");
+    if (reusedSlot) reusedSlot.textContent = it.reused ? "♻ reaproveitado" : "";
     const body = card.querySelector(".tk-body");
     // re-renderiza só quando o texto mudou de tamanho (streaming/parcial→final)
     if (body && body.dataset.len !== String(it.len)) {
@@ -2620,7 +2721,9 @@ async function poll(runId) {
     if (!res.ok) throw new Error("status " + res.status);
     const snap = await res.json();
     if (runId !== _watchedRunId) return;   // já trocamos de run: ignora resposta tardia
-    if (snap.status === "running") {
+    // `refreshing`: a run está no meio do pausar→rebobinar→re-entrar de um
+    // "atualizar etapa" (task 002). Ainda é trabalho em curso — não é um término.
+    if (snap.status === "running" || snap.refreshing) {
       saveActiveRun(runId, snap.ticker);   // mantém o ticker fresco pro reengate
       renderProgress(snap);
     } else {
@@ -2645,7 +2748,7 @@ async function resumeActiveRun() {
     if (res.status === 404) { clearActiveRun(); return false; }   // run sumiu do servidor
     if (!res.ok) return false;                                    // transitório: tenta depois
     const snap = await res.json();
-    if (snap.status === "running") {
+    if (snap.status === "running" || snap.refreshing) {
       _openTicker = snap.ticker || active.ticker || "";
       if (snap.ticker) $("ticker").value = snap.ticker;
       $("resultPanel").classList.add("hidden");

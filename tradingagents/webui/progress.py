@@ -91,6 +91,11 @@ class ProgressTracker:
         self._order_index = {p["order"]: i for i, p in enumerate(self.plan)}
         self._current_order = -1
         self._reached: list[dict[str, Any]] = []
+        # Etapas que voltaram PRONTAS do checkpoint numa retomada (task 002/DA-062).
+        # Não "rodaram" neste run — foram REAPROVEITADAS; ficam verdes no stepper
+        # com marca própria, pra o usuário ver o que foi preservado sem que a UI
+        # finja que o motor as executou de novo (DA-058: reúso é honesto, não mudo).
+        self._reused: set[str] = set()
         self._phase = "Inicializando"
         self._label = "Inicializando o motor…"
         self._started_at = time.monotonic()
@@ -109,6 +114,29 @@ class ProgressTracker:
             self._label = label
             self._phase = phase
             self._reached.append({"label": label, "phase": phase})
+
+    def mark_resumed(self, nodes: list[str] | tuple[str, ...]) -> None:
+        """Marca como CONCLUÍDAS as etapas que a retomada trouxe prontas do checkpoint.
+
+        O LangGraph não re-executa um nó já concluído, então o callback de progresso
+        nunca dispara pra ele: sem isto, uma análise que "continua de onde parou"
+        pintaria de cinza justamente o trabalho que foi preservado. Avança o ponteiro
+        pro último nó pronto, então a barra e o rótulo já nascem no ponto real.
+        """
+        stages = sorted(s for s in (stage_for_node(n) for n in nodes) if s is not None)
+        if not stages:
+            return
+        with self._lock:
+            for order, label, phase in stages:
+                if label not in self._reused:
+                    self._reused.add(label)
+                    self._reached.append({"label": label, "phase": phase})
+                if order > self._current_order:
+                    self._current_order = order
+            n = len(self._reused)
+            self._phase = "Retomando"
+            self._label = (f"Retomando de onde parou — {n} etapa"
+                           f"{'s' if n > 1 else ''} preservada{'s' if n > 1 else ''}")
 
     def mark_done(self) -> None:
         with self._lock:
@@ -148,6 +176,7 @@ class ProgressTracker:
             else:
                 idx = 0
             percent = int(round(100 * idx / total)) if total else 0
+            reached = {r["label"] for r in self._reached}
             return {
                 "phase": self._phase,
                 "label": self._label,
@@ -157,7 +186,25 @@ class ProgressTracker:
                 "elapsed": round(time.monotonic() - self._started_at, 1),
                 "plan": [{"label": p["label"], "phase": p["phase"]} for p in self.plan],
                 "reached": list(self._reached),
+                # Estado POR ETAPA (task 002): o stepper deixa de inferir "verde" do
+                # cruzamento plan×reached e passa a ler o estado que o motor conhece —
+                # inclusive o ``reused`` de uma retomada, que reached sozinho não
+                # distingue. ``node`` endereça a etapa no botão de atualizar.
+                "steps": [{
+                    "node": p["node"], "label": p["label"], "phase": p["phase"],
+                    "state": self._step_state(p["label"], reached),
+                } for p in self.plan],
             }
+
+    def _step_state(self, label: str, reached: set[str]) -> str:
+        """``reused``/``done``/``running``/``pending`` de uma etapa. Chamado com o lock."""
+        if label in self._reused:
+            return "reused"
+        if label in reached and (self._done or label != self._label):
+            return "done"
+        if label == self._label and not self._done:
+            return "running"
+        return "pending"
 
 
 class ProgressCallbackHandler(BaseCallbackHandler):
@@ -309,6 +356,11 @@ class ThinkingTracker:
         # (o Mercado ancora o timing no frame intradiário quando a run não é diária).
         self._run_tf = timeframe
         self._texts: dict[str, str] = {}     # node -> último texto (recortado)
+        # Etapas cujo texto veio do CHECKPOINT numa retomada (task 002/DA-062): o
+        # parecer é o que aquele agente já tinha escrito, não uma nova geração. Marca
+        # o card como reaproveitado — o usuário VÊ o trabalho preservado, sem que a UI
+        # finja que o modelo rodou de novo (não há atribuição de LLM pra ele).
+        self._reused: set[str] = set()
         # Atribuição por etapa (task 024, parte 1): node -> {provider, model} que
         # REALMENTE rodou aquela etapa, lido do callback do LLM (metadata ls_* do
         # langchain) — o que rodou, não o configurado. Responde "qual LLM fez cada
@@ -325,6 +377,24 @@ class ThinkingTracker:
             text = text[:_THINKING_CAP] + "…"
         with self._lock:
             self._texts[node] = text
+            self._reused.discard(node)   # re-rodou de verdade: não é mais reaproveitado
+
+    def seed_from_checkpoint(self, reports: dict[str, str]) -> None:
+        """Traz pros cards os pareceres que a retomada recuperou do checkpoint.
+
+        Sem isto o painel de raciocínio de uma run retomada nasce VAZIO — o motor não
+        re-executa os nós concluídos, então nada passa pelo callback. Um texto que
+        chegue depois pelo callback (a etapa re-rodou de fato) sobrescreve e o card
+        deixa de ser 'reaproveitado'."""
+        for node, text in (reports or {}).items():
+            if node not in _THINKING_INDEX or not isinstance(text, str) or not text.strip():
+                continue
+            body = text.strip()
+            if len(body) > _THINKING_CAP:
+                body = body[:_THINKING_CAP] + "…"
+            with self._lock:
+                self._texts[node] = body
+                self._reused.add(node)
 
     def set_model(self, node: str, provider: str | None, model: str | None) -> None:
         """Registra o provedor/modelo que rodou ``node`` (real, do callback). Só grava
@@ -348,6 +418,9 @@ class ThinkingTracker:
                     "provider": attr.get("provider"), "model": attr.get("model"),
                     # timeframe(s) que a etapa analisou (task 009): None onde não se aplica
                     "timeframe": node_timeframe(node, self._run_tf),
+                    # veio pronto do checkpoint numa retomada (task 002) — o card
+                    # mostra a marca de reaproveitado em vez de um selo de modelo
+                    "reused": node in self._reused,
                 })
         items.sort(key=lambda it: it["order"])
         return items

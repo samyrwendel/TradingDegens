@@ -49,6 +49,7 @@ from tradingagents.webui.progress import (
     RunCancelled,
     ThinkingCallbackHandler,
     ThinkingTracker,
+    stage_for_node,
 )
 from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.resume_store import ActiveRunStore
@@ -796,6 +797,11 @@ class AnalysisRunner:
         # Janela de reúso de dia-corrente (DA-058), resolvida do TTL do cache OHLCV;
         # fail-soft pro default. Testes ajustam pra exercitar os dois lados do reúso.
         self.reuse_same_day_ttl = _resolve_same_day_ttl()
+        # Atualizações de etapa em voo (task 002): run_id -> {node, label}. Uma
+        # atualização PAUSA a run, rebobina o checkpoint e re-enfileira — três passos
+        # que o usuário vive como UM. Isto os mantém legíveis no snapshot, pra a UI
+        # dizer "atualizando <etapa>" em vez de piscar "pausada" no meio do caminho.
+        self._refreshing: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _default_graph_factory(config, selected_analysts, callbacks):
@@ -979,6 +985,13 @@ class AnalysisRunner:
                 config, run.selected_analysts,
                 [run.usage_cb, progress_cb, thinking_cb, cancel_cb],
             )
+            # RETOMADA (task 002/DA-062): o que já estava pronto no checkpoint entra
+            # no stepper JÁ concluído (verde) e com o parecer preservado no painel.
+            # Sem isto o LangGraph pula esses nós — nenhum callback dispara — e a tela
+            # pinta de cinza justamente o trabalho que foi salvo, como se nada tivesse
+            # rodado. Melhor esforço: falhar aqui só custaria a cor, não a análise.
+            if run.resuming:
+                self._seed_from_checkpoint(run, config)
             final_state, signal = graph.propagate(
                 run.ticker, run.date, asset_type=run.asset_type,
                 timeframe=run.timeframe
@@ -1516,6 +1529,133 @@ class AnalysisRunner:
                 "level": level, "provider": ov.get(f"{level}_provider"),
                 "model": ov.get(f"{level}_model")}
 
+    # ------------------------------------- atualizar UMA etapa com dado fresco --
+    def _checkpoint_addr(self, selected_analysts, asset_type: str, timeframe: str,
+                         overrides: dict[str, Any] | None = None,
+                         ) -> tuple[str, str] | None:
+        """``(data_cache_dir, assinatura)`` que endereçam o checkpoint de um run.
+
+        Mesmo par que o motor deriva em ``propagate`` — vem de ``run_signature``, a
+        fonte única, pra a UI ler/rebobinar EXATAMENTE a thread que o grafo usa em vez
+        de uma chave parecida. ``None`` quando o checkpoint está desligado ou não há
+        diretório de cache (o fake dos testes)."""
+        from tradingagents.graph.trading_graph import run_signature
+        config = apply_llm_overrides(self.base_config, overrides or {})
+        data_dir = config.get("data_cache_dir")
+        if not (self.checkpoint_enabled and data_dir):
+            return None
+        return data_dir, run_signature(
+            list(selected_analysts), config.get("max_debate_rounds"),
+            config.get("max_risk_discuss_rounds"), asset_type, timeframe,
+        )
+
+    def _seed_from_checkpoint(self, run: _Run, config: dict[str, Any]) -> None:
+        """Traz pro tracker/painel as etapas que a retomada recuperou do checkpoint."""
+        try:
+            from tradingagents.graph.checkpointer import completed_reports
+            data_dir = config.get("data_cache_dir")
+            if not (config.get("checkpoint_enabled") and data_dir):
+                return
+            addr = self._checkpoint_addr(run.selected_analysts, run.asset_type,
+                                         run.timeframe, run.overrides)
+            if addr is None:
+                return
+            reports = completed_reports(data_dir, run.ticker, run.date, addr[1])
+            if not reports:
+                return
+            run.tracker.mark_resumed(list(reports))
+            run.thinking.seed_from_checkpoint(reports)
+        except Exception:  # noqa: BLE001 — cor de stepper nunca derruba uma análise
+            logger.debug("falha ao ler etapas prontas do checkpoint", exc_info=True)
+
+    def refresh_step(self, run_id: str, node: str) -> dict[str, Any] | None:
+        """ATUALIZAR uma etapa concluída com DADO FRESCO (task 002 / DA-062).
+
+        Não é o ESCALAR (027): lá o que muda é o LLM, aqui é o DADO. O cache de preço
+        do ativo é invalidado e o checkpoint REBOBINA pra antes daquela etapa, então
+        ela re-roda com número novo — e tudo que veio ANTES continua voltando pronto
+        do checkpoint, de graça. O que vinha DEPOIS re-roda junto por necessidade: foi
+        julgado em cima do dado que o usuário acabou de trocar, e manter seria carimbar
+        um veredito sobre número que não existe mais.
+
+        Só run RESUMÍVEL (dono/servidor, checkpoint ligado), igual ao escalar. Se a run
+        ainda está viva, PAUSA primeiro e só rebobina quando ela encerra — mexer no
+        checkpoint sob um grafo em execução o corromperia. ``None`` quando não há
+        descritor algum pro id."""
+        stage = stage_for_node(node)
+        if stage is None:
+            return {"ok": False, "code": "bad_step",
+                    "error": "etapa desconhecida para atualização."}
+        desc = self.active.get(run_id)
+        if not desc:
+            return None
+        if not desc.get("resumable"):
+            return {"ok": False, "code": "not_resumable",
+                    "error": ("Atualizar etapa indisponível: esta análise não é "
+                              "retomável (rodou com chave própria, que não fica "
+                              "salva). Rode de novo.")}
+        with self._lock:
+            if run_id in self._refreshing:
+                return {"ok": True, "run_id": run_id, "refreshing": True,
+                        "node": node, "label": stage[1]}   # já pedido: idempotente
+            cur = self._runs.get(run_id)
+            alive = cur is not None and getattr(cur, "status", "") == "running"
+            self._refreshing[run_id] = {"node": node, "label": stage[1]}
+        if alive:
+            self.cancel(run_id, keep_resume=True)
+        threading.Thread(target=self._refresh_worker,
+                         args=(run_id, node, dict(desc), alive), daemon=True).start()
+        return {"ok": True, "run_id": run_id, "refreshing": True,
+                "node": node, "label": stage[1], "paused_first": alive}
+
+    def _refresh_worker(self, run_id: str, node: str, desc: dict[str, Any],
+                        wait: bool) -> None:
+        """Pausa (se preciso) → invalida o dado → rebobina o checkpoint → re-enfileira."""
+        try:
+            if wait and not self._await_idle(run_id):
+                logger.warning("atualização de etapa abortada: run %s não encerrou",
+                               run_id)
+                return
+            selected = desc.get("selected_analysts") or select_analysts_for_asset(
+                desc.get("asset_type") or "stock",
+                include_erick=(desc.get("method") == "erick"),
+            )
+            addr = self._checkpoint_addr(
+                selected, desc.get("asset_type") or "stock",
+                desc.get("timeframe", _DEFAULT_TIMEFRAME), desc.get("overrides"),
+            )
+            if addr is not None:
+                data_dir, signature = addr
+                # dado fresco de verdade: sem isto a etapa re-roda lendo o MESMO
+                # candle do cache e o usuário atualiza pra receber o que já tinha.
+                from tradingagents.dataflows.cache_control import invalidate_price_cache
+                from tradingagents.graph.checkpointer import rewind_before_node
+                invalidate_price_cache(data_dir, desc["ticker"])
+                rewind_before_node(data_dir, desc["ticker"], desc["date"],
+                                   signature, node=node)
+            # Re-grava o descritor: se a run encerrou como terminal enquanto
+            # esperávamos, o worker antigo o apagou — e a run que vai subir agora
+            # precisa dele pra ser recuperável num restart.
+            self.active.put(run_id, desc)
+            self._reenqueue(desc)
+        except Exception:  # noqa: BLE001 — um refresh não pode derrubar o servidor
+            logger.warning("falha ao atualizar etapa %s da run %s", node, run_id,
+                           exc_info=True)
+        finally:
+            with self._lock:
+                self._refreshing.pop(run_id, None)
+
+    def _await_idle(self, run_id: str, timeout: float = 180.0) -> bool:
+        """Espera a run sair do ``running`` (pausa cooperativa). False no estouro."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._lock:
+                run = self._runs.get(run_id)
+            if run is None or getattr(run, "status", "") != "running":
+                return True
+            time.sleep(0.2)
+        return False
+
     # ----------------------------------------------------- compare (Fase 3) ----
     def start_compare(self, ticker: str, date: str,
                       timeframe: str = _DEFAULT_TIMEFRAME,
@@ -2023,6 +2163,12 @@ class AnalysisRunner:
             if hasattr(run, "cancel_event"):
                 snap["cancellable"] = (run.status == "running")
                 snap["resumable"] = self._run_is_resumable(run)
+            # Atualizar etapa em voo (task 002): estado honesto do intervalo entre a
+            # pausa e a re-entrada — a UI não trata como "run pausada e acabou".
+            with self._lock:
+                pending = self._refreshing.get(run_id)
+            if pending:
+                snap["refreshing"] = dict(pending)
             return snap
         # fall back to persisted history for a run this process didn't start
         record = self.store.get(run_id)

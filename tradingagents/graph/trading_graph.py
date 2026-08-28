@@ -187,6 +187,28 @@ def resolve_fallback_chain(config: dict, byok_key: str | None = None,
     return chains
 
 
+def run_signature(selected_analysts, max_debate_rounds, max_risk_discuss_rounds,
+                  asset_type: str, timeframe: str = "1d") -> str:
+    """Graph-shape inputs that must invalidate a checkpoint if changed.
+
+    Keyed into the checkpoint thread ID so a resume under a different analyst
+    selection, debate/risk depth, asset mode, or reference timeframe starts
+    fresh instead of silently continuing the previous graph (#1089). Each
+    (ticker, date, TF) is therefore its own cacheable run.
+
+    Module-level so anything that needs to ADDRESS a run's checkpoint without
+    building the graph (the web UI's resume/refresh, which reads which stages came
+    back done and rewinds one of them) derives the same key from one source.
+    """
+    return "|".join([
+        "analysts=" + ",".join(selected_analysts),
+        f"debate={max_debate_rounds}",
+        f"risk={max_risk_discuss_rounds}",
+        f"asset={asset_type}",
+        f"tf={timeframe}",
+    ])
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -608,20 +630,11 @@ class TradingAgentsGraph:
         )
 
     def _run_signature(self, asset_type: str, timeframe: str = "1d") -> str:
-        """Graph-shape inputs that must invalidate a checkpoint if changed.
-
-        Keyed into the checkpoint thread ID so a resume under a different analyst
-        selection, debate/risk depth, asset mode, or reference timeframe starts
-        fresh instead of silently continuing the previous graph (#1089). Each
-        (ticker, date, TF) is therefore its own cacheable run.
-        """
-        return "|".join([
-            "analysts=" + ",".join(self.selected_analysts),
-            f"debate={self.config['max_debate_rounds']}",
-            f"risk={self.config['max_risk_discuss_rounds']}",
-            f"asset={asset_type}",
-            f"tf={timeframe}",
-        ])
+        """This graph's checkpoint signature — see :func:`run_signature`."""
+        return run_signature(
+            self.selected_analysts, self.config["max_debate_rounds"],
+            self.config["max_risk_discuss_rounds"], asset_type, timeframe,
+        )
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock",
                   timeframe: str = "1d"):

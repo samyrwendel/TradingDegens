@@ -651,6 +651,25 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": res.get("error"), "error_code": res.get("code")}, 409)
                 else:
                     self._send_json(res)
+            elif path.startswith("/api/run/") and path.endswith("/refresh-step"):
+                # ATUALIZAR uma etapa concluída com DADO FRESCO (task 002 / DA-062):
+                # invalida o cache de preço do ativo e rebobina o checkpoint (022) pra
+                # antes daquela etapa, que re-roda com número novo — as anteriores
+                # seguem vindo prontas. Owner-only, como o escalar: roda pela credencial
+                # do servidor e run BYOK não é retomável (indisponível honesto no
+                # runner). Corpo: {"node": "<nó do pipeline>"}.
+                if not self._owner_or_403():
+                    return
+                body = self._read_json_body()
+                run_id = path[len("/api/run/"):-len("/refresh-step")]
+                res = self.runner.refresh_step(run_id, (body.get("node") or "").strip())
+                if res is None:
+                    self._send_json({"error": "execução desconhecida ou sem checkpoint"}, 404)
+                elif not res.get("ok"):
+                    self._send_json({"error": res.get("error"),
+                                     "error_code": res.get("code")}, 409)
+                else:
+                    self._send_json(res)
             elif path == "/api/compare":
                 # Manual confront (task 018): meta-judge over two EXISTING runs of
                 # the same ticker (no pipeline re-run). Returns a ready snapshot.

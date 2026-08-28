@@ -322,6 +322,27 @@ details.section.erick > summary { color: #9cc7f5; }
 .steps li.done { color: var(--green); border-color: var(--green-dim); }
 .steps li.active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 
+/* Retomada + atualizar etapa (task 002 / DA-062). O chip vira uma linha com três
+   peças: nome · ♻ (voltou pronta do checkpoint) · 🔄 (atualizar só ela com dado
+   fresco). O ♻ existe pra o verde não mentir: essa etapa foi REAPROVEITADA, não
+   re-executada agora. O 🔄 só aparece em etapa concluída de run retomável do dono. */
+.steps li { display: inline-flex; align-items: center; gap: 6px; }
+.steps li.reused { border-style: dashed; }
+/* ♻ e 🔄 são emoji: em 10px viram um quadradinho colorido ilegível. 14px é o menor
+   tamanho em que os dois se leem dentro do chip sem esticar a linha. */
+.step-reused { font-size: var(--fs-14); line-height: 1; opacity: .85; }
+.step-refresh {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: inherit; font-size: var(--fs-14); line-height: 1; padding: 2px;
+  border-radius: 999px; opacity: .55; transition: opacity .12s ease, transform .12s ease;
+}
+.step-refresh:hover, .step-refresh:focus-visible { opacity: 1; }
+.step-refresh:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.step-refresh.is-busy, .step-refresh:disabled { cursor: default; opacity: .4; }
+.step-refresh.is-busy { animation: step-spin 1s linear infinite; }
+@keyframes step-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .step-refresh.is-busy { animation: none; } }
+
 /* Estabilidade do progresso — NÃO "dançar" a cada 2s (sobretudo no mobile 390):
    toda área que muda a cada poll tem a altura RESERVADA, então trocar fase/rótulo
    e preencher os chips de analista não muda a caixa do painel nem empurra o
@@ -386,6 +407,14 @@ details.section.erick > summary { color: #9cc7f5; }
   white-space: nowrap; flex: none;
 }
 .tk-model:empty { display: none; }
+/* Card cujo parecer voltou pronto do checkpoint (task 002): marca de reaproveitado
+   no lugar do selo de modelo — nenhum LLM rodou pra produzi-lo agora. */
+.tk-reused {
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--green);
+  border: 1px dashed var(--green-dim); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; flex: none;
+}
+.tk-reused:empty { display: none; }
 
 /* Selo de TIMEFRAME(s) da etapa (task 009): mesmo formato do selo de modelo, mas
    tinta de acento pra distinguir "em que tempo gráfico" de "qual LLM". Ao lado do
