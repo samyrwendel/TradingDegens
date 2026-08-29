@@ -638,6 +638,49 @@ def test_watchlist_owner_edits(tmp_path):
         os.environ.pop("TRADINGDEGENS_OWNER_TOKEN", None)
 
 
+@pytest.mark.parametrize("payload,porque", [
+    ({"method": "setup123", "compare": True},
+     "setup123+compare caía em start_compare (Padrão × Erick × meta-juiz) na chave do servidor"),
+    ({"method": "SETUP123", "compare": True},
+     "o método é normalizado pra minúsculo — o bypass não pode voltar pelo caixa alta"),
+    ({"method": "setup123", "compare": 1},
+     "truthy que não é bool tem que contar igual"),
+])
+def test_setup123_nao_e_passe_livre_pra_rota_com_llm(server, payload, porque):
+    """Nenhum caminho ANÔNIMO dispara LLM (C1).
+
+    A isenção de gate do atalho 1-2-3 era avaliada pelo RÓTULO do método, antes do
+    ramo ``compare`` — que é quem decide a rota de verdade. Sem sessão de dono e sem
+    ``X-LLM-Key``, estes corpos tinham que ser 403 e criavam run paga.
+    """
+    req = urllib.request.Request(
+        server + "/api/analyze",
+        data=json.dumps({"ticker": "MSFT", "date": "2026-08-28", **payload}).encode(),
+        headers={"Content-Type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as ei:
+        urllib.request.urlopen(req, timeout=5)
+    assert ei.value.code == 403, porque
+    assert json.loads(ei.value.read()).get("error_code") == "need_key"
+
+
+def test_atalho_puro_segue_livre_o_portao_nao_engordou(server, monkeypatch):
+    """Contra-prova do fix: fechar o bypass não pode fechar o atalho legítimo."""
+    import tradingagents.webui.runner as rm
+
+    monkeypatch.setattr(rm, "fetch_price_chart",
+                        lambda t, d, tf="1d", method="padrao": {"candles": [{"c": 1.0}]})
+    monkeypatch.setattr(rm, "fetch_actionable_plan",
+                        lambda t, d, tf="1d", method="padrao":
+                        {"price": 100.0, "pattern": None, "setup_state": "sem_setup"})
+    req = urllib.request.Request(
+        server + "/api/analyze",
+        data=json.dumps({"ticker": "MSFT", "date": "2026-08-28",
+                         "method": "setup123", "compare": False}).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.status == 200
+
+
 def test_setup123_run_is_instant_free_and_ungated(server, monkeypatch):
     """POST /api/analyze com method=setup123: run instantânea $0 — SEM chave de LLM
     (o gate protege custo que não existe), status done com o plano estrutural."""

@@ -59,6 +59,10 @@ from tradingagents.webui.models_list import fetch_provider_model_infos
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.subscription import SubscriptionStore
 
+# Flags do corpo do /api/analyze que trocam a rota do atalho 1-2-3 por um pipeline
+# COM LLM. Estar nesta lista = a isenção de gate do setup123 não vale.
+_FLAGS_QUE_ESCALAM_A_ROTA = ("compare",)
+
 _STATIC_DIR = Path(__file__).parent / "static"
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -231,6 +235,20 @@ class _Handler(BaseHTTPRequestHandler):
             return True
         self._send_json({"error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE}, 403)
         return False
+
+    @staticmethod
+    def _rota_sem_llm(method: str, body: dict) -> bool:
+        """A requisição vai mesmo subir a rota estrutural de $0 (sem LLM nenhum)?
+
+        Só o atalho 1-2-3 puro. Qualquer flag que mude a ROTA pra um pipeline com
+        modelo (hoje ``compare`` → Padrão × Erick × meta-juiz) tira a isenção — o
+        rótulo do método sozinho não é prova de custo zero. Fechado por default:
+        flag nova que escale a rota entra em ``_FLAGS_QUE_ESCALAM_A_ROTA``, senão o
+        padrão continua sendo exigir o portão.
+        """
+        if method != "setup123":
+            return False
+        return not any(bool(body.get(flag)) for flag in _FLAGS_QUE_ESCALAM_A_ROTA)
 
     def _owner_or_403(self) -> bool:
         """Portão só-dono (task 017): rotas da assinatura exigem sessão de dono
@@ -624,7 +642,13 @@ class _Handler(BaseHTTPRequestHandler):
                 # EXCEÇÃO setup123 (o atalho 1-2-3): $0 de LLM, nenhum modelo roda —
                 # o gate protegeria um custo que não existe. Público pode escanear
                 # estrutura do mesmo jeito que pode ver o /api/chart.
-                if method != "setup123" and not self._gate_or_403(body):
+                #
+                # A isenção vale SÓ quando o atalho é mesmo a rota que vai subir. O
+                # `compare` é decidido DEPOIS daqui e roda Padrão + Erick + meta-juiz
+                # na chave do servidor: `{"method":"setup123","compare":true}` passava
+                # pela isenção e queimava crédito do dono anonimamente. A regra passa a
+                # ser a rota REAL, não só o rótulo do método.
+                if not self._rota_sem_llm(method, body) and not self._gate_or_403(body):
                     return
                 # BYOK: a chave/provider/modelo do usuário viajam por header+corpo e
                 # valem só pra ESTA run (chave do usuário > env do servidor).
