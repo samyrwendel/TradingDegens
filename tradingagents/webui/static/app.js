@@ -1590,7 +1590,7 @@ function renderLaunchBar() {
   // candle e degrada honesto por símbolo/data.
   const enabled = _openTicker ? new Set(_timeframes || ["1d"]) : new Set(ALL_TFS.map(([t]) => t));
   if (!enabled.has(_barTf)) _barTf = enabled.has(_verdictTf) ? _verdictTf : "1d";
-  tfsEl.innerHTML = ALL_TFS.map(([tf, curto, completo]) => {
+  const pill = ([tf, curto, completo]) => {
     const on = enabled.has(tf);
     const active = tf === _barTf;
     const cls = ["lb-tf", active ? "is-active" : "", on ? "" : "is-off"].filter(Boolean).join(" ");
@@ -1599,7 +1599,12 @@ function renderLaunchBar() {
     // largura, quem usa leitor de tela (ou passa o mouse) continua ouvindo "Semanal".
     return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
       `title="${escapeHtml(title)}" aria-label="${escapeHtml(completo)}">${escapeHtml(curto)}</button>`;
-  }).join("");
+  };
+  // TEMPO em DUAS linhas contando como UM elemento da barra — a mesma gramática do
+  // bloco MODELOS (coluna de duas fileiras, alinhada embaixo com o resto). Em cima
+  // o macro (S · D), embaixo o intradiário (4h · 1h · 15m).
+  tfsEl.innerHTML = tfFaixas().map(({ faixa, itens }) =>
+    `<div class="lb-tf-row is-${faixa}">${itens.map(pill).join("")}</div>`).join("");
   const methods = [
     ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
     ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
@@ -2101,19 +2106,35 @@ const PLOT_RIGHT_GAP = 16;
 // têm a escada inteira operável; o mecanismo de desabilitar segue valendo como
 // defesa caso o backend devolva uma escada reduzida.
 // FONTE ÚNICA dos timeframes: código · rótulo CURTO (a pill) · nome COMPLETO
-// (prosa, title, aria). Os DOIS seletores — o da barra de controle e o do gráfico —
-// leem daqui, e TF_LABEL/TF_SHORT são DERIVADOS da mesma lista: nada de listas
-// paralelas mantidas à mão, que foi como o rótulo curto da task 012 chegou só no
-// scan e nunca na barra. O curto é o que ocupa espaço; o completo é o que explica.
+// (prosa, title, aria) · FAIXA (a linha do bloco TEMPO na barra). Os DOIS
+// seletores — o da barra de controle e o do gráfico — leem daqui, e
+// TF_LABEL/TF_SHORT são DERIVADOS da mesma lista: nada de listas paralelas
+// mantidas à mão, que foi como o rótulo curto da task 012 chegou só no scan e
+// nunca na barra. O curto é o que ocupa espaço; o completo é o que explica.
+// A FAIXA separa o macro do intradiário e é declarada AQUI, no próprio frame —
+// não numa lista de "quem vai em cima": frame novo entra na linha certa sozinho.
 const ALL_TFS = [
-  ["1w", "S", "Semanal"],
-  ["1d", "D", "Diário"],
-  ["4h", "4h", "4h"],
-  ["1h", "1h", "1h"],
-  ["15m", "15m", "15m"],
+  ["1w", "S", "Semanal", "macro"],
+  ["1d", "D", "Diário", "macro"],
+  ["4h", "4h", "4h", "intra"],
+  ["1h", "1h", "1h", "intra"],
+  ["15m", "15m", "15m", "intra"],
 ];
 const TF_LABEL = Object.fromEntries(ALL_TFS.map(([tf, , completo]) => [tf, completo]));
 const TF_SHORT = Object.fromEntries(ALL_TFS.map(([tf, curto]) => [tf, curto]));
+
+// As linhas do bloco TEMPO saem da faixa declarada em ALL_TFS, na ordem em que
+// cada faixa aparece — quem acrescentar um frame não precisa lembrar de mexer aqui.
+function tfFaixas() {
+  const linhas = [];
+  for (const item of ALL_TFS) {
+    const faixa = item[3] || "intra";
+    let linha = linhas.find((l) => l.faixa === faixa);
+    if (!linha) linhas.push((linha = { faixa, itens: [] }));
+    linha.itens.push(item);
+  }
+  return linhas;
+}
 
 // Legenda do gráfico (swatches das MMS/EMA + faixas do plano + 1-2-3). Extraída
 // pra ser reusada pelos mini-gráficos da comparação.

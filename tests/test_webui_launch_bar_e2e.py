@@ -72,10 +72,16 @@ def test_barra_cabe_numa_linha_na_tela_larga(base):
         m = _medidas(page)
         # nenhuma quebra: a barra inteira cabe na largura que tem
         assert m["barW"] <= m["barC"] + 1, m
-        # cada grupo é UMA fileira (TEMPO com 5 pills não vira duas linhas)
-        assert m["tfsH"] <= 34 and m["methodsH"] <= 36, m
-        # MODELOS em DUAS linhas — o par é o único bloco alto da barra
+        # MODELOS em DUAS linhas — o par é o bloco alto que define a altura da barra
         assert m["modelsH"] >= 48, m
+        # TEMPO também é duas fileiras desde a task 017, mas na MESMA forma do par de
+        # modelos: a linha aqui era `tfsH <= 34` ("cinco pills não viram duas linhas")
+        # e virou esta — o que ela sempre defendeu foi a ALTURA DA BARRA, não o número
+        # de fileiras. Empilhar de propósito, dentro da altura que já existia, passa;
+        # TEMPO passar de MODELOS (foi o que a pill de 30px fazia) cresce a barra e cai.
+        assert m["tfsH"] == m["modelsH"], ("TEMPO tem de caber na forma de MODELOS", m)
+        assert m["methodsH"] <= 36, m
+        assert m["barH"] - m["modelsH"] <= 20, ("a barra é o bloco mais alto + o rótulo", m)
         # e continua sendo UM elemento da MESMA linha: os três começam juntos
         # (o topo do bloco de modelos é o mais alto; ninguém foi empurrado pra baixo)
         assert m["topoModelos"] <= m["topoAtivo"], m

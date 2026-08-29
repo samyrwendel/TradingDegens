@@ -181,10 +181,13 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .lb-ticker input:focus { outline: none; border-color: var(--accent); }
 .lb-ctrls { display: flex; gap: 10px 12px; align-items: flex-end; flex-wrap: wrap; }
 /* A coluna do conteúdo é o container medido (o resizer da lateral muda esta
-   largura sem tocar no viewport). 1176px é o que a barra INTEIRA ocupa numa linha
-   — medido, não chutado; abaixo disso ela quebra sozinha. */
+   largura sem tocar no viewport). 1106px é o que a barra INTEIRA ocupa numa linha
+   — medido, não chutado; abaixo disso ela quebra sozinha. Era 1176 (o mesmo
+   número, medido quando o TEMPO era uma fileira de cinco): empilhar o TEMPO em
+   duas linhas devolveu 70px de largura, e o limiar TEM de descer junto — senão a
+   barra continuaria quebrando entre 1106 e 1176 por um número velho. */
 .launcher { container-type: inline-size; }
-@container (min-width: 1176px) {
+@container (min-width: 1106px) {
   .launch-bar, .lb-ctrls { flex-wrap: nowrap; }
 }
 .lb-group { display: flex; flex-direction: column; gap: 5px; }
@@ -207,9 +210,19 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 
 /* timeframe + método na barra única — pills herdados da antiga barra de reanálise */
-/* Os grupos NÃO quebram por dentro: a barra é uma linha só, então cada grupo é
-   uma fileira só (era isso que fazia TEMPO virar duas fileiras e crescer a barra). */
-.lb-tfs { display: inline-flex; gap: 5px; flex-wrap: nowrap; }
+/* TEMPO em DUAS linhas contando como UM elemento da barra — a MESMA gramática do
+   bloco MODELOS (coluna de duas fileiras, `gap: 4px`, e o `align-items: flex-end`
+   da barra alinhando o resto embaixo). Em cima o macro (S · D), embaixo o
+   intradiário (4h · 1h · 15m): o corte é semântico, não "3 e 2 pra ficar quadrado".
+   Cada fileira NÃO quebra por dentro — quem decide onde quebra é a faixa do frame,
+   nunca o espaço que sobrou (era o `flex-wrap` livre que fazia TEMPO virar duas
+   fileiras arbitrárias e crescer a barra, corrigido na 010). */
+.lb-tfs { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.lb-tf-row { display: flex; gap: 5px; flex-wrap: nowrap; }
+/* A fileira de cima tem menos pills que a de baixo; esticá-las fecha o retângulo em
+   vez de deixar um degrau à direita — e não custa largura nenhuma, porque a largura
+   do grupo já é a da fileira MAIS LARGA (a de baixo). */
+.lb-tf-row.is-macro button.lb-tf { flex: 1; }
 /* `button.` NÃO é decoração de seletor: o GRUPO no HTML é `<div class="lb-group
    lb-tf">` e a PILL é `<button class="lb-tf">` — o mesmo nome nos dois. Sem o
    qualificador, o div do grupo herdava borda, fundo e 6px/8px de padding de pill,
@@ -217,7 +230,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    significado, comendo largura nas duas pontas — parte do "espaços mal
    utilizados". A largura que isso devolve vai pro nome do modelo, não pros gaps. */
 button.lb-tf {
-  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold);
+  font-family: var(--mono); font-size: var(--fs-12); font-weight: var(--fw-bold);
+  /* `line-height: 1` (era `--lh-12`, 16px) é o que faz a pill medir 26px, igual ao
+     chip de MODELOS — duas fileiras de 26 + 4 de gap dão exatamente os 56px que o
+     par de modelos já ocupa. É assim que TEMPO ganha a segunda linha SEM crescer a
+     altura da barra: ela continua sendo definida pelo bloco mais alto, que não mudou. */
+  line-height: 1;
   color: var(--muted); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--radius);
   padding: 6px 8px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
@@ -1019,6 +1037,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .lb-ctrls { flex-direction: column; align-items: stretch; gap: 12px; }
   .lb-group { width: 100%; }
   .lb-tfs, .lb-methods, .lb-models { width: 100%; }
+  /* No telefone o TEMPO volta a ser UMA fileira: a barra aqui já é uma coluna de
+     blocos, então a segunda linha só somaria altura sem devolver largura nenhuma —
+     ela existe pra estreitar o desktop. `display: contents` dissolve as fileiras e
+     devolve os botões ao flex da .lb-tfs, que é o layout que já estava no ar. */
+  .lb-tfs { flex-direction: row; }
+  .lb-tf-row { display: contents; }
   button.lb-tf { flex: 1; text-align: center; }
   .lb-method { flex: 1; text-align: center; padding: 10px 8px; }
   .lb-model-pick { flex: 1; justify-content: center; }
