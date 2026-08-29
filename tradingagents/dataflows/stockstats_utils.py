@@ -8,6 +8,7 @@ import yfinance as yf
 from stockstats import wrap
 from yfinance.exceptions import YFRateLimitError
 
+from . import data_notices
 from .config import get_config
 from .symbol_utils import NoMarketDataError, normalize_symbol
 from .utils import safe_ticker_component
@@ -17,7 +18,18 @@ logger = logging.getLogger(__name__)
 # A vendor's latest OHLCV row this many calendar days before the requested date
 # is treated as stale. Generous enough to span long holiday weekends, tight
 # enough to catch the year-old frames yfinance occasionally returns (#1021).
+# É o limiar de REJEIÇÃO — dado velho demais pra existir, erro duro.
 MAX_OHLCV_STALE_DAYS = 10
+
+# Limiar de DECLARAÇÃO (≠ rejeição). O bug L2 era um buraco de 3 dias: bem abaixo
+# dos 10, então o guard passava calado e o ``drop_nature`` lia -1,3% onde a queda
+# real era -4,6%. A granularidade que o método exige é de DIAS, não de semanas —
+# um buraco desses muda o veredito sem mudar a cara do relatório.
+#
+# Contado em dias ÚTEIS pra não gritar toda segunda-feira (sexta→segunda é 1 dia
+# útil de distância, não 3 de calendário). PROVISÓRIO e declarado: 2 dias úteis é
+# o menor buraco que já corrompeu uma leitura; a calibrar com o histórico.
+OHLCV_STALE_NOTICE_BDAYS = 2
 
 # How long a same-day cache that does not yet reach the requested day may be
 # reused before it is refetched (#1150). Short enough that an intraday run picks
@@ -89,6 +101,53 @@ def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
             if not parsed.empty:
                 return parsed
     return pd.Series(dtype="datetime64[ns]")
+
+
+def _bdays_atras(latest: pd.Timestamp, requested: pd.Timestamp) -> int:
+    """Dias ÚTEIS entre a última barra e a data pedida (0 quando alcança)."""
+    if latest >= requested:
+        return 0
+    # bdate_range inclui as duas pontas; a barra que EXISTE não conta como buraco.
+    return max(0, len(pd.bdate_range(latest, requested)) - 1)
+
+
+def _declara_serie_vencida(
+    data: pd.DataFrame | None,
+    curr_date: str,
+    canonical: str | None,
+    *,
+    motivo: str | None = None,
+    max_bdays: int = OHLCV_STALE_NOTICE_BDAYS,
+) -> None:
+    """Registra em ``degraded_sources`` que a série servida NÃO alcança a data.
+
+    Silêncio aqui é o defeito do L2: o relatório saía com a queda medida numa série
+    que parava dias antes, sem nada dizendo isso. Declara a fonte, a última barra e
+    a idade — nunca "consertando" o número, só nomeando o buraco.
+    """
+    if data is None or getattr(data, "empty", True):
+        return
+    requested = pd.to_datetime(curr_date, errors="coerce")
+    if pd.isna(requested):
+        return
+    requested = requested.normalize()
+    dates = _coerce_ohlcv_dates(data)
+    if dates.empty:
+        return
+    latest = dates.max().normalize()
+    atraso_uteis = _bdays_atras(latest, requested)
+    if motivo is None and atraso_uteis <= max_bdays:
+        return
+    dias = (requested - latest).days
+    fonte = canonical or "OHLCV"
+    razao = (
+        f"última barra em {latest.date().isoformat()} para a data pedida "
+        f"{requested.date().isoformat()} — {dias} dia(s) de atraso "
+        f"({atraso_uteis} útil/úteis)"
+    )
+    if motivo:
+        razao = f"{motivo}; {razao}"
+    data_notices.record(f"série OHLCV de {fonte}", razao)
 
 
 def _assert_ohlcv_not_stale(
@@ -240,6 +299,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
                 "OHLCV refresh failed for %s; serving the cached frame (may miss "
                 "the most recent bars)", canonical,
             )
+            # O fail-open deixa de ser SILENCIOSO (C4): servir cache vencido é uma
+            # degradação real, e quem lê o relatório precisa saber que a série pode
+            # não alcançar a data pedida. Vai pro mesmo canal que a UI já nomeia.
+            _declara_serie_vencida(
+                usable_cache, curr_date, canonical,
+                motivo="a atualização da fonte falhou e a série veio do cache",
+            )
             data = usable_cache
         else:
             # Only cache real data — never persist an empty frame. Um retorno vazio
@@ -259,6 +325,11 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     # Reject a stale frame (latest row far older than curr_date) rather than
     # feeding year-old prices into indicators (#1021).
     _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
+
+    # Passou da rejeição mas ainda tem buraco relevante? DECLARA (C4). O guard duro
+    # protege do absurdo (frame de um ano atrás); este aqui protege do sutil — o
+    # buraco de poucos dias que muda a leitura sem mudar a aparência.
+    _declara_serie_vencida(data, curr_date, canonical)
 
     return data
 

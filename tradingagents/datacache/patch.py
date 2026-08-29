@@ -287,6 +287,12 @@ def _make_stable_load_ohlcv(mod):
                         "ta_datacache: OHLCV refresh failed for %s; serving cached "
                         "frame (may miss the most recent bars)", canonical,
                     )
+                    # Mesma declaração da cópia em stockstats_utils (C4): o cache
+                    # vencido servido no fail-open é DITO, não engolido.
+                    mod._declara_serie_vencida(
+                        usable_cache, curr_date, canonical,
+                        motivo="a atualização da fonte falhou e a série veio do cache",
+                    )
                     data = usable_cache
                 else:
                     if downloaded.empty or "Close" not in downloaded.columns:
@@ -300,6 +306,7 @@ def _make_stable_load_ohlcv(mod):
             data = mod._clean_dataframe(data)
             data = data[data["Date"] <= curr_date_dt]
             mod._assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
+            mod._declara_serie_vencida(data, curr_date, canonical)
             return data
         except mod.NoMarketDataError:
             raise

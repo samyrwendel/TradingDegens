@@ -24,6 +24,7 @@ from typing import Any
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from tradingagents.agents.utils.rating import RATING_PT
+from tradingagents.dataflows import data_notices
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
 from tradingagents.webui import ask as ask_module, timeutil
 from tradingagents.webui.compare import (
@@ -928,13 +929,16 @@ class AnalysisRunner:
 
     def _worker_setup123(self, run: _Run) -> None:
         """Worker da run 1-2-3: computa chart+plano (cacheado, ~1-2s) e encerra."""
+        data_notices.reset()   # avisos de qualidade de dado desta run começam do zero
         try:
             chart = fetch_price_chart(run.ticker, run.date, run.timeframe, "padrao")
             plan = fetch_actionable_plan(run.ticker, run.date, run.timeframe, "padrao")
             run.result = {
                 "verdict": None,
                 "final_decision": "",
-                "degraded": [],
+                # O atalho também DECLARA série vencida (C4): $0 de LLM não é
+                # desculpa pra mostrar número velho com cara de novo.
+                "degraded": normalize_degraded(data_notices.drain()),
                 "bull": "", "bear": "", "research_manager": "",
                 "investment_plan": "", "trader_plan": "", "risk_decision": "",
                 "market_report": "", "sentiment_report": "", "news_report": "",
@@ -993,6 +997,9 @@ class AnalysisRunner:
         orchestrator runs two of these inline before persisting).
         """
         final_status = "error"
+        # Avisos de qualidade de dado (série OHLCV vencida) são POR RUN: zera na
+        # entrada pra um worker nunca herdar o aviso do anterior na mesma thread.
+        data_notices.reset()
         # Config efetiva computada fora do try pra estar disponível no except mesmo
         # se a construção do grafo falhar (o provider vira parte da mensagem humana).
         config = apply_llm_overrides(self.base_config, run.overrides)
@@ -1070,6 +1077,10 @@ class AnalysisRunner:
                 run.ticker, run.date, asset_type=run.asset_type,
                 timeframe=run.timeframe
             )
+            # Avisos da camada de FETCH (série OHLCV vencida servida no fail-open)
+            # entram no mesmo ``degraded_sources`` das fontes que caíram — é o canal
+            # que a UI já sabe nomear. Sem isto o dado velho chegava mudo (bug L2).
+            data_notices.merge_into(final_state)
             run.result = extract_result(final_state, signal)
             if run.asset_type == "crypto":
                 run.result["derivatives_report"] = fetch_derivatives_report(
