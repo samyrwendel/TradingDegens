@@ -1075,7 +1075,7 @@ function renderResult(snap) {
     // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
   // dois; frame sem candle degrada honesto sob demanda). Só o fallback — a fonte
   // da verdade é result.timeframes do backend.
-  _timeframes = ["1w", "1d", "4h", "1h", "15m"];
+  _timeframes = ALL_TFS.map(([t]) => t);
     _verdictTf = snap.verdict_timeframe || "1d";
     syncLaunchBarToOpen();
     $("bull").innerHTML = ""; $("bear").innerHTML = "";
@@ -1145,7 +1145,7 @@ function renderResult(snap) {
   _openDate = snap.date || "";
   _assetType = snap.asset_type || "";
   _tf = r.timeframe || "1d";
-  _timeframes = ["1w", "1d", "4h", "1h", "15m"];
+  _timeframes = ALL_TFS.map(([t]) => t);
   // TF em que o VEREDITO foi computado (carimbo do cabeçalho). Runs antigas não
   // têm o campo → cai no frame do gráfico. É diferente de _tf: _tf pode ser
   // trocado só pra olhar o gráfico, o carimbo fixa o frame do veredito real.
@@ -1324,7 +1324,7 @@ function renderCompare(snap) {
   // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
   // dois; frame sem candle degrada honesto sob demanda). Só o fallback — a fonte
   // da verdade é result.timeframes do backend.
-  _timeframes = ["1w", "1d", "4h", "1h", "15m"];
+  _timeframes = ALL_TFS.map(([t]) => t);
   const cmpTf = (a && (a.verdict_timeframe || a.timeframe)) ||
     (b && (b.verdict_timeframe || b.timeframe)) || "1d";
   _verdictTf = cmpTf;
@@ -1590,12 +1590,15 @@ function renderLaunchBar() {
   // candle e degrada honesto por símbolo/data.
   const enabled = _openTicker ? new Set(_timeframes || ["1d"]) : new Set(ALL_TFS.map(([t]) => t));
   if (!enabled.has(_barTf)) _barTf = enabled.has(_verdictTf) ? _verdictTf : "1d";
-  tfsEl.innerHTML = ALL_TFS.map(([tf, label]) => {
+  tfsEl.innerHTML = ALL_TFS.map(([tf, curto, completo]) => {
     const on = enabled.has(tf);
     const active = tf === _barTf;
     const cls = ["lb-tf", active ? "is-active" : "", on ? "" : "is-off"].filter(Boolean).join(" ");
-    const title = on ? `Analisar no ${label}` : "Frame indisponível para este ativo (o backend não inventa candle)";
-    return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+    const title = on ? `Analisar no ${completo}` : "Frame indisponível para este ativo (o backend não inventa candle)";
+    // O botão MOSTRA o curto e SE CHAMA pelo completo: quem lê de relance ganha a
+    // largura, quem usa leitor de tela (ou passa o mouse) continua ouvindo "Semanal".
+    return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
+      `title="${escapeHtml(title)}" aria-label="${escapeHtml(completo)}">${escapeHtml(curto)}</button>`;
   }).join("");
   const methods = [
     ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
@@ -2097,8 +2100,20 @@ const PLOT_RIGHT_GAP = 16;
 // é renderizado DESABILITADO — o backend nunca inventa candle. Hoje ação e cripto
 // têm a escada inteira operável; o mecanismo de desabilitar segue valendo como
 // defesa caso o backend devolva uma escada reduzida.
-const ALL_TFS = [["1w", "Semanal"], ["1d", "Diário"], ["4h", "4h"], ["1h", "1h"], ["15m", "15m"]];
-const TF_LABEL = { "1w": "Semanal", "1d": "Diário", "4h": "4h", "1h": "1h", "15m": "15m" };
+// FONTE ÚNICA dos timeframes: código · rótulo CURTO (a pill) · nome COMPLETO
+// (prosa, title, aria). Os DOIS seletores — o da barra de controle e o do gráfico —
+// leem daqui, e TF_LABEL/TF_SHORT são DERIVADOS da mesma lista: nada de listas
+// paralelas mantidas à mão, que foi como o rótulo curto da task 012 chegou só no
+// scan e nunca na barra. O curto é o que ocupa espaço; o completo é o que explica.
+const ALL_TFS = [
+  ["1w", "S", "Semanal"],
+  ["1d", "D", "Diário"],
+  ["4h", "4h", "4h"],
+  ["1h", "1h", "1h"],
+  ["15m", "15m", "15m"],
+];
+const TF_LABEL = Object.fromEntries(ALL_TFS.map(([tf, , completo]) => [tf, completo]));
+const TF_SHORT = Object.fromEntries(ALL_TFS.map(([tf, curto]) => [tf, curto]));
 
 // Legenda do gráfico (swatches das MMS/EMA + faixas do plano + 1-2-3). Extraída
 // pra ser reusada pelos mini-gráficos da comparação.
@@ -2205,16 +2220,16 @@ function renderTfSelector() {
   const el = $("tfSelector");
   if (!el) return;
   const enabled = new Set(_timeframes || ["1d"]);
-  el.innerHTML = ALL_TFS.map(([tf, label]) => {
+  el.innerHTML = ALL_TFS.map(([tf, curto, completo]) => {
     const on = enabled.has(tf);
     const active = tf === _tf;
     const cls = ["tf-btn", active ? "is-active" : "", on ? "" : "is-off"]
       .filter(Boolean).join(" ");
     const title = on
-      ? `Recalcular no ${label}`
+      ? `Recalcular no ${completo}`
       : "Frame indisponível para este ativo (o backend não inventa candle)";
     return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
-      `title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+      `title="${escapeHtml(title)}" aria-label="${escapeHtml(completo)}">${escapeHtml(curto)}</button>`;
   }).join("");
   bindTfSelector();
   renderReevalBtn();
@@ -4932,9 +4947,12 @@ let _scanView = (() => {
 // caixa própria, ficou gordo e repetitivo — um chip largo por linha, competindo com
 // o ativo. Aqui ele volta a ser o que é: uma etiqueta discreta, e o ATIVO é quem
 // tem destaque.
-const SCAN_TF_CURTO = { "1w": "S", "1d": "D", "4h": "4h", "1h": "1h", "30m": "30m", "15m": "15m" };
+// O curto do scan vem da MESMA fonte da barra e do gráfico (TF_SHORT, derivado de
+// ALL_TFS). Era aqui que morava a lista paralela mantida à mão — foi ela que
+// deixou a barra de controle pra trás quando a task 012 encurtou só o scan.
+// Frame que a fonte não conhece cai no próprio código, que já é curto.
 function scanTfBadge(frame) {
-  const curto = SCAN_TF_CURTO[frame] || frame || "—";
+  const curto = TF_SHORT[frame] || frame || "—";
   return `<span class="scan-tf" title="${escapeHtml(frame || "")}">${escapeHtml(curto)}</span>`;
 }
 
