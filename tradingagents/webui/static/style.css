@@ -202,13 +202,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
   transition: color .12s, border-color .12s, background .12s, box-shadow .12s;
 }
-.lb-method.padrao { border-color: #2e5c7d; color: var(--accent); }
-.lb-method.erick { border-color: #2e5c7d; color: #9cc7f5; }
-.lb-method.compare { border-color: #5b4a8a; color: #cbb6f5; }
-.lb-method:hover { color: #fff; }
+/* Todos os métodos compartilham o mesmo estilo (padrão visual único); a cor de
+   destaque só entra no SELECIONADO, nunca por tipo. Antes cada método tinha cor
+   própria (padrao azul, erick azul-claro, compare roxo) — inconsistente. */
+.lb-method:hover:not(.is-active) { color: #fff; border-color: var(--accent); }
 /* método SELECIONADO (o que Analisar/↻ vão rodar): anel de destaque */
 .lb-method.is-active { box-shadow: 0 0 0 2px var(--accent) inset; color: #fff; background: var(--panel); border-color: var(--accent); }
-.lb-method.compare.is-active { background: linear-gradient(180deg, #3b82f6, #2563eb); border-color: transparent; }
 
 .lb-actions { display: inline-flex; gap: 8px; align-items: flex-end; }
 /* ↻ reanalisa o ativo ABERTO hoje (mesmo método) — absorve o antigo "Atualizar" */
@@ -869,6 +868,15 @@ details.section[open] > summary::before { content: "▾"; }
 .history .h-verdict.underweight,
 .history .h-verdict.sell { color: var(--red); background: none; border: none; }
 .history .h-verdict.error { color: var(--red); background: none; border: none; }
+/* 1-2-3 (setup123): o veredito é o estado do setup, não Buy/Hold. Mesma paleta
+   por função — ativo verde (janela aberta) · aguardar amarelo (esperar) · sem_*
+   cinza (nada a fazer). Distingue à primeira olhada na watchlist. */
+.history .h-verdict.ativo { color: var(--green); background: none; border: none; }
+.history .h-verdict.aguardar_pullback,
+.history .h-verdict.aguardar_rompimento { color: var(--yellow); background: none; border: none; }
+.history .h-verdict.sem_setup,
+.history .h-verdict.sem_dado,
+.history .h-verdict.intradiario_indisponivel { color: var(--muted); background: none; border: none; }
 .history .h-meta { color: var(--muted); font-size: var(--fs-10); line-height: var(--lh-10); font-family: var(--mono); white-space: nowrap; }
 .history .empty { grid-template-columns: 1fr; color: var(--muted); border: none; background: none; cursor: default; padding: 8px 2px; }
 
@@ -1573,6 +1581,25 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* ===== SCAN DE PORTFÓLIO (28/08): gatilhos 1-2-3 a $0 de LLM ==================
    O botão lateral abre o painel; a lista classifica por urgência (em_gatilho
    primeiro). Cores com FUNÇÃO: verde = agir agora, âmbar = vigiar, neutro = resto. */
+/* Caixa de busca da watchlist + ícone de scan compacto (no lugar do botão antigo).
+   Busca filtra por ticker ou nome; o 📡 abre o painel de scan de gatilhos. */
+.wl-search-wrap {
+  display: flex; gap: 6px; margin: 6px 0 8px;
+}
+.wl-search {
+  flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  font-size: 0.86rem; font-family: inherit;
+}
+.wl-search:focus { outline: none; border-color: var(--accent); }
+.wl-search::placeholder { color: var(--muted); }
+.wl-scan-icon {
+  flex: 0 0 auto; padding: 0 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  cursor: pointer; font-size: 0.95rem; line-height: 1;
+}
+.wl-scan-icon:hover { border-color: var(--accent); }
+/* compat: classes legadas do botão de scan inteiro (ainda referenciadas em places) */
 .scan-open-btn {
   width: 100%; margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
@@ -1596,26 +1623,48 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .wl-add button { border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
 .scan-summary { margin: 8px 0; color: var(--text); font-size: .9rem; }
 .scan-summary b { color: var(--green); }
+/* Filtro por estado do gatilho: chips clicáveis que filtram a lista. */
+.scan-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.scan-filter { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--muted); cursor: pointer; font-size: .78rem; font-weight: var(--fw-bold); }
+.scan-filter b { font-variant-numeric: tabular-nums; margin-left: 3px; }
+.scan-filter:hover { border-color: var(--accent); color: var(--text); }
+.scan-filter.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.scan-filter.all { color: var(--accent); }
 .scan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .scan-row { padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); }
-.scan-row.em_gatilho { border-color: var(--green-dim); background: linear-gradient(90deg, var(--green-dim), var(--panel-2) 55%); }
-.scan-row.perto { border-color: rgba(245, 180, 69, .35); }
-.scan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
-.scan-tk { cursor: pointer; min-width: 64px; }
+.scan-row.em_gatilho { border-color: var(--green-dim); }
+.scan-row.em_gatilho.venda { border-color: var(--red-dim); }
+.scan-row.em_movimento { border-color: rgba(96, 165, 250, .3); }
+.scan-row.invalidou { border-color: rgba(139, 151, 173, .35); }
+/* Cabeça: ticker do ativo (agrupa os frames). */
+.scan-tk { display: block; cursor: pointer; margin-bottom: 4px; }
 .scan-tk:hover { color: var(--accent); }
-.scan-frame, .scan-dir { color: var(--muted); font-size: .8rem; }
+/* Sub-linha de cada frame: timeframe + preço + dist + chip + níveis. */
+.scan-frame-row { padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  border-left: 3px solid var(--border); margin-bottom: 4px; }
+.scan-frame-row:hover { background: var(--panel); }
+.scan-frame-row.em_gatilho { border-left-color: var(--green); background: linear-gradient(90deg, var(--green-dim), transparent 70%); }
+.scan-frame-row.em_gatilho.venda { border-left-color: var(--red); background: linear-gradient(90deg, var(--red-dim), transparent 70%); }
+.scan-frame-row.em_movimento { border-left-color: #60a5fa; }
+.scan-frame-row.invalidou { border-left-color: var(--muted); opacity: .75; }
+.scan-frame-row.formando { border-left-color: var(--border); }
+.scan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
+.scan-frame { color: var(--muted); font-size: .8rem; }
+.scan-price { font-variant-numeric: tabular-nums; color: var(--text); font-weight: var(--fw-med); font-size: .82rem; }
 .scan-dist { font-variant-numeric: tabular-nums; color: var(--muted); }
 .scan-chip { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: .74rem; color: var(--muted); }
-.scan-chip.gatilho { color: var(--green); border-color: var(--green); font-weight: 600; }
-.scan-chip.perto { color: var(--amber); border-color: var(--amber); }
+/* Entrada direção-aware: COMPRA verde / VENDA vermelho — a ação na cor. */
+.scan-chip.compra { color: var(--green); border-color: var(--green); font-weight: 600; }
+.scan-chip.venda { color: var(--red); border-color: var(--red); font-weight: 600; }
+.scan-chip.movimento { color: #60a5fa; border-color: #60a5fa; }
+.scan-chip.invalidou { color: var(--muted); border-color: var(--muted); text-decoration: line-through; }
 .scan-chip.ok { color: var(--green); border-color: var(--green); }
 .scan-chip.bad { color: var(--red); border-color: var(--red); }
 .scan-levels { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: .82rem; color: var(--text); }
 .scan-levels b { font-variant-numeric: tabular-nums; }
 .scan-actions-row { display: flex; gap: 8px; margin-top: 8px; }
-.scan-go { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; font-size: .82rem; }
-.scan-go:hover { background: var(--accent); color: #000; }
-.scan-go.erick { border-color: var(--green); color: var(--green); }
-.scan-go.erick:hover { background: var(--green); color: #000; }
+.scan-go { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; font-size: .82rem; font-weight: var(--fw-bold); }
+.scan-go:hover { color: #fff; border-color: var(--accent); background: var(--panel); }
 .scan-track { margin-top: 10px; }
 .ghost-btn { opacity: .8; }

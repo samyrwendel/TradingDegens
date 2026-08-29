@@ -342,3 +342,112 @@ def test_bar_renders_and_clicks_on_mobile_390(live_server):
             assert body.get("method") == "erick" and body.get("timeframe") == "15m"
         finally:
             browser.close()
+
+
+# --- o atalho 1-2-3 no ↻: $0 não pode virar análise completa ------------------
+# Seed próprio (o _SEED_OPEN_JS achata _openMethod em padrao|erick de propósito,
+# porque nasceu antes do setup123 existir).
+_SEED_OPEN_SETUP123_JS = r"""
+(args) => {
+  const [ticker, today, openDate] = args;
+  document.getElementById('progressPanel').classList.add('hidden');
+  document.getElementById('resultPanel').classList.add('hidden');
+  document.getElementById('comparePanel').classList.add('hidden');
+  _openTicker = ticker;
+  _openDate = openDate;
+  _todayManaus = today;
+  _assetType = 'stock';
+  _timeframes = ['1w','1d','4h','1h','15m'];
+  _verdictTf = '1d';
+  _openView = 'setup123';
+  _openMethod = 'setup123';
+  syncLaunchBarToOpen();
+  return true;
+}
+"""
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
+def test_rerun_do_setup123_nao_cai_em_padrao(live_server):
+    """↻ com o 1-2-3 ABERTO re-roda o ATALHO ($0), nunca uma Padrão completa.
+
+    Regressão medida: ``runReanalyze()`` achatava o método com
+    ``method === "erick" ? "erick" : "padrao"``. O setup123 — atalho estrutural
+    sem LLM — não é "erick", então caía em "padrao" e subia o pipeline
+    multi-agente inteiro: o botão prometia $0 e cobrava uma análise completa.
+    Este teste falha com o ternário de volta.
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        _route_stub(page)
+        try:
+            page.goto(live_server)
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
+            page.evaluate(_SEED_OPEN_SETUP123_JS, ["AAPL", TODAY, OPEN_DATE])
+
+            body = _rerun_click(page)
+            assert body.get("method") == "setup123", (
+                "o ↻ do 1-2-3 trocou de método — achatamento voltou e isso custa "
+                "uma análise completa de LLM", body)
+            assert body.get("compare") in (False, None), ("compare", body)
+            assert body.get("date") == TODAY, ("↻ usa hoje", body)
+        finally:
+            browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
+def test_launcher_manda_setup123_inteiro(live_server):
+    """Pela barra (Analisar), o 1-2-3 selecionado também viaja inteiro."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        _route_stub(page)
+        try:
+            page.goto(live_server)
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
+            body = _launch_run(page, "AAPL", "setup123", "1d")
+            assert body.get("method") == "setup123", body
+            assert body.get("compare") in (False, None), body
+        finally:
+            browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
+def test_rerun_de_setup123_que_FALHOU_continua_setup123(live_server):
+    """O caminho do ERRO também não pode escalar o atalho.
+
+    ``renderResult`` no ramo ``status == "error"`` reconstruía o método aberto por
+    uma lista que não tinha ``setup123`` — um atalho $0 que falhou reabria como
+    "padrao" e o ↻ subia o pipeline multi-agente inteiro. É o MESMO bug do
+    achatamento, na porta dos fundos: aqui a run nem chegou a existir direito.
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        _route_stub(page)
+        try:
+            page.goto(live_server)
+            page.wait_for_selector("#launchMethods button.lb-method", state="visible")
+            # Run 1-2-3 que FALHOU, renderizada pelo caminho real (renderResult).
+            page.evaluate(
+                """(args) => {
+                  const [ticker, today, openDate] = args;
+                  _todayManaus = today;
+                  _timeframes = ['1w','1d','4h','1h','15m'];
+                  renderResult({
+                    run_id: 'err-1', ticker, date: openDate, status: 'error',
+                    method: 'setup123', asset_type: 'stock',
+                    result: { error: 'fonte fora do ar' },
+                  });
+                  return _openView;
+                }""",
+                ["AAPL", TODAY, OPEN_DATE],
+            )
+            body = _rerun_click(page)
+            assert body.get("method") == "setup123", (
+                "o ↻ de um 1-2-3 que falhou virou análise completa — o atalho $0 "
+                "cobrando LLM pela porta do erro", body)
+            assert body.get("compare") in (False, None), ("compare", body)
+        finally:
+            browser.close()

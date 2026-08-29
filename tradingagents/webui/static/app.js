@@ -138,6 +138,19 @@ const SETUP_PT = {
   aguardar_rompimento: ["⏳", "Aguardar rompimento"],
   sem_setup: ["⚪", "Sem setup de preço definido"],
   sem_dado: ["⚪", "Sem dado suficiente"],
+  intradiario_indisponivel: ["⚪", "Intradiário indisponível"],
+};
+
+// Rótulo COMPACTO do setup state pra chip estreito da watchlist (task 010): o
+// veredito de uma run 1-2-3 é o estado do setup, não "CONCLUÍDO". SETUP_PT tem
+// a frase completa (cabeçalho da análise); aqui a forma curta cabe na coluna.
+const SETUP_COMPACT = {
+  ativo: "Ativo",
+  aguardar_pullback: "Aguardar recuo",
+  aguardar_rompimento: "Aguardar rompimento",
+  sem_setup: "Sem setup",
+  sem_dado: "Sem dado",
+  intradiario_indisponivel: "Indisponível",
 };
 
 // 1-2-3 direction/state -> emoji + pt-BR. Compra (fundo ascendente) e venda
@@ -1013,10 +1026,12 @@ function renderResult(snap) {
     // Reanálise segue disponível pela barra ÚNICA: uma falha (fonte fora do ar,
     // transitório) é justamente quando o usuário quer rerodar escolhendo método/TF.
     // Método aberto: preserva o que o run errado carregava (history traz r.method);
-    // sem isso, cai em padrão (não inventa método num run que falhou).
-    _openMethod = snap.method === "erick" ? "erick" : (snap.method === "padrao" ? "padrao" : _openMethod);
-    _openView = snap.method === "compare" ? "compare"
-      : (snap.method === "erick" ? "erick" : (snap.method === "padrao" ? "padrao" : ""));
+    // sem isso, cai em padrão (não inventa método num run que falhou). setup123
+    // ENTRA na lista: um atalho $0 que falhou tem que voltar como atalho — sem isto
+    // o ↻ do erro caía em "padrao" e cobrava uma análise completa de LLM.
+    const snapM = _METODOS_CONHECIDOS.has(snap.method) ? snap.method : null;
+    _openMethod = (snapM && snapM !== "compare") ? snapM : _openMethod;
+    _openView = snapM || "";
     _openDate = snap.date || "";
     _assetType = snap.asset_type || "";
     // Escada completa: intradiário vale pra ação e cripto (fonte real keyless dos
@@ -1500,6 +1515,10 @@ let _barMethod = "padrao"; // método escolhido na barra: "padrao" | "erick" | "
 
 // Normaliza um "view" (padrao|erick|compare|"") pro método a rodar. "" (run com erro
 // sem método) e qualquer desconhecido caem em padrão — nunca inventa método.
+// Métodos que o backend conhece — usado pra preservar o método de um run que
+// falhou sem inventar nada (desconhecido/ausente = "", cai no padrão).
+const _METODOS_CONHECIDOS = new Set(["padrao", "erick", "setup123", "compare"]);
+
 function normMethod(v) {
   if (v === "compare") return "compare";
   if (v === "erick") return "erick";
@@ -1541,9 +1560,9 @@ function renderLaunchBar() {
   }).join("");
   const methods = [
     ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
-    ["erick", "🧭 Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
+    ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
     ["setup123", "1-2-3", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
-    ["compare", "⚖️ Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+    ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
   ];
   mEl.innerHTML = methods.map(([m, label, title]) => {
     const active = m === _barMethod;
@@ -1813,7 +1832,12 @@ function bindLaunchBar() {
 function runReanalyze(method, tf) {
   if (!_openTicker) return;
   const compare = method === "compare";
-  const m = method === "erick" ? "erick" : "padrao";
+  // O método vai INTEIRO pro backend (normMethod), nunca achatado. Achatar aqui era o
+  // bug: setup123 (atalho estrutural, $0 de LLM) caía em "padrao" e subia o pipeline
+  // multi-agente completo — o botão prometia $0 e cobrava uma análise inteira.
+  // 'compare' viaja na flag `compare`, e o método base da comparação é o padrão.
+  const nm = normMethod(method);
+  const m = nm === "compare" ? "padrao" : nm;
   const date = _todayManaus || _openDate || "";
   $("formError").textContent = "";
   $("resultPanel").classList.add("hidden");
@@ -1821,7 +1845,9 @@ function runReanalyze(method, tf) {
   $("steps").innerHTML = "";
   const boot = compare
     ? "Comparando Padrão × Erick…"
-    : (m === "erick" ? "Método Erick — subindo o motor…" : "Subindo o motor…");
+    : (m === "erick" ? "Método Erick — subindo o motor…"
+      : m === "setup123" ? "1-2-3 — leitura estrutural, sem LLM…"
+      : "Subindo o motor…");
   renderProgress({
     status: "running", ticker: _openTicker, elapsed: 0, cost: null,
     progress: { phase: "Inicializando", label: boot, percent: 2, plan: [], reached: [] },
@@ -3029,6 +3055,7 @@ function renderAssetTimeline(ticker, currentId) {
 
 let _todayManaus = "";
 let _historyFilter = "all";
+let _historyQuery = "";   // busca por ticker ou nome (case-insensitive)
 
 // "Atualizar" (reanalisar hoje preservando o método) foi ABSORVIDO pela barra de
 // reanálise (task 018): o método aberto fica destacado (is-open) e clicá-lo roda na
@@ -3152,6 +3179,29 @@ function bindHistoryTabs() {
     tabs.querySelectorAll(".h-tab").forEach((b) => b.classList.toggle("is-active", b === btn));
     paintHistory();   // troca de aba re-pinta do cache, sem re-buscar o histórico
   });
+  // Caixa de busca: filtra a watchlist por ticker ou nome (re-pinta do cache).
+  // debounce leve pra não re-pintar a cada tecla em listas grandes; o nome que
+  // ainda não resolveu é buscado quando chega (paintHistory re-roda no ensureNames).
+  const search = document.getElementById("watchlistSearch");
+  if (search && !search._bound) {
+    search._bound = true;
+    let t;
+    search.addEventListener("input", () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        _historyQuery = search.value.trim();
+        paintHistory();
+      }, 120);
+    });
+    // Esc limpa a busca; mantém o foco pra digitar de novo.
+    search.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && _historyQuery) {
+        search.value = "";
+        _historyQuery = "";
+        paintHistory();
+      }
+    });
+  }
 }
 
 // Nome da empresa/ativo por símbolo — TICKER ( Nome ). Resolve async via /api/names
@@ -3217,7 +3267,14 @@ function paintHistory() {
   // como calendário dentro da análise aberta.
   const item = (r, n) => {
     const running = r.status === "running";
-    const v = (r.verdict || r.status || "").toString();
+    // 1-2-3 (setup123): sem verdict Buy/Hold — o resultado é o estado do setup.
+    // Hoje caía em r.status "done" → "CONCLUÍDO" no lugar do veredito. Agora surfamos
+    // o setup_state (mesmo campo que a view aberta já mostra no card de setup).
+    const isSetup123 = r.method === "setup123";
+    const setupState = isSetup123 ? (r.setup_state || "sem_dado") : "";
+    const v = isSetup123 ? setupState : (r.verdict || r.status || "").toString();
+    // title do chip: frase legível do setup (1-2-3) ou o veredito cru nos demais.
+    let vTitle = v;
     // contagem de análises do ticker: vem do backend (watchlist varre o index inteiro,
     // task 011); ``n`` (ocorrências na lista) é fallback pra payloads antigos.
     const cnt = r.count || n;
@@ -3234,8 +3291,17 @@ function paintHistory() {
       vClass = "running";
       meta = `${escapeHtml(p.phase || "processando")} · ${Math.round(r.elapsed || 0)}s`;
     } else {
-      vHtml = verdictHtml(v);
-      vClass = verdictClass(v).replace("verdict", "").trim();
+      if (isSetup123) {
+        // Chip 1-2-3: emoji + rótulo compacto do setup, cor por estado. O title
+        // carrega a frase completa de SETUP_PT (acessível, não cabe na coluna).
+        const [emo, full] = SETUP_PT[setupState] || ["⚪", setupState];
+        vHtml = `${emo} ${escapeHtml(SETUP_COMPACT[setupState] || full)}`;
+        vClass = setupState;
+        vTitle = full;   // title ganha a frase legível, não o snake_case
+      } else {
+        vHtml = verdictHtml(v);
+        vClass = verdictClass(v).replace("verdict", "").trim();
+      }
       // Watchlist densa (task 009/015): a coluna estreita só comporta veredito +
       // DATA à direita sem espremer o nome. Só a DATA (dd/mm, sem hora) — o horário
       // e custo/tempo seguem no cabeçalho da análise aberta.
@@ -3261,7 +3327,7 @@ function paintHistory() {
         coHtml +
       `</span>` +
       `<span class="h-right">` +
-        `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : v)}">${vHtml}</span>` +
+        `<span class="h-verdict ${vClass}" title="${escapeHtml(running ? "em andamento" : vTitle)}">${vHtml}</span>` +
         `<span class="h-meta">${meta}</span>` +
       `</span>` +
       rm +
@@ -3272,9 +3338,20 @@ function paintHistory() {
       flagHtml +
       `</li>`;
   };
-  const filtered = _historyFilter === "all"
-    ? runs
-    : runs.filter((r) => (r.asset_type === "crypto") === (_historyFilter === "crypto"));
+  const filtered = runs.filter((r) => {
+    // 1) aba (Todos/Ações/Cripto)
+    if (_historyFilter !== "all" && (r.asset_type === "crypto") !== (_historyFilter === "crypto")) return false;
+    // 2) busca: ticker ou nome da empresa (case-insensitive). Nome vem do cache
+    // async; se ainda não resolveu, filtra só pelo ticker — ao chegar o nome o
+    // paintHistory re-roda e a busca passa a casar por nome também.
+    if (_historyQuery) {
+      const q = _historyQuery.toLowerCase();
+      const t = (r.ticker || "").toLowerCase();
+      const name = (_nameCache.get((r.ticker || "").toUpperCase()) || "").toLowerCase();
+      if (!t.includes(q) && !name.includes(q)) return false;
+    }
+    return true;
+  });
   // um por ticker (o mais recente; a API já devolve do mais novo pro mais velho)
   const seen = new Map();
   filtered.forEach((r) => {
@@ -3284,7 +3361,7 @@ function paintHistory() {
   });
   ul.innerHTML = seen.size
     ? [...seen.values()].map(({ run, n }) => item(run, n)).join("")
-    : '<li class="empty">Nenhuma análise nesta aba.</li>';
+    : `<li class="empty">${_historyQuery ? `Nenhum ativo casando “${escapeHtml(_historyQuery)}”.` : "Nenhuma análise nesta aba."}</li>`;
   [...ul.children].forEach((li) => {
     const id = li.getAttribute("data-id");
     if (id) li.addEventListener("click", () => openRun(id));
@@ -4539,16 +4616,31 @@ function renderModelTest(data) {
 }
 
 // ---- SCAN DE PORTFÓLIO (28/08): gatilhos 1-2-3 a $0 de LLM ---------------------
-// O olho barato: varre a watchlist em 1d+4h, classifica pela distância do preço ao
+// O olho barato: varre a watchlist em 1d+4h+1h, classifica pela distância do preço ao
 // gatilho e oferece a análise completa (Padrão/Erick) a um clique no que estiver
 // EM GATILHO. Estados (vocabulário único do backend scanner.py):
+let _scanData = null;        // último scan completo (pra re-pintar ao trocar filtro)
+let _scanEstadoFilter = null; // estado selecionado no filtro de chips (null = todos)
 const SCAN_ESTADO_PT = {
-  em_gatilho: ["EM GATILHO", "🟢"], perto: ["perto", "🟡"], formando: ["formando", "⚪"],
-  sem_setup: ["sem setup", "·"], sem_dado: ["sem dado", "⚠️"],
+  em_gatilho: { compra: ["COMPRA", "🟢"], venda: ["VENDA", "🔴"] },
+  em_movimento: ["EM MOVIMENTO", "🔵"],
+  invalidou: ["INVALIDOU", "⚫"],
+  formando: ["FORMANDO", "⚪"],
+  sem_setup: ["sem setup", "·"],
+  sem_dado: ["sem dado", "⚠️"],
 };
-function scanEstadoChip(estado) {
-  const [pt, dot] = SCAN_ESTADO_PT[estado] || [estado, "·"];
-  const cls = estado === "em_gatilho" ? "scan-chip gatilho" : (estado === "perto" ? "scan-chip perto" : "scan-chip");
+function scanEstadoChip(estado, direction) {
+  const entry = SCAN_ESTADO_PT[estado] || [estado, "·"];
+  // em_gatilho é direção-aware: COMPRA (verde) ou VENDA (vermelho) — a ação na cara.
+  if (estado === "em_gatilho") {
+    const dir = direction === "venda" ? "venda" : "compra";
+    const [pt, dot] = entry[dir];
+    return `<span class="scan-chip ${dir}">${dot} ${escapeHtml(pt)}</span>`;
+  }
+  const [pt, dot] = entry;
+  const cls = estado === "em_movimento" ? "scan-chip movimento"
+    : estado === "invalidou" ? "scan-chip invalidou"
+    : "scan-chip";
   return `<span class="${cls}">${dot} ${escapeHtml(pt)}</span>`;
 }
 function scanFmt(n) { return n == null ? "—" : Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 }); }
@@ -4605,12 +4697,13 @@ async function runScan() {
   const btn = $("scanRunBtn");
   btn.disabled = true;
   btn.textContent = "escaneando…";
-  $("scanSummary").innerHTML = '<span class="hint">varrendo 1d + 4h…</span>';
+  $("scanSummary").innerHTML = '<span class="hint">varrendo 1d + 4h + 1h…</span>';
   $("scanList").innerHTML = "";
   try {
     const res = await fetch("/api/scan?date=" + encodeURIComponent($("date").value || ""));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha no scan");
+    _scanEstadoFilter = null;   // novo scan: limpa o filtro de estado anterior
     paintScan(data);
   } catch (e) {
     $("scanSummary").innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
@@ -4620,48 +4713,110 @@ async function runScan() {
   }
 }
 
+// Chips de filtro por estado do gatilho. Reusa SCAN_ESTADO_PT pra cor/emoji.
+// Clicar um chip seleciona o filtro; clicar de novo (ou o "Todos") desliga.
+const SCAN_FILTER_ORDER = ["em_gatilho", "em_movimento", "invalidou", "formando", "sem_setup", "sem_dado"];
+function renderScanFilters(s) {
+  const host = $("scanFilters");
+  if (!host) return;
+  const hasAny = SCAN_FILTER_ORDER.some((k) => (s[k] || 0) > 0);
+  if (!hasAny) { host.classList.add("hidden"); host.innerHTML = ""; return; }
+  host.classList.remove("hidden");
+  const chip = (key, label, dot, n) => {
+    const active = _scanEstadoFilter === key;
+    const cls = `scan-filter ${key}${active ? " is-active" : ""}`;
+    return `<button type="button" class="${cls}" data-filter="${key}">${dot} ${escapeHtml(label)} <b>${n}</b></button>`;
+  };
+  // chip "Todos" pra desligar o filtro (só aparece quando há um ativo)
+  const allChip = _scanEstadoFilter
+    ? `<button type="button" class="scan-filter all" data-filter="">Todos</button>`
+    : "";
+  host.innerHTML = allChip + SCAN_FILTER_ORDER
+    .filter((k) => (s[k] || 0) > 0)
+    .map((k) => {
+      // em_gatilho é direção-aware no chip de linha ({compra,venda}), mas no
+      // filtro é genérico — achatamos pra um label único. Os demais são [label, dot].
+      const entry = SCAN_ESTADO_PT[k];
+      const [label, dot] = (k === "em_gatilho") ? ["EM GATILHO", "🟢"] : entry;
+      return chip(k, label, dot, s[k] || 0);
+    }).join("");
+  host.querySelectorAll("[data-filter]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const f = b.dataset.filter;
+      _scanEstadoFilter = f || null;
+      if (_scanData) paintScan(_scanData);
+    });
+  });
+}
+
 function paintScan(data) {
+  _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
   const s = data.resumo || {};
   $("scanSummary").innerHTML =
-    `<b>${s.em_gatilho || 0}</b> em gatilho · <b>${s.perto || 0}</b> perto · ` +
-    `<b>${s.formando || 0}</b> formando · ${s.sem_setup || 0} sem setup · ${s.sem_dado || 0} sem dado` +
+    `<b>${s.em_gatilho || 0}</b> em gatilho · <b>${s.em_movimento || 0}</b> em movimento · ` +
+    `<b>${s.invalidou || 0}</b> invalidou · <b>${s.formando || 0}</b> formando · ` +
+    `${s.sem_setup || 0} sem setup · ${s.sem_dado || 0} sem dado` +
     (data.date ? `<span class="hint"> — ${escapeHtml(data.date)} · ${escapeHtml((data.frames || []).join(" + "))}</span>` : "");
+  // Chips de filtro por estado: cada um mostra a contagem; clicar filtra.
+  renderScanFilters(s);
   const ul = $("scanList");
-  ul.innerHTML = (data.ativos || []).map((a) => {
-    const m = a.melhor || {};
-    const gatilho = m.estado === "em_gatilho" || m.estado === "perto";
-    const levels = gatilho && m.trigger != null
-      ? `<div class="scan-levels">` +
-        `<span>🎯 gatilho <b>${scanFmt(m.trigger)}</b></span>` +
-        `<span>🛑 SL <b>${scanFmt(m.sl)}</b></span>` +
-        `<span>🎯 TP <b>${scanFmt(m.tp)}</b></span>` +
-        `<span>R:R <b>${m.rr != null ? m.rr.toFixed(2) : "não calculável"}</b></span>` +
-        `</div>`
-      : "";
-    const actions = m.estado === "em_gatilho"
-      ? `<div class="scan-actions-row">` +
-        `<button type="button" class="scan-go" data-go="${escapeHtml(a.ticker)}|padrao">Analisar Padrão</button>` +
-        `<button type="button" class="scan-go erick" data-go="${escapeHtml(a.ticker)}|erick">🧭 Analisar Erick</button>` +
-        `</div>` : "";
-    const dir = m.direction === "venda" ? "⬇️ venda" : (m.direction === "compra" ? "⬆️ compra" : "");
-    return `<li class="scan-row ${m.estado}">` +
-      `<div class="scan-line"><b class="scan-tk" data-open="${escapeHtml(a.ticker)}">${escapeHtml(a.ticker)}</b>` +
-      `<span class="scan-frame">${escapeHtml(m.frame || "")}</span>` +
-      `<span class="scan-dir">${dir}</span>` +
-      `<span class="scan-dist">${m.dist_txt || "—"}</span>` +
-      scanEstadoChip(m.estado) + `</div>` +
-      levels + actions + `</li>`;
+  // Aplica o filtro de estado ativo (null = mostra todos, ordenados por urgência).
+  const ativos = (data.ativos || []).filter((a) =>
+    !_scanEstadoFilter || (a.melhor || {}).estado === _scanEstadoFilter);
+  ul.innerHTML = ativos.map((a) => {
+    // Cada ativo reporta TODOS os frames (1d, 4h) — um por linha, com seu próprio
+    // estado e direção. Sem hierarquia, sem escolher "melhor": mostra os dois e o
+    // timeframe de cada. O ticker cabeça agrupa; cada sub-linha abre seu gráfico.
+    const valid = (a.frames || []).filter((f) => f.estado !== "sem_dado");
+    const rows = valid.map((f) => {
+      const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
+      const levels = hasLevels
+        ? `<div class="scan-levels">` +
+          `<span>🎯 gatilho <b>${scanFmt(f.trigger)}</b></span>` +
+          `<span>🛑 SL <b>${scanFmt(f.sl)}</b></span>` +
+          `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` +
+          `<span>R:R <b>${f.rr != null ? f.rr.toFixed(2) : "não calculável"}</b></span>` +
+          `</div>`
+        : (f.estado === "invalidou" && f.invalidacao != null
+          ? `<div class="scan-levels"><span>⚫ invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
+          : "");
+      const actions = f.estado === "em_gatilho"
+        ? `<div class="scan-actions-row">` +
+          `<button type="button" class="scan-go" data-go="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}|padrao">Analisar Padrão</button>` +
+          `<button type="button" class="scan-go erick" data-go="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}|erick">Analisar Erick</button>` +
+          `</div>` : "";
+      return `<div class="scan-frame-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
+        `<span class="scan-frame">${escapeHtml(f.frame || "")}</span>` +
+        `<span class="scan-price">$${scanFmt(f.price)}</span>` +
+        `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
+        scanEstadoChip(f.estado, f.direction) +
+        levels + actions + `</div>`;
+    }).join("");
+    return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
+      `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}</b>` +
+      rows + `</li>`;
   }).join("");
-  ul.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => {
-    const [tk, method] = b.dataset.go.split("|");
+  ul.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();   // não dispara o data-open do frame-row pai
+    const [tk, frame, method] = b.dataset.go.split("|");
     $("ticker").value = tk;
+    if (frame) { _barTf = frame; }
     _barMethod = method;
     renderLaunchBar();
     $("scanPanel").classList.add("hidden");
     $("analyzeForm").requestSubmit();
   }));
   ul.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => {
-    $("ticker").value = b.dataset.open;
+    // Clicar o ticker (cabeça) ou qualquer frame-row abre a análise gráfica direto
+    // (setup123 — leitura estrutural sem LLM, $0): preenche o ticker, seta o frame
+    // da linha clicada e roda. Atalho mais rápido: ticker → gráfico 1-2-3.
+    const [tk, frame] = b.dataset.open.split("|");
+    $("ticker").value = tk;
+    if (frame) { _barTf = frame; }
+    _barMethod = "setup123";
+    renderLaunchBar();
+    $("scanPanel").classList.add("hidden");
+    $("analyzeForm").requestSubmit();
   }));
 }
 

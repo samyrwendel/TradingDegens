@@ -1295,6 +1295,11 @@ class AnalysisRunner:
                 # 1-2-3) vem como método próprio — nunca colide com padrao/erick.
                 "method": getattr(run, "method", None)
                 or ("erick" if "erick" in run.selected_analysts else "padrao"),
+                # Veredito de uma run 1-2-3 (setup_state) — a watchlist mostra isto
+                # no lugar de "CONCLUÍDO": setup123 não tem verdict Buy/Hold, o seu
+                # resultado é o estado do setup (ativo/aguardar_*/sem_*). Vem do
+                # mesmo actionable plan que a view aberta já rendera (SETUP_PT).
+                "setup_state": ((run.result or {}).get("actionable") or {}).get("setup_state"),
                 "cost_usd": cost["usd"],
                 "elapsed": elapsed,
                 # Manaus wall-clock with explicit -04:00 offset, so the UI can
@@ -2306,6 +2311,11 @@ class AnalysisRunner:
             "asset_type": run.asset_type,
             "status": "running",
             "verdict": None,
+            # method + setup_state no resumo ao vivo igual ao index persistido
+            # (task 010): a watchlist usa o mesmo código pra done e running.
+            "method": getattr(run, "method", None)
+            or ("erick" if "erick" in run.selected_analysts else "padrao"),
+            "setup_state": ((run.result or {}).get("actionable") or {}).get("setup_state"),
             "cost_usd": cost.get("usd", 0),
             "elapsed": round(time.time() - run.started_at, 1),
             "finished_at": None,
@@ -2416,7 +2426,7 @@ class AnalysisRunner:
         return self.watchlist_store.set([str(t) for t in tickers])
 
     def scan_portfolio(self, date: str) -> dict[str, Any]:
-        """Varre a watchlist (1d+4h) — $0 de LLM, só plano determinístico.
+        """Varre a watchlist (1d+4h+1h) — $0 de LLM, só plano determinístico.
 
         Todo ``em_gatilho`` é LOGADO (dedup por ticker+frame+gatilho: o mesmo
         setup não re-entrega) — é o insumo do track record do scan.

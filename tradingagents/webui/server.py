@@ -429,7 +429,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # (POST) é owner-only.
                 self._send_json({"tickers": self.runner.watchlist_get()})
             elif path == "/api/scan":
-                # SCAN ESTRUTURAL 1-2-3 da watchlist (1d+4h): $0 de LLM — só o plano
+                # SCAN ESTRUTURAL 1-2-3 da watchlist (1d+4h+1h): $0 de LLM — só o plano
                 # determinístico cacheado. Público como /api/chart. Síncrono: frio
                 # ~13s/10 ativos, cacheado ~2s (medido 28/08).
                 qs = parse_qs(urlparse(self.path).query)

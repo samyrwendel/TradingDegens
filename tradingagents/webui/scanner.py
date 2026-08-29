@@ -3,15 +3,18 @@
 O método decide por ESTRUTURA (1-2-3 + médias), não por sentimento — e a
 estrutura já vem computada do :func:`build_actionable_plan_dict`
 (determinístico, cacheado DA-058, zero LLM). Este módulo só ENUMERA: varre a
-watchlist em 1d+4h e classifica cada ativo pela distância do preço ao GATILHO,
+watchlist em 1d+4h+1h e classifica cada ativo pela distância do preço ao GATILHO,
 pra o Samyr decidir com um clique se vale a análise completa (Padrão/Erick).
 
 Estados (vocabulário único, reutilizado no painel):
-* ``em_gatilho`` — preço a ≤ _GATILHO_TOL do gatilho OU padrão ``acionado``
-* ``perto``      — distância ≤ _PERTO_TOL (vigiar)
-* ``formando``   — padrão existe, ainda longe
-* ``sem_setup``  — sem padrão detectado (não é erro)
-* ``sem_dado``   — fonte degradou; NUNCA se inventa setup (honestidade padrão)
+* ``em_gatilho``   — preço a ≤ _GATILHO_TOL do gatilho (ponto de entrada AGORA).
+                     No painel vira COMPRA (verde) ou VENDA (vermelho) pela direção.
+* ``em_movimento`` — padrão acionado e preço além da entrada (no move buscando alvo;
+                     o gatilho ficou p/ trás — NÃO é ponto de entrada).
+* ``invalidou``    — preço além do ponto 3: a premissa estrutural morreu, não entra.
+* ``formando``     — padrão existe, ainda não rompeu (vigiar — distância mostrada).
+* ``sem_setup``    — sem padrão detectado (não é erro)
+* ``sem_dado``     — fonte degradou; NUNCA se inventa setup (honestidade padrão)
 
 Track record (a observação do Samyr virando número): todo ``em_gatilho`` é
 logado append-only em ``scans.jsonl`` com os níveis; ``scan_verdicts``
@@ -34,25 +37,39 @@ from tradingagents.dataflows.price_structure import (
 
 logger = logging.getLogger(__name__)
 
-# Frames do scan (decisão do Samyr 28/08): o swing (1d) e o posicionamento (4h).
-SCAN_FRAMES = ("1d", "4h")
+# Frames do scan: o swing (1d), o posicionamento (4h) e o fino (1h).
+SCAN_FRAMES = ("1d", "4h", "1h")
 
-# Distância do preço ao gatilho que caracteriza "em gatilho" / "perto".
-# PROVISÓRIO e declarado: 0,5% absorve o ruído intradiário de um toque
-# iminente; 3% é a janela de vigília. A calibrar com o track record do
-# scans.jsonl (mesma disciplina do _EARNINGS_WINDOW_NOTE do erick_method).
+# Distância do preço ao gatilho que caracteriza "em gatilho" (ponto de entrada).
+# PROVISÓRIO e declarado: 0,5% absorve o ruído intradiário de um toque iminente.
+# A calibrar com o track record do scans.jsonl (mesma disciplina do
+# _EARNINGS_WINDOW_NOTE do erick_method).
 _GATILHO_TOL = 0.005
-_PERTO_TOL = 0.03
 
-# Ordem de urgência pro sort (menor = mais urgente).
-_URGENCIA = {"em_gatilho": 0, "perto": 1, "formando": 2, "sem_setup": 3, "sem_dado": 4}
+# Ordem de urgência pro sort (menor = mais urgente). Entradas vivas primeiro;
+# em_movimento (já passou) e invalidou (morreu) ficam após os opportunities vivos.
+_URGENCIA = {"em_gatilho": 0, "formando": 1, "em_movimento": 2, "invalidou": 3, "sem_setup": 4, "sem_dado": 5}
 
 
 def _fmt_pct(v: float | None) -> str:
     return f"{v * 100:.2f}%" if v is not None else "—"
 
 
-def _frame_row(ticker: str, date: str, frame: str) -> dict[str, Any]:
+def _live_price(ticker: str) -> float | None:
+    """Preço atual (live) de um símbolo — uma chamada rápida ao fast_info do
+    yfinance, fail-open. O scan de gatilhos mede a distância do PREÇO ATUAL ao
+    gatilho, não do last close da série date-guarded (que pode ser de ontem ou
+    estar stale no cache diário). Sem live → cai no price do plan (honesto)."""
+    try:
+        from tradingagents.dataflows.live_price import fetch_live_price
+        data = fetch_live_price(ticker)
+        return float(data["price"]) if data and data.get("price") else None
+    except Exception:  # noqa: BLE001 — preço live nunca derruba o scan
+        return None
+
+
+def _frame_row(ticker: str, date: str, frame: str,
+               live_price: float | None = None) -> dict[str, Any]:
     """Uma linha do scan: plano + chart do frame, classificada."""
     try:
         plan = build_actionable_plan_dict(ticker, date, timeframe=frame)
@@ -63,7 +80,10 @@ def _frame_row(ticker: str, date: str, frame: str) -> dict[str, Any]:
 
     plan = plan or {}
     pat = plan.get("pattern") or {}
-    price = plan.get("price") or _last_close(chart)
+    # Preço ATUAL tem prioridade: o gatilho é onde se entra AGORA, então a
+    # distância é medida do live. Sem live (fonte instável/fora do ar), usa o
+    # last close do plan (date-guarded) — declarado, nunca inventado.
+    price = live_price if live_price is not None else (plan.get("price") or _last_close(chart))
     if not pat or pat.get("trigger") is None or price is None:
         setup = plan.get("setup_state")
         if setup in ("sem_dado", "intradiario_indisponivel"):
@@ -74,10 +94,24 @@ def _frame_row(ticker: str, date: str, frame: str) -> dict[str, Any]:
     trigger = float(pat["trigger"])
     dist = abs(price / trigger - 1.0) if trigger else None
     state = pat.get("state")
-    if state == "acionado" or (dist is not None and dist <= _GATILHO_TOL):
+    direction = pat.get("direction")
+    # Invalidação: preço além do ponto 3 (onde o padrão deixa de existir). Na
+    # compra o setup morre ao PERDER o ponto 3; na venda ao VOLTAR acima dele.
+    # (antes o scan não tinha esse estado: mostrava um setup morto como vivo.)
+    inval_price = (plan.get("invalidation") or {}).get("price")
+    invalidated = False
+    if inval_price is not None:
+        inval = float(inval_price)
+        invalidated = (price > inval) if direction == "venda" else (price < inval)
+    # EM GATILHO = preço no ponto de entrada AGORA (≤ tol), independente de o
+    # padrão já ter acionado (recém-rompido ainda no ponto ainda entra). Acionado
+    # e preço além da entrada → em_movimento (buscando alvo, não é entrada).
+    if invalidated:
+        estado = "invalidou"
+    elif dist is not None and dist <= _GATILHO_TOL:
         estado = "em_gatilho"
-    elif dist is not None and dist <= _PERTO_TOL:
-        estado = "perto"
+    elif state == "acionado":
+        estado = "em_movimento"
     else:
         estado = "formando"
 
@@ -87,7 +121,7 @@ def _frame_row(ticker: str, date: str, frame: str) -> dict[str, Any]:
     return {
         "frame": frame,
         "estado": estado,
-        "direction": pat.get("direction"),
+        "direction": direction,
         "pattern_state": state,
         "trigger": trigger,
         "price": price,
@@ -109,9 +143,18 @@ def _last_close(chart: dict) -> float | None:
 
 
 def scan_symbol(ticker: str, date: str, frames: tuple = SCAN_FRAMES) -> dict[str, Any]:
-    """O scan de UM ativo nos frames pedidos (fail-open por frame)."""
+    """O scan de UM ativo nos frames pedidos (fail-open por frame).
+
+    O preço LIVE é buscado UMA vez por símbolo (não por frame) e compartilhado
+    entre os frames — a cotação atual é a mesma independente do timeframe, e
+    ``fast_info`` é a chamada leve que não carrega série.
+    """
     ticker = (ticker or "").strip().upper()
-    rows = [_frame_row(ticker, date, tf) for tf in frames]
+    live = _live_price(ticker)
+    rows = [_frame_row(ticker, date, tf, live_price=live) for tf in frames]
+    # "Melhor" só ordena a lista (urgência) — não escolhe nem esconde frame.
+    # Cada ativo reporta TODOS os frames com seu 1-2-3; a UI mostra os dois lado
+    # a lado (1d, 4h e 1h), sem hierarquia entre eles.
     best = min(rows, key=lambda r: (_URGENCIA.get(r.get("estado"), 9),
                                     r.get("dist_pct") if r.get("dist_pct") is not None else 9.9))
     return {"ticker": ticker, "frames": rows, "melhor": best}
@@ -180,7 +223,10 @@ def scan_verdicts(log: ScanLog, tickers: list[str], date: str) -> dict[str, Any]
             plan = build_actionable_plan_dict(ticker, date, timeframe=frame)
         except Exception:  # noqa: BLE001 — verdict ausente não derruba o resto
             plan = {}
-        price = (plan or {}).get("price")
+        # Preço ATUAL tem prioridade sobre o last close do plan (mesmo motivo do
+        # scan: a re-avaliação é contra onde o preço está AGORA, não o close stale).
+        live = _live_price(ticker)
+        price = live if live is not None else (plan or {}).get("price")
         v = dict(e)
         v["preco_agora"] = price
         venda = e.get("direction") == "venda"
