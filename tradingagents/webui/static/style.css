@@ -553,11 +553,32 @@ details.section.erick > summary { color: #9cc7f5; }
    Samyr). O veredito continua em cima; aqui embaixo ficam os níveis operáveis ao
    lado do preço, alinhados à direita — antes os níveis só existiam no texto abaixo
    do gráfico e o gatilho tinha que ser caçado. */
+/* DUAS famílias, DUAS linhas (task 018). Antes era uma fila só com oito números —
+   "R:R 0,31" encostado em "835,37" como se fossem do mesmo assunto, correndo até a
+   borda direita até a última data não caber. São assuntos diferentes: em cima
+   MERCADO (a cotação e o preço da análise, com o momento de cada uma), embaixo
+   PLANO (gatilho · SL · TP · R:R). A cotação fica em cima porque é a âncora contra
+   a qual os níveis do plano se leem — e porque o número grande no MEIO da fila era
+   metade do motivo da tira ser ilegível.
+   As duas linhas continuam alinhadas À DIREITA (contrato da task 010: os níveis no
+   canto inferior direito do card, ao lado da cotação — agora logo abaixo dela). */
 .head-levels {
-  display: flex; align-items: baseline; justify-content: flex-end;
-  gap: 8px 18px; flex-wrap: wrap; margin: 0 0 8px;
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 3px; margin: 0 0 8px; min-width: 0;
 }
-.hl-levels { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+/* Cada linha quebra ENTRE unidades quando falta largura — nunca no meio de um
+   número e nunca cortando. É a resposta ao pior defeito da tira: informação que
+   simplesmente sumia na borda. */
+.hl-levels, .head-price {
+  display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end;
+  gap: 2px 14px; min-width: 0; max-width: 100%;
+}
+/* rótulo de família / de unidade: caixa alta miúda e apagada, nunca do mesmo peso
+   do dado. É o que faz "análise" e "plano" SEPARAREM em vez de virarem mais um item. */
+.hl-k, .hp-k {
+  font-family: var(--font); font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+}
 .hl-item { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); white-space: nowrap; }
 .hl-item b { font-family: var(--mono); font-weight: var(--fw-bold); color: var(--text); margin-left: 3px; }
 /* Alvo recusado: âmbar de ATENÇÃO (o setup existe, o alvo é que não) — mesma
@@ -566,19 +587,32 @@ details.section.erick > summary { color: #9cc7f5; }
 /* A cotação ATUAL vem com a SESSÃO declarada: fechamento, pré e pós são preços
    diferentes, e o rótulo é o que impede a tela de chamar qualquer um deles de
    "agora". O preço da ANÁLISE fica ao lado, menor, como referência. */
-.hp-live { display: inline-flex; align-items: baseline; gap: 6px; font-family: var(--mono);
-  font-size: var(--fs-16); line-height: var(--lh-16); font-weight: var(--fw-bold); color: var(--text); }
-.hp-tag { font-family: inherit; font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
+/* A unidade fica numa linha SÓ enquanto couber, e quando não couber ela quebra por
+   DENTRO — nunca transborda. O `white-space: nowrap` que estava aqui fazia a unidade
+   passar por cima da borda com o rótulo mais longo que o backend produz de verdade
+   ("último fechamento (pré-market sem negócio ainda)") num card de ~390px: era o
+   defeito 1 de volta, só que por outra porta. O que continua atômico é o que não
+   pode partir — número e carimbo de hora. */
+.hp-unit { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 1px 6px; max-width: 100%; }
+.hp-unit b, .hp-when, .hp-k, .hl-k { white-space: nowrap; }
+.hp-live b { font-family: var(--mono); font-size: var(--fs-16); line-height: var(--lh-16);
+  font-weight: var(--fw-bold); color: var(--text); }
+.hp-tag { font-family: var(--font); font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
   color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
-.hp-sep { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--muted);
-  text-transform: uppercase; letter-spacing: .5px; }
-/* preço da análise (último fechamento da série datada) */
-.head-price {
-  display: inline-flex; align-items: baseline; gap: 6px;
-  font-size: var(--fs-16); font-weight: var(--fw-bold); line-height: var(--lh-16); font-family: var(--mono);
-  color: var(--text);
-}
-.head-price .hp-when { font-size: var(--fs-12); font-weight: var(--fw-med); color: var(--muted); font-family: inherit; }
+/* o QUANDO é mono e apagado: lido como carimbo, não como mais um rótulo — era o
+   "· 29/08 20:42" grudado no fim do rótulo, com o mesmo peso dele. */
+.hp-when { font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12);
+  font-weight: var(--fw-med); color: var(--dim); }
+/* preço da análise: referência, menor que a cotação, e separado dela por uma RÉGUA
+   (1px sólido — DA-070 proíbe degradê, e uma régua tem o peso visual que a palavra
+   "análise" solta não tinha). */
+.hp-ref { border-left: 1px solid var(--border); padding-left: 14px; }
+/* Sem cotação atual (run reaberta noutro dia), a análise é a ÚNICA unidade da linha
+   — e uma régua abrindo a linha separaria o quê? Some. */
+.hp-ref:first-child { border-left: 0; padding-left: 0; }
+.hp-ref b { font-family: var(--mono); font-size: var(--fs-14); line-height: var(--lh-14);
+  font-weight: var(--fw-bold); color: var(--text); }
+.head-price { font-family: var(--mono); color: var(--text); }
 /* Veredito SEM PÍLULA (task 036): só o TEXTO na cor da função — sem fundo, sem
    borda, sem cápsula. 16/700 na escala. O qualificador (Hold/Buy/Overweight) fica
    ao lado em cinza apagado. Vale aqui (grande) e nas colunas do confronto. */

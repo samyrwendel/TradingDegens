@@ -319,9 +319,14 @@
              GATILHOS descem pro canto inferior DIREITO, ao lado do preço atual,
              alinhados à direita. O preço vem com a SESSÃO declarada (fechamento ×
              pré × pós são preços diferentes) — ver renderHeadLevels. -->
+        <!-- DUAS famílias, DUAS linhas (task 018): em cima o MERCADO (cotação agora
+             + o preço da análise), embaixo o PLANO (gatilho · SL · TP · R:R). Antes
+             eram oito números numa fila só, correndo até a borda — o olho lia uma
+             lista, não dois assuntos. A cotação vai em cima porque é a âncora contra
+             a qual todos os níveis do plano se leem. -->
         <div class="head-levels hidden" id="headLevels">
-          <div class="hl-levels" id="headTriggers"></div>
           <div class="head-price hidden" id="headPrice"></div>
+          <div class="hl-levels" id="headTriggers"></div>
         </div>
         <!-- Carimbo do veredito (task 016): quando os insumos tinham inconsistência
              na hora da decisão, o juiz recebeu os DADOS VERIFICADOS e decidiu com

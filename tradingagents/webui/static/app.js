@@ -221,6 +221,17 @@ function verdictHtml(v) {
   return escapeHtml((raw || "—").toUpperCase());
 }
 
+// Um MOMENTO da tira do cabeçalho: "29/08" quando o dado só tem data, "29/08 20:00"
+// quando ele carrega a HORA — que é o caso de um frame intradiário, onde o preço da
+// análise é o de um candle específico. Aceita "2026-08-29", "2026-08-29 20:00" e
+// "2026-08-29T20:00" (as três formas que o backend devolve). Não inventa hora: sem
+// hora no dado, nada aparece.
+function fmtMomento(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  if (!m) return escapeHtml(String(iso || ""));
+  return `${m[3]}/${m[2]}` + (m[4] ? ` ${m[4]}:${m[5]}` : "");
+}
+
 // Format a Manaus ISO stamp ("2026-08-23T20:30:00-04:00") for display WITHOUT
 // going through Date() — the string already carries Manaus wall time, so we read
 // it verbatim and never let the browser's timezone re-shift it. Returns e.g.
@@ -1920,24 +1931,41 @@ function runReanalyze(method, tf) {
 // valendo 513,53), e a tela o exibia como se fosse "agora". Agora a run de HOJE
 // carrega a cotação com a SESSÃO declarada (fechamento × pré-market × after-market
 // são preços diferentes) e o preço da análise fica ao lado, como referência.
+// Cada preço é uma UNIDADE fechada — número · o que ele é · de quando — e as
+// unidades não quebram por dentro: a tira quebra ENTRE elas, nunca no meio de uma e
+// nunca cortando (era o defeito 1: a fila corria até a borda e a data sumia).
+// O rótulo e o carimbo de hora deixam de ser o mesmo texto colado ("COTAÇÃO AGORA ·
+// 24H · 29/08 20:42" era ilegível: não dava pra saber se o "24h" qualificava a
+// cotação e se o horário era dela ou da análise). Agora o rótulo é rótulo (caixa
+// alta, apagado) e a hora é hora (mono), cada uma dentro da SUA unidade.
 function renderHeadPrice(a, live) {
   const el = $("headPrice");
   const box = $("headLevels");
   const analise = a && a.price != null
-    ? `<b>${fmtNum(a.price)}</b>` + (a.as_of ? `<span class="hp-when">em ${fmtDate(a.as_of)}</span>` : "")
+    ? `<span class="hp-unit hp-ref"><span class="hp-k">análise</span>` +
+      `<b>${fmtNum(a.price)}</b>` +
+      // O as_of da análise costuma trazer a HORA do candle no intradiário; ela
+      // estava sendo jogada fora por fmtDate e é justamente o que distingue este
+      // momento do da cotação (os dois caem no mesmo dia).
+      (a.as_of ? `<span class="hp-when">${fmtMomento(a.as_of)}</span>` : "") +
+      `</span>`
     : "";
   // A cotação só vale como ATUAL no dia em que foi tirada: o resultado é persistido,
   // e uma run reaberta amanhã mostraria a de hoje como se fosse de agora.
   const hoje = _todayManaus || "";
   const atual = live && live.price != null && (!live.em || !hoje || live.em === hoje)
-    ? `<span class="hp-live"><b>${fmtNum(live.price)}</b>` +
-      `<span class="hp-tag">${escapeHtml(live.rotulo || "cotação")}` +
-      `${live.as_of ? " · " + escapeHtml(live.as_of) : ""}</span></span>`
+    ? `<span class="hp-unit hp-live"><b>${fmtNum(live.price)}</b>` +
+      `<span class="hp-tag">${escapeHtml(live.rotulo || "cotação")}</span>` +
+      (live.as_of ? `<span class="hp-when">${escapeHtml(live.as_of)}</span>` : "") +
+      `</span>`
     : "";
   if (!analise && !atual) {
     el.classList.add("hidden"); el.innerHTML = "";
   } else {
-    el.innerHTML = atual + (atual && analise ? `<span class="hp-sep">análise</span>` : "") + analise;
+    // Sem separador de texto entre as duas: quem separa é a régua da .hp-ref, que
+    // tem peso visual de verdade — o "análise" solto tinha o mesmo peso do resto e
+    // por isso não separava nada, virava mais um item da lista (defeito 4).
+    el.innerHTML = atual + analise;
     el.classList.remove("hidden");
   }
   if (box) box.classList.toggle("hidden", !el.innerHTML && !$("headTriggers").innerHTML);
@@ -1965,7 +1993,10 @@ function renderHeadTriggers(a) {
     partes.push(`<span class="hl-item hl-warn">⚠️ ${escapeHtml(rr.note)}</span>`);
   }
   if (rr.rr != null) partes.push(`<span class="hl-item">⚖️ R:R <b>${fmtNum(rr.rr)}</b></span>`);
-  el.innerHTML = partes.join("");
+  // A família se declara: estes quatro são NÍVEIS DO PLANO, e a linha de cima é
+  // cotação de mercado. Sem o rótulo, "R:R 0,31" e "835,37" ficavam lado a lado como
+  // se fossem do mesmo assunto (defeito 2).
+  el.innerHTML = partes.length ? `<span class="hl-k">plano</span>` + partes.join("") : "";
   el.classList.toggle("hidden", !partes.length);
   // A tira some só quando NENHUM dos dois lados tem conteúdo (gatilhos e preço são
   // independentes: um 1-2-3 sem padrão ainda mostra a cotação).
