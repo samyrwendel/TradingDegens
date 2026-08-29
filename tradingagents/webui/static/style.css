@@ -44,6 +44,15 @@
      token só — sem pílula em botão nem canto gordo em card. Dots redondos, barras
      de progresso e micro-pílulas de STATUS ficam de fora. */
   --radius: 5px;
+
+  /* AÇÃO PRIMÁRIA — cor CHAPADA, um token só (DA-070, correção de escopo).
+     Antes eram cinco degradês `180deg, #3b82f6 → #2563eb` copiados em
+     #runBtn/.cfg-save/.err-action/.btn-primary e um azul→ciano na .bar-fill.
+     O valor é o PÉ do antigo degradê, não o topo: branco sobre #2563eb passa
+     AA (5,2:1) e sobre #3b82f6 não passa (3,7:1) — botão de 14px bold não é
+     "texto grande". A profundidade que o degradê dava volta pelo hover
+     (filter: brightness) de .err-action e .btn-primary. */
+  --primary: #2563eb;
 }
 
 * { box-sizing: border-box; }
@@ -148,7 +157,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 .field input:focus { outline: none; border-color: var(--accent); }
 #runBtn {
-  background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none;
+  background: var(--primary); color: #fff; border: none;
   border-radius: var(--radius); padding: 0 22px; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold);
   cursor: pointer; height: 36px;
 }
@@ -334,7 +343,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .bar { background: var(--panel-2); border-radius: 999px; height: 10px; overflow: hidden; border: 1px solid var(--border); }
 .bar-fill {
   height: 100%; width: 0; border-radius: 999px;
-  background: linear-gradient(90deg, #3b82f6, #22d3ee); transition: width .5s ease;
+  background: var(--primary); transition: width .5s ease;
 }
 .steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .steps li {
@@ -1316,7 +1325,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   border-radius: var(--radius); padding: 0 16px; height: 34px; font-size: var(--fs-13, var(--fs-14));
   cursor: pointer; font-weight: var(--fw-med); font-family: var(--font); border: 1px solid var(--border);
 }
-.cfg-save { background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none; }
+.cfg-save { background: var(--primary); color: #fff; border: none; }
 .cfg-test { background: var(--panel-2); color: var(--text); }
 .cfg-test:hover { border-color: var(--accent); }
 .cfg-clear { background: none; color: var(--muted); }
@@ -1391,7 +1400,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .error-card .err-msg { font-size: var(--fs-14); color: var(--text); line-height: 1.5; }
 .error-card .err-foot { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .error-card .err-action {
-  background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none;
+  background: var(--primary); color: #fff; border: none;
   border-radius: var(--radius); padding: 0 16px; height: 34px; font-size: var(--fs-14);
   font-weight: var(--fw-med); cursor: pointer; font-family: var(--font);
 }
@@ -1440,7 +1449,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
 }
 .owner-box button:disabled, .subscription-box button:disabled { opacity: .55; cursor: not-allowed; }
-.btn-primary { background: linear-gradient(180deg, #3b82f6, #2563eb); color: #fff; border: none; }
+.btn-primary { background: var(--primary); color: #fff; border: none; }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
 .btn-secondary { background: var(--panel-2); color: var(--text); }
 .btn-secondary:hover:not(:disabled) { border-color: var(--accent); }
