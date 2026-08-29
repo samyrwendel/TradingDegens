@@ -342,3 +342,65 @@ def test_alvo_de_setup_ja_acionado_nao_e_rejeitado_por_engano(tmp_path, monkeypa
     v = scan_verdicts(log, "2026-08-28")["verdicts"][0]
     assert v["tp_ignorado"] is False
     assert v["veredito"] == "bateu_tp"
+
+
+# ------------------------------- R:R residual: número certo, leitura errada ------
+def _plan_msft_1h_acionado():
+    """MSFT 1h de 29/08, os números REAIS do print: o padrão já acionou, o preço
+    passou de 513,67 e o alvo é 513,73 — sobra 0,06 de retorno pra 28,70 de risco."""
+    return {
+        "price": 513.67, "setup_state": "ativo",
+        "pattern": {"direction": "compra", "state": "acionado", "trigger": 497.14},
+        "stop": {"price": 484.97},
+        "target": {"price": 513.73},
+        "risk_reward": {"rr": 0.0, "entry": 513.67, "risk": 28.70, "reward": 0.06,
+                        "note": None, "entry_basis": "preço atual (padrão já acionado)"},
+    }
+
+
+def test_rr_zero_de_setup_acionado_e_marcado_como_residual(_plans):
+    """O número está CERTO e a leitura estava errada: "R:R 0.00" lê-se "setup sem
+    retorno", quando a verdade é "o trade já andou, sobrou quase nada". O flag é o
+    que deixa a tela dizer isso com palavra em vez de repetir o número cru.
+
+    DENTE: sem ``rr_residual``, a linha volta a publicar só o 0.0.
+    """
+    _plans({("MSFT", "1h"): _plan_msft_1h_acionado()})
+    linha = scan_symbol("MSFT", "2026-08-29", frames=("1h",))["frames"][0]
+    assert linha["estado"] == "em_movimento"     # acionado e preço além da entrada
+    assert linha["rr"] == 0.0                    # o número NÃO muda
+    assert linha["rr_residual"] is True
+    assert linha["rr_retorno"] == 0.06 and linha["rr_risco"] == 28.70
+    # e a BASE da entrada viaja junto: sem ela não dá pra saber que o R:R foi
+    # medido do preço de agora, não do gatilho (do gatilho daria 1,36)
+    assert "preço atual" in (linha["rr_basis"] or "")
+    assert linha["rr_entry"] == 513.67
+
+
+def test_setup_NAO_acionado_com_rr_baixo_nao_vira_residual(_plans):
+    """Contra-prova: R:R ruim num setup que ainda NÃO acionou é R:R ruim mesmo — a
+    entrada é o gatilho, o alvo não foi "praticamente alcançado", e trocar o número
+    por texto ali esconderia um setup honestamente ruim."""
+    plan = _plan_msft_1h_acionado()
+    plan["pattern"]["state"] = "formando"
+    plan["risk_reward"].update({"rr": 0.02, "entry": 497.14,
+                                "entry_basis": "gatilho — rompimento da máxima do ponto 2"})
+    _plans({("MSFT", "1h"): plan})
+    linha = scan_symbol("MSFT", "2026-08-29", frames=("1h",))["frames"][0]
+    assert linha["rr"] == 0.02
+    assert linha["rr_residual"] is False
+
+
+def test_acionado_com_retorno_de_verdade_nao_e_residual(_plans):
+    """O outro lado: acionado com R:R 0,66 (BTC-USD 1h no mesmo print) continua
+    mostrando o NÚMERO — o residual é pra quando quase não sobrou nada."""
+    plan = _plan_msft_1h_acionado()
+    plan["risk_reward"].update({"rr": 0.66, "reward": 18.9})
+    _plans({("MSFT", "1h"): plan})
+    linha = scan_symbol("MSFT", "2026-08-29", frames=("1h",))["frames"][0]
+    assert linha["rr"] == 0.66 and linha["rr_residual"] is False
+
+
+def test_o_limiar_do_residual_e_declarado():
+    """Limiar arbitrário TEM que ser nomeado (mesma disciplina do _GATILHO_TOL)."""
+    assert 0 < sc._RR_RESIDUAL <= 0.1

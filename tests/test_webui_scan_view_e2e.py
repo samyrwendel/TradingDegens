@@ -32,7 +32,9 @@ except Exception:  # noqa: BLE001
 def _frame(frame, estado, **kw):
     base = {"frame": frame, "estado": estado, "direction": "compra", "price": 513.53,
             "dist_pct": 0.0015, "dist_txt": "0.15%", "trigger": 512.76, "sl": 471.35,
-            "tp": 515.06, "rr": 0.06, "rr_note": None, "pattern_state": "formando"}
+            "tp": 515.06, "rr": 0.06, "rr_note": None, "pattern_state": "formando",
+            "rr_entry": 512.76, "rr_basis": "gatilho — rompimento da máxima do ponto 2",
+            "rr_risco": 41.41, "rr_retorno": 2.3, "rr_residual": False}
     base.update(kw)
     return base
 
@@ -140,7 +142,9 @@ def test_timeframe_destacado_no_inicio_da_linha(base):
         }""")
         assert m["tfLeft"] < m["prLeft"], m          # o frame vem ANTES do preço
         assert m["gap"] >= 6, ("sem respiro entre frame e preço", m)
-        assert m["minW"] >= 30, m                    # caixa própria, largura fixa
+        # largura FIXA (as linhas de um ativo alinham em coluna) e estreita — a
+        # segunda rodada do pedido reduziu a pill; o que não pode é ela sumir.
+        assert 20 <= m["minW"] <= 40, m
         assert m["borda"] != "0px", m                # é um badge, não texto solto
         browser.close()
 
@@ -173,4 +177,111 @@ def test_DA070_sem_degrade_e_sem_canto_arredondado_nas_linhas(base):
             .map(e => { const c = getComputedStyle(e);
               return {bg: c.backgroundImage, raio: c.borderTopLeftRadius}; })""")
         assert m and all(x["bg"] == "none" and x["raio"] == "0px" for x in m), m
+        browser.close()
+
+
+# ---------------------------- segunda rodada de pedidos (task 012) --------------
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_cards_em_grade_de_ate_tres_colunas(base):
+    """A visão Cards empilhava em coluna única e desperdiçava a largura (tela de
+    1500px+). Vira grade — com TETO de 3, que é o pedido, e quebra pra baixo."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        _abre_scan(page, base)
+        def colunas():
+            return page.evaluate(
+                "() => getComputedStyle(document.querySelector('#scanList'))"
+                ".gridTemplateColumns.split(' ').length")
+
+        def largura_coluna(px):
+            # Arrasta a lateral: é a largura do CONTAINER que manda, não a do
+            # viewport (mesma lição da barra de controle — a lateral é
+            # redimensionável e o viewport não sabe disso).
+            page.evaluate(
+                "(w) => document.querySelector('main.layout')"
+                ".style.setProperty('--sidebar-w', w + 'px')", px)
+            page.wait_for_timeout(150)
+
+        assert colunas() == 3, "coluna larga → 3 (o teto pedido)"
+        largura_coluna(600)
+        assert colunas() == 2, "coluna média → 2"
+        largura_coluna(950)
+        assert colunas() == 1, "coluna estreita → 1"
+        largura_coluna(300)
+        page.wait_for_timeout(150)
+        page.click(".scan-view[data-view='lista']")
+        page.wait_for_timeout(200)
+        assert colunas() == 1, "lista não vira grade"
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_timeframe_em_pill_estreita_com_rotulo_curto(base):
+    """Segunda rodada da mesma queixa: o chip com caixa própria resolveu o "colado
+    no preço" e ficou GORDO, um por linha, competindo com o ativo. Vira pill
+    estreita na gramática da barra de controle (S · D · 4h · 1h)."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        _abre_scan(page, base)
+        m = page.evaluate("""() => {
+          const tf = document.querySelector('.scan-frame-row .scan-tf');
+          const tk = document.querySelector('.scan-tk');
+          return {txt: tf.innerText.trim(), titulo: tf.getAttribute('title'),
+                  larg: Math.round(tf.getBoundingClientRect().width),
+                  fonteTf: parseFloat(getComputedStyle(tf).fontSize),
+                  fonteTk: parseFloat(getComputedStyle(tk).fontSize)};
+        }""")
+        assert m["txt"] == "D", ("1d vira D, como na barra de controle", m)
+        assert m["titulo"] == "1d", ("o frame completo fica no title", m)
+        assert m["larg"] <= 40, ("pill ESTREITA", m)
+        assert m["fonteTf"] < m["fonteTk"], ("o ATIVO é quem tem destaque", m)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_rr_residual_vira_texto_honesto_e_nao_zero_cru(base):
+    """MSFT 1h de 29/08: acionado, gatilho 497,14, TP 513,73, preço 513,67 → R:R
+    0.00. O número está certo (a entrada de um setup acionado é o preço atual), mas
+    "0.00" lê-se como "setup sem retorno". A tela passa a dizer o que ele significa
+    — e, quando o R:R vale, declara que foi medido do preço atual."""
+    scan = json.loads(json.dumps(_SCAN))
+    scan["ativos"][0]["frames"] = [_frame(
+        "1h", "em_movimento", pattern_state="acionado", trigger=497.14, sl=484.97,
+        tp=513.73, price=513.67, rr=0.0, rr_entry=513.67, rr_risco=28.70,
+        rr_retorno=0.06, rr_residual=True,
+        rr_basis="preço atual (padrão já acionado)")]
+
+    def handler(route):
+        if "/api/scan" in route.request.url and "verdicts" not in route.request.url:
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(scan))
+        else:
+            route.continue_()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        page.route(re.compile(r"/api/"), handler)
+        page.goto(base, wait_until="networkidle")
+        page.click("#scanOpenBtn")
+        page.click("#scanRunBtn")
+        page.wait_for_selector("#scanList li")
+        txt = page.inner_text("#scanList")
+        assert "alvo praticamente alcançado" in txt, txt
+        assert "0.00" not in txt, ("o zero cru sumiu da tela", txt)
+        assert "sobrou" in txt and "28,7" in txt, ("diz o que sobrou pra quanto de risco", txt)
+
+        # e o caso NÃO-residual acionado declara a base da entrada
+        scan2 = json.loads(json.dumps(_SCAN))
+        scan2["ativos"][0]["frames"] = [_frame("1h", "em_movimento", pattern_state="acionado",
+                                               rr=0.66, rr_basis="preço atual (padrão já acionado)")]
+        page.unroute(re.compile(r"/api/"))
+        page.route(re.compile(r"/api/"), lambda r: (
+            r.fulfill(status=200, content_type="application/json", body=json.dumps(scan2))
+            if "/api/scan" in r.request.url and "verdicts" not in r.request.url else r.continue_()))
+        page.click("#scanRunBtn")
+        page.wait_for_timeout(400)
+        txt2 = page.inner_text("#scanList")
+        assert "0.66" in txt2 and "do preço atual" in txt2, txt2
         browser.close()

@@ -49,6 +49,12 @@ SCAN_FRAMES = ("1d", "4h", "1h")
 # _EARNINGS_WINDOW_NOTE do erick_method).
 _GATILHO_TOL = 0.005
 
+# Abaixo deste R:R, num setup JÁ ACIONADO, o que sobra do movimento não paga o
+# risco de entrar agora — a tela diz isso com palavra ("alvo praticamente
+# alcançado") em vez de exibir "0.00", que se lê como "setup sem retorno".
+# ARBITRÁRIO e declarado, como o _GATILHO_TOL: a calibrar com o track record.
+_RR_RESIDUAL = 0.05
+
 # Paralelismo do scan. Limite ESCOLHIDO POR MEDIÇÃO, não por gosto (20 ativos ×
 # 3 frames, N=4 por config, 29/08 — mediana):
 #
@@ -193,6 +199,22 @@ def _frame_row(ticker: str, date: str, frame: str,
     # instante em que aciona. Com ``tp=None`` o track record só pode fechar pelo SL
     # (``_primeiro_toque`` já trata), que é a leitura honesta.
     tp_incoerente = bool(rr.get("note")) and rr.get("rr") is None
+    # RETORNO RESIDUAL: num setup JÁ ACIONADO a entrada de referência é o PREÇO
+    # ATUAL, não o gatilho (``_entry_ref``) — então o R:R mede o que AINDA sobra do
+    # trade, não o que ele valia quando nasceu. Aritmeticamente certo e enganoso na
+    # tela: MSFT 1h em 29/08 saía "gatilho 497,14 · TP 513,73 · R:R 0.00" com o
+    # preço em 513,67, e 0.00 lê-se como "setup sem retorno" quando a verdade é "o
+    # trade já andou, sobrou 0,06 pra 28,70 de risco" (do gatilho teria dado 1,36).
+    # Mesma família do alvo degenerado: número correto, leitura errada. O flag deixa
+    # a TELA dizer isso com palavra em vez de repetir o número cru.
+    #
+    # 0,05 é o limiar: abaixo disso o que resta do movimento não paga o risco de
+    # entrar agora em nenhuma leitura razoável. ARBITRÁRIO e declarado, como o
+    # _GATILHO_TOL — a calibrar com o track record.
+    rr_val = rr.get("rr")
+    rr_residual = bool(
+        state == "acionado" and rr_val is not None and 0 <= float(rr_val) < _RR_RESIDUAL
+    )
     return {
         "frame": frame,
         "estado": estado,
@@ -208,8 +230,16 @@ def _frame_row(ticker: str, date: str, frame: str,
         "tp_faixa": (None if tp_incoerente else
                      ([target.get("low"), target.get("high")]
                       if target.get("low") is not None else None)),
-        "rr": rr.get("rr"),
+        "rr": rr_val,
         "rr_note": rr.get("note"),
+        # A BASE da entrada viaja junto do R:R: sem ela a tela não tem como dizer
+        # se o número foi medido do gatilho ou do preço de agora — e são leituras
+        # diferentes do mesmo setup.
+        "rr_entry": rr.get("entry"),
+        "rr_basis": rr.get("entry_basis"),
+        "rr_risco": rr.get("risk"),
+        "rr_retorno": rr.get("reward"),
+        "rr_residual": rr_residual,
     }
 
 

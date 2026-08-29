@@ -1698,7 +1698,17 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-view.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .scan-vazio { color: var(--muted); padding: 10px 2px; font-size: var(--fs-14); }
 
-.scan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* CARDS em GRADE de até 3 colunas: a tela do Samyr tem 1500px+ e a coluna única
+   desperdiçava a largura toda. O teto de 3 é dele; a quebra pra 2 e 1 vem por
+   CONTAINER QUERY (a largura que manda é a da coluna do conteúdo, não a do
+   viewport — a lateral é redimensionável, mesma lição da barra de controle).
+   `align-items: start` pra um card alto não esticar o vizinho. */
+.scan-panel { container-type: inline-size; }
+.scan-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 6px; align-items: start; }
+@container (min-width: 720px) { .scan-list:not(.is-lista) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (min-width: 1080px) { .scan-list:not(.is-lista) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* A LISTA é uma coluna só por natureza (uma linha por ativo+frame). */
+.scan-list.is-lista { grid-template-columns: 1fr; }
 /* MODO LISTA: uma linha por ativo+frame, sem agrupar por ticker — densidade pra
    varrer o portfólio inteiro sem rolar 20 cards. Mesma gramática de cor do modo
    cards (borda-esquerda sólida = estado), só que rasa. */
@@ -1744,15 +1754,20 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-frame-row.formando { border-left-color: var(--border); }
 .scan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
 .scan-frame { color: var(--muted); font-size: .8rem; }
-/* TIMEFRAME no INÍCIO da linha, com largura fixa: antes saía colado no preço
-   ("1d$513,530.15%") e não havia onde o olho pousar. Mono + caixa própria = as
-   três linhas de um ativo ficam alinhadas em coluna. */
+/* TIMEFRAME: pill ESTREITA na gramática da barra de controle (S · D · 4h · 1h),
+   não um chip largo por linha. Duas rodadas da mesma queixa: primeiro ele vinha
+   colado no preço ("1d$513,530.15%"); depois, com caixa própria, ficou gordo e
+   repetitivo e passou a competir com o ativo — que é quem tem que ter destaque.
+   Mono + largura fixa mantém as linhas de um ativo alinhadas em coluna. */
 .scan-tf {
-  display: inline-block; min-width: 34px; text-align: center; margin-right: 8px;
-  font-family: var(--mono); font-size: .72rem; font-weight: var(--fw-bold);
+  display: inline-block; min-width: 26px; text-align: center; margin-right: 7px;
+  font-family: var(--mono); font-size: .68rem; font-weight: var(--fw-bold);
   color: var(--muted); border: 1px solid var(--border); border-radius: 0;
-  padding: 1px 5px; text-transform: lowercase;
+  padding: 0 4px; line-height: 1.5;
 }
+/* Qualificador de leitura (base da entrada, sobra do movimento): existe pra o
+   número não ser lido fora de contexto, então é discreto por definição. */
+.scan-sub { color: var(--muted); font-size: .74rem; }
 .scan-frame-row .scan-price, .scan-line-row .scan-price { margin-right: 6px; }
 .scan-price { font-variant-numeric: tabular-nums; color: var(--text); font-weight: var(--fw-med); font-size: .82rem; }
 .scan-dist { font-variant-numeric: tabular-nums; color: var(--muted); }

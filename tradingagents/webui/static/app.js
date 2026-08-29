@@ -4843,11 +4843,16 @@ let _scanView = (() => {
   catch (e) { return "cards"; }
 })();
 
-// Badge do TIMEFRAME no INÍCIO da linha. Antes o frame saía colado no preço
-// ("1d$513,530.15%"), sem respiro nem hierarquia — o olho não achava onde começava
-// cada coisa. Agora é o primeiro elemento, com largura fixa, e o preço vem depois.
+// Timeframe no INÍCIO da linha, na MESMA gramática da barra de controle: pill
+// estreita, mono, rótulo curto (S · D · 4h · 1h · 30m). Duas correções em cima da
+// mesma queixa: primeiro ele saía colado no preço ("1d$513,530.15%"); depois, com
+// caixa própria, ficou gordo e repetitivo — um chip largo por linha, competindo com
+// o ativo. Aqui ele volta a ser o que é: uma etiqueta discreta, e o ATIVO é quem
+// tem destaque.
+const SCAN_TF_CURTO = { "1w": "S", "1d": "D", "4h": "4h", "1h": "1h", "30m": "30m", "15m": "15m" };
 function scanTfBadge(frame) {
-  return `<span class="scan-tf">${escapeHtml(frame || "—")}</span>`;
+  const curto = SCAN_TF_CURTO[frame] || frame || "—";
+  return `<span class="scan-tf" title="${escapeHtml(frame || "")}">${escapeHtml(curto)}</span>`;
 }
 
 // Níveis de uma linha do scan (gatilho · SL · TP · R:R), ou o MOTIVO quando o
@@ -4866,10 +4871,30 @@ function scanLevelsHtml(f) {
     // vez de um TP que o servidor recusou — antes vinha "🎯 TP 512,76" ao lado
     // de "🎯 gatilho 512,76 · R:R não calculável", e o porquê era descartado.
     (f.tp != null
-      ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` +
-        `<span>R:R <b>${f.rr != null ? f.rr.toFixed(2) : "não calculável"}</b></span>`
+      ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` + scanRrHtml(f)
       : `<span class="scan-note">⚠️ sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
     `</div>`;
+}
+
+// O R:R e — quando muda a leitura — a BASE da entrada.
+//
+// Num setup JÁ ACIONADO a entrada de referência é o PREÇO ATUAL, não o gatilho: o
+// R:R passa a medir o que AINDA sobra do trade. Correto, e enganoso escrito como
+// número seco. MSFT 1h (29/08): "gatilho 497,14 · TP 513,73 · R:R 0.00" com o preço
+// em 513,67 — 0.00 lê-se "setup sem retorno", quando a verdade é "já andou, sobrou
+// 0,06 pra 28,70 de risco" (medido do gatilho daria 1,36). O número não muda; o que
+// muda é a tela DIZER o que ele significa.
+function scanRrHtml(f) {
+  if (f.rr == null) return `<span>R:R <b>não calculável</b></span>`;
+  if (f.rr_residual) {
+    const sobra = (f.rr_retorno != null && f.rr_risco != null)
+      ? ` <span class="scan-sub">sobrou ${scanFmt(f.rr_retorno)} pra ${scanFmt(f.rr_risco)} de risco</span>` : "";
+    return `<span class="scan-note">🏁 alvo praticamente alcançado${sobra}</span>`;
+  }
+  // Acionado sem ser residual: o número vale, mas a base precisa estar dita.
+  const base = f.pattern_state === "acionado"
+    ? ` <span class="scan-sub">do preço atual</span>` : "";
+  return `<span>R:R <b>${f.rr.toFixed(2)}</b>${base}</span>`;
 }
 
 function scanActionsHtml(ticker, f) {
