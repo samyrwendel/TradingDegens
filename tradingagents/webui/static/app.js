@@ -55,6 +55,29 @@ function saveLlmCfg(cfg) {
 // está sendo acompanhado ao vivo; ao carregar a página e ao voltar o app pra
 // frente, se ele ainda está `running` no servidor, reengatamos. Some no término.
 const _ACTIVE_RUN_KEY = "td_active_run";
+// Token de CONTROLE da run (Parar/Pausar): o servidor devolve junto do run_id em
+// /api/analyze e só quem INICIOU a análise o tem — o run_id sozinho não vale como
+// prova, ele aparece na lista pública de /api/runs. Guardado por run (últimos 10) e
+// devolvido no header X-Run-Token; sobrevive a refresh pra o Parar seguir funcionando
+// depois do reengate. O dono logado não precisa dele (a sessão já o identifica).
+const _RUN_TOKEN_KEY = "td_run_tokens";
+function rememberRunToken(runId, token) {
+  if (!runId || !token) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(_RUN_TOKEN_KEY) || "{}") || {};
+    all[runId] = token;
+    const ids = Object.keys(all);
+    // poda simples: o mapa não pode crescer pra sempre no navegador
+    if (ids.length > 10) ids.slice(0, ids.length - 10).forEach((k) => delete all[k]);
+    localStorage.setItem(_RUN_TOKEN_KEY, JSON.stringify(all));
+  } catch (e) { /* quota / modo privado: perde só o Parar, não quebra a análise */ }
+}
+function runTokenHeader(runId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(_RUN_TOKEN_KEY) || "{}") || {};
+    return all[runId] ? { "X-Run-Token": all[runId] } : {};
+  } catch (e) { return {}; }
+}
 function saveActiveRun(runId, ticker) {
   if (!runId) return;
   try {
@@ -367,7 +390,9 @@ async function stopRun(pause) {
     const { headers } = llmRequestParts();
     const res = await fetch("/api/run/" + encodeURIComponent(runId) + "/cancel", {
       method: "POST", credentials: "same-origin",
-      headers: { ...headers, "Content-Type": "application/json" },
+      // X-Run-Token: prova de que ESTA run é minha (o servidor não aceita mais um
+      // run_id sozinho — era assim que dava pra parar a análise dos outros).
+      headers: { ...headers, ...runTokenHeader(runId), "Content-Type": "application/json" },
       body: JSON.stringify({ pause: !!pause }),
     });
     // Só MANTÉM 'parando…' se o servidor confirmou (200). Não-200 = não registrou →
@@ -1855,8 +1880,10 @@ function runReanalyze(method, tf) {
   apiPost("/api/analyze", { ticker: _openTicker, date, method: m, compare, timeframe: tf || "1d" })
     .then((r) => r.json())
     .then((data) => {
-      if (data && data.run_id) { watchRun(data.run_id); loadHistory(); }
-      else { $("formError").textContent = (data && data.error) || "falha ao reanalisar"; }
+      if (data && data.run_id) {
+        rememberRunToken(data.run_id, data.run_token);
+        watchRun(data.run_id); loadHistory();
+      } else { $("formError").textContent = (data && data.error) || "falha ao reanalisar"; }
     })
     .catch(() => { $("formError").textContent = "falha ao reanalisar"; });
 }
@@ -2224,8 +2251,10 @@ function reevaluate(tf) {
   apiPost("/api/analyze", { ticker: _openTicker, date: _openDate || "", method, timeframe: tf })
     .then((r) => r.json())
     .then((data) => {
-      if (data && data.run_id) { watchRun(data.run_id); loadHistory(); }
-      else { $("formError").textContent = (data && data.error) || "falha ao reavaliar"; }
+      if (data && data.run_id) {
+        rememberRunToken(data.run_id, data.run_token);
+        watchRun(data.run_id); loadHistory();
+      } else { $("formError").textContent = (data && data.error) || "falha ao reavaliar"; }
     })
     .catch(() => { $("formError").textContent = "falha ao reavaliar"; });
 }
@@ -2989,6 +3018,7 @@ async function startAnalysis(ev) {
       return;
     }
     if (!res.ok) throw new Error(data.error || "falha ao iniciar");
+    rememberRunToken(data.run_id, data.run_token);
     renderProgress({ status: "running", ticker, elapsed: 0, cost: null, progress: { phase: "Inicializando", label: "Subindo o motor…", percent: 2, plan: [], reached: [] } });
     watchRun(data.run_id);
     loadHistory();   // o novo run aparece na lista como "em andamento" na hora

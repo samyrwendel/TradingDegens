@@ -68,14 +68,15 @@ def _get(base, path):
         return resp.status, json.loads(resp.read())
 
 
-def _post(base, path, payload):
+def _post(base, path, payload, headers=None):
     data = json.dumps(payload).encode()
     # Gating BYOK/owner (task 042): endpoints de LLM exigem chave própria OU sessão
     # do dono. Estes testes de roteamento mandam uma chave dummy (o motor é falso e
     # a ignora) só pra passar do gate — o que se testa aqui é o roteamento/fluxo.
     req = urllib.request.Request(
         base + path, data=data,
-        headers={"Content-Type": "application/json", "X-LLM-Key": "sk-test"},
+        headers={"Content-Type": "application/json", "X-LLM-Key": "sk-test",
+                 **(headers or {})},
     )
     with urllib.request.urlopen(req, timeout=5) as resp:
         return resp.status, json.loads(resp.read())
@@ -201,7 +202,10 @@ def test_stop_cancels_run_cleanly_and_frees_active(tmp_path):
             time.sleep(0.03)
         assert run_id in health.get("runs", []), health
 
-        st, res = _post(base, "/api/run/" + run_id + "/cancel", {})
+        # X-Run-Token (task 007): o Parar é portão de AUTORIA — o run_id sozinho não
+        # prova nada (é público em /api/runs). Quem iniciou recebeu o token na resposta.
+        st, res = _post(base, "/api/run/" + run_id + "/cancel", {},
+                        headers={"X-Run-Token": started["run_token"]})
         assert st == 200 and res["ok"] and res["cancelled"] and res["paused"] is False
 
         deadline = time.time() + 5.0
@@ -267,13 +271,16 @@ def test_stop_does_not_keep_descriptor(tmp_path):
     assert runner.active.get(rid) is None   # descritor apagado
 
 
-def test_cancel_unknown_run_is_404(server):
-    st = None
+def test_cancel_de_run_alheia_e_403_antes_de_qualquer_busca(server):
+    """Task 007: chave própria não é autoria. Sem o token DAQUELA run (nem sessão de
+    dono), o Parar é 403 — e nem chega a olhar se a run existe. O 404 de antes era
+    justamente a prova de que o portão tinha sido vencido por um header não validado."""
+    st = code = None
     try:
         _post(server, "/api/run/nao-existe/cancel", {})
     except urllib.error.HTTPError as e:
-        st = e.code
-    assert st == 404
+        st, code = e.code, json.loads(e.read()).get("error_code")
+    assert st == 403 and code == "not_run_owner"
 
 
 def test_config_endpoint_reports_manaus(server):

@@ -9,7 +9,9 @@ Routes:
     GET  /                     -> index.html
     GET  /static/<file>        -> bundled static asset
     GET  /api/health           -> {"ok": true, ...}
-    POST /api/analyze          -> {ticker, date[, compare]} -> {run_id}
+    POST /api/analyze          -> {ticker, date[, compare]} -> {run_id, run_token}
+    POST /api/run/<id>/cancel  -> PARAR/PAUSAR: dono OU X-Run-Token daquela run
+    POST /api/run/<id>/resume  -> RETOMAR do checkpoint: só o dono (chave do servidor)
     POST /api/compare          -> {a, b} -> meta-judge snapshot over two runs
     POST /api/ask              -> {run_id, question} -> grounded Q&A over a run
     POST /api/test-key         -> {} + X-LLM-Key header -> {ok, provider, model}
@@ -38,8 +40,11 @@ chave do servidor nunca é enviada ao cliente.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import signal
 import threading
 import time
@@ -59,9 +64,40 @@ from tradingagents.webui.models_list import fetch_provider_model_infos
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.subscription import SubscriptionStore
 
-# Flags do corpo do /api/analyze que trocam a rota do atalho 1-2-3 por um pipeline
-# COM LLM. Estar nesta lista = a isenção de gate do setup123 não vale.
-_FLAGS_QUE_ESCALAM_A_ROTA = ("compare",)
+# ALLOWLIST do corpo do /api/analyze que a isenção de gate do atalho 1-2-3 aceita.
+# Fechado por default DE VERDADE: só isenta quando TODA chave com valor de peso no
+# corpo está aqui. Flag nova (não listada) = sem isenção, o portão volta a valer —
+# o contrário da denylist antiga, que deixava passar tudo que ninguém tivesse
+# lembrado de listar.
+#
+# Dois grupos, ambos incapazes de subir a rota pra um pipeline com modelo:
+#   - parâmetros da própria rota estrutural ($0 de LLM);
+#   - configuração BYOK, que o front manda em TODA requisição (inclusive de quem
+#     não tem chave, ex.: Ollama self-host) e que o 1-2-3 sequer consome.
+# `compare` está FORA de propósito: é ele que troca a rota por Padrão x Erick x
+# meta-juiz na chave do servidor.
+_CORPO_ISENTO_DE_GATE = frozenset({
+    "ticker", "date", "method", "timeframe", "force_fresh",
+    "llm_provider", "deep_think_llm", "quick_think_llm", "backend_url",
+    "advanced", "deep_provider", "quick_provider",
+    "deep_backend_url", "quick_backend_url",
+})
+
+# Token de CONTROLE da run (Parar/Pausar): capacidade que só quem INICIOU a run
+# recebe, devolvida junto do run_id no /api/analyze. O run_id NÃO serve de prova de
+# autoria — ele é público de propósito (/api/runs e /api/history listam qualquer um),
+# então quem soubesse ler a lista podia parar a análise alheia. Derivado por HMAC de
+# um segredo de processo: nada a guardar, nada a expirar, e impossível de forjar sem
+# o segredo. Restart invalida todos, e tudo bem: run BYOK não sobrevive a restart
+# (a chave vive no navegador) e a de chave-do-servidor é do dono, que para pela sessão.
+_RUN_TOKEN_SECRET = secrets.token_bytes(32)
+
+
+def _run_token(run_id: str) -> str:
+    """Token de controle da run ``run_id`` (ver ``_RUN_TOKEN_SECRET``)."""
+    return hmac.new(_RUN_TOKEN_SECRET, (run_id or "").encode(),
+                    hashlib.sha256).hexdigest()[:32]
+
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _CONTENT_TYPES = {
@@ -240,15 +276,16 @@ class _Handler(BaseHTTPRequestHandler):
     def _rota_sem_llm(method: str, body: dict) -> bool:
         """A requisição vai mesmo subir a rota estrutural de $0 (sem LLM nenhum)?
 
-        Só o atalho 1-2-3 puro. Qualquer flag que mude a ROTA pra um pipeline com
-        modelo (hoje ``compare`` → Padrão × Erick × meta-juiz) tira a isenção — o
-        rótulo do método sozinho não é prova de custo zero. Fechado por default:
-        flag nova que escale a rota entra em ``_FLAGS_QUE_ESCALAM_A_ROTA``, senão o
-        padrão continua sendo exigir o portão.
+        Só o atalho 1-2-3 puro, e só com um corpo INTEIRAMENTE conhecido: toda chave
+        de valor com peso tem que estar em ``_CORPO_ISENTO_DE_GATE``. Chave que
+        ninguém reconhece pode ser uma flag de rota nova (``compare`` foi exatamente
+        isso) — e diante do desconhecido a resposta é o portão, não a isenção. Chave
+        de valor vazio/falso é ignorada porque não liga rota nenhuma (o front manda
+        ``compare: false`` no 1-2-3 legítimo).
         """
         if method != "setup123":
             return False
-        return not any(bool(body.get(flag)) for flag in _FLAGS_QUE_ESCALAM_A_ROTA)
+        return all(k in _CORPO_ISENTO_DE_GATE for k, v in (body or {}).items() if v)
 
     def _owner_or_403(self) -> bool:
         """Portão só-dono (task 017): rotas da assinatura exigem sessão de dono
@@ -256,6 +293,24 @@ class _Handler(BaseHTTPRequestHandler):
         if self._is_owner():
             return True
         self._send_json({"error": "acesso restrito ao dono", "error_code": "owner_only"}, 403)
+        return False
+
+    def _controla_a_run_or_403(self, run_id: str) -> bool:
+        """Portão do PARAR/PAUSAR: dono logado OU portador do token DAQUELA run.
+
+        Não dá pra usar ``_gate_or_403`` aqui: ele aprova qualquer ``X-LLM-Key``
+        não-vazia, sem validar, e um BYOK legítimo continua não sendo dono da run
+        alheia — o portão de custo não é portão de autoria. Quem inicia a run recebe
+        ``run_token`` na resposta e o devolve em ``X-Run-Token`` pra interromper a
+        SUA análise; qualquer outro (com ou sem chave) leva 403 em vez de derrubar
+        a análise dos outros."""
+        if self._is_owner():
+            return True
+        tok = (self.headers.get("X-Run-Token") or "").strip()
+        if tok and hmac.compare_digest(tok, _run_token(run_id)):
+            return True
+        self._send_json({"error": "esta execução não é sua",
+                         "error_code": "not_run_owner"}, 403)
         return False
 
     def _redact_key(self, text: str) -> str:
@@ -662,7 +717,7 @@ class _Handler(BaseHTTPRequestHandler):
                     run_id = self.runner.start_compare(
                         ticker, date, timeframe=timeframe, overrides=overrides
                     )
-                    self._send_json({"run_id": run_id})
+                    self._send_json({"run_id": run_id, "run_token": _run_token(run_id)})
                     return
                 # Reúso automático de análise idêntica já feita (DA-058); o front
                 # pode forçar do zero com force_fresh (ex.: "reanalisar").
@@ -671,26 +726,35 @@ class _Handler(BaseHTTPRequestHandler):
                     ticker, date, method=method or "padrao", timeframe=timeframe,
                     overrides=overrides, reuse=reuse,
                 )
-                self._send_json({"run_id": run_id})
+                # ``run_token``: capacidade de PARAR/PAUSAR esta run (o run_id é
+                # público e não prova autoria) — o front guarda e devolve no header.
+                self._send_json({"run_id": run_id, "run_token": _run_token(run_id)})
             elif path.startswith("/api/run/") and path.endswith("/cancel"):
-                # PARAR/PAUSAR a run em andamento (task 026): mesmo portão do analyze
-                # (dono OU chave própria — quem pode iniciar pode interromper). Corpo
-                # {"pause": true} = PAUSAR (retomável, mantém checkpoint da 022); default
-                # PARAR. Cancelamento cooperativo — active_runs cai a 0 em poucos segundos.
-                body = self._read_json_body()
-                if not self._gate_or_403(body):
-                    return
+                # PARAR/PAUSAR a run em andamento (task 026). Portão de AUTORIA, não de
+                # custo: dono logado OU o token daquela run (task 007). O "quem pode
+                # iniciar pode interromper" de antes partia de premissa falsa — o
+                # _gate_or_403 aceita qualquer X-LLM-Key sem validar, então qualquer
+                # anônimo com um header lixo e um run_id de /api/runs derrubava análise
+                # alheia. Corpo {"pause": true} = PAUSAR (retomável, mantém checkpoint
+                # da 022); default PARAR. Cooperativo — active_runs cai a 0 em segundos.
                 run_id = path[len("/api/run/"):-len("/cancel")]
+                if not self._controla_a_run_or_403(run_id):
+                    return
+                body = self._read_json_body()
                 res = self.runner.cancel(run_id, keep_resume=bool(body.get("pause")))
                 if res is None:
                     self._send_json({"error": "execução desconhecida ou já encerrada"}, 404)
                 else:
                     self._send_json({"ok": True, **res})
             elif path.startswith("/api/run/") and path.endswith("/resume"):
-                # RETOMAR uma run PAUSADA (task 026): mesmo portão. Continua do checkpoint
-                # da 022 (reaproveita as etapas já concluídas), não recomeça do zero.
-                body = self._read_json_body()
-                if not self._gate_or_403(body):
+                # RETOMAR uma run PAUSADA (task 026): continua do checkpoint da 022
+                # (reaproveita as etapas concluídas), não recomeça do zero. OWNER-ONLY
+                # pela mesma razão do escalar/refresh-step (task 007): o resume ignora
+                # os overrides da requisição e re-enfileira pelo DESCRITOR da run, que
+                # carrega allow_server_key=True — ou seja, roda NA CREDENCIAL DO
+                # SERVIDOR. E só run resumível (dono/servidor) tem descritor: run BYOK
+                # nunca é retomável, então o público não perde nada aqui.
+                if not self._owner_or_403():
                     return
                 run_id = path[len("/api/run/"):-len("/resume")]
                 res = self.runner.resume(run_id)
