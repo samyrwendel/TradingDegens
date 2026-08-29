@@ -133,7 +133,11 @@ def test_dict_is_json_serializable(synth):
     json.dumps(d)  # must not raise
     assert set(d) == {
         "symbol", "as_of", "price", "timeframe", "horizon",
-        "setup_state", "buy_zone", "realize_zone", "pullback_zone", "pattern",
+        # setup_source diz DE QUAL setup veio o setup_state (recuo à média × 1-2-3).
+        # Sem ele "Setup ativo agora" não dizia de quem falava, e os dois setups
+        # convivem na mesma tela — ver tests/test_setup_naming_collision.py.
+        "setup_state", "setup_source",
+        "buy_zone", "realize_zone", "pullback_zone", "pattern",
         "invalidation", "stop", "target", "risk_reward",
     }
 

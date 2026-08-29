@@ -6,7 +6,7 @@ isso?" e quer o NÍVEL concreto (a faixa das EMAs 8/21, ~preço X), não papo va
 
 Este módulo NÃO re-roda a análise nem busca dado externo: monta o contexto a
 partir do que a run já computou e cacheou — ``price_structure`` (EMA 8/21/50, MMS,
-zona de compra/realização, gatilho 1-2-3, preço no momento), o veredito e os
+zona de recuo à média/realização, gatilho 1-2-3, preço no momento), o veredito e os
 relatórios — e devolve as mensagens pro modelo barato responder.
 
 Regras da casa embutidas aqui:
@@ -34,7 +34,7 @@ SYSTEM_PROMPT = (
     "- Responda em português do Brasil, curto e direto (2 a 5 frases). Sem saudação, "
     "sem repetir a pergunta, sem encher linguiça.\n"
     "- ANCORE todo nível/preço nos números da seção DADOS (vindos do price_structure "
-    "desta run): EMA 8/21/50, médias MMS, zona de compra, zona de realização, gatilho "
+    "desta run): EMA 8/21/50, médias MMS, zona de recuo à média, zona de realização, gatilho "
     "1-2-3 e preço no momento. Cite o NÚMERO real de lá.\n"
     "- COPIE cada número e cada rótulo EXATAMENTE como aparecem em DADOS — não arredonde, "
     "não altere um dígito, não invente vírgula. As ÚNICAS médias que existem são EMA 8, "
@@ -184,7 +184,10 @@ def price_facts(actionable: dict | None, price_chart: dict | None) -> list[str]:
         has_number = has_number or val is not None
     lines.append("Médias simples (MMS): " + " · ".join(ma_bits) + ".")
 
-    for label_pt, key in (("Zona de compra", "buy_zone"),
+    # "Zona de compra" era o pior lugar da colisão: o modelo recebia a faixa da
+    # MÉDIA com o mesmo nome que o 1-2-3 de compra logo abaixo, e respondia como
+    # se fossem o mesmo setup. Aqui o nome é o do setup, não o da direção.
+    for label_pt, key in (("Zona de recuo à média (setup do recuo, não o 1-2-3)", "buy_zone"),
                           ("Zona de realização", "realize_zone"),
                           ("Recuo/gatilho a aguardar", "pullback_zone")):
         zone = actionable.get(key)

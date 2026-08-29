@@ -1064,6 +1064,10 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   color: var(--amber); background: #3a2f10; border-color: #5c4a17;
 }
 .act-setup.sem_setup, .act-setup.sem_dado { color: var(--muted); }
+/* DE QUAL setup veio o estado, colado nele: peso menor e cor herdada, porque é
+   qualificador do mesmo fato — não um segundo fato competindo por atenção. */
+.act-setup .act-src { font-weight: var(--fw-med); opacity: .8; margin-left: 6px; }
+.act-setup .act-src::before { content: "· "; opacity: .7; }
 .act-fact { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text); }
 .act-fact .act-k { color: var(--muted); margin-right: 5px; white-space: nowrap; }
 

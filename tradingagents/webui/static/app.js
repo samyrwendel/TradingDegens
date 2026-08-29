@@ -164,6 +164,18 @@ const SETUP_PT = {
   intradiario_indisponivel: ["⚪", "Intradiário indisponível"],
 };
 
+// DE QUAL setup veio o estado acima. São dois independentes, desenhados na mesma
+// tela, que podem coexistir e discordar: o RECUO À MÉDIA (faixa verde) e o 1-2-3
+// (gatilho no ponto 2). "Setup ativo agora" sozinho não dizia de quem falava — e
+// no ZEC-USD 4h falava da média enquanto o 1-2-3 acionado roubava o crédito.
+const SETUP_SOURCE_PT = {
+  recuo_media: "recuo à média",
+  123: "padrão 1-2-3",
+};
+function setupSourcePt(src) {
+  return SETUP_SOURCE_PT[src] || SETUP_SOURCE_PT[String(src)] || "";
+}
+
 // Rótulo COMPACTO do setup state pra chip estreito da watchlist (task 010): o
 // veredito de uma run 1-2-3 é o estado do setup, não "CONCLUÍDO". SETUP_PT tem
 // a frase completa (cabeçalho da análise); aqui a forma curta cabe na coluna.
@@ -1970,8 +1982,12 @@ function renderActionable(a) {
   } else if (rr && rr.note) {
     rrHtml = `<span class="act-fact" title="${escapeHtml(rr.note)}"><span class="act-k">⚖️ Risco/retorno</span> não calculável</span>`;
   }
+  // O estado sozinho é ambíguo quando os dois setups convivem — o nome da FONTE
+  // vai colado nele, não numa nota que o leitor tem que ir procurar.
+  const fonte = setupSourcePt(a.setup_source);
   el.innerHTML =
-    `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}</span>` +
+    `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}` +
+    (fonte ? `<span class="act-src">${escapeHtml(fonte)}</span>` : "") + `</span>` +
     `<span class="act-fact"><span class="act-k">🕐 Horizonte</span> ${escapeHtml(a.horizon || "—")}</span>` +
     `<span class="act-fact"><span class="act-k">📐 Timeframe</span> ${escapeHtml(a.timeframe || "—")}</span>` +
     rrHtml;
@@ -2131,10 +2147,20 @@ function renderChartCard(chart, ticker, actionable) {
   // note: pt-BR summary of what's marked
   const notes = [];
   if (active) {
-    notes.push(`🎯 <b>Setup ativo agora</b>: preço na ${active.ma_label} (${Math.abs(active.distance_pct).toFixed(1)}% ${active.distance_pct >= 0 ? "acima" : "abaixo"}).`);
+    // A frase antiga dizia "preço na MMS50 (2,8% acima)" — afirmava e desmentia na
+    // mesma linha. Agora ela nomeia o setup, dá a distância REAL do preço até a
+    // média e diz se isso ainda está DENTRO da faixa desenhada.
+    const bz = (actionable || {}).buy_zone || {};
+    const d = bz.distance_pct != null ? bz.distance_pct : active.distance_pct;
+    const onde = d >= 0 ? "acima" : "abaixo";
+    const dentro = bz.active_now === false
+      ? " — <b>fora da faixa</b>, não é entrada agora"
+      : " — dentro da faixa";
+    notes.push(`🎯 <b>Recuo à média</b>: preço ${Math.abs(d).toFixed(1)}% ${onde} da ` +
+               `${escapeHtml(active.ma_label)}${dentro}.`);
   }
   const nreg = (chart.markers && chart.markers.buy_regions || []).length;
-  if (nreg) notes.push(`${nreg} região(ões) de compra na média marcada(s) no período.`);
+  if (nreg) notes.push(`${nreg} região(ões) de <b>recuo à média</b> marcada(s) no período.`);
   if (pat) {
     const [demo, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     const verb = pat.direction === "venda" ? "perda de" : "rompimento de";
@@ -2374,10 +2400,19 @@ async function switchTimeframe(tf) {
 function planZones(a) {
   if (!a) return [];
   const out = [];
+  // A zona da média é o setup do RECUO — NUNCA sai rotulada só "compra", porque
+  // o 1-2-3 de compra é OUTRO setup, com outro gatilho, desenhado no mesmo gráfico.
+  // Era essa colisão de nome que fazia o ZEC-USD 4h parecer contradição: a faixa
+  // dizia "compra 803,09" com o preço em 835,20 e o card dizia COMPRA — dois
+  // setups, um nome só. O rótulo rico já vem do backend (``tag``).
   const buy = a.buy_zone;
   if (buy && buy.price != null) {
-    const waiting = a.setup_state === "aguardar_pullback";
-    out.push({ ...buy, color: ZONE_COLORS.buy, tag: waiting ? "compra (recuo à média)" : "compra" });
+    // "não ativa agora" é fato do backend (preço fora da faixa DESENHADA), não
+    // inferência da tela: faixa fora do preço para de se desenhar como entrada.
+    const fora = buy.active_now === false;
+    const nome = buy.tag || "recuo à média";
+    out.push({ ...buy, color: ZONE_COLORS.buy, inactive: fora,
+               tag: fora ? `${nome} — não ativa agora` : nome });
   }
   // A região de realização só se chama "alvo" quando de fato é: num setup de VENDA
   // ela é o topo acima (resistência, nunca o alvo de um short) e, quando coincide
@@ -2618,10 +2653,15 @@ function drawPriceChart(canvas, chart, a) {
     const hasBand = z.low != null && z.high != null && z.high > z.low;
     if (hasBand) {
       const yTop = y(z.high), yBot = y(z.low);
-      ctx.fillStyle = z.color + "1f";
+      // Faixa NÃO ATIVA (preço fora dela) se desenha diferente da ativa: mais
+      // apagada e com a borda tracejada. Antes as duas saíam idênticas, e uma
+      // região que não é entrada agora tinha o mesmo peso visual de uma que é.
+      ctx.fillStyle = z.color + (z.inactive ? "10" : "1f");
       ctx.fillRect(padL, yTop, plotW, Math.max(2, yBot - yTop));
-      ctx.strokeStyle = z.color + "55"; ctx.lineWidth = 1;
+      ctx.strokeStyle = z.color + (z.inactive ? "40" : "55"); ctx.lineWidth = 1;
+      if (z.inactive) ctx.setLineDash([4, 3]);
       ctx.strokeRect(padL + 0.5, yTop + 0.5, plotW - 1, Math.max(2, yBot - yTop));
+      ctx.setLineDash([]);
     } else {
       const yy = y(z.price);
       ctx.strokeStyle = z.color + "aa"; ctx.setLineDash(z.dash || [5, 4]); ctx.lineWidth = 1.2;
@@ -4720,7 +4760,11 @@ function scanEstadoChip(estado, direction) {
   if (estado === "em_gatilho") {
     const dir = direction === "venda" ? "venda" : "compra";
     const [pt, dot] = entry[dir];
-    return `<span class="scan-chip ${dir}">${dot} ${escapeHtml(pt)}</span>`;
+    // O chip diz COMPRA/VENDA, e no scan isso é SEMPRE o 1-2-3 (o estado vem do
+    // pattern). Diz isso no title pra que a mesma palavra na tela de análise —
+    // onde também existe o recuo à média — não vire dúvida sobre qual setup.
+    const tit = `padrão 1-2-3 de ${dir} acionado (gatilho rompido)`;
+    return `<span class="scan-chip ${dir}" title="${escapeHtml(tit)}">${dot} ${escapeHtml(pt)}</span>`;
   }
   const [pt, dot] = entry;
   const cls = estado === "em_movimento" ? "scan-chip movimento"

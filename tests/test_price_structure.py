@@ -398,7 +398,11 @@ def test_section_data_failure_is_graceful(monkeypatch):
 @pytest.mark.unit
 def test_section_lists_region_and_pattern(synth):
     section = ps.build_price_structure_section("SYN", CURR)
-    assert "Regiões de compra na média" in section
+    # "Regiões de compra na média" virou "Regiões de recuo à média": o relatório
+    # trazia as duas seções chamando o setup de "compra", e o 1-2-3 de compra
+    # logo abaixo é OUTRO setup (ver tests/test_setup_naming_collision.py).
+    assert "Regiões de recuo à média" in section
+    assert "Regiões de compra na média" not in section
     assert "Padrão 1-2-3 de compra" in section
     assert "Ponto 1" in section and "Gatilho" in section
 

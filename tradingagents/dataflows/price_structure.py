@@ -4,7 +4,7 @@ The market analyst calculates *indicators* (RSI, MACD, moving averages,
 Bollinger) but never looks for **price structure** — the setup the product owner
 actually trades:
 
-* **Região de compra na média** — the price pulls back to a rising moving
+* **Região de recuo à média** — the price pulls back to a rising moving
   average, touches it, and reacts up from there. Buy at the touch and hold; over
   days-to-months it tends to pay.
 * **Padrão 1-2-3, both directions** — the classic reversal in either sense:
@@ -617,15 +617,19 @@ def build_price_structure_section(
 
     if s.active_region is not None:
         a = s.active_region
+        # NOMEIA o setup ("recuo à média", não "compra": o 1-2-3 de compra é outro
+        # setup no mesmo relatório) e não afirma "o preço está na média" quando o
+        # número ao lado diz que ele está a alguns por cento dela.
+        onde = "acima" if a.distance_pct >= 0 else "abaixo"
         lines += [
-            f"🎯 **Setup ativo agora** — o preço está na {a.ma_label} "
-            f"({abs(a.distance_pct):.1f}% "
-            f"{'acima' if a.distance_pct >= 0 else 'abaixo'}, mínima {a.low:,.2f} / "
-            f"média {a.ma_value:,.2f}): região de compra em formação.",
+            f"🎯 **Setup ativo agora — recuo à média** — a mínima está "
+            f"{abs(a.distance_pct):.1f}% {onde} da {a.ma_label} "
+            f"(mínima {a.low:,.2f} / média {a.ma_value:,.2f}): "
+            "região de recuo à média em formação.",
             "",
         ]
 
-    lines.append("### Regiões de compra na média (último ano)")
+    lines.append("### Regiões de recuo à média (último ano)")
     if s.buy_regions:
         # Most recent first; cap the list so the report stays readable.
         for r in reversed(s.buy_regions[-5:]):
@@ -633,7 +637,7 @@ def build_price_structure_section(
         if len(s.buy_regions) > 5:
             lines.append(f"- _(+{len(s.buy_regions) - 5} outras regiões no período)_")
     else:
-        lines.append("_Nenhuma região de compra na média identificada no último ano._")
+        lines.append("_Nenhuma região de recuo à média identificada no último ano._")
     lines.append("")
 
     if s.pattern is not None:
@@ -804,6 +808,11 @@ class ActionablePlan:
     stop: dict[str, Any] | None = None           # invalidação + folga de ATR
     target: dict[str, Any] | None = None         # alvo (TP) do setup
     risk_reward: dict[str, Any] | None = None    # R:R a partir de entrada/stop/alvo
+    # DE QUAL SETUP veio o ``setup_state``. São dois setups INDEPENDENTES que a
+    # tela chamava igual: ``recuo_media`` (recuo até uma média ascendente, a faixa
+    # verde do gráfico) e ``123`` (rompimento da máxima do ponto 2). Podem coexistir
+    # e até discordar — sem este campo o veredito não dizia de quem estava falando.
+    setup_source: str | None = None              # recuo_media | 123 | None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -821,6 +830,7 @@ class ActionablePlan:
             "stop": self.stop,
             "target": self.target,
             "risk_reward": self.risk_reward,
+            "setup_source": self.setup_source,
         }
 
 
@@ -1099,14 +1109,20 @@ def build_actionable_plan(
     struct = detect_price_structure(symbol, curr_date, timeframe, method)
     lows, highs = _swings(df, _method_k(method))
 
-    # Região de compra — a RISING moving average the detector already identified.
+    # Região de compra na MÉDIA — o setup do RECUO, que NÃO é o 1-2-3. ``ma_label``
+    # fica no payload porque a tela precisa NOMEAR o setup (não basta "compra": o
+    # 1-2-3 de compra é outro setup, com outro gatilho, e os dois convivem na mesma
+    # tela). ``origin`` distingue o ramo: "ativa" é a média que o detector diz estar
+    # sendo tocada AGORA, "historica" é a última onde o preço reagiu.
     buy_zone = None
     if struct.active_region is not None:
         a = struct.active_region
-        buy_zone = {"label": f"{a.ma_label} — preço na média agora", "price": a.ma_value}
+        buy_zone = {"label": f"{a.ma_label} — preço na média agora", "price": a.ma_value,
+                    "ma_label": a.ma_label, "origin": "ativa"}
     elif struct.buy_regions:
         r = struct.buy_regions[-1]  # most recent
-        buy_zone = {"label": f"{r.ma_label} — média onde reagiu em {r.date}", "price": r.ma_value}
+        buy_zone = {"label": f"{r.ma_label} — média onde reagiu em {r.date}", "price": r.ma_value,
+                    "ma_label": r.ma_label, "origin": "historica"}
 
     # Região de realização — nearest prior swing high overhead.
     realize_zone = _nearest_overhead_high(df, highs, price, fmt)
@@ -1118,10 +1134,13 @@ def build_actionable_plan(
     #  • nothing actionable                 -> no level, no operable horizon
     pullback_zone = None
     pullback_is_trigger = False
+    setup_source = None
     if struct.active_region is not None:
         setup_state = "ativo"
+        setup_source = "recuo_media"
     elif buy_zone is not None and buy_zone["price"] < price:
         setup_state = "aguardar_pullback"
+        setup_source = "recuo_media"
         pullback_zone = {
             "label": f"recuo até {buy_zone['label'].split(' —')[0]} (média subindo)",
             "price": buy_zone["price"],
@@ -1130,6 +1149,7 @@ def build_actionable_plan(
         # "formando" (nunca rompeu) e "rompeu_retracou" (rompeu e voltou) têm o preço
         # do lado NÃO rompido do gatilho → em ambos o que se espera é o rompimento.
         setup_state = "aguardar_rompimento"
+        setup_source = "123"
         pullback_is_trigger = True  # a trigger is a line, not a zone → stays a point
         if struct.pattern.direction == "venda":
             trig_label = "perda da mínima do ponto 2 (gatilho 1-2-3 de venda)"
@@ -1146,6 +1166,29 @@ def build_actionable_plan(
     realize_zone = _banded(realize_zone, atr)
     pullback_zone = _banded(pullback_zone, None if pullback_is_trigger else atr)
 
+    # A zona da média NOMEIA o próprio setup e diz se está ATIVA AGORA — e "ativa"
+    # é medida contra a faixa que o gráfico DESENHA (±0,5·ATR), não contra a
+    # tolerância de toque do detector (``_TOUCH_TOL`` = 8%), que é ordens de
+    # grandeza mais larga. Era essa diferença de régua que produzia o ZEC-USD 4h
+    # de 29/08: preço 836,38 visivelmente fora da faixa 790,32–815,92 enquanto o
+    # rótulo afirmava "preço na média agora". O limiar do detector fica como está
+    # (mudá-lo mudaria a DETECÇÃO); o que muda é a tela parar de afirmar o que o
+    # número desmente.
+    if buy_zone is not None:
+        origem = buy_zone.pop("origin", None)
+        ma_label = buy_zone.get("ma_label") or "média"
+        dist = ((price / buy_zone["price"] - 1) * 100) if buy_zone.get("price") else None
+        dentro = (buy_zone.get("low") is not None
+                  and buy_zone["low"] <= price <= buy_zone["high"])
+        buy_zone["setup"] = "recuo_media"
+        buy_zone["tag"] = f"recuo à média ({ma_label})"
+        buy_zone["active_now"] = bool(dentro)
+        buy_zone["distance_pct"] = round(dist, 1) if dist is not None else None
+        if origem == "ativa" and not dentro and dist is not None:
+            onde = "acima" if dist > 0 else "abaixo"
+            buy_zone["label"] = (f"{ma_label} — preço {abs(dist):.1f}% {onde} da média, "
+                                 f"fora da faixa (não é entrada agora)")
+
     # Reconciliação compra×realização: âncoras distintas com bandas que se cobrem
     # (ex.: EMA 21 e topo anterior a 0,7 de distância com ±0,5·ATR) NÃO são duas
     # zonas independentes — comprar e realizar no mesmo preço é setup degenerado.
@@ -1155,8 +1198,8 @@ def build_actionable_plan(
         and buy_zone.get("high") is not None and realize_zone.get("low") is not None
         and buy_zone["high"] >= realize_zone["low"]
     ):
-        note = ("faixa de compra cobre a de realização — sem espaço entre a média "
-                "e o alvo: setup degenerado, não duas zonas independentes")
+        note = ("faixa de recuo à média cobre a de realização — sem espaço entre a "
+                "média e o alvo: setup degenerado, não duas zonas independentes")
         buy_zone["overlap_note"] = note
         realize_zone["overlap_note"] = note
 
@@ -1174,6 +1217,7 @@ def build_actionable_plan(
         buy_zone=buy_zone, realize_zone=realize_zone, pullback_zone=pullback_zone,
         pattern=struct.pattern.as_dict() if struct.pattern is not None else None,
         invalidation=invalidation, stop=stop, target=target, risk_reward=risk_reward,
+        setup_source=setup_source,
     )
 
 
