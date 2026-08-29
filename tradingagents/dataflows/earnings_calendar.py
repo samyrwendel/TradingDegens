@@ -179,12 +179,6 @@ def _fmt_event(ev: dict) -> str:
     return f"{ev['date']}{when}{est}"
 
 
-def _missing_line(label: str) -> str:
-    """Linha de ausência que DIZ a causa — as duas se leem ao contrário uma da
-    outra e nunca podem sair na mesma frase (ver :data:`STATUS_SEM_AGENDA`)."""
-    return label
-
-
 def _event_line(name: str, tag: str, ev: dict | None, status: str) -> str:
     if ev is None:
         if status == STATUS_SEM_AGENDA:

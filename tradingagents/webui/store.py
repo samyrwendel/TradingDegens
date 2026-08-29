@@ -219,7 +219,12 @@ class WatchlistStore:
         current = self.get()
         if up and not any(w.get("ticker") == up for w in current):
             current.insert(0, {"ticker": up})
-            self._write(current[:100])
+            # Truncar UMA vez e devolver a MESMA lista que foi pro disco: antes
+            # gravava ``current[:100]`` e devolvia ``current`` inteiro, então o 101º
+            # ticker aparecia na UI e sumia no reload — a tela mentia sobre o que
+            # tinha sido salvo.
+            current = current[:100]
+            self._write(current)
         return current
 
     def remove(self, ticker: str) -> list[dict[str, Any]]:

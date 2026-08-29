@@ -123,6 +123,37 @@ def test_scan_watchlist_em_gatilho_first(fake_fetch):
     assert out["resumo"]["em_gatilho"] == 2
 
 
+def test_chart_so_e_buscado_quando_serve_de_fallback(monkeypatch):
+    """Limpeza: o chart reroda a detecção de estrutura inteira e só existia como
+    último recurso pro preço. Com plan['price'] presente, nem é tocado — antes
+    dobrava esse trabalho por (ticker, frame), 3 frames × a watchlist toda."""
+    def nunca(t, d, timeframe="1d", method="padrao"):
+        raise AssertionError("o chart foi buscado sem precisar")
+
+    monkeypatch.setattr(sc, "build_actionable_plan_dict",
+                        lambda t, d, timeframe="1d", method="padrao":
+                        {"price": 100.0, "pattern": _pat(trigger=100.2),
+                         "setup_state": "ativo"})
+    monkeypatch.setattr(sc, "build_price_chart", nunca)
+    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    r = scan_symbol("A", "2026-08-28", frames=("1d",))
+    assert r["melhor"]["estado"] == "em_gatilho"
+
+
+def test_sem_preco_no_plan_o_chart_ENTRA_como_fallback(monkeypatch):
+    """Contra-prova: preguiçoso não é ausente — sem price no plano, o chart salva."""
+    monkeypatch.setattr(sc, "build_actionable_plan_dict",
+                        lambda t, d, timeframe="1d", method="padrao":
+                        {"price": None, "pattern": _pat(trigger=100.2),
+                         "setup_state": "ativo"})
+    monkeypatch.setattr(sc, "build_price_chart",
+                        lambda t, d, timeframe="1d", method="padrao":
+                        {"candles": [{"c": 100.0}]})
+    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    r = scan_symbol("A", "2026-08-28", frames=("1d",))
+    assert r["melhor"]["estado"] == "em_gatilho" and r["melhor"]["price"] == 100.0
+
+
 def test_scan_log_is_append_only_dedup_free(tmp_path):
     log = ScanLog(tmp_path / "scans.jsonl")
     log.record({"ticker": "MSFT", "frame": "4h", "trigger": 513.73, "direction": "compra"})
@@ -174,7 +205,7 @@ def test_verdicts_are_direction_aware(tmp_path, monkeypatch):
     _serie(monkeypatch,
            {"V": [_c("2026-08-21", 101.0, 98.0)], "C": [_c("2026-08-21", 106.0, 104.0)]},
            {"V": 99.0, "C": 105.0})
-    out = scan_verdicts(log, ["V", "C"], "2026-08-28")
+    out = scan_verdicts(log, "2026-08-28")
     v = {x["ticker"]: x["veredito"] for x in out["verdicts"]}
     assert v["V"] == "andamento_lucro"      # venda lucra caindo
     assert v["C"] == "andamento_lucro"
@@ -193,7 +224,7 @@ def test_verdicts_tp_sl_closed_counts(tmp_path, monkeypatch):
            {"C": [_c("2026-08-21", 111.0, 100.0)],     # máxima cruzou o TP
             "S": [_c("2026-08-21", 101.0, 94.0)]},     # mínima cruzou o SL
            {"C": 105.0, "S": 96.0})
-    out = scan_verdicts(log, ["C", "S"], "2026-08-28")
+    out = scan_verdicts(log, "2026-08-28")
     v = {x["ticker"]: x["veredito"] for x in out["verdicts"]}
     assert v["C"] == "bateu_tp" and v["S"] == "bateu_sl"
     assert out["n_fechados"] == 2 and out["taxa_acerto"] == 0.5
@@ -215,7 +246,7 @@ def test_tocou_o_tp_e_voltou_continua_bateu_tp(tmp_path, monkeypatch):
                   _c("2026-08-22", 103.0, 99.0),       # e voltou
                   _c("2026-08-25", 101.0, 96.0)]},
            {"C": 100.5})                                # preço de hoje: longe do TP
-    out = scan_verdicts(log, ["C"], "2026-08-28")
+    out = scan_verdicts(log, "2026-08-28")
     v = out["verdicts"][0]
     assert v["veredito"] == "bateu_tp", v
     assert v["fechado"] is True and v["fechado_em"] == "2026-08-21"
@@ -236,7 +267,7 @@ def test_bateu_sl_e_recuperou_continua_bateu_sl(tmp_path, monkeypatch):
            {"S": [_c("2026-08-21", 101.0, 94.0),       # perfurou o SL
                   _c("2026-08-22", 106.0, 100.0)]},    # e recuperou
            {"S": 106.0})
-    v = scan_verdicts(log, ["S"], "2026-08-28")["verdicts"][0]
+    v = scan_verdicts(log, "2026-08-28")["verdicts"][0]
     assert v["veredito"] == "bateu_sl" and v["fechado_em"] == "2026-08-21"
 
 
@@ -253,7 +284,7 @@ def test_veredito_fechado_nao_muda_quando_a_data_avanca(tmp_path, monkeypatch):
     saidas = []
     for i, dia in enumerate(("2026-08-22", "2026-08-25", "2026-08-28"), start=1):
         _serie(monkeypatch, {"C": serie[:max(1, i)]}, {"C": 92.0})
-        saidas.append(scan_verdicts(log, ["C"], dia))
+        saidas.append(scan_verdicts(log, dia))
     assert {o["verdicts"][0]["veredito"] for o in saidas} == {"bateu_tp"}
     assert {o["taxa_acerto"] for o in saidas} == {1.0}
 
@@ -266,7 +297,7 @@ def test_tp_e_sl_na_mesma_barra_conta_sl(tmp_path, monkeypatch):
          "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
     ])
     _serie(monkeypatch, {"X": [_c("2026-08-21", 112.0, 94.0)]}, {"X": 100.0})
-    v = scan_verdicts(log, ["X"], "2026-08-28")["verdicts"][0]
+    v = scan_verdicts(log, "2026-08-28")["verdicts"][0]
     assert v["veredito"] == "bateu_sl" and v["empate_na_barra"] is True
 
 
@@ -279,7 +310,7 @@ def test_o_proprio_dia_do_log_nao_fecha_o_trade(tmp_path, monkeypatch):
          "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
     ])
     _serie(monkeypatch, {"C": [_c("2026-08-21", 115.0, 99.0)]}, {"C": 101.0})
-    out = scan_verdicts(log, ["C"], "2026-08-28")
+    out = scan_verdicts(log, "2026-08-28")
     assert out["verdicts"][0]["veredito"] == "andamento_lucro"
     assert out["n_fechados"] == 0
 
@@ -298,6 +329,6 @@ def test_sem_serie_o_trade_fica_ABERTO_nunca_fechado_no_escuro(tmp_path, monkeyp
                         {"price": 120.0, "pattern": None, "setup_state": "ativo"})
     monkeypatch.setattr(sc, "build_price_chart", boom)
     monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
-    out = scan_verdicts(log, ["C"], "2026-08-28")
+    out = scan_verdicts(log, "2026-08-28")
     assert out["verdicts"][0]["fechado"] is False
     assert out["n_fechados"] == 0

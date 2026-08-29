@@ -68,12 +68,20 @@ def _live_price(ticker: str) -> float | None:
         return None
 
 
+def _chart_fallback(ticker: str, date: str, frame: str) -> dict:
+    """Chart só pro último recurso de preço (ver :func:`_frame_row`). Fail-open."""
+    try:
+        return build_price_chart(ticker, date, timeframe=frame) or {}
+    except Exception as exc:  # noqa: BLE001 — fallback nunca derruba o scan
+        logger.info("chart de fallback falhou para %s %s: %s", ticker, frame, exc)
+        return {}
+
+
 def _frame_row(ticker: str, date: str, frame: str,
                live_price: float | None = None) -> dict[str, Any]:
-    """Uma linha do scan: plano + chart do frame, classificada."""
+    """Uma linha do scan: plano do frame, classificada."""
     try:
         plan = build_actionable_plan_dict(ticker, date, timeframe=frame)
-        chart = build_price_chart(ticker, date, timeframe=frame)
     except Exception as exc:  # noqa: BLE001 — scan nunca cai por um símbolo
         logger.info("scan fetch falhou para %s %s: %s", ticker, frame, exc)
         return {"frame": frame, "estado": "sem_dado", "motivo": str(exc)}
@@ -83,7 +91,13 @@ def _frame_row(ticker: str, date: str, frame: str,
     # Preço ATUAL tem prioridade: o gatilho é onde se entra AGORA, então a
     # distância é medida do live. Sem live (fonte instável/fora do ar), usa o
     # last close do plan (date-guarded) — declarado, nunca inventado.
-    price = live_price if live_price is not None else (plan.get("price") or _last_close(chart))
+    #
+    # O chart é o ÚLTIMO recurso e por isso vem PREGUIÇOSO: ele reroda a detecção
+    # de estrutura inteira, e buscá-lo sempre dobrava esse trabalho por (ticker,
+    # frame) — 3 frames × a watchlist toda — pra um fallback que quase nunca entra.
+    price = live_price if live_price is not None else plan.get("price")
+    if price is None:
+        price = _last_close(_chart_fallback(ticker, date, frame))
     if not pat or pat.get("trigger") is None or price is None:
         setup = plan.get("setup_state")
         if setup in ("sem_dado", "intradiario_indisponivel"):
@@ -248,7 +262,7 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     return None
 
 
-def scan_verdicts(log: ScanLog, tickers: list[str], date: str) -> dict[str, Any]:
+def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
     """Re-avalia cada gatilho logado — FECHADO pela série, ABERTO pelo preço de hoje.
 
     Fechado (``bateu_tp``/``bateu_sl``): decidido pelo primeiro toque em TP ou SL
