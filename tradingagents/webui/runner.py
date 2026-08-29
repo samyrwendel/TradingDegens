@@ -936,6 +936,37 @@ class AnalysisRunner:
         threading.Thread(target=self._worker_setup123, args=(run,), daemon=True).start()
         return run_id
 
+    def _cotacao_da_run(self, run: _Run) -> dict[str, Any] | None:
+        """Cotação ATUAL do ativo pra o cabeçalho — só em run de HOJE.
+
+        O plano é date-guarded: o preço que ele carrega é o ÚLTIMO FECHAMENTO da
+        série, e a tela o mostrava como se fosse "agora" (MSFT em 29/08: 505,06 de
+        27/08 no cabeçalho, com o papel valendo 513,53). Buscar a cotação resolve
+        metade; a outra metade é DIZER qual preço é esse — fechado, pré ou pós vêm
+        rotulados de ``fetch_live_price``.
+
+        Em run de data PASSADA não se busca nada: a cotação de hoje não pertence à
+        análise daquele dia (mesma regra do DA-073), e a tela declara a data em vez
+        de exibir um número que não é dali. Fail-open: sem cotação, o cabeçalho cai
+        no preço da análise, como antes.
+        """
+        try:
+            if str(run.date)[:10] != timeutil.today():
+                return None
+            from tradingagents.dataflows.live_price import fetch_live_price
+
+            cot = fetch_live_price(run.ticker)
+            if not cot:
+                return None
+            # CARIMBO do dia da cotação: o resultado inteiro é persistido, e uma run
+            # reaberta amanhã mostraria a cotação de hoje como se fosse "agora". Com
+            # o carimbo, a tela só a trata como atual enquanto for do dia corrente.
+            cot["em"] = timeutil.today()
+            return cot
+        except Exception as exc:  # noqa: BLE001 — cotação nunca derruba a análise
+            logger.info("cotação do cabeçalho indisponível para %s: %s", run.ticker, exc)
+            return None
+
     def _worker_setup123(self, run: _Run) -> None:
         """Worker da run 1-2-3: computa chart+plano (cacheado, ~1-2s) e encerra."""
         data_notices.reset()   # avisos de qualidade de dado desta run começam do zero
@@ -956,6 +987,9 @@ class AnalysisRunner:
                 "price_chart": chart or {},
                 "actionable": plan or {},
                 "as_of_price": (plan or {}).get("price"),
+                # Cotação ATUAL + a sessão dela (só em run de hoje) — ver
+                # :meth:`_cotacao_da_run`.
+                "live_price": self._cotacao_da_run(run),
                 "setup123": True,
                 "timeframes": timeframes_for_asset(run.asset_type),
             }
@@ -1091,6 +1125,8 @@ class AnalysisRunner:
             # que a UI já sabe nomear. Sem isto o dado velho chegava mudo (bug L2).
             data_notices.merge_into(final_state)
             run.result = extract_result(final_state, signal)
+            # Cotação ATUAL + sessão (fechado/pré/pós) pro cabeçalho — só run de hoje.
+            run.result["live_price"] = self._cotacao_da_run(run)
             if run.asset_type == "crypto":
                 run.result["derivatives_report"] = fetch_derivatives_report(
                     run.ticker, run.date
@@ -1422,6 +1458,12 @@ class AnalysisRunner:
         result = copy.deepcopy(prior.get("result") or {})
         result["reused"] = True
         result["reused_from"] = prior.get("run_id")
+        # A ANÁLISE é reaproveitada; a COTAÇÃO não. O reuso devolve a leitura
+        # estrutural íntegra (é isso que o DA-058 promete), mas o preço de tela é do
+        # momento em que se OLHA — herdar o do run anterior mostraria uma cotação
+        # velha com carimbo de agora, que é o defeito que esta tela acabou de
+        # corrigir. Fail-open: sem cotação, some o bloco (o preço da análise fica).
+        result["live_price"] = self._cotacao_da_run(run)
         run.result = result
         run.reused = True
         run.reused_from = prior.get("run_id")

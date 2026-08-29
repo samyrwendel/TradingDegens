@@ -1044,6 +1044,7 @@ function renderResult(snap) {
     $("chartCard").classList.add("hidden");
     $("actionable").classList.add("hidden");
     $("headPrice").classList.add("hidden");
+    $("headLevels").classList.add("hidden");   // run com erro não tem gatilho nem cotação a mostrar
     $("verdictTf").classList.add("hidden");
     $("degradedBanner").classList.add("hidden");
     $("exportPdfBtn").classList.add("hidden");  // nada de análise pra exportar num run com erro
@@ -1142,7 +1143,8 @@ function renderResult(snap) {
   renderDegraded(r.degraded);
   hideDegrade();
 
-  renderHeadPrice(r.actionable);
+  renderHeadPrice(r.actionable, r.live_price);
+  renderHeadTriggers(r.actionable);
   renderActionable(r.actionable);
   renderChartCard(r.price_chart, snap.ticker, r.actionable);
   renderTfSelector();
@@ -1888,16 +1890,67 @@ function runReanalyze(method, tf) {
     .catch(() => { $("formError").textContent = "falha ao reanalisar"; });
 }
 
-// ---- header price + setup strip -------------------------------------------
-// O preço no momento da análise é a terceira âncora do cabeçalho (ticker ·
-// veredito · preço), não uma linha perdida num card. Vem do plano acionável
-// (último fechamento da série datada); ausente, o cabeçalho some com ele.
-function renderHeadPrice(a) {
+// ---- rodapé do cabeçalho: gatilhos + preço, no canto inferior direito -------
+// Pedido do Samyr: o VEREDITO fica em cima; os GATILHOS descem pro canto inferior
+// direito do card, ao lado do preço atual, alinhados à direita. Antes os níveis só
+// existiam no texto abaixo do gráfico — o leitor tinha que caçar o gatilho.
+//
+// E o PREÇO passa a dizer o que é. O plano é date-guarded: o número que ele carrega
+// é o último FECHAMENTO da série (MSFT em 29/08 mostrava 505,06 de 27/08 com o papel
+// valendo 513,53), e a tela o exibia como se fosse "agora". Agora a run de HOJE
+// carrega a cotação com a SESSÃO declarada (fechamento × pré-market × after-market
+// são preços diferentes) e o preço da análise fica ao lado, como referência.
+function renderHeadPrice(a, live) {
   const el = $("headPrice");
-  if (!a || a.price == null) { el.classList.add("hidden"); el.innerHTML = ""; return; }
-  el.innerHTML = `<b>${fmtNum(a.price)}</b>` +
-    (a.as_of ? `<span class="hp-when">em ${fmtDate(a.as_of)}</span>` : "");
-  el.classList.remove("hidden");
+  const box = $("headLevels");
+  const analise = a && a.price != null
+    ? `<b>${fmtNum(a.price)}</b>` + (a.as_of ? `<span class="hp-when">em ${fmtDate(a.as_of)}</span>` : "")
+    : "";
+  // A cotação só vale como ATUAL no dia em que foi tirada: o resultado é persistido,
+  // e uma run reaberta amanhã mostraria a de hoje como se fosse de agora.
+  const hoje = _todayManaus || "";
+  const atual = live && live.price != null && (!live.em || !hoje || live.em === hoje)
+    ? `<span class="hp-live"><b>${fmtNum(live.price)}</b>` +
+      `<span class="hp-tag">${escapeHtml(live.rotulo || "cotação")}` +
+      `${live.as_of ? " · " + escapeHtml(live.as_of) : ""}</span></span>`
+    : "";
+  if (!analise && !atual) {
+    el.classList.add("hidden"); el.innerHTML = "";
+  } else {
+    el.innerHTML = atual + (atual && analise ? `<span class="hp-sep">análise</span>` : "") + analise;
+    el.classList.remove("hidden");
+  }
+  if (box) box.classList.toggle("hidden", !el.innerHTML && !$("headTriggers").innerHTML);
+}
+
+// Os GATILHOS do 1-2-3 na tira inferior direita: gatilho · SL · TP · R:R. Cada um
+// some quando não existe (nunca "—" inventado); sem alvo publicável, mostra o MOTIVO
+// (mesma regra do scan: número recusado vira explicação, não um valor sem sentido).
+function renderHeadTriggers(a) {
+  const el = $("headTriggers");
+  if (!el) return;
+  const pat = (a || {}).pattern || {};
+  const partes = [];
+  if (pat.trigger != null) {
+    const seta = pat.direction === "venda" ? "⬇️" : "⬆️";
+    partes.push(`<span class="hl-item">${seta} gatilho <b>${fmtNum(pat.trigger)}</b></span>`);
+  }
+  const sl = (a || {}).stop || {};
+  if (sl.price != null) partes.push(`<span class="hl-item">🛑 SL <b>${fmtNum(sl.price)}</b></span>`);
+  const tp = (a || {}).target || {};
+  const rr = (a || {}).risk_reward || {};
+  if (tp.price != null && !(rr.note && rr.rr == null)) {
+    partes.push(`<span class="hl-item">🎯 TP <b>${fmtNum(tp.price)}</b></span>`);
+  } else if (rr.note) {
+    partes.push(`<span class="hl-item hl-warn">⚠️ ${escapeHtml(rr.note)}</span>`);
+  }
+  if (rr.rr != null) partes.push(`<span class="hl-item">⚖️ R:R <b>${fmtNum(rr.rr)}</b></span>`);
+  el.innerHTML = partes.join("");
+  el.classList.toggle("hidden", !partes.length);
+  // A tira some só quando NENHUM dos dois lados tem conteúdo (gatilhos e preço são
+  // independentes: um 1-2-3 sem padrão ainda mostra a cotação).
+  const box = $("headLevels");
+  if (box) box.classList.toggle("hidden", !partes.length && !$("headPrice").innerHTML);
 }
 
 // A faixa do setup carrega SÓ o que o gráfico não desenha: estado, horizonte e
@@ -2303,7 +2356,8 @@ async function switchTimeframe(tf) {
     _tf = data.timeframe || tf;
     if (Array.isArray(data.timeframes) && data.timeframes.length) _timeframes = data.timeframes;
     renderTfSelector();
-    renderHeadPrice(data.actionable);
+    renderHeadPrice(data.actionable, data.live_price);
+    renderHeadTriggers(data.actionable);
     renderActionable(data.actionable);
     renderChartCard(data.price_chart, _openTicker, data.actionable);
     if (data.degraded && data.notice) showDegrade(data.notice);
@@ -4779,6 +4833,70 @@ function renderScanFilters(s) {
   });
 }
 
+// Busca + modo de apresentação (pedido do Samyr). A busca filtra por SIGLA — é
+// assim que se procura um papel numa lista de 20 × 3 frames. O modo fica guardado
+// no navegador: quem prefere a lista densa não escolhe de novo a cada scan.
+const _SCAN_VIEW_KEY = "td_scan_view";
+let _scanBusca = "";
+let _scanView = (() => {
+  try { return localStorage.getItem(_SCAN_VIEW_KEY) === "lista" ? "lista" : "cards"; }
+  catch (e) { return "cards"; }
+})();
+
+// Badge do TIMEFRAME no INÍCIO da linha. Antes o frame saía colado no preço
+// ("1d$513,530.15%"), sem respiro nem hierarquia — o olho não achava onde começava
+// cada coisa. Agora é o primeiro elemento, com largura fixa, e o preço vem depois.
+function scanTfBadge(frame) {
+  return `<span class="scan-tf">${escapeHtml(frame || "—")}</span>`;
+}
+
+// Níveis de uma linha do scan (gatilho · SL · TP · R:R), ou o MOTIVO quando o
+// servidor recusou o alvo. Compartilhado pelos dois modos de apresentação.
+function scanLevelsHtml(f) {
+  const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
+  if (!hasLevels) {
+    return (f.estado === "invalidou" && f.invalidacao != null)
+      ? `<div class="scan-levels"><span>⚫ invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
+      : "";
+  }
+  return `<div class="scan-levels">` +
+    `<span>🎯 gatilho <b>${scanFmt(f.trigger)}</b></span>` +
+    `<span>🛑 SL <b>${scanFmt(f.sl)}</b></span>` +
+    // Sem alvo publicável, mostra o MOTIVO (o que a tela de análise já faz) em
+    // vez de um TP que o servidor recusou — antes vinha "🎯 TP 512,76" ao lado
+    // de "🎯 gatilho 512,76 · R:R não calculável", e o porquê era descartado.
+    (f.tp != null
+      ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` +
+        `<span>R:R <b>${f.rr != null ? f.rr.toFixed(2) : "não calculável"}</b></span>`
+      : `<span class="scan-note">⚠️ sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
+    `</div>`;
+}
+
+function scanActionsHtml(ticker, f) {
+  if (f.estado !== "em_gatilho") return "";
+  return `<div class="scan-actions-row">` +
+    `<button type="button" class="scan-go" data-go="${escapeHtml(ticker)}|${escapeHtml(f.frame)}|padrao">Analisar Padrão</button>` +
+    `<button type="button" class="scan-go erick" data-go="${escapeHtml(ticker)}|${escapeHtml(f.frame)}|erick">Analisar Erick</button>` +
+    `</div>`;
+}
+
+// Liga a busca e o alternador de modo UMA vez (a lista é repintada a cada filtro).
+let _scanToolsBound = false;
+function bindScanTools() {
+  if (_scanToolsBound) return;
+  _scanToolsBound = true;
+  const busca = $("scanSearch");
+  if (busca) busca.addEventListener("input", () => {
+    _scanBusca = busca.value.trim().toUpperCase();
+    if (_scanData) paintScan(_scanData);
+  });
+  document.querySelectorAll(".scan-view").forEach((b) => b.addEventListener("click", () => {
+    _scanView = b.dataset.view === "lista" ? "lista" : "cards";
+    try { localStorage.setItem(_SCAN_VIEW_KEY, _scanView); } catch (e) { /* quota */ }
+    if (_scanData) paintScan(_scanData);
+  }));
+}
+
 function paintScan(data) {
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
   const s = data.resumo || {};
@@ -4789,48 +4907,53 @@ function paintScan(data) {
     (data.date ? `<span class="hint"> — ${escapeHtml(data.date)} · ${escapeHtml((data.frames || []).join(" + "))}</span>` : "");
   // Chips de filtro por estado: cada um mostra a contagem; clicar filtra.
   renderScanFilters(s);
+  bindScanTools();
+  const tools = $("scanTools");
+  if (tools) tools.classList.toggle("hidden", !(data.ativos || []).length);
+  document.querySelectorAll(".scan-view").forEach((b) =>
+    b.classList.toggle("is-active", b.dataset.view === _scanView));
   const ul = $("scanList");
-  // Aplica o filtro de estado ativo (null = mostra todos, ordenados por urgência).
+  ul.classList.toggle("is-lista", _scanView === "lista");
+  // Filtro de estado (chips) + busca por sigla. Os dois se somam.
   const ativos = (data.ativos || []).filter((a) =>
-    !_scanEstadoFilter || (a.melhor || {}).estado === _scanEstadoFilter);
-  ul.innerHTML = ativos.map((a) => {
-    // Cada ativo reporta TODOS os frames (1d, 4h) — um por linha, com seu próprio
-    // estado e direção. Sem hierarquia, sem escolher "melhor": mostra os dois e o
-    // timeframe de cada. O ticker cabeça agrupa; cada sub-linha abre seu gráfico.
-    const valid = (a.frames || []).filter((f) => f.estado !== "sem_dado");
-    const rows = valid.map((f) => {
-      const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
-      const levels = hasLevels
-        ? `<div class="scan-levels">` +
-          `<span>🎯 gatilho <b>${scanFmt(f.trigger)}</b></span>` +
-          `<span>🛑 SL <b>${scanFmt(f.sl)}</b></span>` +
-          // Sem alvo publicável, mostra o MOTIVO (o que a tela de análise já faz) em
-          // vez de um TP que o servidor recusou — antes vinha "🎯 TP 512,76" ao lado
-          // de "🎯 gatilho 512,76 · R:R não calculável", e o porquê era descartado.
-          (f.tp != null
-            ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` +
-              `<span>R:R <b>${f.rr != null ? f.rr.toFixed(2) : "não calculável"}</b></span>`
-            : `<span class="scan-note">⚠️ sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
-          `</div>`
-        : (f.estado === "invalidou" && f.invalidacao != null
-          ? `<div class="scan-levels"><span>⚫ invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
-          : "");
-      const actions = f.estado === "em_gatilho"
-        ? `<div class="scan-actions-row">` +
-          `<button type="button" class="scan-go" data-go="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}|padrao">Analisar Padrão</button>` +
-          `<button type="button" class="scan-go erick" data-go="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}|erick">Analisar Erick</button>` +
-          `</div>` : "";
-      return `<div class="scan-frame-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
-        `<span class="scan-frame">${escapeHtml(f.frame || "")}</span>` +
+    (!_scanEstadoFilter || (a.melhor || {}).estado === _scanEstadoFilter) &&
+    (!_scanBusca || (a.ticker || "").toUpperCase().includes(_scanBusca)));
+
+  if (_scanView === "lista") {
+    // LISTA: uma linha por ativo+frame, sem agrupar. Densa de propósito — é o modo
+    // de varrer o portfólio inteiro de relance, sem rolar 20 cards.
+    const linhas = [];
+    ativos.forEach((a) => (a.frames || []).filter((f) => f.estado !== "sem_dado").forEach((f) => {
+      linhas.push(
+        `<li class="scan-line-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
+        scanTfBadge(f.frame) +
+        `<b class="scan-tk-inline">${escapeHtml(a.ticker)}</b>` +
         `<span class="scan-price">$${scanFmt(f.price)}</span>` +
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
         scanEstadoChip(f.estado, f.direction) +
-        levels + actions + `</div>`;
-    }).join("");
-    return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
-      `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}</b>` +
-      rows + `</li>`;
-  }).join("");
+        scanLevelsHtml(f) + `</li>`);
+    }));
+    ul.innerHTML = linhas.join("") ||
+      `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
+  } else {
+    ul.innerHTML = ativos.map((a) => {
+      // Cada ativo reporta TODOS os frames (1d, 4h, 1h) — um por linha, com seu
+      // próprio estado e direção. Sem hierarquia, sem escolher "melhor": mostra
+      // todos e o timeframe de cada. O ticker cabeça agrupa; cada sub-linha abre.
+      const valid = (a.frames || []).filter((f) => f.estado !== "sem_dado");
+      const rows = valid.map((f) =>
+        `<div class="scan-frame-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
+        scanTfBadge(f.frame) +
+        `<span class="scan-price">$${scanFmt(f.price)}</span>` +
+        `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
+        scanEstadoChip(f.estado, f.direction) +
+        scanLevelsHtml(f) + scanActionsHtml(a.ticker, f) + `</div>`).join("");
+      return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
+        `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}</b>` +
+        rows + `</li>`;
+    }).join("") ||
+      `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
+  }
   ul.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", (ev) => {
     ev.stopPropagation();   // não dispara o data-open do frame-row pai
     const [tk, frame, method] = b.dataset.go.split("|");

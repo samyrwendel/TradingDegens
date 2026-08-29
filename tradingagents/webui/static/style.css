@@ -154,16 +154,30 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 #runBtn:disabled { opacity: .55; cursor: not-allowed; }
 
-.launch-bar { display: flex; gap: 10px 16px; align-items: flex-end; flex-wrap: wrap; }
+/* Barra de controle em UMA linha (pedido do Samyr): antes ela quebrava em três
+   faixas e deixava o bloco MODELOS pendurado à direita, cortado.
+   O gatilho é CONTAINER QUERY, não media query, porque quem manda aqui é a largura
+   da COLUNA, não a da tela: arrastar o resizer da lateral pra 400px encolhe o
+   conteúdo sem mexer no viewport, e um `nowrap` preso ao viewport estourava a
+   página na horizontal (pego por test_vertical_resizer_drags_and_persists). Base
+   `wrap`: sem espaço, quebra — melhor duas linhas legíveis que scroll horizontal. */
+.launch-bar { display: flex; gap: 10px 12px; align-items: flex-end; flex-wrap: wrap; }
 .lb-field { display: flex; flex-direction: column; gap: 5px; }
-.lb-ticker { flex: 1 1 240px; min-width: 200px; }
+.lb-ticker { flex: 1 1 160px; min-width: 108px; }
 .lb-ticker label { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .lb-ticker input {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: var(--radius); padding: 8px 11px; font-size: var(--fs-14); width: 100%;
 }
 .lb-ticker input:focus { outline: none; border-color: var(--accent); }
-.lb-ctrls { display: flex; gap: 10px 16px; align-items: flex-end; flex-wrap: wrap; }
+.lb-ctrls { display: flex; gap: 10px 12px; align-items: flex-end; flex-wrap: wrap; }
+/* A coluna do conteúdo é o container medido (o resizer da lateral muda esta
+   largura sem tocar no viewport). 1176px é o que a barra INTEIRA ocupa numa linha
+   — medido, não chutado; abaixo disso ela quebra sozinha. */
+.launcher { container-type: inline-size; }
+@container (min-width: 1176px) {
+  .launch-bar, .lb-ctrls { flex-wrap: nowrap; }
+}
 .lb-group { display: flex; flex-direction: column; gap: 5px; }
 .lb-glabel { font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
 .lb-glabel .tz { text-transform: none; letter-spacing: 0; margin-left: 4px; }
@@ -184,21 +198,23 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 
 /* timeframe + método na barra única — pills herdados da antiga barra de reanálise */
-.lb-tfs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+/* Os grupos NÃO quebram por dentro: a barra é uma linha só, então cada grupo é
+   uma fileira só (era isso que fazia TEMPO virar duas fileiras e crescer a barra). */
+.lb-tfs { display: inline-flex; gap: 5px; flex-wrap: nowrap; }
 .lb-tf {
   font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold);
   color: var(--muted); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 6px 10px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+  padding: 6px 8px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
 }
 .lb-tf:hover:not(.is-off):not(.is-active) { color: var(--text); border-color: var(--accent); }
 .lb-tf.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .lb-tf.is-off { color: #55607a; cursor: not-allowed; opacity: .6; text-decoration: line-through; text-decoration-color: #55607a55; }
 
-.lb-methods { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.lb-methods { display: inline-flex; gap: 6px; flex-wrap: nowrap; }
 .lb-method {
   font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold); cursor: pointer;
-  border-radius: var(--radius); padding: 8px 14px; white-space: nowrap;
+  border-radius: var(--radius); padding: 8px 11px; white-space: nowrap;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
   transition: color .12s, border-color .12s, background .12s, box-shadow .12s;
 }
@@ -223,7 +239,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    mostram o modelo em uso e abrem um popover pesquisável pra ESCOLHER (não digitar).
    Antes o rápido/pesado morava só atrás do botão "Chaves" — impossível de achar. */
 .lb-model { position: relative; }
-.lb-models { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+/* MODELOS em DUAS linhas (rápido em cima, pesado embaixo) contando como UM
+   elemento da barra: o par é mais alto que os demais controles, e o
+   ``align-items: flex-end`` da barra mantém todo o resto alinhado embaixo, sem
+   esticar altura de ninguém. */
+.lb-models { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.lb-model { flex: 0 0 auto; }
 .lb-model-pick {
   display: inline-flex; align-items: center; gap: 6px;
   font: inherit; font-size: var(--fs-12); line-height: 1; cursor: pointer; white-space: nowrap;
@@ -237,7 +258,9 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 .lb-model-pick .lbm-model {
   font-family: var(--mono); font-weight: var(--fw-bold); color: var(--accent);
-  max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  /* 120px com reticências: o nome do modelo não pode ser quem decide se a barra
+     cabe numa linha (gpt-5.5 e um id gigante de OpenRouter ocupam o mesmo espaço). */
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .lb-model-pick.is-default .lbm-model { color: var(--muted); font-weight: normal; }
 
@@ -488,7 +511,30 @@ details.section.erick > summary { color: #9cc7f5; }
 }
 .head-main { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; min-width: 0; }
 .head-nav { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
-/* preço no momento da análise — terceira âncora, ao lado do veredito */
+/* Rodapé do cabeçalho: GATILHOS + preço no canto inferior DIREITO (pedido do
+   Samyr). O veredito continua em cima; aqui embaixo ficam os níveis operáveis ao
+   lado do preço, alinhados à direita — antes os níveis só existiam no texto abaixo
+   do gráfico e o gatilho tinha que ser caçado. */
+.head-levels {
+  display: flex; align-items: baseline; justify-content: flex-end;
+  gap: 8px 18px; flex-wrap: wrap; margin: 0 0 8px;
+}
+.hl-levels { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.hl-item { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); white-space: nowrap; }
+.hl-item b { font-family: var(--mono); font-weight: var(--fw-bold); color: var(--text); margin-left: 3px; }
+/* Alvo recusado: âmbar de ATENÇÃO (o setup existe, o alvo é que não) — mesma
+   semântica da linha do scan, pra a cor querer dizer a mesma coisa nas duas telas. */
+.hl-warn { color: var(--amber); white-space: normal; }
+/* A cotação ATUAL vem com a SESSÃO declarada: fechamento, pré e pós são preços
+   diferentes, e o rótulo é o que impede a tela de chamar qualquer um deles de
+   "agora". O preço da ANÁLISE fica ao lado, menor, como referência. */
+.hp-live { display: inline-flex; align-items: baseline; gap: 6px; font-family: var(--mono);
+  font-size: var(--fs-16); line-height: var(--lh-16); font-weight: var(--fw-bold); color: var(--text); }
+.hp-tag { font-family: inherit; font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.hp-sep { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .5px; }
+/* preço da análise (último fechamento da série datada) */
 .head-price {
   display: inline-flex; align-items: baseline; gap: 6px;
   font-size: var(--fs-16); font-weight: var(--fw-bold); line-height: var(--lh-16); font-family: var(--mono);
@@ -1634,8 +1680,50 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-filter:hover { border-color: var(--accent); color: var(--text); }
 .scan-filter.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
 .scan-filter.all { color: var(--accent); }
+/* Busca + alternador de modo do scan. Chapados e quadrados (DA-070). */
+.scan-tools { display: flex; gap: 10px; align-items: center; margin: 0 0 8px; flex-wrap: wrap; }
+.scan-search {
+  flex: 1 1 220px; min-width: 160px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 0; padding: 6px 10px; font-size: var(--fs-14);
+}
+.scan-search:focus { outline: none; border-color: var(--accent); }
+.scan-views { display: inline-flex; gap: 0; }
+.scan-view {
+  font: inherit; font-size: var(--fs-12); font-weight: var(--fw-bold); cursor: pointer;
+  color: var(--muted); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 0; padding: 6px 12px; white-space: nowrap;
+}
+.scan-view + .scan-view { border-left: none; }
+.scan-view:hover { color: var(--text); border-color: var(--accent); }
+.scan-view.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.scan-vazio { color: var(--muted); padding: 10px 2px; font-size: var(--fs-14); }
+
 .scan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.scan-row { padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); }
+/* MODO LISTA: uma linha por ativo+frame, sem agrupar por ticker — densidade pra
+   varrer o portfólio inteiro sem rolar 20 cards. Mesma gramática de cor do modo
+   cards (borda-esquerda sólida = estado), só que rasa. */
+.scan-list.is-lista { gap: 2px; }
+.scan-line-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer;
+  padding: 5px 8px; border-radius: 0; border-left: 3px solid var(--border);
+  background: var(--panel-2); font-size: .86rem;
+}
+.scan-line-row:hover { background: var(--panel); }
+.scan-line-row.em_gatilho { border-left-color: var(--green); background: var(--green-dim); }
+.scan-line-row.em_gatilho.venda { border-left-color: var(--red); background: var(--red-dim); }
+.scan-line-row.em_movimento { border-left-color: #60a5fa; }
+.scan-line-row.invalidou { border-left-color: var(--muted); opacity: .75; }
+.scan-line-row.formando { border-left-color: var(--border); }
+.scan-tk-inline { min-width: 78px; color: var(--text); }
+/* Na lista os níveis ficam na MESMA linha (não em bloco abaixo) — é o que a torna
+   uma lista de verdade em vez de um card mais estreito. */
+.scan-line-row .scan-levels {
+  border-top: none; margin-top: 0; padding-top: 0; margin-left: auto; gap: 12px;
+}
+/* DA-070: card QUADRADO e fundo CHAPADO. O estado deixa de ser degradê e passa a
+   ser borda-esquerda sólida — a cor continua carregando a informação, sem virar
+   textura que compete com o número. */
+.scan-row { padding: 8px 10px; border-radius: 0; background: var(--panel-2); border: 1px solid var(--border); }
 .scan-row.em_gatilho { border-color: var(--green-dim); }
 .scan-row.em_gatilho.venda { border-color: var(--red-dim); }
 .scan-row.em_movimento { border-color: rgba(96, 165, 250, .3); }
@@ -1644,16 +1732,28 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-tk { display: block; cursor: pointer; margin-bottom: 4px; }
 .scan-tk:hover { color: var(--accent); }
 /* Sub-linha de cada frame: timeframe + preço + dist + chip + níveis. */
-.scan-frame-row { padding: 6px 8px; border-radius: 6px; cursor: pointer;
+.scan-frame-row { padding: 6px 8px; border-radius: 0; cursor: pointer;
   border-left: 3px solid var(--border); margin-bottom: 4px; }
 .scan-frame-row:hover { background: var(--panel); }
-.scan-frame-row.em_gatilho { border-left-color: var(--green); background: linear-gradient(90deg, var(--green-dim), transparent 70%); }
-.scan-frame-row.em_gatilho.venda { border-left-color: var(--red); background: linear-gradient(90deg, var(--red-dim), transparent 70%); }
+/* Entrada viva: borda-esquerda sólida na cor da DIREÇÃO (verde compra, vermelho
+   venda) + fundo chapado. Era um degradê que esmaecia pra direita (DA-070). */
+.scan-frame-row.em_gatilho { border-left-color: var(--green); background: var(--green-dim); }
+.scan-frame-row.em_gatilho.venda { border-left-color: var(--red); background: var(--red-dim); }
 .scan-frame-row.em_movimento { border-left-color: #60a5fa; }
 .scan-frame-row.invalidou { border-left-color: var(--muted); opacity: .75; }
 .scan-frame-row.formando { border-left-color: var(--border); }
 .scan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
 .scan-frame { color: var(--muted); font-size: .8rem; }
+/* TIMEFRAME no INÍCIO da linha, com largura fixa: antes saía colado no preço
+   ("1d$513,530.15%") e não havia onde o olho pousar. Mono + caixa própria = as
+   três linhas de um ativo ficam alinhadas em coluna. */
+.scan-tf {
+  display: inline-block; min-width: 34px; text-align: center; margin-right: 8px;
+  font-family: var(--mono); font-size: .72rem; font-weight: var(--fw-bold);
+  color: var(--muted); border: 1px solid var(--border); border-radius: 0;
+  padding: 1px 5px; text-transform: lowercase;
+}
+.scan-frame-row .scan-price, .scan-line-row .scan-price { margin-right: 6px; }
 .scan-price { font-variant-numeric: tabular-nums; color: var(--text); font-weight: var(--fw-med); font-size: .82rem; }
 .scan-dist { font-variant-numeric: tabular-nums; color: var(--muted); }
 .scan-chip { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: .74rem; color: var(--muted); }

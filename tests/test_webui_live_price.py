@@ -1,8 +1,11 @@
-"""Preço LIVE da watchlist (task 010): fetch leve + cache TTL no runner + endpoint.
+"""Preço LIVE: fetch leve + cache TTL no runner + endpoint + a SESSÃO declarada.
 
 Não bate na rede: o ``fetch_live_price`` é trocado por um fake, então checamos o
 CACHE (só busca o que expirou), o passthrough de null (fonte caída → None → "—" na
-UI) e a leitura resiliente do ``fast_info`` do yfinance (mapping OU atributo).
+UI) e — o que a task 010 de UI trouxe — QUAL preço a cotação está devolvendo:
+fechamento, pré-market e after-market são números DIFERENTES, e chamar qualquer um
+deles de "agora" é mentira. A fonte passou a ser o ``info`` (tem ``marketState`` e
+os preços de pré/pós) no lugar do ``fast_info`` (só o regular, e sem dizer que é).
 """
 
 import json
@@ -10,7 +13,7 @@ import threading
 import urllib.request
 
 import tradingagents.dataflows.live_price as live_price
-from tradingagents.dataflows.live_price import _fast_get, _to_float, fetch_live_price
+from tradingagents.dataflows.live_price import _to_float, fetch_live_price
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
@@ -69,30 +72,83 @@ def test_prices_endpoint_shape(tmp_path, monkeypatch):
                               "BTC": None}}
 
 
-class _FastInfoAttr:
-    last_price = 100.0
-    previous_close = 80.0
-    currency = "USD"
-
-
-class _FastInfoMap:
-    def __init__(self):
-        self._d = {"last_price": 50.0, "previous_close": 50.0, "currency": "BRL"}
-
-    def get(self, k):
-        return self._d.get(k)
-
-
-def test_fetch_live_price_reads_attr_and_mapping(monkeypatch):
+def _fake_info(monkeypatch, info):
+    """Troca o yfinance por um duplo que devolve ``info`` — sem rede."""
     import types
-    fake_yf = types.SimpleNamespace(Ticker=lambda sym: types.SimpleNamespace(fast_info=_FastInfoAttr()))
-    monkeypatch.setitem(__import__("sys").modules, "yfinance", fake_yf)
-    out = fetch_live_price("AAPL")
-    assert out == {"price": 100.0, "change_pct": 25.0, "currency": "USD"}   # (100-80)/80
+    monkeypatch.setitem(
+        __import__("sys").modules, "yfinance",
+        types.SimpleNamespace(Ticker=lambda sym: types.SimpleNamespace(info=dict(info))))
 
-    fake_yf.Ticker = lambda sym: types.SimpleNamespace(fast_info=_FastInfoMap())
-    out2 = fetch_live_price("PETR4.SA")
-    assert out2 == {"price": 50.0, "change_pct": 0.0, "currency": "BRL"}    # prev==last → 0%
+
+_BASE = {"currency": "USD", "quoteType": "EQUITY", "exchangeTimezoneName": "America/New_York",
+         "regularMarketPrice": 513.53, "regularMarketPreviousClose": 505.06,
+         "regularMarketTime": 1787947201}
+
+
+def test_mercado_aberto_diz_que_e_agora(monkeypatch):
+    _fake_info(monkeypatch, {**_BASE, "marketState": "REGULAR"})
+    out = fetch_live_price("MSFT")
+    assert out["price"] == 513.53
+    assert out["sessao"] == "regular" and "agora" in out["rotulo"]
+    assert out["change_pct"] == 1.68                      # (513.53-505.06)/505.06
+
+
+def test_mercado_fechado_nao_chama_fechamento_de_cotacao_atual(monkeypatch):
+    """O pedido do Samyr: com o mercado fechado a tela mostrava o fechamento como se
+    fosse "agora". O número pode ser esse; o RÓTULO é que não podia mentir."""
+    _fake_info(monkeypatch, {**_BASE, "marketState": "CLOSED", "postMarketPrice": 513.06})
+    out = fetch_live_price("MSFT")
+    assert out["price"] == 513.53
+    assert out["sessao"] == "fechado" and out["rotulo"] == "último fechamento"
+
+
+def test_after_market_mostra_o_preco_do_after(monkeypatch):
+    """Pós-mercado com negócio: o preço É outro (513,06 × 513,53) e é ele que vale."""
+    _fake_info(monkeypatch, {**_BASE, "marketState": "POST", "postMarketPrice": 513.06,
+                             "postMarketTime": 1787961586})
+    out = fetch_live_price("MSFT")
+    assert out["price"] == 513.06
+    assert out["regular_price"] == 513.53          # o regular viaja junto pra comparação
+    assert out["sessao"] == "pos" and out["rotulo"] == "after-market"
+
+
+def test_pre_market_sem_negocio_nao_finge_pre_market(monkeypatch):
+    """A fonte diz PRE mas não manda preço de pré: o que existe é o fechamento — e é
+    isso que se diz, em vez de carimbar "pré-market" num número que não é dele."""
+    _fake_info(monkeypatch, {**_BASE, "marketState": "PRE"})
+    out = fetch_live_price("MSFT")
+    assert out["price"] == 513.53
+    assert out["sessao"] == "fechado" and "pré-market sem negócio" in out["rotulo"]
+
+
+def test_pre_market_com_negocio(monkeypatch):
+    _fake_info(monkeypatch, {**_BASE, "marketState": "PRE", "preMarketPrice": 508.0,
+                             "preMarketTime": 1787961586})
+    out = fetch_live_price("MSFT")
+    assert out["price"] == 508.0 and out["sessao"] == "pre"
+
+
+def test_cripto_nao_tem_pregao(monkeypatch):
+    _fake_info(monkeypatch, {"currency": "USD", "quoteType": "CRYPTOCURRENCY",
+                             "exchangeTimezoneName": "UTC", "regularMarketPrice": 77990.13,
+                             "regularMarketPreviousClose": 77843.0, "marketState": "REGULAR",
+                             "regularMarketTime": 1787961586})
+    out = fetch_live_price("BTC-USD")
+    assert out["sessao"] == "24h" and "24h" in out["rotulo"]
+
+
+def test_hora_do_numero_vem_no_fuso_da_BOLSA(monkeypatch):
+    """A hora do servidor não diz nada sobre a sessão; a da bolsa, sim."""
+    _fake_info(monkeypatch, {**_BASE, "marketState": "CLOSED"})
+    out = fetch_live_price("MSFT")
+    assert out["as_of"] and ":" in out["as_of"]
+    assert out["fuso"] == "America/New_York"
+
+
+def test_sessao_desconhecida_nao_inventa_rotulo(monkeypatch):
+    _fake_info(monkeypatch, {**_BASE, "marketState": "SEI_LA"})
+    out = fetch_live_price("MSFT")
+    assert out["sessao"] == "desconhecida" and out["rotulo"] == "último preço conhecido"
 
 
 def test_fetch_live_price_failopen(monkeypatch):
@@ -105,11 +161,13 @@ def test_fetch_live_price_failopen(monkeypatch):
     assert fetch_live_price("") is None          # vazio é no-op
 
 
-def test_helpers_to_float_and_fast_get():
+def test_sem_preco_nenhum_e_None(monkeypatch):
+    _fake_info(monkeypatch, {"marketState": "CLOSED", "currency": "USD"})
+    assert fetch_live_price("XPTO") is None
+
+
+def test_helpers_to_float():
     assert _to_float("3.5") == 3.5
     assert _to_float(None) is None
     assert _to_float(float("nan")) is None
     assert _to_float("x") is None
-    assert _fast_get(_FastInfoAttr(), "last_price") == 100.0
-    assert _fast_get(_FastInfoMap(), "currency") == "BRL"
-    assert _fast_get(_FastInfoAttr(), "nope", "currency") == "USD"   # cai no 2º nome

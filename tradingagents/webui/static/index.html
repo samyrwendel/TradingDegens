@@ -232,10 +232,6 @@
                  ESCOLHER (não digitar), refletindo/sincronizando com os campos do
                  config (#cfgQuick/#cfgDeep). O cross-provider por nível (027) segue no
                  config, alcançável pelo link "avançado" do popover. -->
-            <div class="lb-group lb-model">
-              <span class="lb-glabel">modelos</span>
-              <div class="lb-models" id="launchModels" role="group" aria-label="Modelo rápido e pesado da análise"></div>
-            </div>
           </div>
           <div class="lb-actions">
             <button type="submit" id="runBtn">Analisar</button>
@@ -244,6 +240,13 @@
             <button type="button" id="rerunBtn" class="rerun-btn"
                     title="Reanalisar o ativo aberto hoje (mesmo método)"
                     aria-label="Reanalisar o ativo aberto" disabled>↻</button>
+          </div>
+          <!-- MODELOS é o ÚLTIMO elemento da barra e ocupa DUAS linhas (rápido em
+               cima, pesado embaixo) contando como UM só elemento — foi o pedido: a
+               barra antes quebrava e deixava este bloco pendurado à direita. -->
+          <div class="lb-group lb-model">
+            <span class="lb-glabel">modelos</span>
+            <div class="lb-models" id="launchModels" role="group" aria-label="Modelo rápido e pesado da análise"></div>
           </div>
         </form>
         <p class="hint" id="assetHint"></p>
@@ -297,7 +300,6 @@
             <div class="asset-name" id="assetName">—</div>
             <div class="verdict" id="verdictBadge">—</div>
             <div class="verdict-tf hidden" id="verdictTf"></div>
-            <div class="head-price hidden" id="headPrice"></div>
           </div>
           <div class="head-nav">
             <div class="asset-timeline hidden" id="assetTimeline"></div>
@@ -313,6 +315,14 @@
           </div>
         </div>
         <div class="result-meta" id="resultMeta"></div>
+        <!-- Rodapé do cabeçalho (pedido do Samyr): o VEREDITO fica em cima; os
+             GATILHOS descem pro canto inferior DIREITO, ao lado do preço atual,
+             alinhados à direita. O preço vem com a SESSÃO declarada (fechamento ×
+             pré × pós são preços diferentes) — ver renderHeadLevels. -->
+        <div class="head-levels hidden" id="headLevels">
+          <div class="hl-levels" id="headTriggers"></div>
+          <div class="head-price hidden" id="headPrice"></div>
+        </div>
         <!-- Carimbo do veredito (task 016): quando os insumos tinham inconsistência
              na hora da decisão, o juiz recebeu os DADOS VERIFICADOS e decidiu com
              eles — e o veredito sai avisado, com a lista. -->
@@ -415,6 +425,18 @@
              lista. O resumo acima já mostra as contagens; aqui cada chip vira um
              filtro ativo. Clicar de novo desliga. -->
         <div class="scan-filters hidden" id="scanFilters"></div>
+        <!-- Busca + modo de apresentação (pedido do Samyr): a lista tem 20 ativos ×
+             3 frames, e achar um papel exigia rolar tudo. A busca filtra por sigla;
+             o modo alterna entre CARDS (agrupado por ativo) e LISTA (uma linha por
+             ativo+frame, denso, pra varrer o portfólio inteiro de relance). -->
+        <div class="scan-tools hidden" id="scanTools">
+          <input type="search" id="scanSearch" class="scan-search" autocomplete="off"
+                 placeholder="🔎 filtrar por ativo (ex.: NVDA, BTC)" aria-label="Filtrar os resultados do scan" />
+          <div class="scan-views" role="group" aria-label="Modo de apresentação do scan">
+            <button type="button" class="scan-view is-active" data-view="cards" title="Agrupado por ativo">▦ Cards</button>
+            <button type="button" class="scan-view" data-view="lista" title="Uma linha por ativo e frame">☰ Lista</button>
+          </div>
+        </div>
         <ul class="scan-list" id="scanList"></ul>
         <div class="scan-track hidden" id="scanTrack"></div>
       </section>
