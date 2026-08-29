@@ -184,6 +184,15 @@ def _frame_row(ticker: str, date: str, frame: str,
     stop = plan.get("stop") or {}
     target = plan.get("target") or {}
     rr = plan.get("risk_reward") or {}
+    # ALVO INCOERENTE NÃO SE PUBLICA. ``_risk_reward`` já detecta o alvo atrás da
+    # entrada (ou o stop do lado errado) e devolve ``rr=None`` com o motivo escrito;
+    # o scan publicava o ``tp`` assim mesmo, e a tela mostrava "🎯 TP 512,76" ao lado
+    # de "🎯 gatilho 512,76 · R:R não calculável" — número sem sentido, e o MOTIVO,
+    # que a tela de análise mostra, era descartado aqui. Pior: esse tp ia pro
+    # ScanLog e virava ACERTO FABRICADO — alvo igual ao gatilho é "bateu_tp" no
+    # instante em que aciona. Com ``tp=None`` o track record só pode fechar pelo SL
+    # (``_primeiro_toque`` já trata), que é a leitura honesta.
+    tp_incoerente = bool(rr.get("note")) and rr.get("rr") is None
     return {
         "frame": frame,
         "estado": estado,
@@ -195,9 +204,10 @@ def _frame_row(ticker: str, date: str, frame: str,
         "dist_txt": _fmt_pct(dist),
         "invalidacao": (plan.get("invalidation") or {}).get("price"),
         "sl": stop.get("price"),
-        "tp": target.get("price"),
-        "tp_faixa": ([target.get("low"), target.get("high")]
-                     if target.get("low") is not None else None),
+        "tp": None if tp_incoerente else target.get("price"),
+        "tp_faixa": (None if tp_incoerente else
+                     ([target.get("low"), target.get("high")]
+                      if target.get("low") is not None else None)),
         "rr": rr.get("rr"),
         "rr_note": rr.get("note"),
     }
@@ -284,10 +294,27 @@ class ScanLog:
         entry = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  **{k: row.get(k) for k in ("ticker", "frame", "direction",
                                             "pattern_state", "trigger", "sl", "tp", "rr")}}
-        with self._lock, open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, default=str) + "\n")
+        self._append(entry)
 
-    def entries(self) -> list[dict[str, Any]]:
+    def record_close(self, chave: str, veredito: str, fechado_em: str,
+                     empate_na_barra: bool = False) -> None:
+        """Grava o FECHAMENTO de um gatilho — a linha que torna o veredito eterno.
+
+        Recalcular o fechamento a cada leitura só é imutável enquanto a série ainda
+        alcança o dia do log, e ela NÃO alcança pra sempre: ``build_price_chart``
+        devolve as últimas N barras, e num frame de 1h a janela cobre poucas semanas.
+        Quando a barra do toque saísse dela, um ``bateu_tp`` voltava calado a
+        ``andamento`` e a taxa de acerto mudava — exatamente o defeito que o fechamento
+        pela série dizia ter matado. Um toque é um FATO datado: vira linha no ledger."""
+        self._append({"tipo": "fechamento", "ref": chave, "veredito": veredito,
+                      "fechado_em": fechado_em, "empate_na_barra": bool(empate_na_barra),
+                      "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+
+    def _append(self, obj: dict[str, Any]) -> None:
+        with self._lock, open(self.path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(obj, default=str) + "\n")
+
+    def _linhas(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
         with self._lock, open(self.path, encoding="utf-8") as fh:
@@ -300,10 +327,85 @@ class ScanLog:
                 continue
         return out
 
+    def entries(self) -> list[dict[str, Any]]:
+        """Só os GATILHOS. Linha sem ``tipo`` é gatilho (formato anterior aos
+        fechamentos — o ledger é append-only, nada foi reescrito)."""
+        return [x for x in self._linhas() if not x.get("tipo")]
+
+    def fechamentos(self) -> dict[str, dict[str, Any]]:
+        """``chave do gatilho -> fechamento``. O PRIMEIRO fechamento de uma chave
+        manda: regravar não sobrescreve fato (append-only também na leitura)."""
+        out: dict[str, dict[str, Any]] = {}
+        for x in self._linhas():
+            if x.get("tipo") == "fechamento" and x.get("ref") and x["ref"] not in out:
+                out[x["ref"]] = x
+        return out
+
 
 def _dia(v: Any) -> str:
     """Parte-DATA (``YYYY-MM-DD``) de um ts do log ou do rótulo de um candle."""
     return str(v or "")[:10]
+
+
+def _chave(e: dict[str, Any]) -> str:
+    """Identidade de um gatilho logado — o que amarra o fechamento à entrada."""
+    return "|".join(str(e.get(k)) for k in ("ts", "ticker", "frame", "trigger"))
+
+
+# Barras por DIA de calendário, por frame — só pra DIMENSIONAR o pedido de série
+# (pedir a mais é inofensivo: a fonte devolve o que tem; pedir a menos é que
+# apagava um fechamento). Usa a taxa de CRIPTO (24h/dia), que é o teto: uma ação
+# tem menos barras por dia, então a janela sobra.
+_BARRAS_POR_DIA = {"1w": 1, "1d": 1, "4h": 6, "1h": 24, "15m": 96}
+_BARS_MIN = 260      # o default de build_price_chart — nunca pedir menos
+_BARS_MAX = 5000     # teto de sanidade: nenhuma leitura de painel puxa mais
+
+
+def _bars_para_cobrir(desde_dia: str, ate_dia: str, frame: str) -> int:
+    """Quantas barras pedir pra a série alcançar o dia do log (:data:`_BARS_MIN` no
+    mínimo). Sem data utilizável, o mínimo — a cobertura é conferida depois."""
+    try:
+        d0 = datetime.strptime(desde_dia, "%Y-%m-%d")
+        d1 = datetime.strptime(_dia(ate_dia) or desde_dia, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return _BARS_MIN
+    dias = max(0, (d1 - d0).days) + 2      # +2 de folga (fuso do log vs do mercado)
+    n = dias * _BARRAS_POR_DIA.get(frame, 1)
+    return max(_BARS_MIN, min(_BARS_MAX, n))
+
+
+def _serie_cobre(candles: list[dict], desde_dia: str) -> bool:
+    """A série alcança o dia do log? Só então a ausência de toque significa mesmo
+    "não tocou" — série que começa DEPOIS do gatilho não viu o que aconteceu, e
+    tratá-la como ``andamento`` é afirmar o que não se sabe."""
+    if not candles or not desde_dia:
+        return False
+    primeiro = _dia(candles[0].get("d"))
+    return bool(primeiro) and primeiro <= desde_dia
+
+
+def _tp_publicavel(e: dict[str, Any]) -> float | None:
+    """O alvo LOGADO, se ele for coerente com a direção do trade — senão ``None``.
+
+    O log é append-only e carrega entradas gravadas antes do fix do alvo degenerado
+    (ex.: ZEC-USD 4h de 29/08, ``tp == trigger == 834,82``, ``rr: null``). Um alvo
+    que não está à frente da entrada é ``bateu_tp`` no instante em que aciona —
+    ACERTO FABRICADO. Não se reescreve o ledger; ignora-se o alvo na LEITURA, e o
+    trade só pode fechar pelo SL, que é a leitura honesta.
+
+    DOIS sinais têm que apontar juntos: ``rr`` ausente (o próprio plano recusou a
+    conta) E o alvo do lado errado do gatilho. Só o segundo não bastaria — num setup
+    JÁ ACIONADO a entrada é o preço, não o gatilho, e um alvo entre os dois é
+    legítimo (e vem com o ``rr`` calculado). Rejeitar aquele seria trocar um acerto
+    fabricado por uma PERDA fabricada."""
+    tp, trigger = e.get("tp"), e.get("trigger")
+    if tp is None:
+        return None
+    if trigger is None or e.get("rr") is not None:
+        return float(tp)          # o plano calculou o retorno: alvo coerente
+    venda = e.get("direction") == "venda"
+    ok = (float(tp) < float(trigger)) if venda else (float(tp) > float(trigger))
+    return float(tp) if ok else None
 
 
 def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) -> dict | None:
@@ -325,6 +427,11 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     """
     if tp is None and sl is None:
         return None
+    # Sem dia de referência não há janela: ``dia <= ""`` nunca é verdade, então TODA
+    # barra entraria — inclusive as ANTERIORES ao gatilho, fabricando um toque que
+    # aconteceu antes de o setup existir. Sem carimbo, não se conta nada.
+    if not desde_dia:
+        return None
     for c in candles:
         dia = _dia(c.get("d"))
         if not dia or dia <= desde_dia:
@@ -343,46 +450,92 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
 
 
 def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
-    """Re-avalia cada gatilho logado — FECHADO pela série, ABERTO pelo preço de hoje.
+    """Re-avalia cada gatilho logado — FECHADO pelo ledger, ABERTO pelo preço de hoje.
 
-    Fechado (``bateu_tp``/``bateu_sl``): decidido pelo primeiro toque em TP ou SL
-    nas barras posteriores ao log (:func:`_primeiro_toque`). Uma vez fechado, não
-    muda mais — era o defeito antigo, que comparava só o preço de AGORA com os
-    níveis e por isso (a) perdia o trade que tocou o alvo e voltou, (b) despromovia
-    um ``bateu_tp`` de ontem pra ``andamento`` hoje, e (c) fazia a taxa de acerto
-    oscilar a cada chamada.
+    **Fechado é fato gravado, não conta refeita.** Quando a série mostra o primeiro
+    toque em TP ou SL (:func:`_primeiro_toque`), o veredito é APENDADO no próprio
+    ``scans.jsonl`` (:meth:`ScanLog.record_close`) e, da próxima leitura em diante,
+    vem de lá. Recalcular a cada chamada só parecia imutável: ``build_price_chart``
+    devolve as ÚLTIMAS N barras, então a janela desliza — num frame de 1h ela cobre
+    poucas semanas, e o dia em que a barra do toque saísse dela um ``bateu_tp``
+    voltaria calado pra ``andamento``. O pedido de série passou a ser dimensionado
+    pelo intervalo log→data (:func:`_bars_para_cobrir`), mas isso só ADIA o teto (a
+    fonte não guarda intradiário eterno); o que resolve é o fato persistido.
 
-    Aberto (``andamento_*``): esse sim é marcado a mercado — posição viva vale o
-    preço de agora. Só leitura de série cacheada, $0.
+    **Estados abertos.** ``andamento_*`` é marcado a mercado — posição viva vale o
+    preço de agora. ``sem_serie_cobrindo`` é o estado NOVO e distinto: a série não
+    alcança o dia do log, então não se sabe se tocou; antes isso caía calado em
+    ``andamento``, que afirma o que não se sabe. Entrada sem ``ts`` não é avaliada
+    (sem janela, toda barra contaria — inclusive as anteriores ao gatilho).
+
+    **Expectativa, não só acerto.** Taxa de acerto sozinha engana quando o alvo é
+    perto e o stop é longe: com R:R 0,13 é preciso acertar 88,5% só pra empatar. O
+    painel passa a devolver a expectativa em múltiplos de risco (R) e o acerto de
+    equilíbrio ao lado — ver :func:`_expectativa`.
+
+    Só leitura de série cacheada, $0 de LLM.
     """
+    fechados_log = log.fechamentos()
     verdicts = []
+    novos_fechamentos = []
     for e in log.entries():
         ticker = str(e.get("ticker") or "")
         frame = str(e.get("frame") or "1d")
-        trigger, tp, sl = e.get("trigger"), e.get("tp"), e.get("sl")
+        trigger, sl = e.get("trigger"), e.get("sl")
+        tp = _tp_publicavel(e)
+        chave = _chave(e)
+        v = dict(e)
+        v["tp_ignorado"] = e.get("tp") is not None and tp is None
+        venda = e.get("direction") == "venda"
+        desde = _dia(e.get("ts"))
+
+        # 1) Fechamento JÁ GRAVADO: fato, não se recalcula (nem se busca série).
+        gravado = fechados_log.get(chave)
+        if gravado:
+            v.update({"veredito": gravado.get("veredito"),
+                      "fechado_em": gravado.get("fechado_em"),
+                      "empate_na_barra": bool(gravado.get("empate_na_barra")),
+                      "fechado": True, "fonte_veredito": "ledger"})
+            v["preco_agora"] = _live_price(ticker)
+            verdicts.append(v)
+            continue
+
+        # 2) Sem carimbo de tempo não há janela — não se afirma nada.
+        if not desde:
+            v.update({"veredito": "sem_dado", "fechado": False,
+                      "motivo": "entrada sem carimbo de tempo — sem janela pra medir",
+                      "preco_agora": _live_price(ticker)})
+            verdicts.append(v)
+            continue
+
         try:
             plan = build_actionable_plan_dict(ticker, date, timeframe=frame)
         except Exception:  # noqa: BLE001 — verdict ausente não derruba o resto
             plan = {}
         try:
-            candles = (build_price_chart(ticker, date, timeframe=frame) or {}).get("candles") or []
-        except Exception:  # noqa: BLE001 — sem série o trade fica ABERTO, não fechado no escuro
+            # Janela dimensionada pelo intervalo log→data (o default de 260 barras
+            # não cobre um 1h de algumas semanas atrás).
+            candles = (build_price_chart(
+                ticker, date, bars=_bars_para_cobrir(desde, date, frame),
+                timeframe=frame) or {}).get("candles") or []
+        except Exception:  # noqa: BLE001 — sem série não se fecha no escuro
             candles = []
-        # Preço ATUAL tem prioridade sobre o last close do plan (mesmo motivo do
-        # scan: a posição ABERTA é marcada a onde o preço está AGORA).
         live = _live_price(ticker)
         price = live if live is not None else (plan or {}).get("price")
-        v = dict(e)
         v["preco_agora"] = price
-        venda = e.get("direction") == "venda"
 
-        toque = _primeiro_toque(candles, _dia(e.get("ts")), tp, sl, venda)
+        toque = _primeiro_toque(candles, desde, tp, sl, venda)
         if toque:
             v.update(toque)
             v["fechado"] = True
+            v["fonte_veredito"] = "serie"
+            novos_fechamentos.append((chave, toque))
+        elif not _serie_cobre(candles, desde):
+            # A série não alcança o gatilho: pode ter tocado sem ninguém ver.
+            v.update({"veredito": "sem_serie_cobrindo", "fechado": False,
+                      "motivo": "a série disponível não alcança o dia do gatilho"})
         elif price is None or trigger is None:
-            v["veredito"] = "sem_dado"
-            v["fechado"] = False
+            v.update({"veredito": "sem_dado", "fechado": False})
         else:
             v["fechado"] = False
             if price > trigger:
@@ -391,7 +544,44 @@ def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
                 v["veredito"] = "andamento_lucro" if venda else "andamento_prejuizo"
         verdicts.append(v)
 
+    # Grava os fechamentos NOVOS depois de varrer (uma escrita por fato, e a
+    # releitura seguinte já os encontra no ledger).
+    for chave, toque in novos_fechamentos:
+        log.record_close(chave, toque["veredito"], toque["fechado_em"],
+                         toque.get("empate_na_barra", False))
+
     n = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
     acerto = (sum(1 for v in n if v["veredito"] == "bateu_tp") / len(n)) if n else None
-    return {"verdicts": verdicts, "n_fechados": len(n),
-            "taxa_acerto": acerto}
+    out = {"verdicts": verdicts, "n_fechados": len(n), "taxa_acerto": acerto}
+    out.update(_expectativa(n))
+    return out
+
+
+def _expectativa(fechados: list[dict[str, Any]]) -> dict[str, Any]:
+    """Expectativa em múltiplos de RISCO (R) — a métrica que responde à pergunta.
+
+    Taxa de acerto sozinha é a armadilha clássica: alvo perto e stop longe produzem
+    acerto ALTO com expectativa NEGATIVA. Distribuição real do scan de 29/08 (n=33):
+    mediana de R:R **0,13** — com ela é preciso acertar **88,5%** só pra empatar.
+
+    ``E[R] = p·RR − (1−p)``, com ``RR`` = R:R MÉDIO planejado no momento do gatilho
+    (o que se podia saber ao entrar). ``p`` é medido no MESMO subconjunto que tem R:R
+    conhecido, não na amostra toda: misturar a taxa de acerto de um grupo com o R:R
+    de outro daria um número que não descreve trade nenhum. Por isso ``n_com_rr`` e
+    ``acerto_com_rr`` vão junto — a expectativa é declarada com a sua base.
+
+    Acerto de equilíbrio = ``1/(1+RR)``. Tudo ``None`` quando não há fechado com R:R
+    conhecido: número inventado é pior que a ausência dele."""
+    com_rr = [v for v in fechados if v.get("rr") is not None]
+    if not com_rr:
+        return {"rr_medio": None, "expectativa_r": None, "acerto_equilibrio": None,
+                "n_com_rr": 0, "acerto_com_rr": None}
+    rr_medio = sum(float(v["rr"]) for v in com_rr) / len(com_rr)
+    p = sum(1 for v in com_rr if v["veredito"] == "bateu_tp") / len(com_rr)
+    return {
+        "rr_medio": round(rr_medio, 2),
+        "expectativa_r": round(p * rr_medio - (1.0 - p), 3),
+        "acerto_equilibrio": round(1.0 / (1.0 + rr_medio), 4) if rr_medio > 0 else None,
+        "n_com_rr": len(com_rr),
+        "acerto_com_rr": round(p, 4),
+    }

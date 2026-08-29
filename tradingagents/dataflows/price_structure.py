@@ -829,12 +829,21 @@ def _nearest_overhead_high(
 ):
     """Nearest prior swing high sitting ABOVE ``price`` — the region to realize
     into (resistance / topo anterior). ``None`` when price is in new-high air, so
-    the caller reports "sem nível definido" rather than inventing a target."""
+    the caller reports "sem nível definido" rather than inventing a target.
+
+    A comparação é feita na precisão PUBLICADA (2 casas), não no valor cru. Com o
+    filtro cru (``h > price``) e o retorno arredondado, um topo a menos de um
+    centavo da referência passava e voltava ARREDONDADO PARA BAIXO — o "alvo" caía
+    atrás da entrada. Caso real (MSFT 1d, 29/08): gatilho 512,76 e alvo 512,76,
+    stop 471,35 — risco de 41 pontos, retorno ZERO. Nível que não se distingue da
+    referência no preço que a tela mostra não é nível: é ``None`` honesto.
+    """
+    ref = round(price, 2)
     best: tuple[str, float] | None = None
     for i in highs:
-        h = float(df["High"].iloc[i])
-        if h > price and (best is None or h < best[1]):
-            best = (df["Date"].iloc[i].strftime(fmt), round(h, 2))
+        h = round(float(df["High"].iloc[i]), 2)
+        if h > ref and (best is None or h < best[1]):
+            best = (df["Date"].iloc[i].strftime(fmt), h)
     if best is None:
         return None
     return {"label": f"topo anterior {best[0]}", "price": best[1]}
@@ -847,12 +856,15 @@ def _nearest_support_low(
     realizes into. Mirror of :func:`_nearest_overhead_high`; a venda setup must
     never inherit the long's overhead target (schemas.py already warns about the
     inverted skeleton). ``None`` when price is in new-low air, so the caller
-    reports "sem nível definido" instead of inventing a target."""
+    reports "sem nível definido" instead of inventing a target. Compara na precisão
+    PUBLICADA, espelhando :func:`_nearest_overhead_high` — um fundo a menos de um
+    centavo da referência arredondava PRA CIMA e virava "alvo" atrás da entrada."""
+    ref = round(price, 2)
     best: tuple[str, float] | None = None
     for i in lows:
-        lo = float(df["Low"].iloc[i])
-        if lo < price and (best is None or lo > best[1]):
-            best = (df["Date"].iloc[i].strftime(fmt), round(lo, 2))
+        lo = round(float(df["Low"].iloc[i]), 2)
+        if lo < ref and (best is None or lo > best[1]):
+            best = (df["Date"].iloc[i].strftime(fmt), lo)
     if best is None:
         return None
     return {"label": f"fundo anterior {best[0]}", "price": best[1]}
@@ -977,10 +989,14 @@ def _risk_reward(
     if stop is None or target is None or target.get("price") is None:
         return None
     stop_p, tgt_p = float(stop["price"]), float(target["price"])
+    # Contas na precisão PUBLICADA: stop e alvo já vêm arredondados, e medir o risco
+    # contra uma entrada CRUA fazia a conta discordar da tela por frações de centavo
+    # (era assim que um "reward 0,0" convivia com um alvo aparentemente acima).
+    entry = round(entry, 2)
     risk = entry - stop_p if compra else stop_p - entry
     reward = tgt_p - entry if compra else entry - tgt_p
     out = {
-        "entry": round(entry, 2),
+        "entry": entry,
         "entry_basis": entry_basis,
         "risk": round(abs(risk), 2),
         "reward": round(abs(reward), 2),

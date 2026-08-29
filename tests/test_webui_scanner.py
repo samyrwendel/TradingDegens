@@ -48,7 +48,7 @@ def fake_fetch(monkeypatch):
             lambda t, d, timeframe="1d", method="padrao": plans.get((t.upper(), timeframe), _plan(setup_state="sem_setup")),
         )
         monkeypatch.setattr(sc, "build_price_chart",
-                            lambda t, d, timeframe="1d", method="padrao": {"candles": []})
+                            lambda t, d, bars=260, timeframe="1d", method="padrao": {"candles": []})
         monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
     return install
 
@@ -244,8 +244,10 @@ def _serie(monkeypatch, candles_por_ticker, precos):
     monkeypatch.setattr(sc, "build_actionable_plan_dict",
                         lambda t, d, timeframe="1d", method="padrao":
                         {"price": precos.get(t), "pattern": None, "setup_state": "ativo"})
+    # ``bars`` no seam: ``scan_verdicts`` dimensiona a janela pelo intervalo
+    # log→data (o default de 260 não cobre um 1h de semanas atrás).
     monkeypatch.setattr(sc, "build_price_chart",
-                        lambda t, d, timeframe="1d", method="padrao":
+                        lambda t, d, bars=260, timeframe="1d", method="padrao":
                         {"candles": candles_por_ticker.get(t, [])})
     monkeypatch.setattr(sc, "_live_price", lambda ticker: None)   # offline
 
@@ -263,9 +265,13 @@ def test_verdicts_are_direction_aware(tmp_path, monkeypatch):
         {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
          "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
     ])
-    # Série que NÃO toca nada: V oscila 98–101, C oscila 104–106.
+    # Série que NÃO toca nada: V oscila 98–101, C oscila 104–106. A barra do dia do
+    # log entra só pra a série COBRIR o gatilho (ela não conta pro toque — o dia do
+    # log fica fora da janela); sem cobrir, o veredito honesto seria
+    # ``sem_serie_cobrindo``, não "andamento".
     _serie(monkeypatch,
-           {"V": [_c("2026-08-21", 101.0, 98.0)], "C": [_c("2026-08-21", 106.0, 104.0)]},
+           {"V": [_c("2026-08-20", 100.5, 99.5), _c("2026-08-21", 101.0, 98.0)],
+            "C": [_c("2026-08-20", 100.5, 99.5), _c("2026-08-21", 106.0, 104.0)]},
            {"V": 99.0, "C": 105.0})
     out = scan_verdicts(log, "2026-08-28")
     v = {x["ticker"]: x["veredito"] for x in out["verdicts"]}
@@ -378,8 +384,8 @@ def test_o_proprio_dia_do_log_nao_fecha_o_trade(tmp_path, monkeypatch):
 
 
 def test_sem_serie_o_trade_fica_ABERTO_nunca_fechado_no_escuro(tmp_path, monkeypatch):
-    """Série indisponível não vira veredito fechado — fica em andamento (ou
-    sem_dado). Fechar sem prova é exatamente o que corrompia a taxa."""
+    """Série indisponível não vira veredito fechado — fica ABERTO, hoje nomeado
+    ``sem_serie_cobrindo``. Fechar sem prova é o que corrompia a taxa."""
     log = _log_com_ts(tmp_path, [
         {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
          "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},

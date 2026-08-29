@@ -1623,6 +1623,9 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .wl-add button { border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
 .scan-summary { margin: 8px 0; color: var(--text); font-size: .9rem; }
 .scan-summary b { color: var(--green); }
+/* Expectativa negativa não pode sair verde só porque é um <b> do resumo. */
+.scan-summary b.bad { color: var(--red); }
+.scan-summary b.ok { color: var(--green); }
 /* Filtro por estado do gatilho: chips clicáveis que filtram a lista. */
 .scan-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
 .scan-filter { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
@@ -1661,8 +1664,13 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-chip.invalidou { color: var(--muted); border-color: var(--muted); text-decoration: line-through; }
 .scan-chip.ok { color: var(--green); border-color: var(--green); }
 .scan-chip.bad { color: var(--red); border-color: var(--red); }
+/* Série que não alcança o gatilho: não é acerto nem erro — é ignorância declarada. */
+.scan-chip.warn { color: var(--amber); border-color: var(--amber); }
 .scan-levels { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: .82rem; color: var(--text); }
 .scan-levels b { font-variant-numeric: tabular-nums; }
+/* Motivo de um alvo recusado (sem TP publicável): âmbar de ATENÇÃO, não de erro
+   — o setup existe, o que falta é alvo. Chapado e sem canto arredondado (DA-070). */
+.scan-levels .scan-note { color: var(--amber); }
 .scan-actions-row { display: flex; gap: 8px; margin-top: 8px; }
 .scan-go { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; font-size: .82rem; font-weight: var(--fw-bold); }
 .scan-go:hover { color: #fff; border-color: var(--accent); background: var(--panel); }

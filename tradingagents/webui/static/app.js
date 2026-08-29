@@ -4804,8 +4804,13 @@ function paintScan(data) {
         ? `<div class="scan-levels">` +
           `<span>🎯 gatilho <b>${scanFmt(f.trigger)}</b></span>` +
           `<span>🛑 SL <b>${scanFmt(f.sl)}</b></span>` +
-          `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` +
-          `<span>R:R <b>${f.rr != null ? f.rr.toFixed(2) : "não calculável"}</b></span>` +
+          // Sem alvo publicável, mostra o MOTIVO (o que a tela de análise já faz) em
+          // vez de um TP que o servidor recusou — antes vinha "🎯 TP 512,76" ao lado
+          // de "🎯 gatilho 512,76 · R:R não calculável", e o porquê era descartado.
+          (f.tp != null
+            ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` +
+              `<span>R:R <b>${f.rr != null ? f.rr.toFixed(2) : "não calculável"}</b></span>`
+            : `<span class="scan-note">⚠️ sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
           `</div>`
         : (f.estado === "invalidou" && f.invalidacao != null
           ? `<div class="scan-levels"><span>⚫ invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
@@ -4850,6 +4855,25 @@ function paintScan(data) {
   }));
 }
 
+// EXPECTATIVA, não só taxa de acerto. Acerto alto com alvo perto e stop longe é a
+// armadilha clássica: com R:R 0,13 é preciso acertar 88,5% só pra EMPATAR. A linha
+// diz quanto se ganha (ou perde) por trade em múltiplos de risco, o R:R médio que a
+// sustenta, e o acerto de equilíbrio ao lado — sem isso a taxa sozinha engana.
+function trackExpectancyHtml(data) {
+  if (data.expectativa_r == null) {
+    return data.n_fechados
+      ? '<div class="scan-summary hint">📐 expectativa indisponível — nenhum fechado com R:R conhecido</div>'
+      : "";
+  }
+  const e = data.expectativa_r;
+  const cls = e > 0 ? "ok" : "bad";
+  const sinal = e > 0 ? "+" : "";
+  const eq = data.acerto_equilibrio == null ? "—" : `${(data.acerto_equilibrio * 100).toFixed(1)}%`;
+  const p = data.acerto_com_rr == null ? "—" : `${Math.round(data.acerto_com_rr * 100)}%`;
+  return `<div class="scan-summary">📐 expectativa <b class="${cls}">${sinal}${e.toFixed(2)}R</b> por trade` +
+    `<span class="hint"> — R:R médio ${data.rr_medio} · precisa de ${eq} pra empatar · base: ${data.n_com_rr} fechado(s) com R:R, ${p} de acerto neles</span></div>`;
+}
+
 async function showScanTrack() {
   const box = $("scanTrack");
   box.classList.toggle("hidden");
@@ -4863,6 +4887,10 @@ async function showScanTrack() {
     const rows = (data.verdicts || []).slice().reverse().slice(0, 30).map((v) => {
       const vb = { bateu_tp: ["✅ bateu TP", "ok"], bateu_sl: ["❌ bateu SL", "bad"],
         andamento_lucro: ["📈 no lucro", ""], andamento_prejuizo: ["📉 no prejuízo", ""],
+        // Série que não alcança o dia do gatilho: pode ter tocado sem ninguém ver.
+        // É um estado próprio — chamar isso de "andamento" seria afirmar o que não
+        // se sabe, e é assim que uma taxa de acerto vira ficção.
+        sem_serie_cobrindo: ["🕳️ sem série cobrindo", "warn"],
         sem_dado: ["— sem dado", ""] }[v.veredito] || [v.veredito, ""];
       return `<li class="scan-row"><span class="scan-line">` +
         `<b>${escapeHtml(v.ticker || "")}</b><span class="scan-frame">${escapeHtml(v.frame || "")}</span>` +
@@ -4874,10 +4902,15 @@ async function showScanTrack() {
         (v.fechado && v.fechado_em
           ? `<span class="scan-dist">em ${escapeHtml(v.fechado_em)}${v.empate_na_barra ? " ⚠️ TP e SL na mesma barra" : ""}</span>`
           : "") +
+        // Alvo logado que não estava à frente da entrada (entradas gravadas antes do
+        // fix): ignorado na leitura — o trade só pode fechar pelo SL. Dito na cara.
+        (v.tp_ignorado ? `<span class="scan-dist">⚠️ alvo inválido ignorado</span>` : "") +
+        (v.motivo ? `<span class="scan-dist">${escapeHtml(v.motivo)}</span>` : "") +
         `<span class="scan-chip ${vb[1]}">${vb[0]}</span></span></li>`;
     }).join("");
     box.innerHTML = `<div class="scan-summary">🎯 <b>${taxa}</b> de acerto em ${data.n_fechados || 0} gatilho(s) fechado(s)` +
       `${data.taxa_acerto == null ? ' <span class="hint">(nenhum fechado ainda — os abertos aparecem abaixo)</span>' : ""}</div>` +
+      trackExpectancyHtml(data) +
       (rows ? `<ul class="scan-list">${rows}</ul>` : '<span class="hint">nenhum gatilho flagrado ainda — escaneie que os em-gatilho passam a ser medidos</span>');
   } catch (e) { box.innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`; }
 }
