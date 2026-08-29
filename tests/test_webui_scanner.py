@@ -154,6 +154,68 @@ def test_sem_preco_no_plan_o_chart_ENTRA_como_fallback(monkeypatch):
     assert r["melhor"]["estado"] == "em_gatilho" and r["melhor"]["price"] == 100.0
 
 
+# --------------------------------- paralelismo + cache de cotação (perf) --------
+def test_scan_paralelo_preserva_a_ordem_e_o_resultado(fake_fetch, monkeypatch):
+    """Paralelizar não pode mudar o que sai: mesma lista, mesmo resumo, mesma ordem
+    por urgência. ``ex.map`` preserva a ordem de entrada e o sort vem depois."""
+    fake_fetch({
+        ("AAA", "1d"): _plan(_pat(trigger=100.2), price=100.0),   # em_gatilho
+        ("BBB", "1d"): _plan(_pat(trigger=115.0), price=100.0),   # formando
+        ("CCC", "1d"): _plan(_pat(trigger=100.1), price=100.0),   # em_gatilho
+    })
+    serial = scan_watchlist(["AAA", "BBB", "CCC"], "2026-08-28", frames=("1d",), workers=1)
+    paralelo = scan_watchlist(["AAA", "BBB", "CCC"], "2026-08-28", frames=("1d",), workers=4)
+    assert [a["ticker"] for a in serial["ativos"]] == [a["ticker"] for a in paralelo["ativos"]]
+    assert serial["resumo"] == paralelo["resumo"]
+
+
+def test_scan_de_lista_vazia_nao_abre_pool(fake_fetch):
+    fake_fetch({})
+    out = scan_watchlist([], "2026-08-28", frames=("1d",))
+    assert out["ativos"] == [] and out["resumo"] == {}
+
+
+def test_cotacao_e_cacheada_por_janela_curta(monkeypatch):
+    """Medido: ``_live_price`` custava ~0,9s POR ativo e sozinho respondia por boa
+    parte de um scan quente — 20 cotações refeitas a cada varredura, inclusive num
+    reclique. Agora paga uma vez por janela."""
+    sc._live_cache_clear()
+    chamadas = []
+
+    def fake(symbol):
+        chamadas.append(symbol)
+        return {"price": 10.0}
+
+    import tradingagents.dataflows.live_price as lp
+    monkeypatch.setattr(lp, "fetch_live_price", fake)
+    assert sc._live_price("XYZ") == 10.0
+    assert sc._live_price("XYZ") == 10.0
+    assert len(chamadas) == 1, chamadas
+    # TTL zerado força o refetch — o cache é janela, não memória eterna
+    assert sc._live_price("XYZ", ttl=0) == 10.0
+    assert len(chamadas) == 2
+    sc._live_cache_clear()
+
+
+def test_simbolo_que_a_fonte_nao_resolve_paga_UM_timeout_por_janela(monkeypatch):
+    """O negativo também entra no cache: um ticker morto na watchlist custava um
+    timeout a CADA scan (o caso do AAOI no journal da revisão)."""
+    sc._live_cache_clear()
+    chamadas = []
+
+    def morto(symbol):
+        chamadas.append(symbol)
+        raise RuntimeError("possibly delisted; no price data found")
+
+    import tradingagents.dataflows.live_price as lp
+    monkeypatch.setattr(lp, "fetch_live_price", morto)
+    assert sc._live_price("MORTO") is None
+    assert sc._live_price("MORTO") is None
+    assert sc._live_price("MORTO") is None
+    assert len(chamadas) == 1, ("pagou timeout de novo dentro da janela", chamadas)
+    sc._live_cache_clear()
+
+
 def test_scan_log_is_append_only_dedup_free(tmp_path):
     log = ScanLog(tmp_path / "scans.jsonl")
     log.record({"ticker": "MSFT", "frame": "4h", "trigger": 513.73, "direction": "compra"})

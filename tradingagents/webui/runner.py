@@ -84,6 +84,11 @@ _SAME_DAY_REUSE_TTL_DEFAULT = 900.0
 # Quantos registros do histórico varrer procurando um reúso íntegro.
 _REUSE_SCAN_LIMIT = 50
 
+# Janela do memo do scan: tempo em que um segundo pedido reaproveita a varredura
+# recém-terminada em vez de refazê-la. Curto de propósito — "Escanear" tem que
+# continuar parecendo fresco; isto só absorve o reclique e o pedido concorrente.
+_SCAN_MEMO_TTL = 5.0
+
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
 _MAX_QUESTION_CHARS = 500
 
@@ -785,6 +790,10 @@ class AnalysisRunner:
         # leitura) + log append-only dos gatilhos flagrados (track record $0).
         self.watchlist_store = WatchlistStore(self.store.base, store)
         self.scan_log = ScanLog(self.store.base / "scans.jsonl")
+        # Single-flight do scan: uma varredura por vez, com memo curtíssimo pra o
+        # segundo pedido não re-varrer (ver :meth:`scan_portfolio`).
+        self._scan_lock = threading.Lock()
+        self._scan_memo: tuple[str, float, dict[str, Any]] | None = None
         # graph_factory(config, selected_analysts, callbacks) -> engine graph.
         # Injectable so tests can drive a fake engine.
         self._graph_factory = graph_factory or self._default_graph_factory
@@ -2448,17 +2457,30 @@ class AnalysisRunner:
 
         Todo ``em_gatilho`` é LOGADO (dedup por ticker+frame+gatilho: o mesmo
         setup não re-entrega) — é o insumo do track record do scan.
+
+        **Uma varredura por vez (single-flight).** O servidor é threaded e não sabe
+        que o cliente desistiu: um usuário que cansou de esperar e reclicou disparava
+        uma SEGUNDA varredura enquanto a primeira ainda batia no provedor, dobrando
+        as chamadas e cobrando throttle — a explicação mais provável pro outlier de
+        75s que a revisão mediu. Agora o segundo pedido ESPERA o primeiro e recebe o
+        resultado dele (se ainda fresco, :data:`_SCAN_MEMO_TTL`), em vez de somar
+        pressão em cima de uma fonte que já está reclamando.
         """
-        tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
-        result = scan_watchlist(tickers, date)
-        known = {(e.get("ticker"), e.get("frame"), e.get("trigger"))
-                 for e in self.scan_log.entries()}
-        for s in result.get("ativos", []):
-            for f in s.get("frames", []):
-                if (f.get("estado") == "em_gatilho"
-                        and (s["ticker"], f.get("frame"), f.get("trigger")) not in known):
-                    self.scan_log.record({**f, "ticker": s["ticker"]})
-        return result
+        with self._scan_lock:
+            memo = self._scan_memo
+            if memo and memo[0] == date and time.time() - memo[1] < _SCAN_MEMO_TTL:
+                return memo[2]
+            tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
+            result = scan_watchlist(tickers, date)
+            known = {(e.get("ticker"), e.get("frame"), e.get("trigger"))
+                     for e in self.scan_log.entries()}
+            for s in result.get("ativos", []):
+                for f in s.get("frames", []):
+                    if (f.get("estado") == "em_gatilho"
+                            and (s["ticker"], f.get("frame"), f.get("trigger")) not in known):
+                        self.scan_log.record({**f, "ticker": s["ticker"]})
+            self._scan_memo = (date, time.time(), result)
+            return result
 
     def scan_track_record(self, date: str) -> dict[str, Any]:
         """Re-avalia os gatilhos logados contra o preço da data dada.

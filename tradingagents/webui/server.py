@@ -448,8 +448,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"tickers": self.runner.watchlist_get()})
             elif path == "/api/scan":
                 # SCAN ESTRUTURAL 1-2-3 da watchlist (1d+4h+1h): $0 de LLM — só o plano
-                # determinístico cacheado. Público como /api/chart. Síncrono: frio
-                # ~13s/10 ativos, cacheado ~2s (medido 28/08).
+                # determinístico cacheado. Público como /api/chart. Síncrono e
+                # PARALELO (:data:`scanner._SCAN_WORKERS`): ~8s com a cotação fria,
+                # ~6,5s quente, na watchlist real de 20 ativos (mediana de N=4,
+                # medido 29/08 — a tabela inteira vive em ``scan_watchlist``).
+                # O comentário anterior dizia "~13s/10 ativos, cacheado ~2s": a
+                # watchlist tem 20 e a medida pela HTTP dava 25–75s.
                 qs = parse_qs(urlparse(self.path).query)
                 date = (qs.get("date", [""])[0] or "").strip() or timeutil.today()
                 self._send_json(self.runner.scan_portfolio(date))

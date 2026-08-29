@@ -3,7 +3,8 @@
 O método decide por ESTRUTURA (1-2-3 + médias), não por sentimento — e a
 estrutura já vem computada do :func:`build_actionable_plan_dict`
 (determinístico, cacheado DA-058, zero LLM). Este módulo só ENUMERA: varre a
-watchlist em 1d+4h+1h e classifica cada ativo pela distância do preço ao GATILHO,
+watchlist em 1d+4h+1h (em paralelo) e classifica cada ativo pela distância do
+preço ao GATILHO,
 pra o Samyr decidir com um clique se vale a análise completa (Padrão/Erick).
 
 Estados (vocabulário único, reutilizado no painel):
@@ -26,6 +27,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -46,6 +49,35 @@ SCAN_FRAMES = ("1d", "4h", "1h")
 # _EARNINGS_WINDOW_NOTE do erick_method).
 _GATILHO_TOL = 0.005
 
+# Paralelismo do scan. Limite ESCOLHIDO POR MEDIÇÃO, não por gosto (20 ativos ×
+# 3 frames, N=4 por config, 29/08 — mediana):
+#
+#   workers   cotação fria   cotação quente
+#      1          19,9s           5,2s
+#      3           9,2s           7,5s
+#      4           8,1s           6,5s   ← melhor nos dois, e o mais ESTÁVEL
+#      5          10,2s           7,1s
+#      6           8,8s           7,0s
+#     10           9,4s           6,6s
+#
+# Acima de 4 não melhora e a variância sobe — é onde o throttle do provedor começa
+# a cobrar (o ``yf_retry`` existe por isso), e throttle acumulado é a explicação
+# mais provável pro outlier de 75s que a revisão mediu. Abaixo de 4, a rede manda.
+# Nota honesta: com TUDO em cache o trabalho vira CPU (detecção de estrutura em
+# pandas) e o GIL faz o paralelo custar ~1,3s a mais que o serial — o ganho está no
+# caso frio e, sobretudo, no TETO: um ativo lento não segura mais os outros 19.
+_SCAN_WORKERS = 4
+
+# TTL do preço LIVE por símbolo. Medido: ``_live_price`` custava ~0,9s POR ativo e
+# sozinho respondia por ~18s dos 24,6s de um scan quente — refetch de 20 cotações a
+# cada varredura, inclusive quando o usuário só reclicou "Escanear". 30s fica ABAIXO
+# do refresh da lateral (~40s), então nenhuma tela fica mais velha do que já ficava.
+# Vale também pro NEGATIVO: símbolo que a fonte não resolve custa um timeout por
+# janela, não um por scan.
+_LIVE_TTL_S = 30.0
+_live_cache: dict[str, tuple[float, float | None]] = {}
+_live_lock = threading.Lock()
+
 # Ordem de urgência pro sort (menor = mais urgente). Entradas vivas primeiro;
 # em_movimento (já passou) e invalidou (morreu) ficam após os opportunities vivos.
 _URGENCIA = {"em_gatilho": 0, "formando": 1, "em_movimento": 2, "invalidou": 3, "sem_setup": 4, "sem_dado": 5}
@@ -55,17 +87,37 @@ def _fmt_pct(v: float | None) -> str:
     return f"{v * 100:.2f}%" if v is not None else "—"
 
 
-def _live_price(ticker: str) -> float | None:
+def _live_price(ticker: str, ttl: float = _LIVE_TTL_S) -> float | None:
     """Preço atual (live) de um símbolo — uma chamada rápida ao fast_info do
-    yfinance, fail-open. O scan de gatilhos mede a distância do PREÇO ATUAL ao
-    gatilho, não do last close da série date-guarded (que pode ser de ontem ou
-    estar stale no cache diário). Sem live → cai no price do plan (honesto)."""
+    yfinance, fail-open, com cache de janela curta (:data:`_LIVE_TTL_S`).
+
+    O scan de gatilhos mede a distância do PREÇO ATUAL ao gatilho, não do last
+    close da série date-guarded (que pode ser de ontem ou estar stale no cache
+    diário). Sem live → cai no price do plan (honesto).
+
+    O cache guarda TAMBÉM o negativo: um símbolo que a fonte não resolve paga um
+    timeout por janela, não um por varredura.
+    """
+    agora = time.time()
+    with _live_lock:
+        hit = _live_cache.get(ticker)
+        if hit is not None and agora - hit[0] < ttl:
+            return hit[1]
     try:
         from tradingagents.dataflows.live_price import fetch_live_price
         data = fetch_live_price(ticker)
-        return float(data["price"]) if data and data.get("price") else None
+        preco = float(data["price"]) if data and data.get("price") else None
     except Exception:  # noqa: BLE001 — preço live nunca derruba o scan
-        return None
+        preco = None
+    with _live_lock:
+        _live_cache[ticker] = (agora, preco)
+    return preco
+
+
+def _live_cache_clear() -> None:
+    """Zera o cache de cotação (teste, e o "escanear de novo" explícito)."""
+    with _live_lock:
+        _live_cache.clear()
 
 
 def _chart_fallback(ticker: str, date: str, frame: str) -> dict:
@@ -175,9 +227,37 @@ def scan_symbol(ticker: str, date: str, frames: tuple = SCAN_FRAMES) -> dict[str
 
 
 def scan_watchlist(tickers: list[str], date: str,
-                   frames: tuple = SCAN_FRAMES) -> dict[str, Any]:
-    """Varre a watchlist toda — ordenada por urgência (em_gatilho primeiro)."""
-    out = [scan_symbol(t, date, frames) for t in tickers]
+                   frames: tuple = SCAN_FRAMES,
+                   workers: int = _SCAN_WORKERS) -> dict[str, Any]:
+    """Varre a watchlist toda — ordenada por urgência (em_gatilho primeiro).
+
+    **Em paralelo** (:data:`_SCAN_WORKERS`): é I/O-bound, e o serial fazia 20
+    ativos × 3 frames esperarem um de cada vez.
+
+    **Números REAIS** (20 ativos — a watchlist de verdade —, frames 1d+4h+1h,
+    medido 29/08, mediana de N=4). O comentário antigo prometia "10 ativos, ~13s
+    frio / ~2s cacheado"; a watchlist tem 20 e nenhum dos dois tempos existia:
+
+    ====================  ========  =====================
+    cenário               antes     agora (4 workers)
+    ====================  ========  =====================
+    cotação fria           19,9s     **8,1s**
+    cotação quente          5,2s       6,5s
+    ====================  ========  =====================
+
+    Sobre a cotação quente ficar 1,3s mais lenta: com tudo em cache o trabalho é
+    CPU (pandas sob o GIL), não I/O, e aí thread não ajuda. Vale a troca porque o
+    caso que doía era o outro — a revisão mediu 25s a 75s pela HTTP, com a cotação
+    fria em TODA chamada (não havia cache de cotação; :func:`_live_price`).
+
+    ``ex.map`` preserva a ordem de entrada; a ordenação por urgência vem depois,
+    então o resultado é determinístico apesar do paralelismo.
+    """
+    if not tickers:
+        return {"date": date, "frames": list(frames), "resumo": {}, "ativos": []}
+    n = max(1, min(workers, len(tickers)))
+    with ThreadPoolExecutor(max_workers=n, thread_name_prefix="scan") as ex:
+        out = list(ex.map(lambda t: scan_symbol(t, date, frames), tickers))
     out.sort(key=lambda s: (_URGENCIA.get(s["melhor"].get("estado"), 9),
                             s["melhor"].get("dist_pct") if s["melhor"].get("dist_pct") is not None else 9.9))
     counts: dict[str, int] = {}
