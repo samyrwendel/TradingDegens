@@ -910,7 +910,7 @@ def _estado_note(
 
 def _traco_line(
     read: dict, drop_cls: str | None, fine_veto: bool,
-    factors: dict, gate: bool, decision: dict,
+    factors: dict, gate: bool, decision: dict, frame: str | None = None,
 ) -> str | None:
     """O TRAÇO da decisão (spec §4): qual fator COMANDOU o Estado, o que ele
     SOBREPÔS e quais tiers foram consultados — dado compacto e ordenado, não prosa.
@@ -930,6 +930,13 @@ def _traco_line(
         # Mudou de papel: já NÃO veta a porta (não é uma das 5 citadas) — pesa como
         # teto de tamanho no TIER 3. Fica no traço pra não sumir da vista.
         tiers.append(f"divergência {dt['kind']} na tese (teto de tamanho, não veto)")
+    ds = factors.get("divergencia") or {}
+    if ds.get("measured") and ds.get("kind"):
+        # Divergência do frame MENOR: herda o TIER 0 — é informação de TIMING, não de
+        # tese (BTC 27/08 [01:01] "divergência no RSI de 4h"). Medida e consultada,
+        # mas não inverte direção sozinha; aparece aqui pra não ficar medida no escuro.
+        tiers.append(f"divergência {ds['kind']} no {_COMPACT_FRAME.get(frame or '', frame or 'swing')}"
+                     " (timing — consultada, não inverte)")
     tiers.append(f"T1 veto {'FRAQUEZA' if drop_cls == 'fraqueza' else 'livre'}")
     if gate:
         tiers.append("T2 porta ABERTA (5 condições)")
@@ -1088,7 +1095,7 @@ def build_erick_method_section(
 
     # O traço (spec §4): logo após o Peso, fecha o bloco decisório dizendo quem
     # mandou e o que ele sobrepôs — a caixa-preta morre aqui.
-    traco = _traco_line(read, drop_cls, fine_veto, factors, gate, decision)
+    traco = _traco_line(read, drop_cls, fine_veto, factors, gate, decision, frame)
     if traco:
         lines.append(traco)
 

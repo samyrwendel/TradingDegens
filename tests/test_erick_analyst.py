@@ -745,6 +745,45 @@ def test_section_names_why_gate_did_not_open(monkeypatch):
     assert "**Estado (Método Erick):** CAIXA" in section
 
 
+def test_section_swing_divergence_is_named_in_the_trace(monkeypatch):
+    """Caso BTC 27/08 [01:01] ("divergência no RSI de 4h"): a divergência do frame
+    MENOR é medida e tem que APARECER no traço — como informação de TIMING, sem
+    inverter a direção. Medida no escuro é o mesmo erro do calendário do INTC."""
+    def chart(s, d, timeframe="1d"):
+        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+                else _chart_swing_baixa_desacel(s, d, timeframe))
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: {"setup_state": "sem_setup"})
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: {
+        "classification": "indefinido", "reasons": [],
+        "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
+    monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full(
+        divergencia={"measured": True, "kind": "bearish", "detail": "d"}))
+    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    assert "divergência bearish no 4h (timing — consultada, não inverte)" in section
+    # segue sendo TIMING: não vira veto de direção nem fecha a porta
+    assert "Porta TIER 2 aberta" in section
+    assert "**Estado (Método Erick):** CAIXA" not in section
+
+
+def test_swing_divergence_absent_stays_out_of_the_trace(monkeypatch):
+    """Não medida = fora do traço (vai pro bloco de AUSENTES) — o traço só carrega
+    fator com leitura real, nunca 'sem divergência' inventado."""
+    def chart(s, d, timeframe="1d"):
+        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+                else _chart_swing_baixa_desacel(s, d, timeframe))
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: {"setup_state": "sem_setup"})
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: {
+        "classification": "indefinido", "reasons": [],
+        "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
+    monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full())
+    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    assert "timing — consultada, não inverte" not in section
+
+
 def test_section_thesis_divergence_does_not_close_the_gate(monkeypatch):
     """Contra-regressão do dado REAL: no INTC 27/08 a divergência bearish do semanal
     existe e a porta abre de todo jeito — ela é TETO DE TAMANHO (TIER 3), não veto.
