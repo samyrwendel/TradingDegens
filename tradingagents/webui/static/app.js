@@ -4838,6 +4838,12 @@ async function showScanTrack() {
         `<b>${escapeHtml(v.ticker || "")}</b><span class="scan-frame">${escapeHtml(v.frame || "")}</span>` +
         `<span>${v.direction === "venda" ? "⬇️" : "⬆️"} gatilho ${scanFmt(v.trigger)}</span>` +
         `<span class="scan-dist">agora ${scanFmt(v.preco_agora)}</span>` +
+        // Fechado carrega a DATA do toque: o veredito veio da série (a barra que
+        // tocou o nível), não da comparação com o preço de hoje — por isso não
+        // muda mais amanhã. Mostrar a data é o que torna isso verificável.
+        (v.fechado && v.fechado_em
+          ? `<span class="scan-dist">em ${escapeHtml(v.fechado_em)}${v.empate_na_barra ? " ⚠️ TP e SL na mesma barra" : ""}</span>`
+          : "") +
         `<span class="scan-chip ${vb[1]}">${vb[0]}</span></span></li>`;
     }).join("");
     box.innerHTML = `<div class="scan-summary">🎯 <b>${taxa}</b> de acerto em ${data.n_fechados || 0} gatilho(s) fechado(s)` +

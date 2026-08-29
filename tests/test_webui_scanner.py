@@ -14,6 +14,8 @@ Puro e offline: monkeypatch dos seams do próprio scanner (``build_price_chart``
   abaixo do preço — bug real pego no probe ao vivo, taxa 1.0 falsa).
 """
 
+import json
+
 import pytest
 
 import tradingagents.webui.scanner as sc
@@ -131,42 +133,171 @@ def test_scan_log_is_append_only_dedup_free(tmp_path):
     assert isinstance(log.entries(), list)
 
 
+# --- track record: fechado pela SÉRIE, aberto pelo preço de agora (C2) ---------
+# O log carrega ``ts``; o fechamento olha as barras POSTERIORES ao dia do log. Os
+# testes escrevem o ts na mão pra controlar a janela (``ScanLog.record`` carimba
+# "agora", que não serve pra ancorar candles fixos).
+
+def _log_com_ts(tmp_path, entradas):
+    """Escreve entradas com ``ts`` explícito — a janela do veredito depende dele."""
+    path = tmp_path / "scans.jsonl"
+    with open(path, "w", encoding="utf-8") as fh:
+        for e in entradas:
+            fh.write(json.dumps(e) + "\n")
+    return ScanLog(path)
+
+
+def _serie(monkeypatch, candles_por_ticker, precos):
+    monkeypatch.setattr(sc, "build_actionable_plan_dict",
+                        lambda t, d, timeframe="1d", method="padrao":
+                        {"price": precos.get(t), "pattern": None, "setup_state": "ativo"})
+    monkeypatch.setattr(sc, "build_price_chart",
+                        lambda t, d, timeframe="1d", method="padrao":
+                        {"candles": candles_por_ticker.get(t, [])})
+    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)   # offline
+
+
+def _c(d, h, low):
+    return {"d": d, "o": low, "h": h, "l": low, "c": low}
+
+
 def test_verdicts_are_direction_aware(tmp_path, monkeypatch):
     """VENDA: TP fica ABAIXO — price >= tp NÃO é 'bateu_tp' (bug real do probe:
     taxa 1.0 falsa). Compra: price <= sl é stop, price >= tp é alvo."""
-    log = ScanLog(tmp_path / "scans.jsonl")
-    log.record({"ticker": "V", "frame": "1d", "trigger": 100.0, "direction": "venda",
-                "tp": 90.0, "sl": 105.0})
-    log.record({"ticker": "C", "frame": "1d", "trigger": 100.0, "direction": "compra",
-                "tp": 110.0, "sl": 95.0})
-
-    # V em 99: abaixo do gatilho → lucro em andamento (venda lucra quando cai).
-    # C em 105: acima do gatilho, abaixo do TP → lucro em andamento. NENHUM
-    # bateu_tp falso (o bug: venda em 99 ≥ TP 90 marcava 'bateu_tp' à toa).
-    prices = {"V": 99.0, "C": 105.0}
-    monkeypatch.setattr(sc, "build_actionable_plan_dict",
-                        lambda t, d, timeframe="1d", method="padrao":
-                        {"price": prices[t], "pattern": None, "setup_state": "ativo"})
-    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)   # offline: usa o price do plan
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "V", "frame": "1d",
+         "trigger": 100.0, "direction": "venda", "tp": 90.0, "sl": 105.0},
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    # Série que NÃO toca nada: V oscila 98–101, C oscila 104–106.
+    _serie(monkeypatch,
+           {"V": [_c("2026-08-21", 101.0, 98.0)], "C": [_c("2026-08-21", 106.0, 104.0)]},
+           {"V": 99.0, "C": 105.0})
     out = scan_verdicts(log, ["V", "C"], "2026-08-28")
     v = {x["ticker"]: x["veredito"] for x in out["verdicts"]}
-    assert v["V"] == "andamento_lucro"
+    assert v["V"] == "andamento_lucro"      # venda lucra caindo
     assert v["C"] == "andamento_lucro"
     assert out["n_fechados"] == 0 and out["taxa_acerto"] is None
 
 
 def test_verdicts_tp_sl_closed_counts(tmp_path, monkeypatch):
-    log = ScanLog(tmp_path / "scans.jsonl")
-    log.record({"ticker": "C", "frame": "1d", "trigger": 100.0, "direction": "compra",
-                "tp": 110.0, "sl": 95.0})
-    log.record({"ticker": "S", "frame": "1d", "trigger": 100.0, "direction": "compra",
-                "tp": 110.0, "sl": 95.0})
-    prices = {"C": 111.0, "S": 94.0}            # C bateu TP; S bateu SL
-    monkeypatch.setattr(sc, "build_actionable_plan_dict",
-                        lambda t, d, timeframe="1d", method="padrao":
-                        {"price": prices[t], "pattern": None, "setup_state": "ativo"})
-    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)   # offline: usa o price do plan
+    """Fechamento vem da SÉRIE: a máxima tocou o TP, a mínima tocou o SL."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "S", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    _serie(monkeypatch,
+           {"C": [_c("2026-08-21", 111.0, 100.0)],     # máxima cruzou o TP
+            "S": [_c("2026-08-21", 101.0, 94.0)]},     # mínima cruzou o SL
+           {"C": 105.0, "S": 96.0})
     out = scan_verdicts(log, ["C", "S"], "2026-08-28")
     v = {x["ticker"]: x["veredito"] for x in out["verdicts"]}
     assert v["C"] == "bateu_tp" and v["S"] == "bateu_sl"
     assert out["n_fechados"] == 2 and out["taxa_acerto"] == 0.5
+
+
+def test_tocou_o_tp_e_voltou_continua_bateu_tp(tmp_path, monkeypatch):
+    """O acerto REAL não pode sumir porque o preço voltou (C2-a).
+
+    Antes: o veredito comparava o preço de AGORA com o TP — o trade que subiu,
+    tocou o alvo e devolveu tudo aparecia como 'andamento', apagando um acerto
+    que aconteceu de verdade.
+    """
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    _serie(monkeypatch,
+           {"C": [_c("2026-08-21", 111.0, 101.0),      # tocou o TP
+                  _c("2026-08-22", 103.0, 99.0),       # e voltou
+                  _c("2026-08-25", 101.0, 96.0)]},
+           {"C": 100.5})                                # preço de hoje: longe do TP
+    out = scan_verdicts(log, ["C"], "2026-08-28")
+    v = out["verdicts"][0]
+    assert v["veredito"] == "bateu_tp", v
+    assert v["fechado"] is True and v["fechado_em"] == "2026-08-21"
+    assert out["taxa_acerto"] == 1.0
+
+
+def test_bateu_sl_e_recuperou_continua_bateu_sl(tmp_path, monkeypatch):
+    """A perda REAL também não some quando o preço recupera (C2-a, lado feio).
+
+    Sem isto a taxa de acerto seria otimista por construção: só as perdas que
+    ainda doem hoje contariam.
+    """
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "S", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    _serie(monkeypatch,
+           {"S": [_c("2026-08-21", 101.0, 94.0),       # perfurou o SL
+                  _c("2026-08-22", 106.0, 100.0)]},    # e recuperou
+           {"S": 106.0})
+    v = scan_verdicts(log, ["S"], "2026-08-28")["verdicts"][0]
+    assert v["veredito"] == "bateu_sl" and v["fechado_em"] == "2026-08-21"
+
+
+def test_veredito_fechado_nao_muda_quando_a_data_avanca(tmp_path, monkeypatch):
+    """IMUTABILIDADE (C2-b/c): o mesmo gatilho re-avaliado em datas diferentes dá o
+    MESMO veredito e a MESMA taxa. Antes, um 'bateu_tp' de hoje virava 'andamento'
+    amanhã e a taxa de acerto oscilava a cada chamada."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    serie = [_c("2026-08-21", 111.0, 101.0), _c("2026-08-22", 104.0, 99.0),
+             _c("2026-08-27", 98.0, 90.0)]   # depois até perfura o SL — tarde demais
+    saidas = []
+    for i, dia in enumerate(("2026-08-22", "2026-08-25", "2026-08-28"), start=1):
+        _serie(monkeypatch, {"C": serie[:max(1, i)]}, {"C": 92.0})
+        saidas.append(scan_verdicts(log, ["C"], dia))
+    assert {o["verdicts"][0]["veredito"] for o in saidas} == {"bateu_tp"}
+    assert {o["taxa_acerto"] for o in saidas} == {1.0}
+
+
+def test_tp_e_sl_na_mesma_barra_conta_sl(tmp_path, monkeypatch):
+    """Sem tick não dá pra saber a ordem DENTRO da barra → leitura pessimista.
+    Declarado em ``empate_na_barra``, nunca resolvido no chute otimista."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "X", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    _serie(monkeypatch, {"X": [_c("2026-08-21", 112.0, 94.0)]}, {"X": 100.0})
+    v = scan_verdicts(log, ["X"], "2026-08-28")["verdicts"][0]
+    assert v["veredito"] == "bateu_sl" and v["empate_na_barra"] is True
+
+
+def test_o_proprio_dia_do_log_nao_fecha_o_trade(tmp_path, monkeypatch):
+    """O dia do log fica FORA da janela: o ts é UTC e o candle é do relógio do
+    mercado — contar o próprio dia poderia creditar um TP anterior ao gatilho.
+    Acerto inflado é o erro que este painel não pode cometer."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-21T18:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    _serie(monkeypatch, {"C": [_c("2026-08-21", 115.0, 99.0)]}, {"C": 101.0})
+    out = scan_verdicts(log, ["C"], "2026-08-28")
+    assert out["verdicts"][0]["veredito"] == "andamento_lucro"
+    assert out["n_fechados"] == 0
+
+
+def test_sem_serie_o_trade_fica_ABERTO_nunca_fechado_no_escuro(tmp_path, monkeypatch):
+    """Série indisponível não vira veredito fechado — fica em andamento (ou
+    sem_dado). Fechar sem prova é exatamente o que corrompia a taxa."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0},
+    ])
+    def boom(t, d, timeframe="1d", method="padrao"):
+        raise RuntimeError("fonte fora do ar")
+    monkeypatch.setattr(sc, "build_actionable_plan_dict",
+                        lambda t, d, timeframe="1d", method="padrao":
+                        {"price": 120.0, "pattern": None, "setup_state": "ativo"})
+    monkeypatch.setattr(sc, "build_price_chart", boom)
+    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    out = scan_verdicts(log, ["C"], "2026-08-28")
+    assert out["verdicts"][0]["fechado"] is False
+    assert out["n_fechados"] == 0

@@ -207,12 +207,59 @@ class ScanLog:
         return out
 
 
-def scan_verdicts(log: ScanLog, tickers: list[str], date: str) -> dict[str, Any]:
-    """Re-avalia cada gatilho logado contra o preço de HOJE (mesma data do scan).
+def _dia(v: Any) -> str:
+    """Parte-DATA (``YYYY-MM-DD``) de um ts do log ou do rótulo de um candle."""
+    return str(v or "")[:10]
 
-    ``bateu_tp`` / ``bateu_sl`` / ``andamento`` por entrada + taxa de acerto
-    agregada — só leitura de série cacheada, $0. Um mesmo gatilho logado há
-    dias é o trade que a observação do Samyr diz valer; aqui ele conta.
+
+def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) -> dict | None:
+    """O PRIMEIRO toque em TP ou SL na série, varrida em ordem cronológica.
+
+    É isto que torna o track record IMUTÁVEL: um trade que tocou o alvo e voltou
+    fica ``bateu_tp`` pra sempre, porque o toque é um fato numa barra do passado —
+    não uma comparação com o preço de agora, que muda todo dia. Janela crescendo
+    (``date`` avança) nunca desfaz um toque anterior: o primeiro achado manda.
+
+    Janela: barras de dias ESTRITAMENTE POSTERIORES ao dia do log. O log carrega
+    hora UTC e o candle carrega o relógio do mercado — sem base comum, contar o
+    próprio dia do log poderia creditar um TP que aconteceu ANTES do gatilho ser
+    flagrado. Um acerto inflado é o pior erro possível num painel que existe pra
+    dizer a taxa de acerto real, então o mesmo-dia fica de fora, declarado.
+
+    TP e SL na MESMA barra: sem tick não dá pra saber a ordem dentro da barra →
+    conta ``bateu_sl`` (a leitura pessimista). Também declarado, nunca chutado.
+    """
+    if tp is None and sl is None:
+        return None
+    for c in candles:
+        dia = _dia(c.get("d"))
+        if not dia or dia <= desde_dia:
+            continue
+        hi, lo = c.get("h"), c.get("l")
+        if hi is None or lo is None:
+            continue
+        bateu_tp = tp is not None and (lo <= tp if venda else hi >= tp)
+        bateu_sl = sl is not None and (hi >= sl if venda else lo <= sl)
+        if bateu_sl:               # empate na barra resolve pelo SL (pessimista)
+            return {"veredito": "bateu_sl", "fechado_em": dia,
+                    "empate_na_barra": bool(bateu_tp)}
+        if bateu_tp:
+            return {"veredito": "bateu_tp", "fechado_em": dia, "empate_na_barra": False}
+    return None
+
+
+def scan_verdicts(log: ScanLog, tickers: list[str], date: str) -> dict[str, Any]:
+    """Re-avalia cada gatilho logado — FECHADO pela série, ABERTO pelo preço de hoje.
+
+    Fechado (``bateu_tp``/``bateu_sl``): decidido pelo primeiro toque em TP ou SL
+    nas barras posteriores ao log (:func:`_primeiro_toque`). Uma vez fechado, não
+    muda mais — era o defeito antigo, que comparava só o preço de AGORA com os
+    níveis e por isso (a) perdia o trade que tocou o alvo e voltou, (b) despromovia
+    um ``bateu_tp`` de ontem pra ``andamento`` hoje, e (c) fazia a taxa de acerto
+    oscilar a cada chamada.
+
+    Aberto (``andamento_*``): esse sim é marcado a mercado — posição viva vale o
+    preço de agora. Só leitura de série cacheada, $0.
     """
     verdicts = []
     for e in log.entries():
@@ -223,23 +270,31 @@ def scan_verdicts(log: ScanLog, tickers: list[str], date: str) -> dict[str, Any]
             plan = build_actionable_plan_dict(ticker, date, timeframe=frame)
         except Exception:  # noqa: BLE001 — verdict ausente não derruba o resto
             plan = {}
+        try:
+            candles = (build_price_chart(ticker, date, timeframe=frame) or {}).get("candles") or []
+        except Exception:  # noqa: BLE001 — sem série o trade fica ABERTO, não fechado no escuro
+            candles = []
         # Preço ATUAL tem prioridade sobre o last close do plan (mesmo motivo do
-        # scan: a re-avaliação é contra onde o preço está AGORA, não o close stale).
+        # scan: a posição ABERTA é marcada a onde o preço está AGORA).
         live = _live_price(ticker)
         price = live if live is not None else (plan or {}).get("price")
         v = dict(e)
         v["preco_agora"] = price
         venda = e.get("direction") == "venda"
-        if price is None or trigger is None:
+
+        toque = _primeiro_toque(candles, _dia(e.get("ts")), tp, sl, venda)
+        if toque:
+            v.update(toque)
+            v["fechado"] = True
+        elif price is None or trigger is None:
             v["veredito"] = "sem_dado"
-        elif tp is not None and (price <= tp if venda else price >= tp):
-            v["veredito"] = "bateu_tp"
-        elif sl is not None and (price >= sl if venda else price <= sl):
-            v["veredito"] = "bateu_sl"
-        elif price > trigger:
-            v["veredito"] = "andamento_prejuizo" if venda else "andamento_lucro"
+            v["fechado"] = False
         else:
-            v["veredito"] = "andamento_lucro" if venda else "andamento_prejuizo"
+            v["fechado"] = False
+            if price > trigger:
+                v["veredito"] = "andamento_prejuizo" if venda else "andamento_lucro"
+            else:
+                v["veredito"] = "andamento_lucro" if venda else "andamento_prejuizo"
         verdicts.append(v)
 
     n = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
