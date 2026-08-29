@@ -1921,6 +1921,21 @@ function runReanalyze(method, tf) {
     .catch(() => { $("formError").textContent = "falha ao reanalisar"; });
 }
 
+// R:R ABAIXO DE 1 é estado, não um número como outro qualquer: significa arriscar
+// mais do que se pretende ganhar (0,31 = arrisca 3,2x o alvo). O gráfico já trata
+// assim desde a task 029 (âmbar dentro do canvas quando rr < 1) — aqui a mesma
+// gramática chega ao texto, que é o que se lê no celular antes de rolar até o
+// gráfico. Âmbar de ATENÇÃO, não vermelho de erro: o setup existe, a conta é que
+// está desfavorável.
+function rrRuim(rr) {
+  return rr != null && rr < 1;
+}
+
+function rrAviso(rr) {
+  if (!rrRuim(rr)) return "";
+  return ` — risco MAIOR que o retorno: arrisca ${(1 / rr).toFixed(1)}x o que pretende ganhar`;
+}
+
 // ---- rodapé do cabeçalho: gatilhos + preço, no canto inferior direito -------
 // Pedido do Samyr: o VEREDITO fica em cima; os GATILHOS descem pro canto inferior
 // direito do card, ao lado do preço atual, alinhados à direita. Antes os níveis só
@@ -1992,7 +2007,11 @@ function renderHeadTriggers(a) {
   } else if (rr.note) {
     partes.push(`<span class="hl-item hl-warn">⚠️ ${escapeHtml(rr.note)}</span>`);
   }
-  if (rr.rr != null) partes.push(`<span class="hl-item">⚖️ R:R <b>${fmtNum(rr.rr)}</b></span>`);
+  if (rr.rr != null) {
+    partes.push(`<span class="hl-item${rrRuim(rr.rr) ? " rr-ruim" : ""}"` +
+      (rrRuim(rr.rr) ? ` title="${escapeHtml("R:R" + rrAviso(rr.rr))}"` : "") +
+      `>⚖️ R:R <b>${fmtNum(rr.rr)}</b></span>`);
+  }
   // A família se declara: estes quatro são NÍVEIS DO PLANO, e a linha de cima é
   // cotação de mercado. Sem o rótulo, "R:R 0,31" e "835,37" ficavam lado a lado como
   // se fossem do mesmo assunto (defeito 2).
@@ -2017,7 +2036,9 @@ function renderActionable(a) {
   let rrHtml = "";
   if (rr && rr.rr != null) {
     const detail = `entrada ${fmtNum(rr.entry)} (${rr.entry_basis || ""}) · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`;
-    rrHtml = `<span class="act-fact" title="${escapeHtml(detail)}"><span class="act-k">⚖️ Risco/retorno</span> ${fmtNum(rr.rr)}:1</span>`;
+    rrHtml = `<span class="act-fact${rrRuim(rr.rr) ? " rr-ruim" : ""}" ` +
+      `title="${escapeHtml(detail + rrAviso(rr.rr))}">` +
+      `<span class="act-k">⚖️ Risco/retorno</span> ${fmtNum(rr.rr)}:1</span>`;
   } else if (rr && rr.note) {
     rrHtml = `<span class="act-fact" title="${escapeHtml(rr.note)}"><span class="act-k">⚖️ Risco/retorno</span> não calculável</span>`;
   }
@@ -2478,8 +2499,14 @@ function planZones(a) {
     // inferência da tela: faixa fora do preço para de se desenhar como entrada.
     const fora = buy.active_now === false;
     const nome = buy.tag || "recuo à média";
+    // A tag CURTA existe pro rótulo desenhado dentro do gráfico: no telefone a
+    // largura útil é ~300px e "recuo à média (MMS50) — não ativa agora 806,67"
+    // atravessava a régua do eixo e saía cortado (task 020). A curta diz o mesmo
+    // em menos letra; a longa continua na legenda, que tem a linha inteira.
+    const curto = `recuo ${buy.ma_label || "média"}`;
     out.push({ ...buy, color: ZONE_COLORS.buy, inactive: fora,
-               tag: fora ? `${nome} — não ativa agora` : nome });
+               tag: fora ? `${nome} — não ativa agora` : nome,
+               tagCurto: fora ? `${curto} (inativa)` : curto });
   }
   // A região de realização só se chama "alvo" quando de fato é: num setup de VENDA
   // ela é o topo acima (resistência, nunca o alvo de um short) e, quando coincide
@@ -2488,15 +2515,16 @@ function planZones(a) {
   const rz = a.realize_zone;
   if (rz && rz.price != null && rz.role !== "gatilho") {
     const rzColor = rz.role === "resistencia" ? ZONE_COLORS.resist : ZONE_COLORS.realize;
-    out.push({ ...rz, color: rzColor, tag: rz.role_label || "realização (alvo)" });
+    out.push({ ...rz, color: rzColor, tag: rz.role_label || "realização (alvo)",
+               tagCurto: rz.role === "resistencia" ? "resistência" : "realização" });
   }
   // Alvo (TP) do padrão. Mesmo nível da realização → NÃO desenha um segundo: a
   // faixa que já está lá passa a dizer que ela é o alvo.
   const tg = a.target;
   if (tg && tg.price != null) {
     const twin = tg.same_as_realize && out.find((z) => z.color === ZONE_COLORS.realize && z.price === tg.price);
-    if (twin) { twin.tag = "realização = alvo (TP)"; twin.color = ZONE_COLORS.target; }
-    else out.push({ ...tg, color: ZONE_COLORS.target, tag: "alvo (TP)" });
+    if (twin) { twin.tag = "realização = alvo (TP)"; twin.tagCurto = "alvo"; twin.color = ZONE_COLORS.target; }
+    else out.push({ ...tg, color: ZONE_COLORS.target, tag: "alvo (TP)", tagCurto: "alvo" });
   }
   // Invalidação e stop são LINHAS (nível exato), não faixas: a invalidação é o
   // ponto 3 da série e o stop é ela com a folga de ATR declarada pelo backend.
@@ -2508,7 +2536,7 @@ function planZones(a) {
   const st = a.stop;
   if (st && st.price != null) {
     out.push({ label: st.label, price: st.price, low: null, high: null,
-               color: ZONE_COLORS.stop, tag: "stop (SL)", dash: [6, 4] });
+               color: ZONE_COLORS.stop, tag: "stop (SL)", tagCurto: "stop", dash: [6, 4] });
   }
   const pb = a.pullback_zone;
   const buyPrice = buy && buy.price;
@@ -2853,19 +2881,31 @@ function drawPriceChart(canvas, chart, a) {
   // e começa abaixo do carimbo de frame pra não tampá-lo.
   canvas.dataset.levelLabels = "[]";
   if (zones.length) {
+    // O rótulo tem de CABER no gráfico. No telefone (~300px de área de plotagem)
+    // "recuo à média (MMS50) — não ativa agora 806,67" atravessava a régua do eixo
+    // e saía cortado, ainda por cima colidindo com as pílulas de preço (task 020).
+    // Escada, do mais informativo ao mínimo: texto inteiro → texto curto → só o
+    // preço. O nome nunca se perde de vez — a legenda liga a cor ao nome, e ela
+    // agora fica logo abaixo do gráfico no telefone.
+    ctx.font = "bold 10px ui-monospace, Menlo, monospace";
+    const maxLabelW = plotW - 12;
+    const cabe = (txt) => ctx.measureText(txt).width + 14 <= maxLabelW;
     const tagPills = zones.map((z) => {
       const band = z.low != null && z.high != null && z.high > z.low;
       const yl = band ? (y(z.high) + y(z.low)) / 2 : y(z.price);
-      return { y: yl, ry: yl, text: `${z.tag} ${fmtAxis(z.price)}`, color: z.color };
+      const preco = fmtAxis(z.price);
+      const inteiro = `${z.tag} ${preco}`;
+      const curto = `${z.tagCurto || z.tag} ${preco}`;
+      const text = cabe(inteiro) ? inteiro : (cabe(curto) ? curto : preco);
+      return { y: yl, ry: yl, text, color: z.color };
     });
     const labelTop = padT + ((a && a.risk_reward && a.risk_reward.rr != null) ? 52 : 30);
     layoutAxisPills(tagPills, labelTop, padT + plotH - 10, 17);
     // rótulos realmente PINTADOS ficam observáveis (mesmo padrão do zoom em
     // dataset.v0/v1): é assim que o E2E prova que estão no candle, não só na legenda
     canvas.dataset.levelLabels = JSON.stringify(tagPills.map((t) => t.text));
-    ctx.font = "bold 10px ui-monospace, Menlo, monospace";
     tagPills.forEach((t) => {
-      const w = ctx.measureText(t.text).width + 14;
+      const w = Math.min(ctx.measureText(t.text).width + 14, maxLabelW);
       if (Math.abs(t.ry - t.y) > 1) {   // deslocado pra não colar: leader até o nível real
         ctx.strokeStyle = t.color; ctx.globalAlpha = 0.45; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(padL + 4, t.ry); ctx.lineTo(padL + 4, t.y); ctx.stroke();

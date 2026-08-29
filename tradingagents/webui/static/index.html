@@ -346,8 +346,12 @@
             <div class="chart-card hidden" id="chartCard">
               <div class="chart-head">
                 <h2 class="section-title">Gráfico de candles <span class="orig">(candlestick)</span> com faixas do plano</h2>
-                <div class="chart-legend" id="chartLegend"></div>
               </div>
+              <!-- A legenda é IRMÃ do gráfico (não filha do cabeçalho) desde a task
+                   020: no desktop ela continua na mesma fileira do título (grade do
+                   .chart-card), e no telefone desce pra DEPOIS do gráfico — 11 itens
+                   comiam 4 linhas antes de o gráfico aparecer. -->
+              <div class="chart-legend" id="chartLegend"></div>
               <!-- Seletor de timeframe: recalcula região, 1-2-3 e faixas NAQUELE
                    tempo gráfico. Cripto tem a escada intradiária (candle real de
                    exchange); ação só o diário (intradiário aparece desabilitado). -->

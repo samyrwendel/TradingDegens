@@ -606,6 +606,10 @@ details.section.erick > summary { color: #9cc7f5; }
 /* preço da análise: referência, menor que a cotação, e separado dela por uma RÉGUA
    (1px sólido — DA-070 proíbe degradê, e uma régua tem o peso visual que a palavra
    "análise" solta não tinha). */
+/* R:R < 1: ÂMBAR de atenção — arrisca mais do que pretende ganhar. Mesma gramática
+   que o gráfico já usa dentro do canvas (verde ≥ 1, âmbar < 1) desde a task 029; o
+   texto estava mostrando o número em cor neutra, como se 0,31 fosse igual a 2,50. */
+.hl-item.rr-ruim, .hl-item.rr-ruim b, .act-fact.rr-ruim, .act-fact.rr-ruim .act-k { color: var(--amber); }
 .hp-ref { border-left: 1px solid var(--border); padding-left: 14px; }
 /* Sem cotação atual (run reaberta noutro dia), a análise é a ÚNICA unidade da linha
    — e uma régua abrindo a linha separaria o quê? Some. */
@@ -690,7 +694,13 @@ details.section[open] > summary::before { content: "▾"; }
    colorida no gráfico. O destaque do setup vive nas faixas dentro do próprio gráfico
    (compra/realização/1-2-3), não numa borda em volta do card. */
 
-.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+/* A legenda saiu de DENTRO do cabeçalho (task 020) pra poder descer no telefone —
+   não se reordena um filho pra fora do próprio pai. No desktop ela continua onde
+   estava: com o cabeçalho em `flex-wrap`, na largura real do card (772px em 1500,
+   572px em 1280) ela JÁ ocupava uma fileira própria abaixo do título, e as margens
+   abaixo reproduzem exatamente os mesmos 12px + 10px daquele arranjo. */
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.chart-card > .chart-legend { margin-bottom: 10px; }
 .chart-head .section-title { margin: 0; }
 .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -1098,6 +1108,40 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
   /* altura do gráfico proporcional à tela, não 380px fixo */
   #priceChart { height: 46vh; min-height: 240px; max-height: 340px; }
+
+  /* ---- a tira do cabeçalho no TELEFONE (task 020) ----------------------------
+     "Tá bem zoado pra celular." No desktop a tira encosta à direita; no telefone
+     isso serrilha: cada linha começa num lugar e o R:R sobrava sozinho numa
+     segunda fileira — quebra por ACIDENTE, não por decisão. Aqui ela encosta à
+     ESQUERDA e empilha DE PROPÓSITO. */
+  .head-levels { align-items: stretch; }
+  .hl-levels, .head-price { justify-content: flex-start; }
+  /* MERCADO: uma unidade por linha, cada preço com o SEU carimbo, e o rótulo na
+     frente — no telefone o que se procura primeiro é "qual desses é o de agora". */
+  .hp-unit { width: 100%; }
+  .hp-live .hp-tag { order: -1; }
+  /* a régua separava duas unidades LADO A LADO; empilhadas, ela abriria a linha
+     sem separar nada (o rótulo "análise" já faz esse trabalho aqui) */
+  .hp-ref { border-left: 0; padding-left: 0; }
+  /* PLANO: 2×2 declarado. Os quatro níveis são a informação que decide o trade —
+     o que não pode é o quarto cair sozinho numa fileira desalinhada. */
+  .hl-levels { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+  .hl-levels .hl-k { grid-column: 1 / -1; }
+  .hl-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hl-warn { grid-column: 1 / -1; white-space: normal; }
+
+  /* LEGENDA depois do GRÁFICO: com 11 itens ela comia 4 linhas ANTES do gráfico
+     aparecer — no telefone isso é meia tela de rolagem pra chegar no que interessa.
+     Nada é escondido (a legenda inteira continua lá); ela só passa a ficar embaixo,
+     que é onde se olha DEPOIS de ver as cores no gráfico. */
+  .chart-card { display: flex; flex-direction: column; }
+  .chart-head { order: 1; }
+  .tf-selector { order: 2; }
+  .reeval-btn { order: 3; }
+  .chart-degrade { order: 4; }
+  .chart-wrap { order: 5; }
+  #chartLegend { order: 6; margin-top: 10px; }
+  .chart-note { order: 7; }
 
   /* tabela larga rola dentro do próprio bloco, nunca empurra o body pro lado */
   .md table { display: block; overflow-x: auto; max-width: 100%; }
