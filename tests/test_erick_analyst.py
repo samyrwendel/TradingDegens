@@ -15,6 +15,7 @@ from tradingagents.agents.utils.erick_method import (
     _estado,
     _fine_sell_triggered,
     _gate_abre,
+    _gate_faltam,
     _liq_entry_ref,
     _rsi_divergence,
     _rsi_series,
@@ -555,6 +556,49 @@ def test_gate_intc_opens_and_decides_initial():
     assert _estado(d["acao"], "baixa", None, False) == "CAIXA"
 
 
+def test_gate_opens_with_bearish_weekly_divergence_present():
+    """Regressão do confronto em dado REAL: o INTC de 27/08 tem divergência bearish
+    no semanal (topo 124,92→133,99 · RSI 91→73) e o Erick mandou montar [09:51].
+
+    A porta são as CINCO condições citadas — a divergência da tese não é um 6º
+    bloqueio (isso reprovava a aceitação §5.1 com o dado da live). Ela pesa no
+    TIER 3 como TETO de tamanho: aqui o teto é `posição inicial`, que é exatamente
+    o que a porta entrega — logo o veredito é AGUARDAR/inicial, não CAIXA.
+    """
+    factors = _factors_full(tese=dict(_factors_full()["tese"], divergencias={
+        "1w": {"measured": True, "kind": "bearish",
+               "detail": "topo do preço subiu (124.92→133.99) e o do RSI caiu (91→73)"},
+        "1d": {"measured": True, "kind": None, "detail": ""}}))
+    r = _read("baixa", below=True)
+    assert _gate_abre(r, None, factors) is True
+    d = _decide(r, None, False, factors)
+    assert d["acao"] == "AGUARDAR"
+    assert d["peso"] == "posição inicial"      # teto do TIER 3 == degrau da porta
+    assert "TIMING" in d["entrada"]
+    # o teto de tamanho fica declarado (não sumiu ao deixar de vetar)
+    assert "divergência bearish medida no frame da tese" in d["peso_racional"]
+    assert _gate_faltam(r, None, factors) == []
+
+
+def _factors_div_tese(kind):
+    return _factors_full(tese=dict(_factors_full()["tese"], divergencias={
+        "1w": {"measured": True, "kind": kind, "detail": "d"},
+        "1d": {"measured": False, "kind": None, "detail": ""}}))
+
+
+def test_tier3_thesis_divergence_caps_size_never_direction():
+    """A divergência da tese só DESCE peso — nunca vira comprador em vendedor nem
+    reverte a tese (spec: TIER 3 mexe no tamanho, TIER 2 na direção)."""
+    r = _read("alta", at_media=True)                       # mecânica: meia posição
+    assert _decide(r)["peso"] == "meia posição"
+    d = _decide(r, None, False, _factors_div_tese("bearish"))
+    assert d["acao"] == "AGIR"                             # direção intocada
+    assert d["peso"] == "posição inicial"                  # teto aplicado
+    assert "frame da tese" in d["peso_racional"]
+    # bullish não mexe em nada
+    assert _decide(r, None, False, _factors_div_tese("bullish"))["peso"] == "meia posição"
+
+
 @pytest.mark.parametrize("label,over,drop_cls", [
     ("sem_tese_alta", {"tese": dict(_factors_full()["tese"], regime="baixa")}, None),
     ("tese_ausente", {"tese": dict(_factors_full()["tese"], regime=None)}, None),
@@ -564,9 +608,6 @@ def test_gate_intc_opens_and_decides_initial():
     ("balanco_nao_medido", {"earnings": dict(_factors_full()["earnings"], na_janela=None)}, None),
     ("ancora_fora_de_alta", {"ancora": {"nome": "NVDA", "em_alta": False, "bateu_balanco": True}}, None),
     ("ancora_ausente", {"ancora": None}, None),
-    ("divergencia_bearish_na_tese", {"tese": dict(_factors_full()["tese"],
-        divergencias={"1w": {"measured": True, "kind": "bearish", "detail": ""},
-                      "1d": {"measured": False, "kind": None, "detail": ""}})}, None),
     ("fraqueza_veta", {}, "fraqueza"),
 ])
 def test_gate_fail_closed_any_condition_missing(label, over, drop_cls):
@@ -682,9 +723,9 @@ def test_section_intc_gate_full_acceptance(monkeypatch):
 
 
 def test_section_names_why_gate_did_not_open(monkeypatch):
-    """A porta fechada com tese alta no frame maior declara QUAL condição segurou o
-    CAIXA — caso real do INTC 27/08: divergência bearish no semanal fechou a porta
-    mesmo com tese alta, balanço longe e âncora em alta."""
+    """A porta fechada com tese alta no frame maior declara QUAL das CINCO condições
+    citadas segurou o CAIXA — aqui o balanço caiu DENTRO da janela (o motivo de
+    proteção de capital do próprio método), com tese alta e âncora em alta."""
     def chart(s, d, timeframe="1d"):
         return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
                 else _chart_swing_baixa_desacel(s, d, timeframe))
@@ -694,16 +735,32 @@ def test_section_names_why_gate_did_not_open(monkeypatch):
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: {
         "classification": "indefinido", "reasons": [],
         "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
-    monkeypatch.setattr(em, "_earnings_read", lambda s, d: {
-        "status": "ok", "ev": {"date": "2026-10-22", "days_ahead": 56}, "dias": 56,
-        "na_janela": False, "ausente": None,
-        "leitura": "sem balanço até 2026-10-22 (56 dias)"})
-    # divergência bearish medida no frame da TESE fecha a porta
-    f = _factors_full()
-    f["tese"]["divergencias"]["1w"] = {"measured": True, "kind": "bearish",
-                                       "detail": "topo do preço subiu e o do RSI caiu"}
-    monkeypatch.setattr(em, "_factors", lambda *a, **k: f)
+    dentro = {"status": "ok", "ev": {"date": "2026-09-04", "days_ahead": 8}, "dias": 8,
+              "na_janela": True, "ausente": None, "leitura": "balanço em 8 dia(s)"}
+    monkeypatch.setattr(em, "_earnings_read", lambda s, d: dentro)
+    monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full(earnings=dentro))
     section = build_erick_method_section("INTC", "2026-08-27", "stock")
     assert "Porta TIER 2 não abriu" in section
-    assert "divergência bearish no frame da tese" in section
+    assert "balanço dentro da janela" in section
     assert "**Estado (Método Erick):** CAIXA" in section
+
+
+def test_section_thesis_divergence_does_not_close_the_gate(monkeypatch):
+    """Contra-regressão do dado REAL: no INTC 27/08 a divergência bearish do semanal
+    existe e a porta abre de todo jeito — ela é TETO DE TAMANHO (TIER 3), não veto.
+    O traço tem que dizer isso na cara, pra não parecer que o sinal foi ignorado."""
+    def chart(s, d, timeframe="1d"):
+        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+                else _chart_swing_baixa_desacel(s, d, timeframe))
+
+    monkeypatch.setattr(em, "build_price_chart", chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: {"setup_state": "sem_setup"})
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: {
+        "classification": "indefinido", "reasons": [],
+        "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
+    monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_div_tese("bearish"))
+    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    assert "Porta TIER 2 aberta" in section
+    assert "**Estado (Método Erick):** CAIXA" not in section
+    assert "posição inicial" in section
+    assert "teto de tamanho, não veto" in section

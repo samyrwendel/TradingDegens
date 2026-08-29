@@ -493,8 +493,16 @@ def _gate_abre(r: dict, drop_cls: str | None, factors: dict | None) -> bool:
 
     FAIL-CLOSED: qualquer condição ausente/None/não medida → porta FECHADA e o motor
     cai no CAIXA seguro de hoje. A fraqueza estrutural (TIER 1) é consultada antes e
-    veta tudo — a porta nunca abre sobre estrutura rompida. Divergência bearish no
-    frame da tese também fecha a porta (a alta do frame maior perdeu força).
+    veta tudo — a porta nunca abre sobre estrutura rompida.
+
+    A porta são estas CINCO citadas e mais nada. Em especial, a divergência bearish
+    do frame da TESE **não veta aqui** — medido na live: o INTC de 27/08 tem
+    divergência bearish no semanal (topo 124,92→133,99 com RSI 91→73) e o Erick
+    mandou "começar a montar agora" [09:51]. Um 6º bloqueio não citado reprovava a
+    aceitação §5.1 em dado real. Essa divergência entra no TIER 3 como TETO DE
+    TAMANHO: modula o peso, nunca a direção (spec §8 deixa a precedência
+    divergência × tese `a validar`; o conservador é limitar tamanho, não reverter a
+    tese do frame maior).
     """
     if factors is None:
         return False
@@ -514,13 +522,15 @@ def _gate_abre(r: dict, drop_cls: str | None, factors: dict | None) -> bool:
         return False
     if earnings.get("na_janela") is not False:      # None (fonte caída) NÃO abre
         return False
-    if not ancora.get("em_alta"):
-        return False
+    return bool(ancora.get("em_alta"))
 
-    # Guarda: divergência bearish no frame da TESE tampa a alta do frame maior.
-    frame_tese = tese.get("frame")
-    div_tese = (tese.get("divergencias") or {}).get(frame_tese) or {}
-    return not (div_tese.get("measured") and div_tese.get("kind") == "bearish")
+
+def _div_tese(factors: dict | None) -> dict:
+    """A divergência medida NO FRAME DA TESE (spec §2: "divergência no 4h ≠ no
+    semanal" — o escopo de frame herda o TIER 0). Lida num lugar só, consumida pelo
+    TIER 3 (teto de tamanho) e pelo traço (visibilidade)."""
+    tese = (factors or {}).get("tese") or {}
+    return ((tese.get("divergencias") or {}).get(tese.get("frame")) or {})
 
 
 def _peso_step(peso: str, delta: int) -> str:
@@ -537,6 +547,10 @@ def _tier3(d: dict, factors: dict | None) -> dict:
     * divergência bearish medida no frame de swing → teto ``posição inicial``
       (a alta perdeu força; [01:01] BTC subiu criando divergência no 4h → não
       soma tamanho em cima dela).
+    * divergência bearish no frame da TESE (semanal/diário) → mesmo teto. É aqui
+      que ela pesa, e NÃO como veto de direção na porta TIER 2: no INTC de 27/08 ela
+      existe no semanal e o Erick comprou mesmo assim ([09:51]) — logo ela limita o
+      tamanho, não cancela a tese (spec §8, `a validar` por backtest).
 
     ``caixa`` é piso e teto de si mesmo — o TIER 3 não mexe. ``factors=None``
     → devolve o dict intocado (byte-a-byte). O mapa exato
@@ -554,12 +568,13 @@ def _tier3(d: dict, factors: dict | None) -> dict:
         notes.append(f"balanço na janela ({earnings.get('leitura')}) — "
                      "protege o capital, desce um degrau")
 
-    div = factors.get("divergencia") or {}
-    if div.get("measured") and div.get("kind") == "bearish":
-        if _PESO_ORDEM.index(peso) > 1:
-            peso = _PESO_ORDEM[1]
-        notes.append(f"divergência bearish medida no frame de swing "
-                     f"({div.get('detail')}) — teto de posição inicial")
+    for div, onde in ((factors.get("divergencia") or {}, "frame de swing"),
+                      (_div_tese(factors), "frame da tese")):
+        if div.get("measured") and div.get("kind") == "bearish":
+            if _PESO_ORDEM.index(peso) > 1:
+                peso = _PESO_ORDEM[1]
+            notes.append(f"divergência bearish medida no {onde} "
+                         f"({div.get('detail')}) — teto de posição inicial")
 
     if not notes:
         return d
@@ -597,11 +612,6 @@ def _gate_faltam(r: dict, drop_cls: str | None, factors: dict | None) -> list[st
     if not ancora.get("em_alta"):
         faltam.append(f"âncora {ancora.get('nome') or 'do setor'} fora de alta"
                       if ancora else "âncora do setor ausente nesta run")
-    frame_tese = tese.get("frame")
-    div_tese = (tese.get("divergencias") or {}).get(frame_tese) or {}
-    if div_tese.get("measured") and div_tese.get("kind") == "bearish":
-        faltam.append(f"divergência bearish no frame da tese ({frame_tese}) — "
-                      f"{div_tese.get('detail')}")
     return faltam
 
 
@@ -915,6 +925,11 @@ def _traco_line(
 
     tiers = [f"T0 tese {tese.get('regime') or 'ausente'}"
              + (f" ({_COMPACT_FRAME.get(tese['frame'], tese['frame'])})" if tese.get("frame") else "")]
+    dt = _div_tese(factors)
+    if dt.get("measured") and dt.get("kind"):
+        # Mudou de papel: já NÃO veta a porta (não é uma das 5 citadas) — pesa como
+        # teto de tamanho no TIER 3. Fica no traço pra não sumir da vista.
+        tiers.append(f"divergência {dt['kind']} na tese (teto de tamanho, não veto)")
     tiers.append(f"T1 veto {'FRAQUEZA' if drop_cls == 'fraqueza' else 'livre'}")
     if gate:
         tiers.append("T2 porta ABERTA (5 condições)")
