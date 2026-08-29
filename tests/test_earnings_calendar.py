@@ -47,6 +47,17 @@ def fake_yf(monkeypatch):
     monkeypatch.setattr(yfinance, "Ticker", _FakeTicker)
 
 
+
+
+@pytest.fixture()
+def cache_real(tmp_path, monkeypatch):
+    """Liga o cache de verdade num diretório temporário (o autouse o desliga)."""
+    from tradingagents.datacache import cache
+
+    monkeypatch.setattr(cache, "CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(cache, "DISABLED", False)
+    return cache
+
 # ------------------------------------------------------- próxima data ----------
 @pytest.mark.unit
 def test_next_earnings_after_base(fake_yf):
@@ -192,3 +203,40 @@ def test_coverage_appends_and_fail_open(monkeypatch):
 
     monkeypatch.setattr(ecov, "build_earnings_section", boom)
     assert ecov.ensure_earnings_coverage("intacto", "AMD", "2026-08-01", "stock") == "intacto"
+
+
+# ------------------------------------------- invalidação do cache (C3) ---------
+@pytest.mark.unit
+def test_entrada_gravada_com_a_semantica_ANTIGA_nao_e_servida(cache_real, fake_yf):
+    """O fix do L1 mudou o SIGNIFICADO da resposta; a chave tinha que mudar junto.
+
+    Entrada de data PASSADA é gravada como permanente (``permanent = base < hoje``),
+    então toda (símbolo, data) consultada antes do fix continuaria devolvendo, pra
+    sempre, a resposta que engolia o balanço do próprio dia — inclusive em backtest.
+    Aqui plantamos exatamente essa entrada, na chave SEM versão, e exigimos que ela
+    seja ignorada.
+    """
+    base = "2026-08-26"
+    # a resposta VELHA e ERRADA: pulava o balanço do próprio dia e apontava o seguinte
+    velha = {"symbol": "NVDA", "date": "2026-11-19", "after_close": True, "eps_estimate": 9.99}
+    k_antiga = cache_real.key(ec._CATEGORY, "NVDA", base)
+    cache_real.set_ok(ec._CATEGORY, k_antiga, velha, True)
+    assert cache_real.get(ec._CATEGORY, k_antiga) is not None      # está lá, permanente
+
+    ev = ec.get_next_earnings("NVDA", base)
+    assert ev["date"] == "2026-08-26", ("a entrada velha voltou a ser servida", ev)
+    assert ev["eps_estimate"] != 9.99
+
+
+@pytest.mark.unit
+def test_o_cache_novo_e_usado_de_verdade(cache_real, fake_yf, monkeypatch):
+    """Contra-prova: versionar a chave não pode ter DESLIGADO o cache."""
+    base = "2026-08-01"
+    primeiro = ec.get_next_earnings("NVDA", base)
+
+    def nunca(symbol, limit=16):
+        raise AssertionError("bateu na fonte de novo — o cache novo não pegou")
+
+    monkeypatch.setattr(_FakeTicker, "get_earnings_dates",
+                        lambda self, limit=16: nunca(self.symbol, limit))
+    assert ec.get_next_earnings("NVDA", base) == primeiro

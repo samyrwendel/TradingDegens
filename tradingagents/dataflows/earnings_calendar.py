@@ -24,6 +24,15 @@ from tradingagents.datacache import cache
 logger = logging.getLogger(__name__)
 
 _CATEGORY = "earnings_next"
+
+# VERSÃO DA SEMÂNTICA dentro da chave do cache. O fix do L1 mudou o SIGNIFICADO da
+# resposta — o balanço do PRÓPRIO dia passou a contar como "próximo" — e a chave
+# antiga não sabia disso. Como entrada de data passada é gravada PERMANENTE
+# (``permanent = base < hoje``), toda (símbolo, data) já consultada antes do fix
+# continuaria devolvendo, pra sempre, a resposta que escondia o balanço do dia —
+# em backtest e em reanálise de data passada. Bump aqui = as antigas viram órfãs e
+# nunca mais são servidas. Mudou a semântica da resposta? Bump.
+_SEMANTICA_KEY = "v2-proprio-dia-conta"
 # Quantas linhas puxar do yfinance (cobre alguns trimestres à frente e atrás).
 _LIMIT = 16
 # Hora (fuso do papel) a partir da qual o release é "após o fechamento".
@@ -111,7 +120,7 @@ def get_next_earnings_status(symbol: str, curr_date: str) -> tuple[dict | None, 
     if base is None:
         base = datetime.now().date()
 
-    k = cache.key(_CATEGORY, symbol.upper(), base.isoformat())
+    k = cache.key(_CATEGORY, _SEMANTICA_KEY, symbol.upper(), base.isoformat())
     hit = cache.get(_CATEGORY, k)
     if hit is not None:
         neg = hit.get("kind") == "neg"
