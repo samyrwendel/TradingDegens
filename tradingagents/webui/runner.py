@@ -1883,6 +1883,13 @@ class AnalysisRunner:
             res = rec.get("result") or {}
             if res.get("compare"):
                 continue  # a comparison record is not a single-method reading
+            # Nem o ATALHO 1-2-3: ele grava relatório vazio e veredito None, então a
+            # detecção por ausência de ``erick_report`` o dava como "padrao" — e o
+            # confronto reusava um registro EM BRANCO como o lado Padrão, mandando o
+            # meta-juiz comparar nada com um Erick real. Uma leitura estrutural não é
+            # uma leitura de método.
+            if res.get("setup123"):
+                continue
             has_erick = bool((res.get("erick_report") or "").strip())
             # Invalidação de 1º deploy (task 005): registro erick pré-coerência (sem
             # ``drop_nature``) não é reusável — reapareceria com o Estado antigo.
@@ -2454,9 +2461,13 @@ class AnalysisRunner:
         return result
 
     def scan_track_record(self, date: str) -> dict[str, Any]:
-        """Re-avalia os gatilhos logados contra o preço da data dada."""
-        tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
-        return scan_verdicts(self.scan_log, tickers, date)
+        """Re-avalia os gatilhos logados contra o preço da data dada.
+
+        A lista da watchlist NÃO entra: o track record é do que foi LOGADO, e tirar
+        um ticker da watchlist não apaga o trade que já aconteceu. O parâmetro era
+        recebido e ignorado — a lista era montada a cada chamada pra nada.
+        """
+        return scan_verdicts(self.scan_log, date)
 
     def resolve_names(self, symbols: list[str]) -> dict[str, str]:
         """Batch symbol -> display name for the UI chips/header (fail-open)."""

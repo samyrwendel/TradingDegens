@@ -175,6 +175,61 @@ def test_prefix_erick_record_without_drop_nature_is_invalidated(tmp_path):
     assert rec2 and rec2["run_id"] == "new"
 
 
+# ------------------- o atalho 1-2-3 não se disfarça de Padrão no confronto (A1) ---
+def _save_setup123_record(store, run_id="s123"):
+    """Registro do atalho como ele é gravado de verdade: sem relatório, sem veredito."""
+    store.save({
+        "run_id": run_id, "ticker": "AAPL", "date": "2020-01-02", "asset_type": "stock",
+        "status": "done", "verdict": None, "verdict_timeframe": "1d",
+        "method": "setup123", "cost_usd": 0.0, "elapsed": 1,
+        "finished_at": "2020-01-02T00:00:00",
+        "result": {"verdict": None, "erick_report": "", "market_report": "",
+                   "setup123": True, "actionable": {"setup_state": "ativo"}},
+    })
+
+
+def test_registro_setup123_nao_vira_o_lado_padrao_do_confronto(tmp_path):
+    """O 1-2-3 grava ``erick_report`` VAZIO — e a detecção por ausência o dava como
+    "padrao". O confronto reusava esse registro EM BRANCO como a coluna Padrão e o
+    meta-juiz julgava nada contra um Erick de verdade. Agora ele é recusado."""
+    store = HistoryStore(tmp_path)
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)}, store=store,
+                            graph_factory=lambda *a, **k: None)
+    _save_setup123_record(store)
+    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=False) is None
+    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=True) is None
+    # e o reúso single-run também não o entrega como padrão
+    assert runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "padrao") is None
+
+
+def test_detect_method_identifica_o_atalho_em_vez_de_chutar_padrao(tmp_path):
+    """``detect_method`` inferia por AUSÊNCIA de erick_report; o atalho caía em
+    "padrao" e entrava num par de confronto que ele não é."""
+    from tradingagents.webui.compare import confront_pair_valid, detect_method
+
+    rec = {"result": {"setup123": True, "erick_report": ""}}
+    assert detect_method(rec) == "setup123"
+    # e um par com ele deixa de ser um confronto válido (Padrão × Erick, só)
+    assert confront_pair_valid({"method": "setup123", "timeframe": "1d", "date": "d"},
+                               {"method": "erick", "timeframe": "1d", "date": "d"}) is False
+
+
+def test_padrao_de_verdade_continua_reusavel(tmp_path):
+    """Contra-prova: recusar o atalho não pode recusar um Padrão legítimo."""
+    store = HistoryStore(tmp_path)
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)}, store=store,
+                            graph_factory=lambda *a, **k: None)
+    store.save({
+        "run_id": "p1", "ticker": "AAPL", "date": "2020-01-02", "asset_type": "stock",
+        "status": "done", "verdict": "Hold", "verdict_timeframe": "1d",
+        "method": "padrao", "cost_usd": 0.1, "elapsed": 9,
+        "finished_at": "2020-01-02T00:00:00",
+        "result": {"verdict": "Hold", "erick_report": "", "market_report": "## técnico"},
+    })
+    rec = runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=False)
+    assert rec and rec["run_id"] == "p1"
+
+
 # ----------------------------------- resume descriptors + boot resume (P1/2/5) ---
 def test_active_descriptor_written_while_running_and_cleared(tmp_path):
     """A run drops a resume descriptor the moment it starts and clears it on
