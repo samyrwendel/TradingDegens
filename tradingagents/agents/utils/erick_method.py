@@ -224,12 +224,22 @@ def _earnings_read(symbol: str, curr_date: str) -> dict:
     ter balanço amanhã). Por isso a fonte caída devolve ``na_janela=None`` e JAMAIS
     ``False``: "não medido" não é "sem risco".
     """
+    # Os enums de status são comparados DEPOIS do except, então não podem nascer
+    # dentro do try: um import quebrado (ciclo, dependência ausente) deixaria os
+    # nomes sem valor e o handler estouraria UnboundLocalError — matando a seção
+    # inteira exatamente no modo de falha pra qual ele existe. São constantes de
+    # texto (:mod:`earnings_calendar`); o fallback repete o valor delas.
     try:
         from tradingagents.dataflows.earnings_calendar import (
             STATUS_OK,
             STATUS_SEM_AGENDA,
-            get_next_earnings_status,
         )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("enums do calendário indisponíveis: %s", exc)
+        STATUS_OK, STATUS_SEM_AGENDA = "ok", "sem_agenda"
+
+    try:
+        from tradingagents.dataflows.earnings_calendar import get_next_earnings_status
 
         ev, status = get_next_earnings_status(symbol, curr_date)
     except Exception as exc:  # noqa: BLE001 — calendário ausente nunca derruba a run
@@ -436,9 +446,18 @@ def _rsi_divergence(chart: dict) -> dict:
     traço, bloqueia a porta do TIER 2 e limita o tamanho — nunca inverte sozinha um
     veredito que a mecânica de hoje já dá."""
     candles = (chart or {}).get("candles") or []
-    closes = [c.get("c") for c in candles]
-    if len(closes) < 40 or any(c is None for c in closes[-40:]):
-        return {"measured": False, "kind": None, "detail": "série curta demais para RSI"}
+    # Barra sem fechamento é DESCARTADA antes da conta, como o ``_drop_decelerating``
+    # já faz. Antes o None era validado só nos últimos 40 closes, mas ``_rsi_series``
+    # percorre a série inteira (até 260 barras) subtraindo: um único buraco no meio
+    # (NaN de gap em semanal reamostrado, candle parcial) virava TypeError que
+    # escapava até o ``build_erick_method_section`` e derrubava a seção toda.
+    brutos = [c.get("c") for c in candles]
+    closes = [c for c in brutos if c is not None]
+    buracos = len(brutos) - len(closes)
+    nota_buraco = f" ({buracos} barra(s) sem fechamento descartada(s))" if buracos else ""
+    if len(closes) < 40:
+        return {"measured": False, "kind": None, "buracos": buracos,
+                "detail": f"série curta demais para RSI{nota_buraco}"}
     rsi = _rsi_series(closes)
     highs, lows = _swing_points(closes)
     def two(idxs):
@@ -447,18 +466,20 @@ def _rsi_divergence(chart: dict) -> dict:
     if hh:
         a, b = hh
         if rsi[a] is not None and rsi[b] is not None and closes[b] > closes[a] and rsi[b] < rsi[a]:
-            return {"measured": True, "kind": "bearish",
+            return {"measured": True, "kind": "bearish", "buracos": buracos,
                     "detail": f"topo do preço subiu ({_fmt(closes[a])}→{_fmt(closes[b])}) "
-                              f"e o do RSI caiu ({rsi[a]:.0f}→{rsi[b]:.0f})"}
+                              f"e o do RSI caiu ({rsi[a]:.0f}→{rsi[b]:.0f}){nota_buraco}"}
     if ll:
         a, b = ll
         if rsi[a] is not None and rsi[b] is not None and closes[b] < closes[a] and rsi[b] > rsi[a]:
-            return {"measured": True, "kind": "bullish",
+            return {"measured": True, "kind": "bullish", "buracos": buracos,
                     "detail": f"fundo do preço caiu ({_fmt(closes[a])}→{_fmt(closes[b])}) "
-                              f"e o do RSI subiu ({rsi[a]:.0f}→{rsi[b]:.0f})"}
+                              f"e o do RSI subiu ({rsi[a]:.0f}→{rsi[b]:.0f}){nota_buraco}"}
     if hh or ll:
-        return {"measured": True, "kind": None, "detail": "preço e RSI apontam para o mesmo lado"}
-    return {"measured": False, "kind": None, "detail": "sem dois swings confirmados na janela"}
+        return {"measured": True, "kind": None, "buracos": buracos,
+                "detail": f"preço e RSI apontam para o mesmo lado{nota_buraco}"}
+    return {"measured": False, "kind": None, "buracos": buracos,
+            "detail": f"sem dois swings confirmados na janela{nota_buraco}"}
 
 
 def _liq_entry_ref(drop: dict | None) -> str:

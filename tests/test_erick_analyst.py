@@ -455,6 +455,46 @@ def test_rsi_divergence_bearish_measured():
     assert "109" in out["detail"] and "110" in out["detail"]
 
 
+def test_rsi_divergence_sobrevive_a_buraco_no_MEIO_da_serie():
+    """A4: o None era validado só nos últimos 40 closes, mas ``_rsi_series`` percorre
+    a série inteira subtraindo — um buraco no meio (NaN de gap em semanal
+    reamostrado, candle parcial) virava TypeError que escapava até a seção.
+    Filtra como o ``_drop_decelerating`` já filtrava, e DIZ quantas barras caíram."""
+    candles = [{"c": float(100 + i)} for i in range(120)]
+    candles[30]["c"] = None            # buraco bem longe da janela dos últimos 40
+    candles[77]["c"] = None
+    out = em._rsi_divergence({"candles": candles})
+    assert out["buracos"] == 2
+    assert "2 barra(s) sem fechamento" in out["detail"]
+    assert isinstance(out["measured"], bool)      # decidiu, não explodiu
+
+
+def test_rsi_divergence_serie_toda_furada_nao_mede_em_vez_de_estourar():
+    candles = [{"c": None} for _ in range(120)]
+    out = em._rsi_divergence({"candles": candles})
+    assert out["measured"] is False and out["buracos"] == 120
+
+
+def test_earnings_read_degrada_quando_o_IMPORT_do_calendario_quebra(monkeypatch):
+    """A4: os enums de status nasciam DENTRO do try e eram comparados depois do
+    except — import quebrado (ciclo, dependência ausente) dava UnboundLocalError e
+    matava a seção justo no modo de falha pra qual o handler existe."""
+    import builtins
+
+    monkeypatch.setattr(em, "_earnings_read", _real_earnings_read)  # desfaz o autouse
+    real = builtins.__import__
+
+    def falha(name, *a, **k):
+        if "earnings_calendar" in name:
+            raise ImportError("ciclo de import simulado")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", falha)
+    out = em._earnings_read("INTC", "2026-08-27")
+    assert out["na_janela"] is None          # "não medido" nunca vira "sem risco"
+    assert out["ausente"] and "NÃO MEDIDO" in out["ausente"]
+
+
 def test_rsi_divergence_short_series_is_not_measured():
     out = _rsi_divergence({"candles": [{"c": 100.0}] * 10})
     assert out["measured"] is False
