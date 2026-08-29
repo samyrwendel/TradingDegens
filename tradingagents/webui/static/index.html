@@ -421,6 +421,11 @@
         <div class="scan-watchlist" id="scanWatchlist"></div>
         <p class="hint" id="scanHint"></p>
         <div class="scan-summary" id="scanSummary"></div>
+        <!-- Estado da ATUALIZAÇÃO, ao lado do resumo (task 014). O scan anterior
+             nunca é apagado: enquanto varre ele fica na tela esmaecido e esta linha
+             diz que está atualizando; se a varredura FALHA ele CONTINUA na tela e
+             esta linha diz que falhou e DE QUANDO é o dado que está sendo mostrado. -->
+        <div class="scan-notice hidden" id="scanNotice" aria-live="polite"></div>
         <!-- Filtro por estado do gatilho: chips clicáveis que filtram a
              lista. O resumo acima já mostra as contagens; aqui cada chip vira um
              filtro ativo. Clicar de novo desliga. -->

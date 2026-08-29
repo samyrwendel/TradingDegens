@@ -1713,6 +1713,22 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    viewport — a lateral é redimensionável, mesma lição da barra de controle).
    `align-items: start` pra um card alto não esticar o vizinho. */
 .scan-panel { container-type: inline-size; }
+/* O scan anterior NÃO é apagado durante a varredura (task 014). Ele esmaece e
+   continua clicável — 7-12s de painel VAZIO era pior que 7-12s de dado com alguns
+   segundos de idade, e um scan que falhava levava junto o último resultado bom.
+   Sem spinner cobrindo o conteúdo (o pedido é indicador DISCRETO) e sem degradê
+   (DA-070): o sinal é opacidade + a linha de aviso, nada de textura. */
+.scan-list.is-atualizando { opacity: .55; }
+@media (prefers-reduced-motion: no-preference) {
+  .scan-list { transition: opacity .18s ease; }
+}
+/* A linha que diz o que está acontecendo com a ATUALIZAÇÃO — e, quando ela
+   falha, de quando é o dado que ficou na tela. Discreta por padrão; vermelha
+   só no erro, porque aí ela é a única pista de que a tela está velha. */
+.scan-notice { margin: 6px 0 0; font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+.scan-notice b { color: var(--text); font-weight: var(--fw-bold); }
+.scan-notice.err { color: var(--red); }
+.scan-notice.err b { color: var(--red); }
 .scan-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 6px; align-items: start; }
 @container (min-width: 720px) { .scan-list:not(.is-lista) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (min-width: 1080px) { .scan-list:not(.is-lista) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

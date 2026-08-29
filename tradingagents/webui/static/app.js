@@ -4705,6 +4705,7 @@ function renderModelTest(data) {
 // EM GATILHO. Estados (vocabulário único do backend scanner.py):
 let _scanData = null;        // último scan completo (pra re-pintar ao trocar filtro)
 let _scanEstadoFilter = null; // estado selecionado no filtro de chips (null = todos)
+let _scanAt = null;          // quando o scan QUE ESTÁ NA TELA chegou (task 014)
 const SCAN_ESTADO_PT = {
   em_gatilho: { compra: ["COMPRA", "🟢"], venda: ["VENDA", "🔴"] },
   em_movimento: ["EM MOVIMENTO", "🔵"],
@@ -4777,23 +4778,61 @@ async function watchlistEdit(action, ticker) {
   } catch (e) { $("scanHint").textContent = e.message; }
 }
 
+// A linha de aviso ao lado do resumo: "atualizando…" durante a varredura e
+// "falhou, isto aqui é de tal hora" quando ela não chega. Vazio esconde.
+function scanNotice(html, erro) {
+  const el = $("scanNotice");
+  if (!el) return;
+  el.innerHTML = html || "";
+  el.classList.toggle("hidden", !html);
+  el.classList.toggle("err", !!erro);
+}
+
+// Hora do dado que está NA TELA (relógio local). O backend não carimba o scan, e
+// o memo dele dura 5s — o erro máximo é menor que o minuto que se exibe.
+function scanHoraDoDado() {
+  return _scanAt ? _scanAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+}
+
 async function runScan() {
   const btn = $("scanRunBtn");
+  const ul = $("scanList");
+  // O resultado anterior NÃO é destruído (task 014). Zerar a lista antes do fetch
+  // deixava o painel VAZIO pelos 7-12s da varredura, e um scan que falhasse levava
+  // junto o último resultado bom — o usuário perdia informação boa por causa de uma
+  // atualização que nem chegou. Mesmo princípio do erro que preserva as etapas já
+  // concluídas na tela de análise: não se descarta o que já se sabe.
+  const horaAnterior = _scanData ? scanHoraDoDado() : null;
   btn.disabled = true;
   btn.textContent = "escaneando…";
-  $("scanSummary").innerHTML = '<span class="hint">varrendo 1d + 4h + 1h…</span>';
-  $("scanList").innerHTML = "";
+  if (horaAnterior !== null) {
+    ul.classList.add("is-atualizando");
+    scanNotice(`atualizando… mostrando o scan das <b>${escapeHtml(horaAnterior)}</b>`);
+  } else {
+    // PRIMEIRA carga: não há o que preservar, então o texto de varredura fica.
+    $("scanSummary").innerHTML = '<span class="hint">varrendo 1d + 4h + 1h…</span>';
+    scanNotice("");
+  }
   try {
     const res = await fetch("/api/scan?date=" + encodeURIComponent($("date").value || ""));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha no scan");
     _scanEstadoFilter = null;   // novo scan: limpa o filtro de estado anterior
     paintScan(data);
+    scanNotice("");
   } catch (e) {
-    $("scanSummary").innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
+    const msg = escapeHtml(e.message);
+    if (horaAnterior !== null) {
+      // O anterior FICA. O aviso diz o que falhou e de quando é o que está na tela.
+      scanNotice(`⚠️ a atualização falhou (${msg}) — mostrando o scan das ` +
+                 `<b>${escapeHtml(horaAnterior)}</b>`, true);
+    } else {
+      $("scanSummary").innerHTML = `<span class="error">${msg}</span>`;
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = "Escanear";
+    ul.classList.remove("is-atualizando");
   }
 }
 
@@ -4923,6 +4962,9 @@ function bindScanTools() {
 }
 
 function paintScan(data) {
+  // Carimba a hora só quando o dado é NOVO: filtro, busca e troca de modo
+  // re-pintam com a MESMA referência e não podem rejuvenescer o carimbo.
+  if (data !== _scanData) _scanAt = new Date();
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
   const s = data.resumo || {};
   $("scanSummary").innerHTML =
