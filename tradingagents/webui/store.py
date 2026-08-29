@@ -43,9 +43,8 @@ class HistoryStore:
         """Return up to ``limit`` most-recent run summaries, newest first."""
         if not self.index_path.exists():
             return []
-        with self._lock:
-            with open(self.index_path, "r", encoding="utf-8") as fh:
-                lines = fh.readlines()
+        with self._lock, open(self.index_path, encoding="utf-8") as fh:
+            lines = fh.readlines()
         out: list[dict[str, Any]] = []
         for line in reversed(lines):
             line = line.strip()
@@ -71,9 +70,8 @@ class HistoryStore:
         """
         if not self.index_path.exists():
             return []
-        with self._lock:
-            with open(self.index_path, "r", encoding="utf-8") as fh:
-                lines = fh.readlines()
+        with self._lock, open(self.index_path, encoding="utf-8") as fh:
+            lines = fh.readlines()
         latest: dict[str, dict[str, Any]] = {}
         counts: dict[str, int] = {}
         order: list[str] = []
@@ -113,7 +111,7 @@ class HistoryStore:
         with self._lock:
             if not self.index_path.exists():
                 return 0
-            with open(self.index_path, "r", encoding="utf-8") as fh:
+            with open(self.index_path, encoding="utf-8") as fh:
                 lines = fh.readlines()
             kept: list[str] = []
             removed_ids: set[str] = set()
@@ -153,7 +151,7 @@ class HistoryStore:
         if not path.exists():
             return None
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 return json.load(fh)
         except (OSError, json.JSONDecodeError):
             return None
@@ -164,3 +162,71 @@ class HistoryStore:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False, default=str)
         os.replace(tmp, path)
+
+
+class WatchlistStore:
+    """Watchlist MANUAL do scan de portfólio — editável na webui (owner-only).
+
+    Distinta da ``HistoryStore.watchlist()`` (derivada do histórico, só cresce):
+    esta é a lista CURADA pelo dono — o que ele quer vigiar, não tudo que já
+    analisou. Na PRIMEIRA leitura sem arquivo, semeia com os tickers do
+    histórico (a lista derivada) pra nascer útil; depois o dono edita.
+    Persistência no mesmo molde: JSON atômico + lock.
+    """
+
+    def __init__(self, base_dir: str | os.PathLike, history: HistoryStore):
+        self.path = Path(base_dir) / "watchlist.json"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._history = history
+        self._lock = threading.Lock()
+
+    def get(self) -> list[dict[str, Any]]:
+        """``[{ticker, name, asset_type, count?}]`` — ordem de inserção."""
+        with self._lock:
+            if self.path.exists():
+                try:
+                    with open(self.path, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    return list(data.get("tickers") or [])
+                except (OSError, json.JSONDecodeError):
+                    pass  # arquivo corrompido → cai na semente
+        # Semente única (na primeira vez ou se o arquivo for ilegível): os
+        # tickers que o dono já analisou, mais recente primeiro.
+        seeded = [{"ticker": w.get("ticker"), "name": w.get("name"),
+                   "asset_type": w.get("asset_type"), "count": w.get("count")}
+                  for w in self._history.watchlist()[:30]]
+        if seeded:
+            self._write(seeded)
+        return seeded
+
+    def set(self, tickers: list[str]) -> list[dict[str, Any]]:
+        """Substitui a lista inteira (normaliza: upper, dedup, máx 100)."""
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for t in tickers:
+            up = (str(t) or "").strip().upper()
+            if up and up not in seen:
+                seen.add(up)
+                out.append({"ticker": up})
+            if len(out) >= 100:
+                break
+        self._write(out)
+        return out
+
+    def add(self, ticker: str) -> list[dict[str, Any]]:
+        up = (str(ticker) or "").strip().upper()
+        current = self.get()
+        if up and not any(w.get("ticker") == up for w in current):
+            current.insert(0, {"ticker": up})
+            self._write(current[:100])
+        return current
+
+    def remove(self, ticker: str) -> list[dict[str, Any]]:
+        up = (str(ticker) or "").strip().upper()
+        current = [w for w in self.get() if w.get("ticker") != up]
+        self._write(current)
+        return current
+
+    def _write(self, tickers: list[dict[str, Any]]) -> None:
+        with self._lock:
+            HistoryStore._atomic_write(self.path, {"tickers": tickers})

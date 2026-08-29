@@ -54,7 +54,8 @@ from tradingagents.webui.progress import (
 )
 from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.resume_store import ActiveRunStore
-from tradingagents.webui.store import HistoryStore
+from tradingagents.webui.scanner import ScanLog, scan_verdicts, scan_watchlist
+from tradingagents.webui.store import HistoryStore, WatchlistStore
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
 _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
@@ -130,8 +131,8 @@ def levels_credential_error(config: dict, overrides: dict) -> tuple[str | None, 
     Complementa ``_owner_only_blocked`` (que só olha o ``llm_provider`` base) cobrindo
     o caso de um NÍVEL owner-only enquanto o outro não é.
     """
-    from tradingagents.llm_clients.api_key_env import get_api_key_env
     from tradingagents.graph.trading_graph import resolve_level_specs
+    from tradingagents.llm_clients.api_key_env import get_api_key_env
 
     specs = resolve_level_specs(config, config.get("llm_api_key"))
     allow_server_key = (overrides or {}).get("allow_server_key")
@@ -627,6 +628,9 @@ class _Run:
             "ticker": self.ticker,
             "date": self.date,
             "asset_type": self.asset_type,
+            # Método da run (padrao/erick/setup123/compare) — o MESMO campo que o
+            # histórico persiste; o front lê de um lugar só.
+            "method": self.method,
             "status": self.status,
             "error": self.error,
             "error_code": self.error_code,
@@ -776,6 +780,10 @@ class AnalysisRunner:
             from pathlib import Path
             store = HistoryStore(Path(self.base_config["results_dir"]) / "webui")
         self.store = store
+        # Watchlist MANUAL do scan (curada pelo dono; semeia do histórico na 1ª
+        # leitura) + log append-only dos gatilhos flagrados (track record $0).
+        self.watchlist_store = WatchlistStore(self.store.base, store)
+        self.scan_log = ScanLog(self.store.base / "scans.jsonl")
         # graph_factory(config, selected_analysts, callbacks) -> engine graph.
         # Injectable so tests can drive a fake engine.
         self._graph_factory = graph_factory or self._default_graph_factory
@@ -863,6 +871,13 @@ class AnalysisRunner:
                 f"timeframe {timeframe!r} indisponível para {asset_type} "
                 f"(disponíveis: {', '.join(allowed)})"
             )
+        # ANÁLISE 1-2-3 (setup123): o atalho estrutural — gatilho/invalidação/SL/TP/
+        # R:R do plano determinístico, $0 de LLM, sem agentes. Vive no mesmo fluxo
+        # de run (histórico, reúso DA-058, status) pra o resultado abrir como qualquer
+        # análise e o botão de análise completa ficar a um clique.
+        if method == "setup123":
+            return self._start_setup123(ticker, date, asset_type, timeframe,
+                                        overrides, reuse)
         selected = select_analysts_for_asset(
             asset_type, include_erick=(method == "erick")
         )
@@ -886,6 +901,63 @@ class AnalysisRunner:
         self._write_descriptor(run, overrides)
         threading.Thread(target=self._worker, args=(run,), daemon=True).start()
         return run_id
+
+    def _start_setup123(self, ticker: str, date: str, asset_type: str,
+                         timeframe: str, overrides: dict[str, Any] | None,
+                         reuse: bool) -> str:
+        """A run instantânea do 1-2-3: só o plano estrutural, sem LLM ($0).
+
+        Reusa uma run setup123 idêntica (DA-058) como qualquer método; a chave de
+        reúso é ``setup123``, então nunca colide com runs Padrão/Erick do mesmo dia.
+        """
+        if reuse:
+            prior = self._find_reusable_completed(ticker, date, timeframe, "setup123")
+            if prior is not None:
+                return self._register_reused_run(
+                    prior, ticker, date, asset_type, [], timeframe, overrides
+                )
+        run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
+        run = _Run(run_id, ticker, date, asset_type, [], timeframe=timeframe,
+                   overrides=overrides)
+        run.method = "setup123"
+        with self._lock:
+            self._runs[run_id] = run
+        self._write_descriptor(run, overrides)
+        threading.Thread(target=self._worker_setup123, args=(run,), daemon=True).start()
+        return run_id
+
+    def _worker_setup123(self, run: _Run) -> None:
+        """Worker da run 1-2-3: computa chart+plano (cacheado, ~1-2s) e encerra."""
+        try:
+            chart = fetch_price_chart(run.ticker, run.date, run.timeframe, "padrao")
+            plan = fetch_actionable_plan(run.ticker, run.date, run.timeframe, "padrao")
+            run.result = {
+                "verdict": None,
+                "final_decision": "",
+                "degraded": [],
+                "bull": "", "bear": "", "research_manager": "",
+                "investment_plan": "", "trader_plan": "", "risk_decision": "",
+                "market_report": "", "sentiment_report": "", "news_report": "",
+                "fundamentals_report": "", "erick_report": "", "drop_nature": {},
+                "derivatives_report": "",
+                "price_chart": chart or {},
+                "actionable": plan or {},
+                "as_of_price": (plan or {}).get("price"),
+                "setup123": True,
+                "timeframes": timeframes_for_asset(run.asset_type),
+            }
+            run.status = "done"
+        except Exception as exc:  # noqa: BLE001 — erro vira run errada honesta
+            logger.exception("setup123 run failed for %s", run.ticker)
+            run.error = f"{type(exc).__name__}: {exc}"
+            run.error_code = "unavailable"
+            run.status = "error"
+            run.result = None
+        run.finished_at = time.time()
+        run.finished_stamp = timeutil.stamp()
+        if run.status != "cancelled":
+            self._persist(run, run.status)
+        self.active.remove(run.run_id)
 
     def _worker(self, run: _Run) -> None:
         # ``final_status`` is flipped onto the run only after the history write,
@@ -1219,8 +1291,10 @@ class AnalysisRunner:
                 "verdict": (run.result or {}).get("verdict") if status == "done" else None,
                 "verdict_timeframe": run.timeframe,
                 # Method for the manual-confront picker (task 018): reliable from the
-                # analyst selection, done or errored.
-                "method": "erick" if "erick" in run.selected_analysts else "padrao",
+                # analyst selection, done or errored. setup123 (run instantânea do
+                # 1-2-3) vem como método próprio — nunca colide com padrao/erick.
+                "method": getattr(run, "method", None)
+                or ("erick" if "erick" in run.selected_analysts else "padrao"),
                 "cost_usd": cost["usd"],
                 "elapsed": elapsed,
                 # Manaus wall-clock with explicit -04:00 offset, so the UI can
@@ -1316,6 +1390,10 @@ class AnalysisRunner:
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe,
                    overrides=overrides)
+        # O método do ORIGINAL prevalece (setup123 reusa setup123; erick, erick) —
+        # o reuso nunca muda o rótulo do que está devolvendo.
+        if prior.get("method"):
+            run.method = prior["method"]
         result = copy.deepcopy(prior.get("result") or {})
         result["reused"] = True
         result["reused_from"] = prior.get("run_id")
@@ -2322,6 +2400,42 @@ class AnalysisRunner:
     def search_symbols(self, term: str, limit: int = 8) -> list[dict[str, Any]]:
         """Autocomplete candidates for a name-or-ticker term (fail-open)."""
         return fetch_symbol_search(term, limit)
+
+    # ------------------------------------------------- watchlist + scan 1-2-3 ----
+    def watchlist_get(self) -> list[dict[str, Any]]:
+        """A watchlist manual do scan (semeada do histórico na primeira vez)."""
+        return self.watchlist_store.get()
+
+    def watchlist_add(self, ticker: str) -> list[dict[str, Any]]:
+        return self.watchlist_store.add(ticker)
+
+    def watchlist_remove(self, ticker: str) -> list[dict[str, Any]]:
+        return self.watchlist_store.remove(ticker)
+
+    def watchlist_set(self, tickers: list) -> list[dict[str, Any]]:
+        return self.watchlist_store.set([str(t) for t in tickers])
+
+    def scan_portfolio(self, date: str) -> dict[str, Any]:
+        """Varre a watchlist (1d+4h) — $0 de LLM, só plano determinístico.
+
+        Todo ``em_gatilho`` é LOGADO (dedup por ticker+frame+gatilho: o mesmo
+        setup não re-entrega) — é o insumo do track record do scan.
+        """
+        tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
+        result = scan_watchlist(tickers, date)
+        known = {(e.get("ticker"), e.get("frame"), e.get("trigger"))
+                 for e in self.scan_log.entries()}
+        for s in result.get("ativos", []):
+            for f in s.get("frames", []):
+                if (f.get("estado") == "em_gatilho"
+                        and (s["ticker"], f.get("frame"), f.get("trigger")) not in known):
+                    self.scan_log.record({**f, "ticker": s["ticker"]})
+        return result
+
+    def scan_track_record(self, date: str) -> dict[str, Any]:
+        """Re-avalia os gatilhos logados contra o preço da data dada."""
+        tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
+        return scan_verdicts(self.scan_log, tickers, date)
 
     def resolve_names(self, symbols: list[str]) -> dict[str, str]:
         """Batch symbol -> display name for the UI chips/header (fail-open)."""

@@ -171,6 +171,8 @@
            controlado por JS ao cruzar o limiar de 900px — ver syncHistoryCollapse). -->
       <details class="panel history-panel" id="historyPanel" open>
         <summary class="section-title">Lista de observação</summary>
+        <button type="button" class="scan-open-btn" id="scanOpenBtn"
+                title="Varrer a watchlist: quem está em gatilho de compra/venda 1-2-3 (1d + 4h, sem LLM)">📡 Scan de gatilhos</button>
         <div class="h-tabs" id="historyTabs" role="tablist">
           <button type="button" class="h-tab is-active" data-filter="all">Todos</button>
           <button type="button" class="h-tab" data-filter="stock">Ações</button>
@@ -387,6 +389,26 @@
         <!-- Q&A ancorado sobre a comparação (task 027): a resposta pode
              referenciar as duas leituras (Padrão × Erick) com os níveis reais. -->
         <div class="ask-box" id="askCompare"></div>
+      </section>
+
+      <!-- SCAN DE PORTFÓLIO (28/08): o olho barato ($0 de LLM) — varre a watchlist
+           em 1d+4h e classifica pela distância do preço ao gatilho do 1-2-3. O que
+           estiver EM GATILHO abre a análise completa (Padrão/Erick) a um clique. -->
+      <section class="panel scan-panel hidden" id="scanPanel">
+        <div class="scan-head">
+          <h2>📡 Scan do portfólio — gatilhos 1-2-3 <span class="orig">(1d + 4h · $0 de LLM)</span></h2>
+          <div class="scan-actions">
+            <button type="button" id="scanRunBtn" title="Varrer a watchlist nos frames 1d e 4h">Escanear</button>
+            <button type="button" id="scanTrackBtn" class="ghost-btn" title="Taxa de acerto dos gatilhos já flagrados">🎯 Track record</button>
+            <button type="button" class="scan-close" id="scanCloseBtn" title="Fechar o scan">✕</button>
+          </div>
+        </div>
+        <!-- Edição da watchlist (dono): chips removíveis + input de adição. -->
+        <div class="scan-watchlist" id="scanWatchlist"></div>
+        <p class="hint" id="scanHint"></p>
+        <div class="scan-summary" id="scanSummary"></div>
+        <ul class="scan-list" id="scanList"></ul>
+        <div class="scan-track hidden" id="scanTrack"></div>
       </section>
     </div>
   </main>

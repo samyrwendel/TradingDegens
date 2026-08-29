@@ -307,7 +307,7 @@ def test_single_bar_layout_no_separate_reanalyze_bar(live_server):
             assert page.locator("#runBtn").count() == 1
             assert page.locator("#rerunBtn").count() == 1
             assert page.locator("#launchTfs button.lb-tf").count() == 5
-            assert page.locator("#launchMethods button.lb-method").count() == 3
+            assert page.locator("#launchMethods button.lb-method").count() == 4  # Padrão · Erick · 1-2-3 · Comparar
 
             # sem ativo aberto, o ↻ nasce desabilitado (não há o que reanalisar)
             assert page.is_disabled("#rerunBtn") is True
@@ -321,7 +321,7 @@ def test_single_bar_layout_no_separate_reanalyze_bar(live_server):
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
 def test_bar_renders_and_clicks_on_mobile_390(live_server):
     """Mobile 390: a barra única quebra limpa (flex-wrap, sem overflow horizontal),
-    renderiza os 3 métodos + 5 TFs, e o clique dispara o POST correto."""
+    renderiza os 4 métodos + 5 TFs, e o clique dispara o POST correto."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 390, "height": 850})
@@ -329,7 +329,7 @@ def test_bar_renders_and_clicks_on_mobile_390(live_server):
         try:
             page.goto(live_server)
             page.wait_for_selector("#launchMethods button.lb-method", state="visible")
-            assert page.locator("#launchMethods button.lb-method").count() == 3
+            assert page.locator("#launchMethods button.lb-method").count() == 4  # Padrão · Erick · 1-2-3 · Comparar
             assert page.locator("#launchTfs button.lb-tf").count() == 5
 
             # quebra limpa: nada estoura a largura de 390 (sem scroll horizontal)

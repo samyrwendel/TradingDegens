@@ -1066,16 +1066,20 @@ function renderResult(snap) {
   if (railThesesOk) railThesesOk.classList.remove("hidden");
   // método da análise aberta: a estrutura (recuo/1-2-3) é EMA 8/21 no Erick, MMS no
   // Padrão. Trocar de TF precisa recalcular na mesma família — daí guardar o método.
-  _openMethod = (r.erick_report && r.erick_report.trim()) ? "erick" : "padrao";
-  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick)
-  $("verdictBadge").className = verdictClass(r.verdict);
-  $("verdictBadge").innerHTML = verdictHtml(r.verdict);
+  // setup123 (atalho estrutural $0) é método próprio — o ↻ re-roda o atalho, não a
+  // análise completa.
+  _openMethod = r.setup123 ? "setup123"
+    : ((r.erick_report && r.erick_report.trim()) ? "erick" : "padrao");
+  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick/1-2-3)
+  $("verdictBadge").className = r.setup123 ? "verdict setup123" : verdictClass(r.verdict);
+  $("verdictBadge").innerHTML = r.setup123 ? "1-2-3" : verdictHtml(r.verdict);
   renderVerdictCaveat(r.verdict_caveat, r.pre_judge_findings);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
 
     `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
     `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
+    (r.setup123 ? `<span>Método <b>1-2-3 — leitura estrutural, sem LLM</b></span>` : "") +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
@@ -1497,10 +1501,16 @@ let _barMethod = "padrao"; // método escolhido na barra: "padrao" | "erick" | "
 // Normaliza um "view" (padrao|erick|compare|"") pro método a rodar. "" (run com erro
 // sem método) e qualquer desconhecido caem em padrão — nunca inventa método.
 function normMethod(v) {
-  return v === "compare" ? "compare" : (v === "erick" ? "erick" : "padrao");
+  if (v === "compare") return "compare";
+  if (v === "erick") return "erick";
+  if (v === "setup123") return "setup123";
+  return "padrao";
 }
 function methodLabel(v) {
-  return v === "compare" ? "Comparar" : (v === "erick" ? "Erick" : "Padrão");
+  if (v === "compare") return "Comparar";
+  if (v === "erick") return "Erick";
+  if (v === "setup123") return "1-2-3";
+  return "Padrão";
 }
 
 // Chip de data: "Hoje" quando a data é a de hoje (ou vazia), senão dd/mm. O input
@@ -1532,6 +1542,7 @@ function renderLaunchBar() {
   const methods = [
     ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
     ["erick", "🧭 Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
+    ["setup123", "1-2-3", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
     ["compare", "⚖️ Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
   ];
   mEl.innerHTML = methods.map(([m, label, title]) => {
@@ -2934,9 +2945,10 @@ async function startAnalysis(ev) {
   const date = $("date").value;
   if (!ticker) { $("formError").textContent = "Informe um ticker."; return; }
   // Barra ÚNICA (task 029): Analisar roda com o método + timeframe escolhidos na barra.
-  // Comparar dispara as DUAS (Padrão × Erick, compare=true); Erick/Padrão vão no method.
+  // Comparar dispara as DUAS (Padrão × Erick, compare=true); 1-2-3 é o atalho estrutural
+  // ($0 de LLM); Erick/Padrão vão no method.
   const compare = _barMethod === "compare";
-  const method = _barMethod === "erick" ? "erick" : "padrao";
+  const method = (_barMethod === "erick" || _barMethod === "setup123") ? _barMethod : "padrao";
   const timeframe = _barTf || "1d";
   $("runBtn").disabled = true;
   $("resultPanel").classList.add("hidden");
@@ -4526,6 +4538,171 @@ function renderModelTest(data) {
   }).join("");
 }
 
+// ---- SCAN DE PORTFÓLIO (28/08): gatilhos 1-2-3 a $0 de LLM ---------------------
+// O olho barato: varre a watchlist em 1d+4h, classifica pela distância do preço ao
+// gatilho e oferece a análise completa (Padrão/Erick) a um clique no que estiver
+// EM GATILHO. Estados (vocabulário único do backend scanner.py):
+const SCAN_ESTADO_PT = {
+  em_gatilho: ["EM GATILHO", "🟢"], perto: ["perto", "🟡"], formando: ["formando", "⚪"],
+  sem_setup: ["sem setup", "·"], sem_dado: ["sem dado", "⚠️"],
+};
+function scanEstadoChip(estado) {
+  const [pt, dot] = SCAN_ESTADO_PT[estado] || [estado, "·"];
+  const cls = estado === "em_gatilho" ? "scan-chip gatilho" : (estado === "perto" ? "scan-chip perto" : "scan-chip");
+  return `<span class="${cls}">${dot} ${escapeHtml(pt)}</span>`;
+}
+function scanFmt(n) { return n == null ? "—" : Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 }); }
+
+async function openScanPanel() {
+  $("scanPanel").classList.remove("hidden");
+  $("resultPanel").classList.add("hidden");
+  $("comparePanel").classList.add("hidden");
+  $("progressPanel").classList.add("hidden");
+  clearActiveRun();
+  await Promise.all([loadScanWatchlist(), runScan()]);
+}
+
+async function loadScanWatchlist() {
+  try {
+    const res = await fetch("/api/watchlist");
+    const data = await res.json();
+    const box = $("scanWatchlist");
+    const owner = _isOwner;
+    const chips = (data.tickers || []).map((w) => {
+      const t = w.ticker || "";
+      const rm = owner ? ` <button type="button" class="wl-x" data-wl-x="${escapeHtml(t)}" title="Remover da watchlist">✕</button>` : "";
+      return `<span class="wl-chip" data-wl="${escapeHtml(t)}">${escapeHtml(t)}${rm}</span>`;
+    }).join("");
+    const add = owner
+      ? `<form id="wlAddForm" class="wl-add"><input id="wlAddInput" placeholder="adicionar ativo (ex.: NVDA, BTC-USD)" autocomplete="off" /><button type="submit">＋</button></form>`
+      : `<span class="hint">login do dono pra editar a lista</span>`;
+    box.innerHTML = (chips || '<span class="hint">watchlist vazia — adicione ativos</span>') + add;
+    box.querySelectorAll("[data-wl-x]").forEach((b) => b.addEventListener("click", () => watchlistEdit("remove", b.dataset.wlX)));
+    const f = box.querySelector("#wlAddForm");
+    if (f) f.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const v = $("wlAddInput").value.trim();
+      if (v) watchlistEdit("add", v);
+    });
+    box.querySelectorAll("[data-wl]").forEach((c) => c.addEventListener("click", (e) => {
+      if (e.target.classList.contains("wl-x")) return;
+      $("ticker").value = c.dataset.wl;   // preenche o launcher; o usuário decide o método
+    }));
+  } catch (e) { $("scanWatchlist").innerHTML = `<span class="hint">watchlist indisponível (${escapeHtml(e.message)})</span>`; }
+}
+
+async function watchlistEdit(action, ticker) {
+  try {
+    const res = await apiPost("/api/watchlist", { action, ticker });
+    if (res.status === 403) { $("scanHint").textContent = "só o dono edita a watchlist (faça login)"; return; }
+    if (!res.ok) throw new Error((await res.json()).error || "falha");
+    await loadScanWatchlist();
+    $("scanHint").textContent = "";
+  } catch (e) { $("scanHint").textContent = e.message; }
+}
+
+async function runScan() {
+  const btn = $("scanRunBtn");
+  btn.disabled = true;
+  btn.textContent = "escaneando…";
+  $("scanSummary").innerHTML = '<span class="hint">varrendo 1d + 4h…</span>';
+  $("scanList").innerHTML = "";
+  try {
+    const res = await fetch("/api/scan?date=" + encodeURIComponent($("date").value || ""));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "falha no scan");
+    paintScan(data);
+  } catch (e) {
+    $("scanSummary").innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Escanear";
+  }
+}
+
+function paintScan(data) {
+  const s = data.resumo || {};
+  $("scanSummary").innerHTML =
+    `<b>${s.em_gatilho || 0}</b> em gatilho · <b>${s.perto || 0}</b> perto · ` +
+    `<b>${s.formando || 0}</b> formando · ${s.sem_setup || 0} sem setup · ${s.sem_dado || 0} sem dado` +
+    (data.date ? `<span class="hint"> — ${escapeHtml(data.date)} · ${escapeHtml((data.frames || []).join(" + "))}</span>` : "");
+  const ul = $("scanList");
+  ul.innerHTML = (data.ativos || []).map((a) => {
+    const m = a.melhor || {};
+    const gatilho = m.estado === "em_gatilho" || m.estado === "perto";
+    const levels = gatilho && m.trigger != null
+      ? `<div class="scan-levels">` +
+        `<span>🎯 gatilho <b>${scanFmt(m.trigger)}</b></span>` +
+        `<span>🛑 SL <b>${scanFmt(m.sl)}</b></span>` +
+        `<span>🎯 TP <b>${scanFmt(m.tp)}</b></span>` +
+        `<span>R:R <b>${m.rr != null ? m.rr.toFixed(2) : "não calculável"}</b></span>` +
+        `</div>`
+      : "";
+    const actions = m.estado === "em_gatilho"
+      ? `<div class="scan-actions-row">` +
+        `<button type="button" class="scan-go" data-go="${escapeHtml(a.ticker)}|padrao">Analisar Padrão</button>` +
+        `<button type="button" class="scan-go erick" data-go="${escapeHtml(a.ticker)}|erick">🧭 Analisar Erick</button>` +
+        `</div>` : "";
+    const dir = m.direction === "venda" ? "⬇️ venda" : (m.direction === "compra" ? "⬆️ compra" : "");
+    return `<li class="scan-row ${m.estado}">` +
+      `<div class="scan-line"><b class="scan-tk" data-open="${escapeHtml(a.ticker)}">${escapeHtml(a.ticker)}</b>` +
+      `<span class="scan-frame">${escapeHtml(m.frame || "")}</span>` +
+      `<span class="scan-dir">${dir}</span>` +
+      `<span class="scan-dist">${m.dist_txt || "—"}</span>` +
+      scanEstadoChip(m.estado) + `</div>` +
+      levels + actions + `</li>`;
+  }).join("");
+  ul.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => {
+    const [tk, method] = b.dataset.go.split("|");
+    $("ticker").value = tk;
+    _barMethod = method;
+    renderLaunchBar();
+    $("scanPanel").classList.add("hidden");
+    $("analyzeForm").requestSubmit();
+  }));
+  ul.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => {
+    $("ticker").value = b.dataset.open;
+  }));
+}
+
+async function showScanTrack() {
+  const box = $("scanTrack");
+  box.classList.toggle("hidden");
+  if (box.classList.contains("hidden")) return;
+  box.innerHTML = '<span class="hint">re-avaliando gatilhos…</span>';
+  try {
+    const res = await fetch("/api/scan/verdicts?date=" + encodeURIComponent($("date").value || ""));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "falha");
+    const taxa = data.taxa_acerto == null ? "—" : `${Math.round(data.taxa_acerto * 100)}%`;
+    const rows = (data.verdicts || []).slice().reverse().slice(0, 30).map((v) => {
+      const vb = { bateu_tp: ["✅ bateu TP", "ok"], bateu_sl: ["❌ bateu SL", "bad"],
+        andamento_lucro: ["📈 no lucro", ""], andamento_prejuizo: ["📉 no prejuízo", ""],
+        sem_dado: ["— sem dado", ""] }[v.veredito] || [v.veredito, ""];
+      return `<li class="scan-row"><span class="scan-line">` +
+        `<b>${escapeHtml(v.ticker || "")}</b><span class="scan-frame">${escapeHtml(v.frame || "")}</span>` +
+        `<span>${v.direction === "venda" ? "⬇️" : "⬆️"} gatilho ${scanFmt(v.trigger)}</span>` +
+        `<span class="scan-dist">agora ${scanFmt(v.preco_agora)}</span>` +
+        `<span class="scan-chip ${vb[1]}">${vb[0]}</span></span></li>`;
+    }).join("");
+    box.innerHTML = `<div class="scan-summary">🎯 <b>${taxa}</b> de acerto em ${data.n_fechados || 0} gatilho(s) fechado(s)` +
+      `${data.taxa_acerto == null ? ' <span class="hint">(nenhum fechado ainda — os abertos aparecem abaixo)</span>' : ""}</div>` +
+      (rows ? `<ul class="scan-list">${rows}</ul>` : '<span class="hint">nenhum gatilho flagrado ainda — escaneie que os em-gatilho passam a ser medidos</span>');
+  } catch (e) { box.innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`; }
+}
+
+function bindScan() {
+  const open = $("scanOpenBtn");
+  if (open) open.addEventListener("click", openScanPanel);
+  const run = $("scanRunBtn");
+  if (run) run.addEventListener("click", runScan);
+  const track = $("scanTrackBtn");
+  if (track) track.addEventListener("click", showScanTrack);
+  const close = $("scanCloseBtn");
+  if (close) close.addEventListener("click", () => $("scanPanel").classList.add("hidden"));
+}
+
+
 function init() {
   loadLlmCfg();
   applyConfig();
@@ -4544,6 +4721,7 @@ function init() {
   bindReeval();
   bindConfront();
   bindLaunchBar();
+  bindScan();
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)

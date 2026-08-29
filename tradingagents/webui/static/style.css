@@ -1569,3 +1569,53 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .consistency-warn > summary { color: var(--accent, #e6b800); font-weight: 600; }
 .consistency-list { margin: 6px 0 0; padding-left: 18px; }
 .consistency-list li { margin: 4px 0; line-height: 1.4; }
+
+/* ===== SCAN DE PORTFÓLIO (28/08): gatilhos 1-2-3 a $0 de LLM ==================
+   O botão lateral abre o painel; a lista classifica por urgência (em_gatilho
+   primeiro). Cores com FUNÇÃO: verde = agir agora, âmbar = vigiar, neutro = resto. */
+.scan-open-btn {
+  width: 100%; margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  cursor: pointer; font-size: 0.86rem; text-align: left;
+}
+.scan-open-btn:hover { border-color: var(--accent); }
+.scan-panel { padding: 14px 16px; }
+.scan-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.scan-head h2 { margin: 0; font-size: 1.02rem; }
+.scan-actions { display: flex; gap: 8px; }
+.scan-actions button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.scan-actions button:disabled { opacity: .55; cursor: wait; }
+.scan-close { border: none; background: none; color: var(--muted); font-size: 1rem; }
+.scan-watchlist { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 4px; }
+.wl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); font-size: .8rem; cursor: pointer; }
+.wl-chip:hover { border-color: var(--accent); }
+.wl-x { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 0 0 2px; font-size: .75rem; }
+.wl-x:hover { color: var(--red); }
+.wl-add { display: inline-flex; gap: 4px; }
+.wl-add input { width: 180px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: .8rem; }
+.wl-add button { border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.scan-summary { margin: 8px 0; color: var(--text); font-size: .9rem; }
+.scan-summary b { color: var(--green); }
+.scan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.scan-row { padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); }
+.scan-row.em_gatilho { border-color: var(--green-dim); background: linear-gradient(90deg, var(--green-dim), var(--panel-2) 55%); }
+.scan-row.perto { border-color: rgba(245, 180, 69, .35); }
+.scan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
+.scan-tk { cursor: pointer; min-width: 64px; }
+.scan-tk:hover { color: var(--accent); }
+.scan-frame, .scan-dir { color: var(--muted); font-size: .8rem; }
+.scan-dist { font-variant-numeric: tabular-nums; color: var(--muted); }
+.scan-chip { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: .74rem; color: var(--muted); }
+.scan-chip.gatilho { color: var(--green); border-color: var(--green); font-weight: 600; }
+.scan-chip.perto { color: var(--amber); border-color: var(--amber); }
+.scan-chip.ok { color: var(--green); border-color: var(--green); }
+.scan-chip.bad { color: var(--red); border-color: var(--red); }
+.scan-levels { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: .82rem; color: var(--text); }
+.scan-levels b { font-variant-numeric: tabular-nums; }
+.scan-actions-row { display: flex; gap: 8px; margin-top: 8px; }
+.scan-go { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; font-size: .82rem; }
+.scan-go:hover { background: var(--accent); color: #000; }
+.scan-go.erick { border-color: var(--green); color: var(--green); }
+.scan-go.erick:hover { background: var(--green); color: #000; }
+.scan-track { margin-top: 10px; }
+.ghost-btn { opacity: .8; }

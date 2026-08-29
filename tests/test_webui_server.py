@@ -5,6 +5,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from http.cookiejar import CookieJar
 
 import pytest
 
@@ -564,3 +565,110 @@ def test_runs_and_history_expose_in_flight(tmp_path):
     finally:
         gate.set()
         httpd.shutdown()
+
+
+# --------------------------------------------- scan de portfólio + 1-2-3 (28/08) --
+def test_scan_endpoint_classifies_watchlist(server, monkeypatch):
+    """GET /api/scan varre a watchlist (semeada do histórico na 1ª vez) e devolve
+    a classificação por urgência — $0 de LLM, sem gate."""
+    import tradingagents.webui.runner as rm
+
+    monkeypatch.setattr(
+        rm, "scan_watchlist",
+        lambda tickers, date, frames=("1d", "4h"): {
+            "date": date, "frames": ["1d", "4h"],
+            "resumo": {"em_gatilho": 1},
+            "ativos": [{"ticker": "MSFT", "frames": [], "melhor": {"estado": "em_gatilho"}}],
+        })
+    status, body = _get(server, "/api/scan?date=2026-08-28")
+    assert status == 200
+    assert body["resumo"]["em_gatilho"] == 1
+    assert body["ativos"][0]["ticker"] == "MSFT"
+
+
+def test_watchlist_read_is_public_write_is_owner_only(server):
+    """GET /api/watchlist é público (como /api/chart); POST sem sessão de dono → 403."""
+    status, body = _get(server, "/api/watchlist")
+    assert status == 200 and "tickers" in body
+    # sem dono logado e sem chave: a EDIÇÃO é barrada (a lista é curada pelo dono)
+    req = urllib.request.Request(
+        server + "/api/watchlist", data=json.dumps({"action": "add", "ticker": "NVDA"}).encode(),
+        headers={"Content-Type": "application/json", "X-LLM-Key": "sk-test"})
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        raise AssertionError("POST devia ser 403 sem dono")
+    except urllib.error.HTTPError as e:
+        assert e.code == 403
+
+
+def test_watchlist_owner_edits(tmp_path):
+    """Dono logado adiciona e remove da watchlist — persistida no disco."""
+    import os
+
+    from tradingagents.webui.auth import OwnerAuth
+    from tradingagents.webui.store import HistoryStore
+
+    os.environ["TRADINGDEGENS_OWNER_TOKEN"] = "pw-scan"
+    try:
+        runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                                store=HistoryStore(tmp_path), graph_factory=_factory())
+        httpd = make_server("127.0.0.1", 0, runner=runner, auth=OwnerAuth())
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{port}"
+        try:
+            op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+
+            def post(path, payload):
+                req = urllib.request.Request(base + path, data=json.dumps(payload).encode(),
+                                             headers={"Content-Type": "application/json"})
+                with op.open(req, timeout=5) as resp:   # opener carrega o cookie de dono
+                    return resp.status, json.loads(resp.read())
+
+            assert post("/api/login", {"password": "pw-scan"})[0] == 200
+            _, body = post("/api/watchlist", {"action": "add", "ticker": "nvda"})
+            assert body["ok"] is True and "NVDA" in [w["ticker"] for w in body["tickers"]]
+            _, body = post("/api/watchlist", {"action": "remove", "ticker": "NVDA"})
+            assert "NVDA" not in [w["ticker"] for w in body["tickers"]]
+            # persistiu de verdade (arquivo no disco da store)
+            assert (tmp_path / "watchlist.json").exists()
+        finally:
+            httpd.shutdown()
+    finally:
+        os.environ.pop("TRADINGDEGENS_OWNER_TOKEN", None)
+
+
+def test_setup123_run_is_instant_free_and_ungated(server, monkeypatch):
+    """POST /api/analyze com method=setup123: run instantânea $0 — SEM chave de LLM
+    (o gate protege custo que não existe), status done com o plano estrutural."""
+    import tradingagents.webui.runner as rm
+
+    monkeypatch.setattr(rm, "fetch_price_chart",
+                        lambda t, d, tf="1d", method="padrao": {"candles": [{"c": 1.0}]})
+    monkeypatch.setattr(rm, "fetch_actionable_plan",
+                        lambda t, d, tf="1d", method="padrao":
+                        {"price": 100.0, "pattern": {"trigger": 100.5, "state": "formando",
+                                                     "direction": "compra"},
+                         "setup_state": "aguardar_rompimento"})
+    # SEM X-LLM-Key e sem dono: o 1-2-3 roda mesmo assim (é $0)
+    req = urllib.request.Request(
+        server + "/api/analyze",
+        data=json.dumps({"ticker": "MSFT", "date": "2026-08-28", "method": "setup123"}).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        body = json.loads(resp.read())
+    assert resp.status == 200
+    # a run termina sozinha quase na hora (worker determinístico)
+    deadline = time.time() + 3
+    snap = None
+    while time.time() < deadline:
+        snap = json.loads(urllib.request.urlopen(
+            f"{server}/api/status/{body['run_id']}", timeout=5).read())
+        if snap["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert snap and snap["status"] == "done"
+    assert snap["method"] == "setup123"
+    assert snap["cost"]["usd"] == 0
+    assert (snap["result"] or {}).get("setup123") is True
+    assert snap["result"]["actionable"]["pattern"]["trigger"] == 100.5

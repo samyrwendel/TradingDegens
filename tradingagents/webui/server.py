@@ -423,6 +423,24 @@ class _Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 term = (qs.get("q", [""])[0] or "").strip()
                 self._send_json({"query": term, "results": self.runner.search_symbols(term)})
+            elif path == "/api/watchlist":
+                # Watchlist MANUAL do scan de portfólio. LEITURA pública (dados de
+                # mercado não são secretos — mesmo regime do /api/chart); a edição
+                # (POST) é owner-only.
+                self._send_json({"tickers": self.runner.watchlist_get()})
+            elif path == "/api/scan":
+                # SCAN ESTRUTURAL 1-2-3 da watchlist (1d+4h): $0 de LLM — só o plano
+                # determinístico cacheado. Público como /api/chart. Síncrono: frio
+                # ~13s/10 ativos, cacheado ~2s (medido 28/08).
+                qs = parse_qs(urlparse(self.path).query)
+                date = (qs.get("date", [""])[0] or "").strip() or timeutil.today()
+                self._send_json(self.runner.scan_portfolio(date))
+            elif path == "/api/scan/verdicts":
+                # TRACK RECORD do scan: cada gatilho flagrado é re-avaliado contra o
+                # preço de hoje (bateu TP / bateu SL / andamento) + taxa de acerto.
+                qs = parse_qs(urlparse(self.path).query)
+                date = (qs.get("date", [""])[0] or "").strip() or timeutil.today()
+                self._send_json(self.runner.scan_track_record(date))
             elif path == "/api/subscription/status":
                 # Status da assinatura do dono (task 017; multi-provedor 020): SÓ-DONO.
                 # Público → 403. Devolve só metadados (conectada?/quando/fonte por
@@ -507,6 +525,25 @@ class _Handler(BaseHTTPRequestHandler):
                            f"Path=/; Max-Age=0")
                 self._send_json({"ok": True, "owner": False}, cookies=[cleared])
                 return
+            if path == "/api/watchlist":
+                # EDIÇÃO da watchlist do scan: SÓ-DONO (público lê via GET; só quem
+                # é dono cura a lista). Ações: add | remove | set.
+                if not self._owner_or_403():
+                    return
+                body = self._read_json_body()
+                action = (body.get("action") or "").strip().lower()
+                ticker = (body.get("ticker") or "").strip()
+                if action == "add" and ticker:
+                    tickers = self.runner.watchlist_add(ticker)
+                elif action == "remove" and ticker:
+                    tickers = self.runner.watchlist_remove(ticker)
+                elif action == "set" and isinstance(body.get("tickers"), list):
+                    tickers = self.runner.watchlist_set(body.get("tickers"))
+                else:
+                    self._send_json({"error": "ação inválida (use add/remove/set)"}, 400)
+                    return
+                self._send_json({"ok": True, "tickers": tickers})
+                return
             if path == "/api/subscription/oauth/start":
                 # Conectar via LINK (task 019): SÓ-DONO. Gera PKCE, guarda o verifier
                 # server-side (state→verifier, em memória) e devolve a URL de
@@ -584,7 +621,10 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 # Gating: público sem chave própria e sem sessão do dono não roda —
                 # nunca cai na chave do servidor (responde 403 claro, sem criar run).
-                if not self._gate_or_403(body):
+                # EXCEÇÃO setup123 (o atalho 1-2-3): $0 de LLM, nenhum modelo roda —
+                # o gate protegeria um custo que não existe. Público pode escanear
+                # estrutura do mesmo jeito que pode ver o /api/chart.
+                if method != "setup123" and not self._gate_or_403(body):
                     return
                 # BYOK: a chave/provider/modelo do usuário viajam por header+corpo e
                 # valem só pra ESTA run (chave do usuário > env do servidor).
