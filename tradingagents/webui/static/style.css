@@ -1811,10 +1811,94 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    varrer o portfólio inteiro sem rolar 20 cards. Mesma gramática de cor do modo
    cards (borda-esquerda sólida = estado), só que rasa. */
 .scan-list.is-lista { gap: 2px; }
+/* TABELA DE VERDADE (task 019). Era `flex-wrap` com `margin-left: auto` nos níveis:
+   cada linha se alinhava pelo PRÓPRIO conteúdo, então o gatilho do MSFT, do LINK-USD
+   e do ZEC-USD começavam em três lugares diferentes — comparar exigia varrer com o
+   olho em vez de descer a coluna, que era exatamente a queixa. Agora cada linha é
+   uma GRADE com o MESMO template, e o cabeçalho usa o template idêntico.
+   As larguras são FIXAS (minmax), nunca `auto`: `auto` volta a medir pelo conteúdo
+   de cada linha e a coluna deixa de existir. Só a coluna TP/motivo é elástica —
+   é a que recebe texto, e é ela que absorve a sobra em vez de virar rasgo vazio no
+   meio da linha (o `margin-left: auto` de antes). */
+.scan-line-row, .scan-line-head {
+  display: grid; align-items: center; gap: 0 10px;
+  /* `fr` em TODAS as colunas de dado: a sobra de largura se reparte entre elas em
+     vez de inchar uma só. Com uma única elástica (a primeira tentativa punha o TP
+     como 1fr) o número do TP ficava 600px longe do SL e do próprio cabeçalho — o
+     mesmo rasgo vazio do `margin-left: auto`, só que dentro de uma célula.
+     O `minmax` guarda o piso: abaixo dele a grade não espreme, ela sai de cena
+     (container query embaixo). */
+  grid-template-columns:
+    38px                     /* tf      */
+    minmax(72px, 1.2fr)      /* ativo   */
+    minmax(64px, 1fr)        /* preço   */
+    minmax(48px, 0.8fr)      /* dist    */
+    minmax(108px, 1.1fr)     /* estado  */
+    minmax(64px, 1fr)        /* gatilho */
+    minmax(64px, 1fr)        /* SL      */
+    minmax(72px, 1.4fr)      /* TP / motivo */
+    minmax(56px, 1fr);       /* R:R     */
+}
 .scan-line-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer;
+  cursor: pointer;
   padding: 5px 8px; border-radius: 0; border-left: 3px solid var(--border);
   background: var(--panel-2); font-size: .86rem;
+}
+/* Cabeçalho: diz o que é cada coluna sem depender do emoji (que saiu das células —
+   quem nomeia a coluna agora é este cabeçalho). Não é clicável e não é linha de dado. */
+.scan-line-head {
+  padding: 2px 8px 4px; border-left: 3px solid transparent; cursor: default;
+  font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase;
+  letter-spacing: .5px; color: var(--muted);
+}
+/* O cabeçalho copia EXATAMENTE o alinhamento da célula: rótulo à esquerda e número
+   à direita na mesma coluna é cabeçalho que não aponta pra nada. */
+.scan-line-head .scan-col:nth-child(n+3) { text-align: right; }
+.scan-line-head .scan-col:nth-child(5) { text-align: left; }   /* estado é chip */
+/* Célula: número à DIREITA e tabular-nums em TUDO que é número — é o que deixa
+   comparar por casa decimal descendo a coluna. */
+.scan-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: right; font-variant-numeric: tabular-nums; }
+.scan-cell.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* O chip de estado não pode quebrar em duas linhas: linha de tabela com altura
+   diferente da vizinha desmancha a leitura em coluna tanto quanto o desalinhamento. */
+.scan-line-row .scan-chip { white-space: nowrap; justify-self: start; }
+.scan-line-row .scan-tf { margin-right: 0; }
+.scan-cell.num b { font-variant-numeric: tabular-nums; }
+.scan-cell.vazio { color: var(--muted); }
+/* invalidação divide a coluna do TP e NÃO é um TP: aqui o nome fica VISÍVEL (o
+   `scan-ck` escondido serviria só pro leitor de tela, e a tela precisa dizer que
+   aquele número não é o alvo). */
+.scan-cell.scan-motivo { color: var(--muted); }
+.scan-cell.scan-motivo b { color: var(--text); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.scan-cell.scan-motivo .scan-ck { position: static; width: auto; height: auto; margin: 0;
+  clip-path: none; font-size: .74rem; }
+/* marcador do R:R medido do preço atual — o texto inteiro fica no title e na legenda */
+.scan-mark { color: var(--amber); font-weight: var(--fw-bold); margin-left: 2px; }
+.scan-legenda { margin: 8px 0 0; font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+.scan-legenda b { color: var(--text); }
+/* O nome da coluna viaja DENTRO da célula, invisível enquanto a tabela é tabela (o
+   cabeçalho já nomeia a coluna) — e volta a aparecer quando a grade não cabe. Não é
+   `display: none`: assim o leitor de tela continua ouvindo "gatilho 834,82", que
+   numa `ul` sem `<th>` é a única associação que existe. */
+.scan-ck {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+/* Coluna estreita demais pra nove colunas: a tabela deixa de ser tabela e volta a
+   ser a linha que quebra (o alinhamento é inalcançável nessa largura de qualquer
+   jeito). O cabeçalho some junto — cabeçalho de coluna que não tem coluna embaixo
+   mente — e o nome de cada célula reaparece no lugar dele. Medido: abaixo de 700px
+   as colunas fixas não cabem. */
+@container (max-width: 700px) {
+  .scan-line-row { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+  .scan-line-head { display: none; }
+  .scan-cell { overflow: visible; text-align: left; }
+  .scan-cell:empty { display: none; }
+  .scan-ck {
+    position: static; width: auto; height: auto; margin: 0 3px 0 0;
+    clip-path: none; color: var(--muted); font-size: .74rem;
+  }
 }
 .scan-line-row:hover { background: var(--panel); }
 .scan-line-row.em_gatilho { border-left-color: var(--green); background: var(--green-dim); }
@@ -1823,11 +1907,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-line-row.invalidou { border-left-color: var(--muted); opacity: .75; }
 .scan-line-row.formando { border-left-color: var(--border); }
 .scan-tk-inline { min-width: 78px; color: var(--text); }
-/* Na lista os níveis ficam na MESMA linha (não em bloco abaixo) — é o que a torna
-   uma lista de verdade em vez de um card mais estreito. */
-.scan-line-row .scan-levels {
-  border-top: none; margin-top: 0; padding-top: 0; margin-left: auto; gap: 12px;
-}
+/* (Aqui morava `.scan-line-row .scan-levels { margin-left: auto }` — o bloco de
+   níveis empurrado pro extremo direito. Era ELE a causa do desalinhamento: cada
+   linha empurrava pelo próprio conteúdo, e ainda abria um rasgo vazio no meio
+   enquanto o texto do motivo truncava na borda. Na tabela os níveis são células da
+   grade; o modo CARDS segue com `.scan-levels` como estava.) */
 /* DA-070: card QUADRADO e fundo CHAPADO. O estado deixa de ser degradê e passa a
    ser borda-esquerda sólida — a cor continua carregando a informação, sem virar
    textura que compete com o número. */

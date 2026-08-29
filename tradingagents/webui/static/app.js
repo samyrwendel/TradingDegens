@@ -5029,6 +5029,89 @@ function scanLevelsHtml(f) {
     `</div>`;
 }
 
+// ---- modo LISTA: uma TABELA de verdade ------------------------------------
+// "Faz colunas mais definidas e deixa cada informação em uma coluna" — o pedido é
+// COMPARAR descendo a coluna. A lista era `flex-wrap` com `margin-left: auto`, e
+// isso alinha cada linha pelo PRÓPRIO conteúdo: o gatilho do MSFT, do LINK-USD e do
+// ZEC-USD começavam em três lugares diferentes. Aqui cada linha é uma GRADE com o
+// MESMO template, então a coluna existe de verdade.
+//
+// Os rótulos por célula (🎯 gatilho, 🛑 SL, 🎯 TP) saem: quem diz o que é cada
+// coluna é o CABEÇALHO, e a célula fica com o número — é isso que faz a coluna ser
+// lida como coluna. No modo CARDS os rótulos ficam (lá não há cabeçalho).
+const SCAN_COLUNAS = [
+  ["tf", "Timeframe do candle"],
+  ["ativo", "Sigla do ativo"],
+  ["preço", "Preço no fechamento do candle"],
+  ["dist", "Distância do preço até o gatilho"],
+  ["estado", "Estado do setup 1-2-3"],
+  ["gatilho", "Nível que aciona a entrada"],
+  ["SL", "Stop loss"],
+  ["TP", "Alvo publicável — ou o motivo de não haver"],
+  ["R:R", "Risco/retorno"],
+];
+
+function scanCabecalhoHtml() {
+  return `<li class="scan-line-head" aria-hidden="false">` + SCAN_COLUNAS.map(([nome, ajuda]) =>
+    `<span class="scan-col" title="${escapeHtml(ajuda)}">${escapeHtml(nome)}</span>`).join("") + `</li>`;
+}
+
+// O R:R medido do PREÇO ATUAL (setup já acionado) muda a leitura do número, e o
+// qualificador da task 012 ("do preço atual") não cabe na célula sem empurrar a
+// coluna. Vira marcador + title + legenda embaixo da tabela: forma curta na célula,
+// texto inteiro a um passo — nunca truncado calado.
+function scanRrDoPrecoAtual(f) {
+  return f.rr != null && !f.rr_residual && f.pattern_state === "acionado";
+}
+
+// As quatro células de nível da LISTA (gatilho · SL · TP/motivo · R:R). Célula sem
+// dado fica VAZIA — na tabela ela não pode sumir, senão a coluna seguinte sobe de
+// posição e o alinhamento (que é o pedido inteiro) morre.
+// O nome da coluna vai JUNTO da célula, escondido enquanto a tabela é tabela: na
+// largura em que a grade não cabe e a linha volta a quebrar, ele reaparece — número
+// solto sem cabeçalho em cima não diz nada. De quebra é o que dá contexto a quem usa
+// leitor de tela (isto é `ul`/`li`, não `table`: não há associação automática entre
+// cabeçalho e célula).
+function scanCk(nome) {
+  return `<span class="scan-ck">${escapeHtml(nome)}</span>`;
+}
+
+function scanLineCellsHtml(f) {
+  const vazia = `<span class="scan-cell"></span>`;
+  const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
+  if (!hasLevels) {
+    // Invalidou: o nível que importa é a INVALIDAÇÃO — não é gatilho nem SL, então
+    // vai na coluna do motivo (a flexível), com o porquê no title.
+    const motivo = (f.estado === "invalidou" && f.invalidacao != null)
+      ? `<span class="scan-cell scan-motivo" title="premissa rompida — o preço perdeu o nível de invalidação">` +
+        scanCk("invalidação") + `<b>${scanFmt(f.invalidacao)}</b></span>`
+      : vazia;
+    return vazia + vazia + motivo + vazia;
+  }
+  const tp = f.tp != null
+    ? `<span class="scan-cell num">${scanCk("TP")}<b>${scanFmt(f.tp)}</b></span>`
+    : `<span class="scan-cell scan-note" title="${escapeHtml("sem alvo — " + (f.rr_note || "nível de alvo indefinido"))}">⚠️ sem alvo</span>`;
+  return `<span class="scan-cell num">${scanCk("gatilho")}<b>${scanFmt(f.trigger)}</b></span>` +
+    `<span class="scan-cell num">${scanCk("SL")}<b>${scanFmt(f.sl)}</b></span>` + tp + scanRrCellHtml(f);
+}
+
+function scanRrCellHtml(f) {
+  // Sem R:R o motivo já está na coluna do TP ("sem alvo — …"); aqui a célula diz
+  // que não há número, com o porquê no title. Numa tabela a célula não pode sumir.
+  if (f.rr == null) {
+    return `<span class="scan-cell num vazio" title="${escapeHtml("R:R não calculável — " + (f.rr_note || "sem alvo publicável"))}">` +
+      scanCk("R:R") + `—</span>`;
+  }
+  if (f.rr_residual) {
+    const sobra = (f.rr_retorno != null && f.rr_risco != null)
+      ? ` — sobrou ${scanFmt(f.rr_retorno)} pra ${scanFmt(f.rr_risco)} de risco` : "";
+    return `<span class="scan-cell scan-note" title="${escapeHtml("alvo praticamente alcançado" + sobra)}">🏁 no alvo</span>`;
+  }
+  const marca = scanRrDoPrecoAtual(f)
+    ? `<span class="scan-mark" title="R:R medido do PREÇO ATUAL — o setup já foi acionado, então o número mede o que ainda sobra do trade">*</span>` : "";
+  return `<span class="scan-cell num">${scanCk("R:R")}<b>${f.rr.toFixed(2)}</b>${marca}</span>`;
+}
+
 // O R:R e — quando muda a leitura — a BASE da entrada.
 //
 // Num setup JÁ ACIONADO a entrada de referência é o PREÇO ATUAL, não o gatilho: o
@@ -5048,6 +5131,18 @@ function scanRrHtml(f) {
   const base = f.pattern_state === "acionado"
     ? ` <span class="scan-sub">do preço atual</span>` : "";
   return `<span>R:R <b>${f.rr.toFixed(2)}</b>${base}</span>`;
+}
+
+// A legenda do "*" só aparece quando alguma linha o usa — legenda de marcador que
+// não está na tela é ruído.
+function scanLegenda(temMarca) {
+  const el = $("scanLegenda");
+  if (!el) return;
+  el.innerHTML = temMarca
+    ? `<span class="scan-mark">*</span> R:R medido do <b>preço atual</b> — o setup já foi acionado, ` +
+      `então o número mede o que ainda sobra do trade (medido do gatilho daria outro valor).`
+    : "";
+  el.classList.toggle("hidden", !temMarca);
 }
 
 function scanActionsHtml(ticker, f) {
@@ -5104,7 +5199,9 @@ function paintScan(data) {
     // LISTA: uma linha por ativo+frame, sem agrupar. Densa de propósito — é o modo
     // de varrer o portfólio inteiro de relance, sem rolar 20 cards.
     const linhas = [];
+    let temMarca = false;
     ativos.forEach((a) => (a.frames || []).filter((f) => f.estado !== "sem_dado").forEach((f) => {
+      if (scanRrDoPrecoAtual(f)) temMarca = true;
       linhas.push(
         `<li class="scan-line-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
         scanTfBadge(f.frame) +
@@ -5112,10 +5209,13 @@ function paintScan(data) {
         `<span class="scan-price">$${scanFmt(f.price)}</span>` +
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
         scanEstadoChip(f.estado, f.direction) +
-        scanLevelsHtml(f) + `</li>`);
+        scanLineCellsHtml(f) + `</li>`);
     }));
-    ul.innerHTML = linhas.join("") ||
-      `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
+    // O cabeçalho só existe se houver tabela embaixo dele.
+    ul.innerHTML = linhas.length
+      ? scanCabecalhoHtml() + linhas.join("")
+      : `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
+    scanLegenda(temMarca);
   } else {
     ul.innerHTML = ativos.map((a) => {
       // Cada ativo reporta TODOS os frames (1d, 4h, 1h) — um por linha, com seu
@@ -5129,11 +5229,13 @@ function paintScan(data) {
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
         scanEstadoChip(f.estado, f.direction) +
         scanLevelsHtml(f) + scanActionsHtml(a.ticker, f) + `</div>`).join("");
+      // (CARDS segue com os rótulos por célula — lá não há cabeçalho de coluna.)
       return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
         `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}</b>` +
         rows + `</li>`;
     }).join("") ||
       `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
+    scanLegenda(false);   // a legenda é do marcador da TABELA; em cards não há tabela
   }
   ul.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", (ev) => {
     ev.stopPropagation();   // não dispara o data-open do frame-row pai
