@@ -157,3 +157,28 @@ def test_o_aviso_aparece_no_degraded_da_run_123(tmp_path, monkeypatch):
     deg = (run.result or {}).get("degraded") or []
     assert any("MCD" in d.get("label", "") for d in deg), deg
     assert all(d.get("kind") == "suspect" for d in deg), deg
+
+
+# ---------------------------------------- o limiar diz o que o comentário diz ---
+def test_buraco_de_EXATAMENTE_dois_dias_uteis_declara():
+    """O off-by-one: o comentário chamava 2 dias úteis de "o menor buraco que já
+    corrompeu uma leitura" e o código (``<=``) o deixava passar CALADO — só 3+
+    declarava. Ter→qui é exatamente 2. DENTE: com ``<=`` de volta, some o aviso."""
+    _declara_serie_vencida(_frame("2026-08-25"), "2026-08-27", "MCD")   # ter → qui
+    avisos = data_notices.snapshot()
+    assert len(avisos) == 1, "buraco de 2 dias úteis não pode passar calado"
+    assert "2026-08-25" in avisos[0]["reason"]
+
+
+def test_um_dia_util_segue_calado_porque_e_o_estado_normal_ao_vivo():
+    """Contra-prova: 1 dia útil de atraso é a run ao vivo antes do fechamento (a
+    barra de hoje ainda não publicou). Declarar aí seria aviso em toda run — e aviso
+    que aparece sempre é aviso que ninguém lê."""
+    _declara_serie_vencida(_frame("2026-08-26"), "2026-08-27", "MCD")   # qua → qui
+    assert data_notices.snapshot() == []
+
+
+def test_o_limiar_e_o_MENOR_buraco_que_declara():
+    """Trava a semântica da constante contra o próximo leitor: ela é o piso do que
+    declara (inclusive), não o teto do que cala."""
+    assert OHLCV_STALE_NOTICE_BDAYS == 2

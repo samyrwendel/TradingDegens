@@ -13,6 +13,9 @@ import pytest
 from tradingagents.agents.utils.agent_utils import build_instrument_context
 from tradingagents.dataflows import fundamentals_anchors as fa
 
+# Data de HOJE pros casos de run AO VIVO (o corte histórico é `curr_date < hoje`).
+_HOJE = __import__("datetime").date.today().isoformat()
+
 
 def _quarterly_with_fifth_older() -> pd.DataFrame:
     """AAOI-shaped quarterly cash flow: the four most-recent FCF quarters sum to
@@ -245,14 +248,105 @@ def test_quarterly_cashflow_without_av_key_stays_none(monkeypatch):
 
 @pytest.mark.unit
 def test_shares_falls_back_to_finnhub(monkeypatch):
+    """Fallback do Finnhub — em run AO VIVO, que é onde uma fonte live é legítima.
+    (A data é calculada de hoje: fixá-la faria o teste trocar de significado com o
+    passar do tempo, que é o defeito que ele existe pra pegar.)"""
     import yfinance as yf
 
     import tradingagents.dataflows.finnhub_fundamentals as fh
 
     monkeypatch.setattr(yf, "Ticker", lambda s: (_ for _ in ()).throw(RuntimeError("yf down")))
     monkeypatch.setattr(fh, "get_shares", lambda s: 5_044_000_000.0)
-    sh, fonte = fa._fetch_shares("INTC", "2026-08-27")
+    sh, fonte = fa._fetch_shares("INTC", _HOJE)
     assert fonte == "finnhub" and sh == pytest.approx(5_044_000_000.0)
+
+
+# --------------------------------------------- ações NA DATA DA RUN (look-ahead) ---
+class _TickerComSerie:
+    """yfinance.Ticker falso com histórico de contagem de ações."""
+
+    def __init__(self, serie):
+        self._serie = serie
+        self.info = {"sharesOutstanding": 9_999_999_999.0}   # o número de HOJE
+
+    def get_shares_full(self, start=None, end=None):
+        return self._serie
+
+
+def _serie_de_acoes():
+    return pd.Series(
+        [5_000_000_000.0, 5_044_000_000.0, 4_900_000_000.0],
+        index=pd.to_datetime(["2026-01-30", "2026-05-01", "2026-08-28"]),
+    )
+
+
+@pytest.mark.unit
+def test_run_historica_usa_a_contagem_vigente_naquela_data(monkeypatch):
+    """``market_cap = close(date-guarded) × shares(HOJE)`` era o look-ahead que
+    sobrou — na MESMA seção que existe pra impedi-lo. Agora a contagem sai da série
+    datada: a última anterior à data da run (não a de hoje, nem a posterior).
+
+    DENTE: com o fetch live de volta, a fonte vira "yfinance" e o número vira o de
+    hoje (9.999.999.999) — as duas asserções caem.
+    """
+    import yfinance as yf
+
+    monkeypatch.setattr(yf, "Ticker", lambda s: _TickerComSerie(_serie_de_acoes()))
+    sh, fonte = fa._fetch_shares("INTC", "2026-06-30")
+    assert sh == pytest.approx(5_044_000_000.0)     # a de 01/05, não a de 28/08
+    assert fonte == "yfinance (contagem de 2026-05-01)", fonte
+
+
+@pytest.mark.unit
+def test_run_historica_sem_serie_nao_cai_na_fonte_live(monkeypatch):
+    """Sem série histórica, a resposta é a AUSÊNCIA — cair no ``info``/Finnhub seria
+    trazer o número de hoje de volta pela porta dos fundos. DENTE: com o fallback
+    live, isto devolveria (5.044.000.000, 'finnhub')."""
+    import yfinance as yf
+
+    import tradingagents.dataflows.finnhub_fundamentals as fh
+
+    monkeypatch.setattr(yf, "Ticker", lambda s: (_ for _ in ()).throw(RuntimeError("yf down")))
+    monkeypatch.setattr(fh, "get_shares", lambda s: 5_044_000_000.0)
+    assert fa._fetch_shares("INTC", "2026-06-30") == (None, None)
+
+
+@pytest.mark.unit
+def test_serie_que_so_tem_datas_futuras_nao_serve(monkeypatch):
+    """Contagem posterior à data da run é look-ahead literal."""
+    import yfinance as yf
+
+    serie = pd.Series([5_044_000_000.0], index=pd.to_datetime(["2026-08-28"]))
+    monkeypatch.setattr(yf, "Ticker", lambda s: _TickerComSerie(serie))
+    assert fa._fetch_shares("INTC", "2026-01-15") == (None, None)
+
+
+@pytest.mark.unit
+def test_a_chave_do_cache_de_shares_tem_versao_de_semantica():
+    """Entrada histórica é gravada PERMANENTE: sem bump, toda (símbolo, data) já
+    consultada continuaria servindo o número de HOJE pra sempre."""
+    assert fa._SHARES_SEMANTICA_KEY and fa._SHARES_SEMANTICA_KEY != "v1"
+
+
+@pytest.mark.unit
+def test_run_historica_sem_shares_DECLARA_o_market_cap_ausente(monkeypatch):
+    """A ausência é declarada, como no cross-check do FCF — um buraco mudo parece
+    "não achamos nada", e não "não calculamos de propósito"."""
+    import yfinance as yf
+
+    import tradingagents.dataflows.stockstats_utils as su
+
+    dias = pd.bdate_range("2026-01-02", "2026-06-30")
+    diario = pd.DataFrame({"Date": dias, "Close": [100.0] * len(dias),
+                           "Low": [90.0] * len(dias), "High": [110.0] * len(dias)})
+    monkeypatch.setattr(su, "load_ohlcv", lambda symbol, curr_date: diario)
+    monkeypatch.setattr(yf, "Ticker", lambda s: (_ for _ in ()).throw(RuntimeError("yf down")))
+    monkeypatch.setattr(fa, "_cached_ttm", lambda symbol, curr_date: {})
+
+    sec = fa.build_fundamentals_anchors_section("INTC", "2026-06-30")
+    assert sec and "Market cap" in sec
+    assert "não calculado nesta run de data passada" in sec
+    assert "look-ahead" in sec
 
 
 @pytest.mark.unit

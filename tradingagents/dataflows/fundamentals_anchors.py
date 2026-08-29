@@ -41,6 +41,18 @@ _TRADING_DAYS_52W = 252
 # a tabela trimestral DE 27/08 não muda mais; run ao vivo expira à meia-noite.
 _ANCHORS_CATEGORY = "fundamentals_anchors"
 
+# VERSÃO DA SEMÂNTICA da chave de ``shares`` (mesma disciplina do _SEMANTICA_KEY do
+# earnings_calendar). O significado da resposta MUDOU: antes era "ações de hoje",
+# agora é "ações vigentes na data da run". Entrada de data passada é gravada
+# PERMANENTE — sem o bump, toda (símbolo, data) já consultada continuaria servindo,
+# pra sempre, o número de hoje dentro de uma run histórica. Mudou a semântica? Bump.
+_SHARES_SEMANTICA_KEY = "v2-date-guarded"
+# Idem pro TTM: a definição de "TTM" (os 4 trimestres mais recentes date-guarded)
+# é semântica, e mudar a soma sem mudar a chave gravaria o número novo com a
+# resposta velha nas runs históricas. Nunca foi bumpada — existe pra que a
+# próxima mudança tenha onde ser declarada, em vez de virar dívida silenciosa.
+_TTM_SEMANTICA_KEY = "v1-quatro-trimestres"
+
 
 def _is_permanent(curr_date: str) -> bool:
     """Histórico (curr_date < hoje) é fato estável — cache permanente. Run ao
@@ -230,6 +242,8 @@ def render_anchors_section(
     ]
     if has_price:
         lines.append(f"- **Preço de referência (as_of {as_of})**: {snapshot['price']:,.2f}")
+        if snapshot.get("market_cap") is None and snapshot.get("market_cap_nota"):
+            lines.append(f"- **Market cap**: {snapshot['market_cap_nota']}")
         if snapshot.get("market_cap") is not None:
             sh = snapshot.get("shares")
             # A FONTE das ações sai junto do número, como já sai a do FCF TTM:
@@ -363,7 +377,8 @@ def _fetch_quarterly_cashflow(symbol: str, curr_date: str) -> tuple[pd.DataFrame
 def _cached_ttm(symbol: str, curr_date: str) -> dict[str, Any] | None:
     """Agregados TTM + fonte, cacheados (DA-058). O DataFrame NÃO é cacheado —
     cacheia-se o resultado computado (JSON-serializable)."""
-    out = _cached_call(_ANCHORS_CATEGORY, ("ttm", symbol.upper(), str(curr_date)[:10]),
+    out = _cached_call(_ANCHORS_CATEGORY,
+                       ("ttm", _TTM_SEMANTICA_KEY, symbol.upper(), str(curr_date)[:10]),
                        lambda: _fetch_quarterly_cashflow_pair(symbol, curr_date))
     return (out or {}).get("value") if out else None
 
@@ -380,15 +395,23 @@ def _fetch_quarterly_cashflow_pair(symbol: str, curr_date: str) -> tuple[dict, d
 
 
 def _fetch_shares(symbol: str, curr_date: str) -> tuple[float | None, str | None]:
-    """Shares outstanding MULTI-FONTE (fail-open → (None, None)).
+    """Shares outstanding com a MESMA disciplina de data do resto da seção.
 
-    Fonte 1: yfinance ``info``. Fonte 2: Finnhub ``profile2`` (chave já usada
-    pelo earnings do âncora). O par ``(valor, fonte)`` permite declarar origem.
-    Cacheado (DA-058) — shares mudam pouco; histórico é permanente.
+    Run AO VIVO: ``info`` do yfinance, com fallback no Finnhub ``profile2``.
+    Run HISTÓRICA: só a série de contagem de ações do yfinance
+    (``get_shares_full``), recortada em ``curr_date`` — as duas fontes ao vivo
+    devolvem o número de HOJE, e ``preço daquela data × ações de hoje`` é o mesmo
+    look-ahead que o cross-check do FCF já recusa, dentro da seção que existe pra
+    impedi-lo. Sem série histórica, ``(None, None)``: o relatório DECLARA que não
+    calculou o market cap, e não inventa um.
+
+    O par ``(valor, fonte)`` carrega a origem E a data do número, porque a fonte
+    nomeada no relatório é o que dá autoridade a ele. Cacheado (DA-058).
     """
     out = _cached_call(
-        _ANCHORS_CATEGORY, ("shares", symbol.upper(), str(curr_date)[:10]),
-        lambda: _fetch_shares_pair(symbol),
+        _ANCHORS_CATEGORY,
+        ("shares", _SHARES_SEMANTICA_KEY, symbol.upper(), str(curr_date)[:10]),
+        lambda: _fetch_shares_pair(symbol, curr_date),
     )
     if not out:
         return None, None
@@ -396,8 +419,47 @@ def _fetch_shares(symbol: str, curr_date: str) -> tuple[float | None, str | None
     return (float(value["shares"]), value["fonte"]) if value else (None, None)
 
 
-def _fetch_shares_pair(symbol: str) -> tuple[dict, dict]:
-    """(valor, meta) pro cache."""
+def _shares_date_guarded(symbol: str, curr_date: str) -> tuple[float, str] | None:
+    """Contagem de ações VIGENTE em ``curr_date``, da série histórica do yfinance.
+
+    ``get_shares_full`` devolve a contagem ao longo do tempo (cada mudança por
+    recompra/emissão); pega-se a última entrada com data ≤ ``curr_date``. É a única
+    fonte aqui que responde "quantas ações havia NAQUELE dia" em vez de "hoje".
+    """
+    import yfinance as yf
+
+    from .stockstats_utils import yf_retry
+    from .symbol_utils import normalize_symbol
+
+    alvo = pd.to_datetime(str(curr_date)[:10])
+    serie = yf_retry(lambda: yf.Ticker(normalize_symbol(symbol)).get_shares_full(
+        start=(alvo - pd.DateOffset(years=3)).strftime("%Y-%m-%d"),
+        end=(alvo + pd.Timedelta(days=1)).strftime("%Y-%m-%d")))
+    if serie is None or getattr(serie, "empty", True):
+        return None
+    idx = pd.to_datetime(pd.Series(serie.index), errors="coerce", utc=True).dt.tz_localize(None)
+    valida = idx <= alvo
+    if not bool(valida.any()):
+        return None
+    pos = int(valida[valida].index[-1])
+    valor = float(serie.iloc[pos])
+    quando = idx.iloc[pos].date().isoformat()
+    return (valor, f"yfinance (contagem de {quando})") if valor > 0 else None
+
+
+def _fetch_shares_pair(symbol: str, curr_date: str) -> tuple[dict, dict]:
+    """(valor, meta) pro cache — ver :func:`_fetch_shares` pra a regra de data."""
+    if _is_permanent(curr_date):
+        try:
+            hist = _shares_date_guarded(symbol, curr_date)
+        except Exception as exc:  # noqa: BLE001 — fonte instável degrada a "não calculado"
+            logger.info("shares históricas indisponíveis para %s: %s", symbol, exc)
+            hist = None
+        if hist:
+            return {"shares": hist[0], "fonte": hist[1]}, {}
+        # Nada de cair nas fontes LIVE aqui: seria o look-ahead de volta.
+        return None, {}
+
     try:
         import yfinance as yf
 
@@ -495,6 +557,15 @@ def build_fundamentals_anchors_section(symbol: str, curr_date: str) -> str | Non
     snapshot = price_snapshot(daily, shares)
     if snapshot is not None and shares_fonte:
         snapshot["shares_fonte"] = shares_fonte
+    # Ausência DECLARADA, como no cross-check do FCF: numa run de data passada sem
+    # série histórica de ações, o market cap não é calculado — e o relatório diz por
+    # quê, em vez de deixar um buraco que parece "não achamos nada".
+    if snapshot is not None and not shares and _is_permanent(curr_date):
+        snapshot["market_cap_nota"] = (
+            "não calculado nesta run de data passada — as fontes de contagem de ações "
+            "disponíveis são LIVE (o número de HOJE), e preço daquela data × ações de "
+            "hoje seria look-ahead. Não conferido nesta run."
+        )
     ttm = _cached_ttm(symbol, curr_date) or {}
     xcheck = _fcf_crosscheck(symbol, ttm.get("fcf_ttm"), curr_date)
     return render_anchors_section(snapshot, ttm, xcheck)

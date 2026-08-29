@@ -173,6 +173,35 @@ def set_neg(category, k, *, value=None, error=None):
     })
 
 
+# ---------------------------------------------------------------- purge -------
+def purge_category(category) -> int:
+    """Apaga TODA entrada de uma categoria e devolve quantas foram. 0 se não existe.
+
+    Serve à disciplina do ``_SEMANTICA_KEY``: bump da versão torna as entradas
+    antigas INALCANÇÁVEIS (a chave é um hash — nada as encontra), mas elas ficam no
+    disco pra sempre, e as permanentes nunca expiram. Como a chave não guarda a
+    versão em claro, não dá pra apagar só as órfãs: apaga-se a categoria inteira. O
+    custo é re-buscar o que ainda valia; o benefício é o disco não acumular resposta
+    envenenada de uma semântica que já morreu. Idempotente e fail-open — cache é
+    otimização, e falhar aqui nunca pode derrubar quem chamou.
+    """
+    d, _ = _paths(category, "x")
+    n = 0
+    try:
+        nomes = os.listdir(d)
+    except OSError:
+        return 0
+    for nome in nomes:
+        if not nome.endswith(".json"):
+            continue
+        try:
+            os.remove(os.path.join(d, nome))
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
 # ---------------------------------------------------------------- metrics -----
 def _bump(category, field):
     with _lock:

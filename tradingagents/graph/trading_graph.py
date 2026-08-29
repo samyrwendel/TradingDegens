@@ -33,6 +33,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.date_guard import base_date
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.dataflows import data_notices
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -731,6 +732,16 @@ class TradingAgentsGraph:
         the graph instead of the freshly-built initial state, so the run continues
         from the last completed node rather than restarting it.
         """
+        # Avisos de QUALIDADE DE DADO (série OHLCV vencida servida no fail-open) são
+        # POR RUN, e o cano vive AQUI e não no chamador: a webui drenava, mas quem
+        # chama ``propagate`` direto — CLI (main.py), backtests, run_portfolio — nunca
+        # via nada. É justamente no backtest que os limiares provisórios seriam
+        # calibrados, e calibrar num caminho mudo sobre dado velho é calibrar em cima
+        # de ruído silencioso. Zera na entrada (nenhuma run herda o aviso da anterior)
+        # e junta no estado final logo depois do grafo — quem já drenava por fora
+        # continua funcionando, só encontra o coletor vazio.
+        data_notices.reset()
+
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
@@ -784,6 +795,11 @@ class TradingAgentsGraph:
                     final_state.update(chunk)
             else:
                 final_state = self.graph.invoke(graph_input, **args)
+
+        # Tudo que a run buscou já foi buscado: os avisos da camada de fetch entram
+        # no mesmo ``degraded_sources`` das fontes que caíram — o canal que a UI e o
+        # relatório já sabem nomear.
+        data_notices.merge_into(final_state)
 
         # Store current state for reflection.
         self.curr_state = final_state

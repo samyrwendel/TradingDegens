@@ -27,8 +27,18 @@ MAX_OHLCV_STALE_DAYS = 10
 # um buraco desses muda o veredito sem mudar a cara do relatório.
 #
 # Contado em dias ÚTEIS pra não gritar toda segunda-feira (sexta→segunda é 1 dia
-# útil de distância, não 3 de calendário). PROVISÓRIO e declarado: 2 dias úteis é
-# o menor buraco que já corrompeu uma leitura; a calibrar com o histórico.
+# útil de distância, não 3 de calendário). É o MENOR buraco que DECLARA — inclusive:
+# 2 dias úteis declara, 1 cala (a condição é ``< OHLCV_STALE_NOTICE_BDAYS``, não
+# ``<=``). O comentário e o código já discordaram aqui: com ``<=`` o buraco de
+# EXATAMENTE 2 — o que a própria linha chamava de "o menor que já corrompeu uma
+# leitura" — passava calado, e só 3+ declarava.
+#
+# Por que 2 e não 1, se o ``drop_nature`` trabalha em granularidade DIÁRIA e 1 dia
+# já muda a leitura: 1 dia útil de atraso é o estado NORMAL de uma run ao vivo antes
+# do fechamento — a barra de hoje ainda não publicou. Declarar aí seria um aviso em
+# toda run intradiária, e aviso que aparece sempre é aviso que ninguém lê. 2 é o
+# primeiro atraso que não tem explicação inocente. PROVISÓRIO, a calibrar com o
+# histórico do próprio painel.
 OHLCV_STALE_NOTICE_BDAYS = 2
 
 # How long a same-day cache that does not yet reach the requested day may be
@@ -136,7 +146,7 @@ def _declara_serie_vencida(
         return
     latest = dates.max().normalize()
     atraso_uteis = _bdays_atras(latest, requested)
-    if motivo is None and atraso_uteis <= max_bdays:
+    if motivo is None and atraso_uteis < max_bdays:
         return
     dias = (requested - latest).days
     fonte = canonical or "OHLCV"

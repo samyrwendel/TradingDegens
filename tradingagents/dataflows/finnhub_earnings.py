@@ -40,6 +40,16 @@ _FINNHUB_BASE = "https://finnhub.io/api/v1"
 _TIMEOUT = 12
 _CATEGORY = "earnings_reported"
 
+# VERSÃO DA SEMÂNTICA dentro da chave do cache — a mesma disciplina do
+# ``earnings_calendar._SEMANTICA_KEY``, aqui pela mesma razão: entrada de data
+# passada é gravada PERMANENTE (``permanent = base < hoje``), então mudar o que a
+# resposta SIGNIFICA (a guarda de anúncio, a escolha do trimestre, o cálculo da
+# surpresa) sem mudar a chave grava o erro pra sempre — em backtest e em reanálise.
+# A irmã foi versionada no C3 e esta ficou com a armadilha armada. Mudou a
+# semântica da resposta? Bump. E rode o purge (scripts/purge_cache_semantica.py),
+# senão as antigas só viram órfãs ocupando disco.
+_SEMANTICA_KEY = "v2-anuncio-real-e-guarda"
+
 # Folga conservadora entre o fim do trimestre e a divulgação, usada como guarda
 # anti-look-ahead quando não há data de anúncio real (large caps divulgam em
 # ~4–8 semanas; 55d cobre o típico sem vazar o resultado antes de ser público).
@@ -218,7 +228,7 @@ def get_reported_earnings(symbol: str, curr_date: str) -> dict | None:
     base = _to_date(guarded) or datetime.now().date()
     is_live = base >= datetime.now().date()
 
-    k = cache.key(_CATEGORY, symbol.upper(), base.isoformat())
+    k = cache.key(_CATEGORY, _SEMANTICA_KEY, symbol.upper(), base.isoformat())
     hit = cache.get(_CATEGORY, k)
     if hit is not None:
         cache.record_hit(_CATEGORY, negative=(hit.get("kind") == "neg"))
