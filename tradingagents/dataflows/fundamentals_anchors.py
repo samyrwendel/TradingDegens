@@ -232,7 +232,14 @@ def render_anchors_section(
         lines.append(f"- **Preço de referência (as_of {as_of})**: {snapshot['price']:,.2f}")
         if snapshot.get("market_cap") is not None:
             sh = snapshot.get("shares")
-            sh_txt = f" (preço × {sh:,.0f} ações)" if sh else ""
+            # A FONTE das ações sai junto do número, como já sai a do FCF TTM:
+            # número sem fonte foi o que escondeu o drift do ``info.freeCashflow``.
+            # ``shares_fonte`` era gravado no snapshot e nunca chegava ao relatório.
+            fonte = snapshot.get("shares_fonte")
+            sh_txt = ""
+            if sh:
+                sh_txt = f" (preço × {sh:,.0f} ações"
+                sh_txt += f", fonte {fonte})" if fonte else ")"
             lines.append(f"- **Market cap**: {_money(snapshot['market_cap'])}{sh_txt}")
         if snapshot.get("low_52w") is not None or snapshot.get("high_52w") is not None:
             lo = snapshot.get("low_52w")
@@ -439,14 +446,27 @@ def _fcf_crosscheck_from(fcf_ttm: float | None, other: float | None) -> str | No
             "ser de data (o Finnhub free é live) — declarada, não escondida.")
 
 
-def _fcf_crosscheck(symbol: str, fcf_ttm: float | None) -> str | None:
+def _fcf_crosscheck(symbol: str, fcf_ttm: float | None,
+                    curr_date: str | None = None) -> str | None:
     """Linha de CONFERÊNCIA do FCF TTM: Finnhub (live) × âncora (date-guarded).
 
     A conferência nunca substitui a âncora — só RENDERIZA a divergência com os
     dois números lado a lado. Ausente (sem chave/endpoint) → None, sem ruído.
+
+    **Não roda em run histórica.** ``get_fcf_ttm`` é explicitamente CORRENTE (não
+    date-guarded): numa análise de data passada ele traz o número de HOJE, que
+    quase sempre estoura o limiar e injeta um falso positivo — dentro da seção que
+    existe justamente pra impedir look-ahead. Pior: a divergência seria de DATA e
+    apareceria como divergência de FONTE, ensinando a LLM a desconfiar de uma
+    âncora correta. A ausência é DECLARADA (nunca silenciosamente neutra).
     """
     if fcf_ttm is None:
         return None
+    if curr_date is not None and _is_permanent(curr_date):
+        return ("- **FCF TTM sem conferência cruzada**: a segunda fonte (Finnhub) é "
+                "LIVE e esta é uma run de data passada — o número de hoje contra a "
+                "âncora daquela data seria look-ahead, e a divergência de DATA "
+                "apareceria como divergência de FONTE. Não conferido nesta run.")
     try:
         from .finnhub_fundamentals import get_fcf_ttm
 
@@ -476,7 +496,7 @@ def build_fundamentals_anchors_section(symbol: str, curr_date: str) -> str | Non
     if snapshot is not None and shares_fonte:
         snapshot["shares_fonte"] = shares_fonte
     ttm = _cached_ttm(symbol, curr_date) or {}
-    xcheck = _fcf_crosscheck(symbol, ttm.get("fcf_ttm"))
+    xcheck = _fcf_crosscheck(symbol, ttm.get("fcf_ttm"), curr_date)
     return render_anchors_section(snapshot, ttm, xcheck)
 
 

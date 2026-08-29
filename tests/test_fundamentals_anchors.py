@@ -271,6 +271,71 @@ def test_fcf_crosscheck_silent_when_agreeing():
     assert fa._fcf_crosscheck_from(2.83e9, None) is None
 
 
+# ------------------- a conferência cruzada não roda em run histórica (A3) -------
+@pytest.mark.unit
+def test_run_historica_nao_chama_a_fonte_LIVE(monkeypatch):
+    """``get_fcf_ttm`` é CORRENTE por definição. Numa run de data passada ele traria
+    o número de HOJE pra dentro da seção que existe pra impedir look-ahead —
+    estourando o limiar quase sempre e virando falso positivo que a LLM lê.
+
+    A fonte live nem chega a ser consultada: se for, este teste explode.
+    """
+    import tradingagents.dataflows.finnhub_fundamentals as ff
+
+    def nunca(symbol):
+        raise AssertionError("a fonte LIVE foi consultada numa run histórica")
+
+    monkeypatch.setattr(ff, "get_fcf_ttm", nunca)
+    linha = fa._fcf_crosscheck("NVDA", 2.83e9, "2020-01-02")
+    assert linha is not None                       # ausência DECLARADA, não silêncio
+    assert "sem conferência cruzada" in linha
+    assert "look-ahead" in linha
+
+
+@pytest.mark.unit
+def test_run_AO_VIVO_continua_conferindo(monkeypatch):
+    """Contra-prova: fechar o look-ahead não pode matar a conferência de hoje."""
+    from datetime import date
+
+    import tradingagents.dataflows.finnhub_fundamentals as ff
+
+    monkeypatch.setattr(ff, "get_fcf_ttm", lambda symbol: 4.54e9)
+    linha = fa._fcf_crosscheck("NVDA", 2.83e9, date.today().isoformat())
+    assert linha is not None and "4.54 bilhões" in linha
+
+
+@pytest.mark.unit
+def test_sem_data_o_comportamento_de_antes_e_preservado(monkeypatch):
+    """``curr_date=None`` (chamada solta) mantém a semântica antiga — byte a byte."""
+    import tradingagents.dataflows.finnhub_fundamentals as ff
+
+    monkeypatch.setattr(ff, "get_fcf_ttm", lambda symbol: 4.54e9)
+    assert fa._fcf_crosscheck("NVDA", 2.83e9) == fa._fcf_crosscheck_from(2.83e9, 4.54e9)
+
+
+@pytest.mark.unit
+def test_render_names_the_shares_source():
+    """``shares_fonte`` era gravado no snapshot e nunca renderizado — o market cap
+    saía com a contagem de ações e sem dizer de onde ela veio, justo o padrão que
+    o FCF já corrigiu."""
+    sec = fa.render_anchors_section(
+        {"price": 100.0, "as_of": "2026-08-27", "shares": 5_044_000_000.0,
+         "market_cap": 504_400_000_000.0, "shares_fonte": "finnhub"},
+        {"fcf_ttm": 2.83e9, "quarters": ["2026-06-30"], "fonte": "yfinance"},
+    )
+    assert "fonte finnhub" in sec
+
+
+@pytest.mark.unit
+def test_render_sem_fonte_de_shares_nao_inventa():
+    sec = fa.render_anchors_section(
+        {"price": 100.0, "as_of": "2026-08-27", "shares": 5_044_000_000.0,
+         "market_cap": 504_400_000_000.0},
+        {"fcf_ttm": 2.83e9, "quarters": ["2026-06-30"], "fonte": "yfinance"},
+    )
+    assert "ações)" in sec and "fonte " not in sec.split("Market cap")[1].split("\n")[0]
+
+
 @pytest.mark.unit
 def test_render_names_the_fcf_source():
     """A seção cita de ONDE veio o FCF TTM — número sem fonte é o que escondeu
