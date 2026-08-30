@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from tradingagents.webui import timeutil
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
@@ -49,6 +50,12 @@ CELULARES = [(390, 844), (360, 800)]
 def snap():
     d = json.loads(_FIXTURE.read_text())
     d["run_id"] = "R-ZEC"
+    # A fixture é uma run REAL congelada (29/08). A cotação só é tratada como ATUAL
+    # no dia em que foi tirada (DA-073), então o carimbo tem de acompanhar o relógio:
+    # com a data fixa, estes testes passavam o dia todo e quebravam à meia-noite.
+    live = (d.get("result") or {}).get("live_price")
+    if isinstance(live, dict):
+        live["em"] = timeutil.today()
     return d
 
 
@@ -242,17 +249,17 @@ def test_rr_abaixo_de_um_e_estado_visual_nao_um_numero_qualquer(base, snap, w, h
           const rr = rows.find(e => e.innerText.includes('risco/retorno'));
           const sl = rows.find(e => e.innerText.includes('stop (SL)'));
           return {classe: rr.className, cor: getComputedStyle(rr).color,
-                  corNumero: getComputedStyle(rr.querySelector('.sc-v')).color,
-                  title: rr.getAttribute('title'),
+                  txt: rr.innerText, title: rr.getAttribute('title'),
                   corNeutra: getComputedStyle(sl).color,
                   // quantas vezes o R:R aparece na TELA inteira
                   vezes: (document.querySelector('#resultPanel').innerText
                     .match(/0,31/g) || []).length};
         }""")
         assert "rr-ruim" in m["classe"], m
-        assert m["cor"] == "rgb(245, 180, 69)", ("âmbar de atenção (--amber)", m)
-        assert m["corNumero"] == m["cor"], ("o NÚMERO é o que se lê de relance", m)
-        assert m["cor"] != m["corNeutra"], ("tem que destoar dos outros níveis", m)
+        # A COR saiu (DA-078 regra 3: âmbar fora da paleta — aviso é palavra). O que
+        # não pode é a informação sumir junto: entra a PALAVRA, na linha da base.
+        assert "risco > retorno" in m["txt"], ("sem a cor, o aviso tem de estar escrito", m)
+        assert "3.2x" in m["txt"] or "3,2x" in m["txt"], m
         # e diz POR QUE é ruim, com a conta feita
         assert "risco MAIOR que o retorno" in (m["title"] or ""), m
         assert "3.2x" in (m["title"] or "") or "3,2x" in (m["title"] or ""), m

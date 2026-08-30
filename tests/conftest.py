@@ -76,7 +76,7 @@ def _disable_datacache(monkeypatch):
 def _e2e_testa_o_working_tree(monkeypatch):
     """A suíte mede o WORKING TREE, não o front publicado.
 
-    Desde a DA-080 o servidor lê os estáticos de um diretório PUBLICADO (a revisão
+    Desde a DA-082 o servidor lê os estáticos de um diretório PUBLICADO (a revisão
     commitada) — que é exatamente o que se quer em produção e exatamente o que NÃO se
     quer aqui: um teste de CSS/JS tem de medir o arquivo que está prestes a ser
     commitado, senão ele valida a versão anterior e passa por acidente.

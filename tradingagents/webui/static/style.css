@@ -14,13 +14,16 @@
   --green-dim: #143d28;
   --red: #ff5c6c;
   --red-dim: #3d1620;
-  --amber: #f5b445;
-  /* MANTER = amarelo com FUNÇÃO: texto amarelo vivo e legível no dark, fundo e
-     borda amarelados (não o dourado-oliva apagado de antes). */
-  --yellow: #ffd23f;
-  --yellow-dim: #33290a;
-  --yellow-border: #6b5514;
-  --orange: #ff8a3d;
+  /* COR É SEMÂNTICA, NUNCA DECORATIVA (DA-078, regra 3). Verde = ganho/alta,
+     vermelho = perda/baixa. Todo o resto é branco e cinza em níveis.
+     --amber, --yellow, --yellow-dim, --yellow-border e --orange SAÍRAM da paleta
+     de interface: eram aviso pintado, e aviso se resolve com PALAVRA e hierarquia.
+     Onde a cor era o único portador de estado (R:R ruim, alvo recusado, série
+     vencida, divergência do meta-juiz, veredito MANTER), o estado passou a ser dito
+     em texto — nunca sumiu. Se algum dia precisarem de volta, voltam com a regra
+     que as justifique, não como conveniência.
+     Foram: --amber #f5b445 · --yellow #ffd23f · --yellow-dim #33290a ·
+            --yellow-border #6b5514 · --orange #ff8a3d */
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* ESCALA TIPOGRÁFICA — densidade Quantfury (task 036). Fonte proprietária
@@ -43,7 +46,7 @@
   /* Raio ÚNICO de botões e cards (task 009): menos arredondado e uniforme. Um
      token só — sem pílula em botão nem canto gordo em card. Dots redondos, barras
      de progresso e micro-pílulas de STATUS ficam de fora. */
-  --radius: 5px;
+  --radius: 2px;
 
   /* AÇÃO PRIMÁRIA — cor CHAPADA, um token só (DA-070, correção de escopo).
      Antes eram cinco degradês `180deg, #3b82f6 → #2563eb` copiados em
@@ -70,7 +73,7 @@ img, canvas, svg, video { max-width: 100%; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: rgba(139, 151, 173, .30);
-  border-radius: 999px;
+  border-radius: 0;
   border: 2px solid transparent;   /* afina visualmente o thumb dentro do trilho */
   background-clip: padding-box;
 }
@@ -102,7 +105,7 @@ body {
 .tagline { margin: 1px 0 0; color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12); }
 .net-note {
   font-size: var(--fs-12); color: var(--muted);
-  border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px;
+  border: 1px solid var(--border); border-radius: 0; padding: 3px 11px;
 }
 
 /* Palco edge-to-edge: sem max-width nem margem — o conteúdo vai até as bordas e
@@ -230,19 +233,21 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    significado, comendo largura nas duas pontas — parte do "espaços mal
    utilizados". A largura que isso devolve vai pro nome do modelo, não pros gaps. */
 button.lb-tf {
-  font-family: var(--mono); font-size: var(--fs-12); font-weight: var(--fw-bold);
+  font-family: var(--mono); font-size: var(--fs-12); font-weight: var(--fw-med);
   /* `line-height: 1` (era `--lh-12`, 16px) é o que faz a pill medir 26px, igual ao
      chip de MODELOS — duas fileiras de 26 + 4 de gap dão exatamente os 56px que o
      par de modelos já ocupa. É assim que TEMPO ganha a segunda linha SEM crescer a
      altura da barra: ela continua sendo definida pelo bloco mais alto, que não mudou. */
   line-height: 1;
-  color: var(--muted); background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 6px 8px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+  /* TEXTO, não botão (DA-078 regra 9): a escolha do frame não executa nada. */
+  color: var(--muted); background: none; border: none; border-radius: 0;
+  /* 7px (era 6 + 1 de borda): sem a moldura, é o padding que mantém a pill em 26px
+     — a altura que faz TEMPO caber na forma do bloco MODELOS. */
+  padding: 7px 8px; cursor: pointer; transition: color .12s;
   min-width: 30px; text-align: center;
 }
-button.lb-tf:hover:not(.is-off):not(.is-active) { color: var(--text); border-color: var(--accent); }
-button.lb-tf.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+button.lb-tf:hover:not(.is-off):not(.is-active) { color: var(--text); }
+button.lb-tf.is-active { color: var(--green); font-weight: var(--fw-bold); }
 button.lb-tf.is-off { color: #55607a; cursor: not-allowed; opacity: .6; text-decoration: line-through; text-decoration-color: #55607a55; }
 
 /* MÉTODO em DUAS fileiras contando como UM elemento (mesma gramática do TEMPO e do
@@ -255,20 +260,21 @@ button.lb-tf.is-off { color: #55607a; cursor: not-allowed; opacity: .6; text-dec
    deixar um degrau à direita — e não custa largura, a do grupo já é a da de cima */
 .lb-method-row.is-estrutural button.lb-method { flex: 1; }
 button.lb-method {
-  font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold); cursor: pointer;
+  font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-med); cursor: pointer;
   /* 6px/8px = a mesma altura das pills de TEMPO: duas fileiras de 26px + 4 de gap
      dão os 56px que o bloco MODELOS já ocupa, então a segunda linha NÃO cresce a
      altura da barra (ela é definida pelo bloco mais alto, que não mudou). */
-  border-radius: var(--radius); padding: 5px 10px; white-space: nowrap;
-  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
-  transition: color .12s, border-color .12s, background .12s, box-shadow .12s;
+  /* TEXTO, não botão (DA-078 regra 9) — o método é escolha, não ação. */
+  border-radius: 0; padding: 6px 10px; white-space: nowrap;   /* 5 + 1 da borda que saiu */
+  border: none; background: none; color: var(--muted);
+  transition: color .12s;
 }
 /* Todos os métodos compartilham o mesmo estilo (padrão visual único); a cor de
    destaque só entra no SELECIONADO, nunca por tipo. Antes cada método tinha cor
    própria (padrao azul, erick azul-claro, compare roxo) — inconsistente. */
-button.lb-method:hover:not(.is-active) { color: #fff; border-color: var(--accent); }
+button.lb-method:hover:not(.is-active) { color: var(--text); }
 /* método SELECIONADO (o que Analisar/↻ vão rodar): anel de destaque */
-button.lb-method.is-active { box-shadow: 0 0 0 2px var(--accent) inset; color: #fff; background: var(--panel); border-color: var(--accent); }
+button.lb-method.is-active { color: var(--green); font-weight: var(--fw-bold); }
 
 .lb-actions { display: inline-flex; gap: 8px; align-items: flex-end; }
 /* ↻ reanalisa o ativo ABERTO hoje (mesmo método) — absorve o antigo "Atualizar" */
@@ -349,7 +355,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .progress-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .chip {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--accent);
-  border-radius: 999px; padding: 3px 11px; font-size: 12px; margin-right: 10px;
+  border-radius: 0; padding: 3px 11px; font-size: 12px; margin-right: 10px;
 }
 .progress-label { color: var(--text); font-size: 14px; }
 .progress-meta { color: var(--muted); font-size: var(--fs-12); font-family: var(--mono); white-space: nowrap; }
@@ -380,9 +386,9 @@ details.section.erick > summary { color: #9cc7f5; }
 .resume-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 16px; background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--radius); }
 .resume-bar .resume-msg { color: var(--text); font-size: var(--fs-12); line-height: var(--lh-12); }
-.bar { background: var(--panel-2); border-radius: 999px; height: 10px; overflow: hidden; border: 1px solid var(--border); }
+.bar { background: var(--panel-2); border-radius: 0; height: 10px; overflow: hidden; border: 1px solid var(--border); }
 .bar-fill {
-  height: 100%; width: 0; border-radius: 999px;
+  height: 100%; width: 0; border-radius: 0;
   background: var(--primary); transition: width .5s ease;
 }
 .steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -406,7 +412,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .step-refresh {
   appearance: none; border: 0; background: transparent; cursor: pointer;
   color: inherit; font-size: var(--fs-14); line-height: 1; padding: 2px;
-  border-radius: 999px; opacity: .55; transition: opacity .12s ease, transform .12s ease;
+  border-radius: 0; opacity: .55; transition: opacity .12s ease, transform .12s ease;
 }
 .step-refresh:hover, .step-refresh:focus-visible { opacity: 1; }
 .step-refresh:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
@@ -475,7 +481,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .tk-model {
   font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
   font-weight: 400; color: var(--muted); background: var(--panel);
-  border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+  border: 1px solid var(--border); border-radius: 0; padding: 1px 8px;
   white-space: nowrap; flex: none;
 }
 .tk-model:empty { display: none; }
@@ -483,7 +489,7 @@ details.section.erick > summary { color: #9cc7f5; }
    no lugar do selo de modelo — nenhum LLM rodou pra produzi-lo agora. */
 .tk-reused {
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--green);
-  border: 1px dashed var(--green-dim); border-radius: 999px; padding: 1px 8px;
+  border: 1px dashed var(--green-dim); border-radius: 0; padding: 1px 8px;
   white-space: nowrap; flex: none;
 }
 .tk-reused:empty { display: none; }
@@ -494,7 +500,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .tk-tf {
   font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
   font-weight: 400; color: var(--accent); background: var(--panel);
-  border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+  border: 1px solid var(--border); border-radius: 0; padding: 1px 8px;
   white-space: nowrap; flex: none;
 }
 .tk-tf:empty { display: none; }
@@ -532,7 +538,7 @@ details.section.erick > summary { color: #9cc7f5; }
   padding: 10px 14px;
 }
 .cmp-step-n {
-  flex: none; width: 22px; height: 22px; border-radius: 999px;
+  flex: none; width: 22px; height: 22px; border-radius: 0;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; font-family: var(--mono);
   background: var(--panel); border: 1px solid var(--border); color: var(--muted);
@@ -547,9 +553,9 @@ details.section.erick > summary { color: #9cc7f5; }
 .cmp-step.is-done { border-color: var(--green-dim); }
 .cmp-step.is-done .cmp-step-n { border-color: var(--green); color: var(--green); }
 .cmp-step.is-done .cmp-step-state { color: var(--green); }
-.cmp-step.is-reused { border-color: var(--yellow-border); }
-.cmp-step.is-reused .cmp-step-n { border-color: var(--yellow); color: var(--yellow); }
-.cmp-step.is-reused .cmp-step-state { color: var(--yellow); }
+.cmp-step.is-reused { border-color: var(--border); }
+.cmp-step.is-reused .cmp-step-n { border-color: var(--muted); color: var(--muted); }
+.cmp-step.is-reused .cmp-step-state { color: var(--muted); }
 .cmp-step.is-pending { opacity: .55; }
 @keyframes cmp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -609,7 +615,7 @@ details.section.erick > summary { color: #9cc7f5; }
 /* R:R < 1: ÂMBAR de atenção — arrisca mais do que pretende ganhar. Mesma gramática
    que o gráfico já usa dentro do canvas (verde ≥ 1, âmbar < 1) desde a task 029; o
    texto estava mostrando o número em cor neutra, como se 0,31 fosse igual a 2,50. */
-.sc-row.rr-ruim, .sc-row.rr-ruim .sc-k, .sc-row.rr-ruim .sc-v { color: var(--amber); }
+.sc-row.rr-ruim, .sc-row.rr-ruim .sc-k, .sc-row.rr-ruim .sc-v { color: var(--text); }
 .hp-ref { border-left: 1px solid var(--border); padding-left: 14px; }
 /* Sem cotação atual (run reaberta noutro dia), a análise é a ÚNICA unidade da linha
    — e uma régua abrindo a linha separaria o quê? Some. */
@@ -626,7 +632,7 @@ details.section.erick > summary { color: #9cc7f5; }
 }
 /* Cor por FUNÇÃO: COMPRAR/AUMENTAR verde · MANTER amarelo · REDUZIR/VENDER vermelho */
 .verdict.buy, .verdict.overweight { color: var(--green); background: none; border: none; }
-.verdict.hold { color: var(--yellow); background: none; border: none; }
+.verdict.hold { color: var(--text); background: none; border: none; }
 .verdict.underweight, .verdict.sell { color: var(--red); background: none; border: none; }
 /* the original English rating, kept in dim gray beside the pt-BR meaning */
 .verdict .verdict-orig {
@@ -673,15 +679,15 @@ details.section[open] > summary::before { content: "▾"; }
 .md ul, .md ol { margin: 8px 0; padding-left: 22px; }
 .md li { margin: 3px 0; }
 .md strong { color: #fff; }
-.md code { font-family: var(--mono); background: #0d0d0d; padding: 1px 5px; border-radius: 5px; font-size: var(--fs-12); }
-.md pre { background: #0d0d0d; padding: 12px; border-radius: 8px; overflow-x: auto; }
+.md code { font-family: var(--mono); background: #0d0d0d; padding: 1px 5px; border-radius: 2px; font-size: var(--fs-12); }
+.md pre { background: #0d0d0d; padding: 12px; border-radius: 2px; overflow-x: auto; }
 .md pre code { background: none; padding: 0; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .md table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: var(--fs-12); }
 .md th, .md td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; }
 .md th { background: #0d0d0d; color: #fff; }
 .md a { color: var(--accent); }
-.unavailable { color: var(--amber); }
+.unavailable { color: var(--text); }
 
 /* candlestick chart */
 .chart-card {
@@ -723,24 +729,25 @@ details.section[open] > summary::before { content: "▾"; }
 
 /* timeframe selector — diário · 4h · 1h · 15m */
 .tf-selector { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+/* TEXTO, não botão (DA-078 regra 9). Era pill com borda, fundo e sombra interna —
+   sete caixas numa fileira pra uma escolha que não executa nada. O ativo se
+   distingue por COR (verde) e PESO; o resto fica cinza. O alvo de clique continua
+   confortável pelo padding, que agora é só espaço, não moldura. */
 .tf-btn {
-  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold);
-  color: var(--muted); background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 4px 11px; cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-med);
+  color: var(--muted); background: none; border: none; border-radius: 0;
+  padding: 4px 8px; cursor: pointer; transition: color .12s;
 }
-.tf-btn:hover:not(.is-off):not(.is-active) { color: var(--text); border-color: var(--accent); }
-.tf-btn.is-active {
-  color: #fff; border-color: var(--accent);
-  background: var(--panel); box-shadow: 0 0 0 1px var(--accent) inset;
-}
+.tf-btn:hover:not(.is-off):not(.is-active) { color: var(--text); }
+.tf-btn.is-active { color: var(--green); font-weight: var(--fw-bold); }
+/* frame indisponível: continua DITO (riscado + não clicável), sem caixa */
 .tf-btn.is-off {
   color: #55607a; cursor: not-allowed; opacity: .6;
   text-decoration: line-through; text-decoration-color: #55607a55;
 }
 .chart-degrade {
-  color: var(--amber); font-size: var(--fs-12); margin: 0 0 10px;
-  background: #3a2f10; border: 1px solid #5c4a17; border-radius: var(--radius); padding: 7px 11px;
+  color: var(--text); font-size: var(--fs-12); margin: 0 0 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 11px;
 }
 
 /* ---- comparação Padrão × Erick (Fase 3, meta-juiz) ---- */
@@ -753,11 +760,11 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .mj-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .mj-badge {
-  font-weight: var(--fw-bold); font-size: var(--fs-14); line-height: var(--lh-14); padding: 3px 11px; border-radius: 999px;
+  font-weight: var(--fw-bold); font-size: var(--fs-14); line-height: var(--lh-14); padding: 3px 11px; border-radius: 0;
   white-space: nowrap; border: 1px solid var(--border);
 }
 .mj-head.agree .mj-badge { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
-.mj-head.diverge .mj-badge { color: var(--amber); background: #3a2f10; border-color: #5c4a17; }
+.mj-head.diverge .mj-badge { color: var(--text); background: var(--panel-2); border-color: var(--border); }
 .mj-head.partial .mj-badge { color: var(--muted); }
 .mj-head.invalid .mj-badge { color: var(--red); background: #3a1414; border-color: #5c1f1f; }
 .mj-headline { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); color: var(--text); overflow-wrap: anywhere; }
@@ -793,7 +800,7 @@ details.section[open] > summary::before { content: "▾"; }
 @media (max-width: 720px) { .confront-select { max-width: 100%; flex: 1; } }
 .cmp-reused {
   font-size: var(--fs-10); color: var(--muted); border: 1px solid var(--border);
-  border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+  border-radius: 0; padding: 2px 8px; white-space: nowrap;
 }
 .cmp-verdict-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 /* coluna do confronto: mesmo veredito sem pílula, na escala (16/700) */
@@ -806,7 +813,7 @@ details.section[open] > summary::before { content: "▾"; }
 .cmp-canvas { width: 100%; height: 260px; display: block; touch-action: none; cursor: default; }
 @media (max-width: 760px) { .cmp-canvas { height: 44vh; min-height: 220px; max-height: 320px; } }
 .cmp-tf { color: var(--muted); font-size: var(--fs-12); }
-.cmp-degraded { color: var(--amber); font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
+.cmp-degraded { color: var(--text); font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
 .cmp-err { color: var(--red); font-size: var(--fs-12); margin-bottom: 8px; overflow-wrap: anywhere; line-height: 1.5; }
 .cmp-plan { font-size: var(--fs-12); overflow-wrap: anywhere; }
 .cmp-col-foot {
@@ -838,7 +845,7 @@ details.section[open] > summary::before { content: "▾"; }
 .ask-q { font-size: var(--fs-12); color: var(--text); overflow-wrap: anywhere; }
 .ask-q-tag {
   font-size: var(--fs-10); text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
-  border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; margin-right: 7px;
+  border: 1px solid var(--border); border-radius: 0; padding: 1px 7px; margin-right: 7px;
 }
 .ask-a {
   font-size: var(--fs-12); color: var(--text); background: var(--bg); border: 1px solid var(--border);
@@ -875,7 +882,7 @@ details.section[open] > summary::before { content: "▾"; }
   margin: 4px 0 12px; padding: 11px 14px;
   border: 1px solid #5c4a17; border-radius: var(--radius); background: #2a2410;
 }
-.degraded-banner .dg-head { color: var(--amber); font-size: 14px; font-weight: var(--fw-bold); }
+.degraded-banner .dg-head { color: var(--text); font-size: 14px; font-weight: var(--fw-bold); }
 .degraded-banner .dg-head b { color: #ffd479; }
 .degraded-banner .dg-sub { color: var(--muted); font-size: var(--fs-12); margin-top: 4px; line-height: 1.5; }
 /* Fonte ausente e texto sinalizado são blocos distintos no mesmo banner — o
@@ -887,19 +894,19 @@ details.section[open] > summary::before { content: "▾"; }
 .degraded-banner .dg-list b { color: #d6dceb; }
 .degraded-banner .dg-btn {
   margin-top: 10px; padding: 7px 14px; font: inherit; font-size: var(--fs-12); font-weight: var(--fw-bold);
-  color: var(--amber); background: transparent; border: 1px solid #5c4a17;
+  color: var(--text); background: transparent; border: 1px solid var(--border);
   border-radius: var(--radius); cursor: pointer; white-space: nowrap;
   transition: color .12s, background .12s, border-color .12s;
 }
-.degraded-banner .dg-btn:hover { color: #fff; background: #3a2f10; border-color: var(--amber); }
+.degraded-banner .dg-btn:hover { color: #fff; background: var(--panel); border-color: var(--text); }
 
 /* Carimbo do veredito (task 016): banner âmbar quando os insumos tinham
    inconsistência na hora da decisão — o juiz recebeu os DADOS VERIFICADOS, e isto
    avisa o leitor + lista o que divergiu. Discreto, mas visível ao lado do veredito. */
 .verdict-caveat {
   margin: 6px 0 4px; padding: 8px 12px;
-  border: 1px solid var(--yellow-border); border-radius: var(--radius);
-  background: var(--yellow-dim); color: var(--yellow);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel-2); color: var(--text);
   font-size: var(--fs-12); line-height: var(--lh-12);
 }
 .verdict-caveat .vc-head { font-weight: var(--fw-bold); }
@@ -909,7 +916,7 @@ details.section[open] > summary::before { content: "▾"; }
 /* carimbo do TF no cabeçalho do veredito ("veredito no Diário/4h/15m") */
 .verdict-tf {
   font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-med); color: var(--muted);
-  border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px;
+  border: 1px solid var(--border); border-radius: 0; padding: 4px 11px;
   white-space: nowrap; align-self: center;
 }
 /* botão "reavaliar veredito neste TF" — roda análise real no frame escolhido */
@@ -1006,7 +1013,7 @@ details.section[open] > summary::before { content: "▾"; }
 .history .h-verdict .verdict-orig { display: none; }
 .history .h-verdict.buy,
 .history .h-verdict.overweight { color: var(--green); background: none; border: none; }
-.history .h-verdict.hold { color: var(--yellow); background: none; border: none; }
+.history .h-verdict.hold { color: var(--text); background: none; border: none; }
 .history .h-verdict.underweight,
 .history .h-verdict.sell { color: var(--red); background: none; border: none; }
 .history .h-verdict.error { color: var(--red); background: none; border: none; }
@@ -1015,7 +1022,7 @@ details.section[open] > summary::before { content: "▾"; }
    cinza (nada a fazer). Distingue à primeira olhada na watchlist. */
 .history .h-verdict.ativo { color: var(--green); background: none; border: none; }
 .history .h-verdict.aguardar_pullback,
-.history .h-verdict.aguardar_rompimento { color: var(--yellow); background: none; border: none; }
+.history .h-verdict.aguardar_rompimento { color: var(--text); background: none; border: none; }
 .history .h-verdict.sem_setup,
 .history .h-verdict.sem_dado,
 .history .h-verdict.intradiario_indisponivel { color: var(--muted); background: none; border: none; }
@@ -1042,7 +1049,7 @@ details.section[open] > summary::before { content: "▾"; }
    assistia) sinaliza no item do histórico até você abri-lo. */
 .h-flag {
   display: inline-block; padding: 1px 7px;
-  font-size: var(--fs-10); font-weight: 700; border-radius: 999px; vertical-align: middle;
+  font-size: var(--fs-10); font-weight: 700; border-radius: 0; vertical-align: middle;
 }
 .h-flag.done { color: var(--green); background: var(--green-dim); border: 1px solid #1e5c3c; }
 .h-flag.error { color: var(--red); background: var(--red-dim); border: 1px solid #5c1e28; }
@@ -1215,7 +1222,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    ele vira ÂMBAR: a cor é o estado (DA-076), e "não opera" não pode se parecer com
    "opera". Chapado, sem degradê (DA-070). */
 .sc-storm { border-left: 3px solid #7cb0ff; }
-.sc-storm.sc-vetado { border-left-color: var(--amber); }
+.sc-storm.sc-vetado { border-left-color: var(--muted); }
 .sc-storm .sc-dir { color: #7cb0ff; }
 .sc-storm.sc-venda .sc-dir { color: #ff9f43; }
 /* Cabeçalho de LEITURA dentro do card do Storm: são DUAS entradas do MESMO padrão
@@ -1236,7 +1243,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* o VETO é manchete, não rodapé: âmbar de atenção e linha própria */
 .sc-veto {
   margin-top: 6px; font-size: var(--fs-12); line-height: var(--lh-12);
-  color: var(--amber); overflow-wrap: anywhere;
+  color: var(--text); overflow-wrap: anywhere;
 }
 .sc-nenhum { border-left: 3px solid var(--border); }
 .sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
@@ -1260,12 +1267,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   text-transform: uppercase; letter-spacing: .5px;
 }
 .sc-state {
-  font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); border-radius: 999px;
+  font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); border-radius: 0;
   padding: 3px 11px; border: 1px solid var(--border); color: var(--text);
 }
 .sc-state.ativo { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
 .sc-state.aguardar_pullback, .sc-state.aguardar_rompimento {
-  color: var(--amber); background: #3a2f10; border-color: #5c4a17;
+  color: var(--text); background: var(--panel-2); border-color: var(--border);
 }
 .sc-state.sem_setup, .sc-state.sem_dado, .sc-state.intradiario_indisponivel { color: var(--muted); }
 .sc-hz { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
@@ -1289,7 +1296,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .sc-sem-txt { display: block; color: var(--muted); }
 /* alvo recusado / faixa degenerada: âmbar de ATENÇÃO (o setup existe, o nível é que
    não) — mesma semântica da linha do scan. */
-.sc-warn { display: block; color: var(--amber); }
+.sc-warn { display: block; color: var(--text); }
 /* Rodapé compartilhado: o FRAME em que as duas leituras foram calculadas (chão
    comum, não pertence a nenhuma) e o veredito ÓRFÃO, quando o backend não elege
    nenhuma das duas. */
@@ -1394,7 +1401,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   color: var(--muted, #8b93a7);
   background: var(--panel-2, #1a1a1a);
   border: 1px solid var(--line, #2a2a2a);
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 /* Calendário do ativo (navegação, no cabeçalho): grade de dias analisados
@@ -1429,7 +1436,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .cal-cell.is-current { border-color: var(--accent, #4c9aff); }
 /* cor = veredito daquele dia (mesma escala: verde compra · amarelo mantém · vermelho vende) */
 .cal-cell.buy, .cal-cell.overweight { background: #2ea043; }
-.cal-cell.hold { background: var(--yellow); }
+.cal-cell.hold { background: var(--muted); }
 .cal-cell.underweight, .cal-cell.sell { background: #d1434b; }
 
 /* "já na região (setup ativo)": é chamada pra ação, não ausência de dado.
@@ -1445,7 +1452,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .chart-zoom-hint {
   position: absolute; right: 66px; top: 10px;
   font-size: var(--fs-10); color: var(--muted, #8b97ad);
-  background: rgba(20,24,34,.7); padding: 2px 7px; border-radius: 5px;
+  background: rgba(20,24,34,.7); padding: 2px 7px; border-radius: 2px;
   pointer-events: none; letter-spacing: .02em;
 }
 #priceChart { touch-action: none; cursor: default; }
@@ -1585,7 +1592,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .model-test .mt-row.err { color: var(--red); }
 .model-test .mt-row code {
   font-family: var(--font-mono, monospace); font-size: var(--fs-12);
-  background: var(--panel-2); padding: 1px 5px; border-radius: 5px;
+  background: var(--panel-2); padding: 1px 5px; border-radius: 2px;
 }
 
 /* Combobox pesquisável dos modelos (BYOK): input + lista filtrada sobreposta.
@@ -1601,7 +1608,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 }
 .combo-opt {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  padding: 7px 9px; border-radius: 6px; cursor: pointer;
+  padding: 7px 9px; border-radius: 2px; cursor: pointer;
 }
 .combo-opt:hover, .combo-opt.is-active { background: rgba(110, 168, 254, .16); }
 .combo-id {
@@ -1628,11 +1635,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   background: var(--red-dim); border: 1px solid var(--red);
   border-radius: var(--radius); padding: 16px 18px; margin: 12px 0;
 }
-.error-card.no_credit { background: var(--yellow-dim); border-color: var(--yellow-border); }
+.error-card.no_credit { background: var(--panel-2); border-color: var(--border); }
 /* Erro PARCIAL (task 015): âmbar, não vermelho — o trabalho foi PRESERVADO, é uma
    pausa forçada numa etapa, não uma falha total. As etapas concluídas vêm abaixo. */
-.error-card.partial { background: var(--yellow-dim); border-color: var(--yellow-border); }
-.error-card.partial .err-title { color: var(--yellow, #e6b800); }
+.error-card.partial { background: var(--panel-2); border-color: var(--border); }
+.error-card.partial .err-title { color: var(--text); }
 .error-card .err-title {
   font-size: var(--fs-14); font-weight: var(--fw-bold); color: var(--text); margin-bottom: 6px;
 }
@@ -1758,7 +1765,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
     --bg: #ffffff; --panel: #ffffff; --panel-2: #ffffff;
     --border: #c9ced8; --text: #0b0d12; --muted: #454b59;
     --accent: #1a56db; --dim: #5b6270;
-    --green: #157347; --red: #c1121f; --yellow: #8a6100;
+    --green: #157347; --red: #c1121f;
     /* algumas superfícies usam var(--fg / --line / --line-strong) com fallback
        ESCURO — recolore-as pro claro também (senão o ticker/bordas somem no branco) */
     --fg: #0b0d12; --line: #c9ced8; --line-strong: #b3b9c4;
@@ -1840,7 +1847,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   margin-left: 6px;
   padding: 0 6px;
   border: 1px solid var(--border, #23304a);
-  border-radius: 999px;
+  border-radius: 0;
   color: var(--muted);
   font-size: var(--fs-12);
   line-height: 1.5;
@@ -1852,7 +1859,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    mas com tinta de acento — "em que tempo gráfico esta leitura opera" de relance. */
 .sec-tf {
   display: inline-block; margin-left: 6px; padding: 0 6px;
-  border: 1px solid var(--border); border-radius: 999px;
+  border: 1px solid var(--border); border-radius: 0;
   color: var(--accent); font-size: var(--fs-12); line-height: 1.5;
   font-weight: 400; white-space: nowrap; font-family: var(--mono);
 }
@@ -1866,8 +1873,8 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-bold);
   text-transform: uppercase; letter-spacing: .4px; margin-right: 4px;
 }
-.sev.sev-alta { color: var(--red); }
-.sev.sev-media { color: var(--amber); }
+.sev.sev-alta { color: var(--text); font-weight: var(--fw-bold); }
+.sev.sev-media { color: var(--muted); }
 .sev.sev-baixa { color: var(--muted); }
 .consistency-ok {
   margin: 8px 2px;
@@ -1891,21 +1898,21 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   display: flex; gap: 6px; margin: 6px 0 8px;
 }
 .wl-search {
-  flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  flex: 1; min-width: 0; padding: 7px 10px; border-radius: 2px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
   font-size: 0.86rem; font-family: inherit;
 }
 .wl-search:focus { outline: none; border-color: var(--accent); }
 .wl-search::placeholder { color: var(--muted); }
 .wl-scan-icon {
-  flex: 0 0 auto; padding: 0 10px; border-radius: 8px;
+  flex: 0 0 auto; padding: 0 10px; border-radius: 2px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
   cursor: pointer; font-size: 0.95rem; line-height: 1;
 }
 .wl-scan-icon:hover { border-color: var(--accent); }
 /* compat: classes legadas do botão de scan inteiro (ainda referenciadas em places) */
 .scan-open-btn {
-  width: 100%; margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px;
+  width: 100%; margin: 6px 0 8px; padding: 8px 10px; border-radius: 2px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
   cursor: pointer; font-size: 0.86rem; text-align: left;
 }
@@ -1914,17 +1921,17 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .scan-head h2 { margin: 0; font-size: 1.02rem; }
 .scan-actions { display: flex; gap: 8px; }
-.scan-actions button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.scan-actions button { padding: 6px 12px; border-radius: 2px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
 .scan-actions button:disabled { opacity: .55; cursor: wait; }
 .scan-close { border: none; background: none; color: var(--muted); font-size: 1rem; }
 .scan-watchlist { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 4px; }
-.wl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); font-size: .8rem; cursor: pointer; }
+.wl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 0; border: 1px solid var(--border); background: var(--panel-2); font-size: .8rem; cursor: pointer; }
 .wl-chip:hover { border-color: var(--accent); }
 .wl-x { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 0 0 2px; font-size: .75rem; }
 .wl-x:hover { color: var(--red); }
 .wl-add { display: inline-flex; gap: 4px; }
-.wl-add input { width: 180px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: .8rem; }
-.wl-add button { border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.wl-add input { width: 180px; padding: 4px 8px; border-radius: 2px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: .8rem; }
+.wl-add button { border-radius: 2px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
 .scan-summary { margin: 8px 0; color: var(--text); font-size: .9rem; }
 .scan-summary b { color: var(--green); }
 /* Expectativa negativa não pode sair verde só porque é um <b> do resumo. */
@@ -1932,12 +1939,13 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-summary b.ok { color: var(--green); }
 /* Filtro por estado do gatilho: chips clicáveis que filtram a lista. */
 .scan-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
-.scan-filter { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--panel-2); color: var(--muted); cursor: pointer; font-size: .78rem; font-weight: var(--fw-bold); }
+/* TEXTO, não botão (DA-078 regra 9): filtrar por estado é escolha, não ação. */
+.scan-filter { padding: 3px 8px; border-radius: 0; border: none;
+  background: none; color: var(--muted); cursor: pointer; font-size: .78rem; font-weight: var(--fw-med); }
 .scan-filter b { font-variant-numeric: tabular-nums; margin-left: 3px; }
-.scan-filter:hover { border-color: var(--accent); color: var(--text); }
-.scan-filter.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
-.scan-filter.all { color: var(--accent); }
+.scan-filter:hover { color: var(--text); }
+.scan-filter.is-active { color: var(--green); font-weight: var(--fw-bold); }
+.scan-filter.all { color: var(--muted); }
 /* Busca + alternador de modo do scan. Chapados e quadrados (DA-070). */
 .scan-tools { display: flex; gap: 10px; align-items: center; margin: 0 0 8px; flex-wrap: wrap; }
 .scan-search {
@@ -1946,14 +1954,14 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 }
 .scan-search:focus { outline: none; border-color: var(--accent); }
 .scan-views { display: inline-flex; gap: 0; }
+/* TEXTO, não botão (DA-078 regra 9): trocar de modo de apresentação é escolha. */
 .scan-view {
-  font: inherit; font-size: var(--fs-12); font-weight: var(--fw-bold); cursor: pointer;
-  color: var(--muted); background: var(--panel-2); border: 1px solid var(--border);
-  border-radius: 0; padding: 6px 12px; white-space: nowrap;
+  font: inherit; font-size: var(--fs-12); font-weight: var(--fw-med); cursor: pointer;
+  color: var(--muted); background: none; border: none;
+  border-radius: 0; padding: 6px 10px; white-space: nowrap;
 }
-.scan-view + .scan-view { border-left: none; }
-.scan-view:hover { color: var(--text); border-color: var(--accent); }
-.scan-view.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.scan-view:hover { color: var(--text); }
+.scan-view.is-active { color: var(--green); font-weight: var(--fw-bold); }
 .scan-vazio { color: var(--muted); padding: 10px 2px; font-size: var(--fs-14); }
 
 /* CARDS em GRADE de até 3 colunas: a tela do Samyr tem 1500px+ e a coluna única
@@ -2058,8 +2066,8 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   color: #7cb0ff; text-transform: uppercase; letter-spacing: .4px;
 }
 .scan-storm-linha .ss-ent { color: var(--muted); }
-.scan-storm-linha.vetado .ss-tag { color: var(--amber); }
-/* Célula do STORM: outro SETUP na mesma linha (DA-078). Três peças numa célula —
+.scan-storm-linha.vetado .ss-tag { color: var(--text); }
+/* Célula do STORM: outro SETUP na mesma linha (DA-081). Três peças numa célula —
    estado, qual entrada (p2/p3) e o R:R —, com as duas leituras inteiras no title.
    A cor é o ESTADO (DA-076: cor + palavra), e "vetado" tem cor própria porque o
    Éden proibindo não é o mesmo que "ainda não formou". */
@@ -2070,10 +2078,10 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-storm .ss-rr { font-variant-numeric: tabular-nums; }
 .scan-storm.em_gatilho .ss-e { color: var(--green); font-weight: var(--fw-bold); }
 .scan-storm.em_movimento .ss-e { color: var(--accent); }
-.scan-storm.vetado .ss-e { color: var(--amber); }
+.scan-storm.vetado .ss-e { color: var(--text); }
 .scan-storm.vetado .ss-rr, .scan-storm.vetado .ss-p { opacity: .55; }
 /* marcador do R:R medido do preço atual — o texto inteiro fica no title e na legenda */
-.scan-mark { color: var(--amber); font-weight: var(--fw-bold); margin-left: 2px; }
+.scan-mark { color: var(--text); font-weight: var(--fw-bold); margin-left: 2px; }
 .scan-legenda { margin: 8px 0 0; font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
 .scan-legenda b { color: var(--text); }
 /* O nome da coluna viaja DENTRO da célula, invisível enquanto a tabela é tabela (o
@@ -2157,23 +2165,27 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-frame-row .scan-price, .scan-line-row .scan-price { margin-right: 6px; }
 .scan-price { font-variant-numeric: tabular-nums; color: var(--text); font-weight: var(--fw-med); font-size: .82rem; }
 .scan-dist { font-variant-numeric: tabular-nums; color: var(--muted); }
-.scan-chip { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: .74rem; color: var(--muted); }
+/* Estado da linha: PALAVRA colorida, sem caixa (DA-078 regras 3 e 8 — o ar vem do
+   espaçamento, não de uma moldura em volta de cada coisa; e a própria linha já
+   carrega a banda de cor do estado). A borda saiu; a cor e o peso ficam. */
+.scan-chip { padding: 1px 0; border-radius: 0; border: none; font-size: .74rem;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
 /* Entrada direção-aware: COMPRA verde / VENDA vermelho — a ação na cor. */
-.scan-chip.compra { color: var(--green); border-color: var(--green); font-weight: 600; }
-.scan-chip.venda { color: var(--red); border-color: var(--red); font-weight: 600; }
-.scan-chip.movimento { color: #60a5fa; border-color: #60a5fa; }
-.scan-chip.invalidou { color: var(--muted); border-color: var(--muted); text-decoration: line-through; }
-.scan-chip.ok { color: var(--green); border-color: var(--green); }
-.scan-chip.bad { color: var(--red); border-color: var(--red); }
+.scan-chip.compra { color: var(--green); font-weight: var(--fw-bold); }
+.scan-chip.venda { color: var(--red); font-weight: var(--fw-bold); }
+.scan-chip.movimento { color: var(--text); }
+.scan-chip.invalidou { color: var(--muted); text-decoration: line-through; }
+.scan-chip.ok { color: var(--green); }
+.scan-chip.bad { color: var(--red); }
 /* Série que não alcança o gatilho: não é acerto nem erro — é ignorância declarada. */
-.scan-chip.warn { color: var(--amber); border-color: var(--amber); }
+.scan-chip.warn { color: var(--text); }
 .scan-levels { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: .82rem; color: var(--text); }
 .scan-levels b { font-variant-numeric: tabular-nums; }
 /* Motivo de um alvo recusado (sem TP publicável): âmbar de ATENÇÃO, não de erro
    — o setup existe, o que falta é alvo. Chapado e sem canto arredondado (DA-070). */
-.scan-levels .scan-note { color: var(--amber); }
+.scan-levels .scan-note { color: var(--text); }
 .scan-actions-row { display: flex; gap: 8px; margin-top: 8px; }
-.scan-go { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; font-size: .82rem; font-weight: var(--fw-bold); }
+.scan-go { padding: 5px 12px; border-radius: 2px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; font-size: .82rem; font-weight: var(--fw-bold); }
 .scan-go:hover { color: #fff; border-color: var(--accent); background: var(--panel); }
 .scan-track { margin-top: 10px; }
 .ghost-btn { opacity: .8; }

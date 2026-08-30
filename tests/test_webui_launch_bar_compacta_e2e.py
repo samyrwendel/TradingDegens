@@ -162,8 +162,12 @@ def test_o_grupo_nao_se_veste_de_pill(base):
             assert m[nome]["borda"] == "0px", (nome, m)
             assert m[nome]["padL"] == "0px", (nome, m)
             assert m[nome]["fundo"] in ("rgba(0, 0, 0, 0)", "transparent"), (nome, m)
-        # a PILL continua sendo pill (o fix não pode ter apagado o estilo dela)
-        assert m["pill"]["borda"] != "0px" and m["pill"]["padL"] != "0px", m
+        # A pill perdeu a MOLDURA na DA-078 (regra 9: escolher não é agir, então a
+        # escolha de frame é TEXTO). O que este teste sempre defendeu foi o GRUPO não
+        # se vestir de pill; a pill em si agora é texto com respiro — e o respiro
+        # continua lá, que é o alvo de clique.
+        assert m["pill"]["borda"] == "0px", ("seletor de segmento é texto (DA-078)", m)
+        assert m["pill"]["padL"] != "0px", ("mas o alvo de clique continua confortável", m)
 
         # E a largura devolvida é MENSURÁVEL, não estética: com a caixa fantasma
         # nos DOIS grupos e o mesmo teto de 200px pro modelo, a barra estourava 3px

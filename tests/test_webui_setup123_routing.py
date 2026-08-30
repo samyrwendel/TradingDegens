@@ -58,7 +58,7 @@ def _run_of(runner, run_id):
 @pytest.mark.parametrize("metodo", ["setup123", "storm123"])
 def test_metodo_estrutural_nao_seleciona_nenhum_analista(runner, metodo):
     """O atalho é estrutural: lista de analistas VAZIA — nenhum agente pra pagar.
-    Vale pros DOIS: o Storm entrou como método próprio pela mesma rota (DA-078)."""
+    Vale pros DOIS: o Storm entrou como método próprio pela mesma rota (DA-081)."""
     run_id = runner.start(TICKER, DATE, method=metodo, reuse=False)
     run = _run_of(runner, run_id)
     assert run.method == metodo, ("método da run", run.method)
@@ -92,7 +92,7 @@ def test_erick_traz_o_analista_erick_e_padrao_nao(runner):
 def test_rotas_sao_disjuntas(runner):
     """Cada método produz a SUA run. Nenhum completo cai na rota estrutural, e os
     dois estruturais não se confundem entre si — 1-2-3 e Storm são setups
-    diferentes com a mesma numeração (DA-078), e a run tem que dizer qual é."""
+    diferentes com a mesma numeração (DA-081), e a run tem que dizer qual é."""
     ids = {m: runner.start(TICKER, DATE, method=m, reuse=False)
            for m in ("setup123", "storm123", "padrao", "erick")}
     metodos = {m: _run_of(runner, rid).method for m, rid in ids.items()}

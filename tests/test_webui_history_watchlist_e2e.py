@@ -2,7 +2,7 @@
 
 Prova os dois pedidos do Samyr:
   1. BORDAS uniformes/menos arredondadas: todos os botões dividem o MESMO raio
-     pequeno (token --radius = 5px). Aqui checamos botões sempre presentes
+     pequeno (token --radius = 2px, DA-078). Aqui checamos botões sempre presentes
      (#runBtn "Analisar" e #configBtn "Chaves") + a linha do histórico, que agora
      NÃO é um cartão arredondado (raio 0, divisória de 1px embaixo).
   2. LISTA estilo watchlist (ref lista-ref.jpg): cada linha é ticker (negrito) +
@@ -147,8 +147,10 @@ def test_watchlist_layout_and_uniform_radius(live):
         # (watchlist contínua estilo Quantfury) — a densidade vem do espaçamento.
         run_r = page.eval_on_selector("#runBtn", "el=>getComputedStyle(el).borderRadius")
         cfg_r = page.eval_on_selector("#configBtn", "el=>getComputedStyle(el).borderRadius")
-        assert run_r == "5px", run_r
-        assert cfg_r == "5px", cfg_r            # era pílula (999px) — agora igual
+        # DA-078 regra 1: raio máximo 2px, e o token único do projeto passou a ser
+        # esse. Antes eram 5px (e o de Chaves era pílula de 999px).
+        assert run_r == "2px", run_r
+        assert cfg_r == "2px", cfg_r
         li = page.eval_on_selector(".history li", """el=>{
           const cs = getComputedStyle(el);
           return {radius: cs.borderRadius, bottom: cs.borderBottomWidth,

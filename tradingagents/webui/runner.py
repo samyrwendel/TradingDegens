@@ -539,7 +539,7 @@ def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIME
 
 # MÉTODOS ESTRUTURAIS ($0 de LLM): leem a série e devolvem níveis, sem agente
 # nenhum. São métodos SEPARADOS, não flags um do outro — o 1-2-3 deste projeto e o
-# 1-2-3 Storm usam a mesma numeração para pontos DIFERENTES (ver DA-078), e a única
+# 1-2-3 Storm usam a mesma numeração para pontos DIFERENTES (ver DA-081), e a única
 # coisa que eles de fato compartilham é não custar nada.
 _METODOS_ESTRUTURAIS = ("setup123", "storm123")
 

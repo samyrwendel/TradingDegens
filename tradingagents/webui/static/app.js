@@ -1586,7 +1586,7 @@ const _METODOS_CONHECIDOS = new Set(["padrao", "erick", "setup123", "storm123", 
 
 // Métodos ESTRUTURAIS ($0 de LLM). São SEPARADOS, não flags um do outro: o 1-2-3
 // deste projeto e o 1-2-3 Storm usam a mesma numeração pra pontos DIFERENTES
-// (ver DA-078) — o que eles compartilham é só não custar nada.
+// (ver DA-081) — o que eles compartilham é só não custar nada.
 const _METODOS_ESTRUTURAIS = new Set(["setup123", "storm123"]);
 
 function normMethod(v) {
@@ -1970,6 +1970,13 @@ function rrAviso(rr) {
   return ` — risco MAIOR que o retorno: arrisca ${(1 / rr).toFixed(1)}x o que pretende ganhar`;
 }
 
+// R:R ruim vira PALAVRA, não cor (DA-078 regra 3: âmbar saiu da paleta; aviso se
+// resolve com palavra e hierarquia). Era o âmbar que dizia "atenção" — sem ele, e
+// sem isto, 0,31 ficaria com a mesma cara de 2,50, que é informação sumindo da tela.
+function rrMarca(rr) {
+  return rrRuim(rr) ? `risco > retorno (${(1 / rr).toFixed(1)}x) · ` : "";
+}
+
 // ---- rodapé do cabeçalho: gatilhos + preço, no canto inferior direito -------
 // Pedido do Samyr: o VEREDITO fica em cima; os GATILHOS descem pro canto inferior
 // direito do card, ao lado do preço atual, alinhados à direita. Antes os níveis só
@@ -2159,7 +2166,7 @@ function stormCardHtml(st) {
       const rr = L.risk_reward || {};
       if (rr.rr != null) {
         rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
-          `${rr.entry_basis || ""} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
+          `${rrMarca(rr.rr)}${rr.entry_basis || ""} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
           rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
       } else if (rr.note) {
         rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
@@ -2257,7 +2264,7 @@ function renderSetupCards(a) {
       // ele vira NOME ("entrada no gatilho").
       const entrada = entradaPropria ? `entrada ${fmtNum(rr.entry)}` : "entrada no gatilho";
       rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
-        `${entrada} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
+        `${rrMarca(rr.rr)}${entrada} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
         rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
     } else if (!rr.note) {
       rows.push(`<div class="sc-row sc-sem"><span class="sc-k">risco/retorno</span>` +
@@ -5415,7 +5422,7 @@ const SCAN_COLUNAS = [
   ["SL", "Stop loss"],
   ["TP", "Alvo publicável — ou o motivo de não haver"],
   ["R:R", "Risco/retorno"],
-  // O STORM é outro SETUP (DA-078), não outra leitura deste: outro detector, outro
+  // O STORM é outro SETUP (DA-081), não outra leitura deste: outro detector, outro
   // ponto 2, outro stop, outro alvo, e um filtro com poder de VETO. Por isso ele
   // ganha COLUNA — some-lo às células do 1-2-3 misturaria dois métodos no mesmo
   // número, que é exatamente o que a task 008 provou não descrever trade nenhum.

@@ -36,9 +36,16 @@ import threading
 
 import pytest
 
+from tradingagents.webui import timeutil
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
+
+# A cotação só vale como ATUAL no dia em que foi tirada (DA-073), e o front confere
+# isso contra o dia de HOJE. Carimbar uma data FIXA na fixture faz o teste passar o
+# dia todo e quebrar sozinho à meia-noite — foi o que aconteceu na virada de 29 pra
+# 30/08. O carimbo acompanha o relógio do servidor, que é a mesma fonte que o front lê.
+_HOJE = timeutil.today()
 
 pytestmark = pytest.mark.integration
 
@@ -91,7 +98,7 @@ def _snap(actionable):
             "live_price": {"price": 835.37, "change_pct": 4.32, "currency": "USD",
                            "sessao": "24h", "rotulo": "cotação agora · 24h",
                            "as_of": "29/08 20:42", "regular_price": 835.37,
-                           "fuso": "UTC", "em": "2026-08-29"},
+                           "fuso": "UTC", "em": _HOJE},
             "price_chart": {}, "degraded": [],
             "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
             "trader_plan": "", "risk_decision": "", "market_report": "",
@@ -162,7 +169,7 @@ def test_cada_analise_ganha_card_proprio_com_titulo_dizendo_qual_e(base):
         assert any("sc-123" in c for c in m["classes"]), m
         assert any("sc-recuo" in c for c in m["classes"]), m
         assert m["estilo"]["fundo"] == "none", ("DA-070: nada de degradê", m)
-        assert m["estilo"]["raio"] == "5px", ("o raio único de card do projeto", m)
+        assert m["estilo"]["raio"] == "2px", ("DA-078 regra 1: raio máximo 2px", m)
         browser.close()
 
 

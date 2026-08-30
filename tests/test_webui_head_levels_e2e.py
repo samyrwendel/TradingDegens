@@ -24,9 +24,16 @@ import threading
 
 import pytest
 
+from tradingagents.webui import timeutil
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
+
+# A cotação só vale como ATUAL no dia em que foi tirada (DA-073), e o front confere
+# isso contra o dia de HOJE. Carimbar uma data FIXA na fixture faz o teste passar o
+# dia todo e quebrar sozinho à meia-noite — foi o que aconteceu na virada de 29 pra
+# 30/08. O carimbo acompanha o relógio do servidor, que é a mesma fonte que o front lê.
+_HOJE = timeutil.today()
 
 pytestmark = pytest.mark.integration
 
@@ -57,7 +64,7 @@ _SNAP = {
         "live_price": {"price": 513.53, "change_pct": 1.68, "currency": "USD",
                        "sessao": "fechado", "rotulo": "último fechamento",
                        "as_of": "28/08 16:00", "regular_price": 513.53,
-                       "fuso": "America/New_York", "em": "2026-08-29"},
+                       "fuso": "America/New_York", "em": _HOJE},
         "price_chart": {}, "degraded": [],
         "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
         "trader_plan": "", "risk_decision": "", "market_report": "",
@@ -211,7 +218,7 @@ _ZEC = {
         "live_price": {"price": 835.37, "change_pct": 4.32, "currency": "USD",
                        "sessao": "24h", "rotulo": "cotação agora · 24h",
                        "as_of": "29/08 20:42", "regular_price": 835.37,
-                       "fuso": "UTC", "em": "2026-08-29"},
+                       "fuso": "UTC", "em": _HOJE},
         "price_chart": {}, "degraded": [],
         "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
         "trader_plan": "", "risk_decision": "", "market_report": "",

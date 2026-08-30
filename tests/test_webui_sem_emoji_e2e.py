@@ -194,13 +194,15 @@ def test_compra_e_venda_continuam_distinguiveis_por_COR_e_PALAVRA(base):
 
 @pytest.mark.integration
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-@pytest.mark.parametrize("estado,cor_esperada", [
-    ("ativo", "rgb(46, 204, 113)"),            # verde: setup vivo
-    ("aguardar_rompimento", "rgb(245, 180, 69)"),  # âmbar: espera
+@pytest.mark.parametrize("estado,cor_esperada,rotulo", [
+    # verde = setup vivo (a única cor que a DA-078 deixa aqui, e ela significa
+    # "janela aberta"); "aguardar" perdeu o âmbar e é dito por PALAVRA.
+    ("ativo", "rgb(46, 204, 113)", "Setup ativo agora"),
+    ("aguardar_rompimento", None, "Aguardar rompimento"),
 ])
-def test_o_estado_do_setup_continua_marcado_por_cor(base, estado, cor_esperada):
-    """O 🎯/⏳/⚪ era o marcador. A cor da classe do chip continua fazendo o
-    trabalho — e o rótulo por extenso sempre esteve lá."""
+def test_o_estado_do_setup_continua_marcado_por_cor(base, estado, cor_esperada, rotulo):
+    """O 🎯/⏳/⚪ era o marcador; depois a cor; agora, onde a DA-078 tirou a cor, a
+    PALAVRA. O que não muda é o invariante: o estado nunca fica sem portador."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1100})
@@ -209,17 +211,19 @@ def test_o_estado_do_setup_continua_marcado_por_cor(base, estado, cor_esperada):
           const e = document.querySelector('#setupCards .sc-state');
           return {txt: e.innerText.trim(), cor: getComputedStyle(e).color};
         }""")
-        assert m["cor"] == cor_esperada, m
-        assert m["txt"] and not _pictogramas(m["txt"]), m
+        if cor_esperada:
+            assert m["cor"] == cor_esperada, m
+        assert m["txt"].startswith(rotulo), m
+        assert not _pictogramas(m["txt"]), m
         browser.close()
 
 
 @pytest.mark.integration
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_atencao_continua_sendo_atencao_sem_o_sinal_de_aviso(base):
-    """O ⚠️ marcava o R:R ruim, o alvo recusado e a série vencida. A cor âmbar já
-    fazia esse trabalho junto com ele desde a 020 — agora faz sozinha, com a
-    palavra do lado."""
+    """O ⚠️ marcava o R:R ruim, o alvo recusado e a série vencida; a cor âmbar fazia
+    o trabalho junto com ele. A DA-078 tirou as duas — sobrou a PALAVRA, que é o que
+    a regra manda: aviso se resolve com texto e hierarquia, não com cor nova."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1100})
@@ -231,7 +235,7 @@ def test_atencao_continua_sendo_atencao_sem_o_sinal_de_aviso(base):
                   title: rr.getAttribute('title'), txt: rr.innerText};
         }""")
         assert "rr-ruim" in m["classe"], m
-        assert m["cor"] == "rgb(245, 180, 69)", ("âmbar de atenção", m)
+        assert "risco > retorno" in m["txt"], ("sem cor e sem emoji, o aviso é PALAVRA", m)
         assert "risco MAIOR que o retorno" in (m["title"] or ""), m
         assert not _pictogramas(m["txt"]), m
         browser.close()

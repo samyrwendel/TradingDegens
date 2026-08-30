@@ -293,8 +293,10 @@ def test_sem_eden_a_tela_diz_NAO_OPERA_e_o_motivo(base):
         assert "NÃO OPERA" in m["txt"], m
         assert "ARMADILHA" in m["veto"], m
         assert "sc-vetado" in m["classe"], m
-        # a cor É o estado (DA-076): vetado sai em âmbar, não na cor de quem opera
-        assert m["borda"] == "rgb(245, 180, 69)", m
+        # A cor era o estado (DA-076); a DA-078 tirou o âmbar da paleta, então o
+        # vetado sai em CINZA — distinto de quem opera (azul) — e quem afirma é a
+        # manchete "NÃO OPERA" logo acima.
+        assert m["borda"] == "rgb(139, 151, 173)", m
         # os números continuam à vista: "por que não opera" precisa do que ele seria
         assert "90,00" in m["txt"] and "128,00" in m["txt"], m
         browser.close()

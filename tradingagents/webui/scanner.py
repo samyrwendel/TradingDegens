@@ -254,7 +254,7 @@ def _frame_row(ticker: str, date: str, frame: str,
 def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[str, Any]:
     """A leitura do STORM naquele frame, compacta pra caber numa linha do scan.
 
-    Setup DIFERENTE do 1-2-3 desta lista (DA-078): outro detector, outro ponto 2,
+    Setup DIFERENTE do 1-2-3 desta lista (DA-081): outro detector, outro ponto 2,
     outro stop, outro alvo — e um filtro (o Éden) com poder de VETO. Por isso ele
     ocupa a SUA célula, com o seu estado, e nunca se mistura ao 1-2-3 na mesma
     coluna: acerto de um setup com R:R de outro não descreve trade nenhum (task 008).
@@ -482,7 +482,7 @@ def _chave(e: dict[str, Any]) -> str:
 
 
 # Setups que o track record sabe separar. ``123`` é o desta lista; ``storm`` é o
-# 1-2-3 do Stormer (DA-078) — outro detector, outro stop, outro alvo.
+# 1-2-3 do Stormer (DA-081) — outro detector, outro stop, outro alvo.
 SETUPS_DO_LEDGER = ("123", "storm")
 
 
