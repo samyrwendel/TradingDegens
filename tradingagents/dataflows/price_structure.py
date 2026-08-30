@@ -1672,18 +1672,30 @@ class StormPattern:
         }
 
 
-# "ACIMA DA MÉDIA" É PROPORÇÃO, NÃO UM PONTO CONTRA UM NÍVEL.
+# A PROPORÇÃO DO CANDLE ACIMA DA MÉDIA — leitura VISUAL, não a regra de decisão.
 #
-# A comparação era ``preço > média`` — o fechamento, um ponto só. Nos exemplos em
-# gráfico da aula o Stormer não exige o candle INTEIRO acima da MME 8: basta a maior
-# parte dele estar acima, e um candle que só encosta na média por baixo continua
-# contando como acima.
+# História, porque ela explica o desenho: a primeira versão desta task fez o Éden
+# decidir pela proporção ("basta a maior parte do candle estar acima da MME 8"), lida
+# dos exemplos em gráfico da aula. A MEDIÇÃO contra uma implementação de referência
+# (scanner público do QuantBrasil, 30/08) corrigiu o rumo:
 #
-# PROCEDÊNCIA, declarada: a regra vem da leitura dos exemplos gráficos, relatada pelo
-# Samyr — a fala da aula não a enuncia. E medir pelo RANGE (máxima−mínima) em vez do
-# corpo (abertura−fechamento) é INTERPRETAÇÃO NOSSA: o range é o que o desenho mostra
-# como "o candle", e o corpo ignoraria pavios que são metade da barra. O corte na
-# METADE é convenção declarada, não doutrina — nenhuma fala numera isso.
+#   * o que ela REFUTOU: não é preciso o candle INTEIRO acima da média — dois ativos
+#     marcados como Éden de compra estão com 77,5% e 82,8% do candle acima da MME 8;
+#   * o que ela mostrou ser o critério OPERANTE: o **FECHAMENTO** contra as duas
+#     médias. Todos os marcados como compra têm close acima da MME 8 E da MME 80 com
+#     a 8 acima da 80; e os "não" falham exatamente onde deveriam — inclusive os dois
+#     que são a ARMADILHA (close acima da 8, abaixo da 80, com 8 < 80).
+#
+# Os dois critérios COINCIDEM na prática (num candle normal, o fechamento acima puxa
+# a maior parte junto). O que decide é o close: é determinístico, é mais estável e é
+# o que a referência usa. A proporção fica MEDIDA e publicada no payload — ela é a
+# leitura visual de "o candle está acima da média?" e informa o leitor —, mas não
+# autoriza nem veta nada.
+#
+# Limite honesto da medição que corrigiu isto: 10 ativos, tabela extraída de texto
+# achatado (a atribuição por ativo pode ter deslocamento) e um caso que não fechou.
+# É INDÍCIO forte, não prova — e é por isso que a proporção continua no payload em
+# vez de ser apagada: se a evidência virar, o número já está lá.
 _FRACAO_ACIMA_MIN = 0.5
 
 
@@ -1749,9 +1761,11 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
     ult = df.iloc[-1]
     high, low = float(ult["High"]), float(ult["Low"])
     preco = round(float(ult["Close"]), 2)
-    # O CANDLE contra cada média, por proporção do range (ver :func:`_fracao_acima`).
-    ac_r, ab_r = _candle_acima(high, low, rapida), _candle_abaixo(high, low, rapida)
-    ac_l, ab_l = _candle_acima(high, low, lenta), _candle_abaixo(high, low, lenta)
+    # A DECISÃO é do FECHAMENTO contra cada média (ver o bloco de :data:`_FRACAO_ACIMA_MIN`
+    # para a medição que estabeleceu isto). A proporção do candle vai junto no payload
+    # como leitura visual, mas não decide.
+    ac_r, ab_r = preco > rapida, preco < rapida
+    ac_l, ab_l = preco > lenta, preco < lenta
     base = {"disponivel": True, "ema_rapida": rapida, "ema_lenta": lenta, "preco": preco,
             "fracao_acima_rapida": round(_fracao_acima(high, low, rapida), 3),
             "fracao_acima_lenta": round(_fracao_acima(high, low, lenta), 3),
@@ -1762,12 +1776,12 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
     base["direcao_estrutural"] = estrutural
     if rapida > lenta and ac_r and ac_l:
         return {**base, "alinhado": True, "direcao": "compra", "armadilha": False,
-                "motivo": (f"MME {_STORM_EMA_RAPIDA} acima da MME {_STORM_EMA_LENTA} e o "
-                           "candle majoritariamente acima das duas")}
+                "motivo": (f"MME {_STORM_EMA_RAPIDA} acima da MME {_STORM_EMA_LENTA} e "
+                           "preço acima das duas")}
     if rapida < lenta and ab_r and ab_l:
         return {**base, "alinhado": True, "direcao": "venda", "armadilha": False,
-                "motivo": (f"MME {_STORM_EMA_RAPIDA} abaixo da MME {_STORM_EMA_LENTA} e o "
-                           "candle majoritariamente abaixo das duas")}
+                "motivo": (f"MME {_STORM_EMA_RAPIDA} abaixo da MME {_STORM_EMA_LENTA} e "
+                           "preço abaixo das duas")}
     # ZONA NEUTRA: o candle está ENTRE as duas médias. O Stormer batiza assim a faixa
     # entre a MME 8 e a MME 80 — "esta região, operar aqui é muito mais perigoso" —,
     # e ela NÃO é o mesmo que "sem Éden": o preço está do lado certo de UMA das médias
@@ -1777,20 +1791,20 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
     # pro outro.
     entre = (ab_r and ac_l) or (ac_r and ab_l)
     if entre:
-        de_baixo = ab_r and ac_l          # abaixo da rápida, acima da lenta
+        de_baixo = ab_r and ac_l          # preço abaixo da rápida, acima da lenta
         armadilha = (estrutural == "venda" and ac_r) or (estrutural == "compra" and ab_r)
         onde = (f"abaixo da MME {_STORM_EMA_RAPIDA} e acima da MME {_STORM_EMA_LENTA}"
                 if de_baixo else
                 f"acima da MME {_STORM_EMA_RAPIDA} e abaixo da MME {_STORM_EMA_LENTA}")
         return {**base, "alinhado": False, "direcao": None, "zona_neutra": True,
                 "armadilha": bool(armadilha),
-                "motivo": (f"ZONA NEUTRA: o candle está {onde} — a região entre as duas "
+                "motivo": (f"ZONA NEUTRA: o preço está {onde} — a região entre as duas "
                            "médias. Operar aqui é muito mais perigoso: exige "
                            "seletividade extra, e o lado que vale depende da tendência "
                            f"({estrutural or 'indefinida'} pelas médias).")}
     return {**base, "alinhado": False, "direcao": None, "armadilha": False,
             "motivo": (f"MME {_STORM_EMA_RAPIDA} e MME {_STORM_EMA_LENTA} cruzadas ou o "
-                       "candle sem maioria de nenhum lado — sem Éden")}
+                       "preço exatamente sobre uma delas — sem Éden")}
 
 
 def _storm_ponto(df: pd.DataFrame, idx: int, kind: str, fmt: str) -> dict[str, Any]:

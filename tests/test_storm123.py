@@ -439,19 +439,27 @@ def test_o_EMPATE_exato_nao_e_nem_acima_nem_abaixo():
 
 
 @pytest.mark.unit
-def test_candle_com_maioria_acima_das_duas_ALINHA_o_eden():
-    """Fim a fim: a mesma barra que a régua antiga (fechamento) reprovava agora
-    alinha, porque a maior parte dela está acima das duas médias."""
+def test_quem_DECIDE_e_o_fechamento_a_proporcao_so_informa():
+    """CORREÇÃO DE RUMO (task 017), medida contra uma implementação de referência: a
+    proporção do candle e o fechamento COINCIDEM na prática, mas o critério operante
+    é o FECHAMENTO contra as duas médias — determinístico e corroborado.
+
+    Este é o caso que os separa: 80% do candle acima da MME 8, mas o fechamento
+    ABAIXO dela. A proporção diria "alinhado"; o Éden diz que não. A fração continua
+    MEDIDA e publicada (é a leitura visual, e se a evidência virar o número já está
+    lá), mas não autoriza nada."""
     d = _serie_eden(subindo=True)
     rapida, lenta = float(d["EMA8"].iloc[-1]), float(d["EMA80"].iloc[-1])
-    # candle com 80% acima da rápida (e inteiro acima da lenta), fechando ABAIXO dela
     baixo = rapida - (rapida - lenta) * 0.05
     alto = rapida + (rapida - lenta) * 0.20
     _poe_candle(d, baixo, alto)
     d.loc[d.index[-1], "Close"] = rapida * 0.999      # fechamento ABAIXO da rápida
     e = ps._eden(d)
-    assert e["fracao_acima_rapida"] > 0.5, e
-    assert e["alinhado"] is True and e["direcao"] == "compra", e
+    assert e["fracao_acima_rapida"] > 0.5, ("a proporção continua medida", e)
+    assert e["alinhado"] is False, ("mas quem decide é o fechamento", e)
+    # e o mesmo candle com o fechamento ACIMA da rápida alinha
+    d.loc[d.index[-1], "Close"] = rapida * 1.001
+    assert ps._eden(d)["alinhado"] is True
 
 
 @pytest.mark.unit

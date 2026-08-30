@@ -827,3 +827,24 @@ qualidade em **6**, **13** em zona neutra. Na decisão: 4 passam a operar, 2 sã
 rebaixadas sem deixar de operar. Tabela em `/tmp/devbot-td-016/impacto-watchlist.txt`.
 
 Governança: **DA-092**.
+
+---
+
+## 21. Correção de rumo: o Éden decide pelo FECHAMENTO (task 20260830-017)
+
+A regra 2 da task 016 (proporção do candle) foi **medida contra uma implementação de
+referência e corrigida**. O que se confirmou: não é preciso o candle inteiro acima da
+média. O que se corrigiu: quem decide é o **fechamento** contra as duas médias.
+
+Medi de novo na watchlist e concordo — com um detalhe: os dois critérios divergem em
+**3 de 42** leituras (7%), e as duas que importam vão CONTRA a proporção (AVGO 1d e
+CRWD 1h têm alinhamento limpo pelo fechamento, e a proporção os derrubaria).
+
+A proporção continua **medida e publicada** no payload como leitura visual — se a
+evidência virar, o número já está lá —, mas não decide.
+
+**A zona neutra (regra 1) segue valendo integralmente.** Impacto da regra que fica,
+contra o código original: nenhum ativo perde alinhamento; 12 leituras passam de "sem
+Éden" para ZONA NEUTRA, 4 mudam de qualidade, 4 passam a operar com aviso.
+
+Governança: **DA-093** (supersede a regra 2 da DA-092).
