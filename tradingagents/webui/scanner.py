@@ -308,6 +308,9 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
     if not pat or not leituras:
         return {"estado": "sem_setup",
                 "eden": (plano.get("eden") or {}).get("direcao"),
+                # O NOME do estado viaja pronto: a célula do scan não reescreve rótulo
+                # (foi assim que a tela ganhou três jeitos de dizer timeframe).
+                "eden_rotulo": (plano.get("eden") or {}).get("rotulo_curto"),
                 "eden_ok": bool((plano.get("eden") or {}).get("alinhado")),
                 "opera": False, "motivo": plano.get("motivo")}
     direction = pat.get("direction")
@@ -351,6 +354,7 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
         "opera": bool(plano.get("opera")),
         "veto": plano.get("veto"),
         "eden": (plano.get("eden") or {}).get("direcao"),
+        "eden_rotulo": (plano.get("eden") or {}).get("rotulo_curto"),
         "eden_ok": bool((plano.get("eden") or {}).get("alinhado")),
         # ZONA NEUTRA viaja na linha (task 016): ela OPERA, então `opera` sozinho não
         # a distingue de um Éden alinhado — e o aviso do Stormer ("operar aqui é

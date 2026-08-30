@@ -2189,6 +2189,32 @@ const STORM_ORDEM_CURTO = { antecipada: "antecipada", confirmada: "confirmada", 
 // ENTRADAS do mesmo padrão. O veto é a manchete do card, não uma nota de rodapé —
 // e a borda muda de cor com ele, que é a gramática que a DA-076 pede (estado é cor
 // + palavra).
+// O NOME DO ÉDEN NA TELA — lido, nunca inventado.
+//
+// *"nos cards de texto onde usamos Éden, identifica Éden de Alta e de Baixa na
+// menção."* O vocabulário mora num lugar só, no produtor (`price_structure._EDEN_ROTULO`),
+// e viaja pronto no payload: `rotulo` pra leitura, `rotulo_curto` pro espaço apertado.
+// Aqui não há tabela nenhuma — se houvesse, seriam DOIS vocabulários, que é como a tela
+// ganhou três jeitos de dizer timeframe (DA-095).
+//
+// Sem rótulo no payload (run ANTIGA, salva antes desta task) devolve vazio, e cada
+// chamador degrada pro texto que aquela run sempre mostrou. Inventar o nome aqui seria
+// afirmar sobre um cálculo que não o produziu.
+function edenNome(eden) {
+  return (eden && eden.rotulo) || "";
+}
+
+function edenCurto(eden) {
+  return (eden && (eden.rotulo_curto || eden.rotulo)) || "";
+}
+
+// A equivalência com a doutrina do Stormer vai no `title`: quem leu "Éden de compra" no
+// material precisa reconhecer o "Éden de Alta" da tela.
+function edenAjuda(eden) {
+  const d = eden && eden.doutrina;
+  return d ? `${edenNome(eden)} — na doutrina do Stormer, ${d}` : edenNome(eden);
+}
+
 function stormCardHtml(st, frameDoBloco) {
   const pat = st.pattern;
   const frameProprio = (st.timeframe && frameDoBloco && st.timeframe !== frameDoBloco)
@@ -2200,11 +2226,17 @@ function stormCardHtml(st, frameDoBloco) {
 
   // ÉDEN primeiro: é ele que autoriza ou proíbe. Sem as duas médias na linha, o
   // leitor não tem como conferir o veto — e um veto que não se confere é palpite.
+  // A CHAVE DA LINHA É O ESTADO DO ÉDEN, não o nome das médias. "MME 8 × MME 80" com
+  // dois números dizia COMO o filtro é medido e nunca QUAL era o resultado — e o
+  // resultado é a única coisa que decide se o setup opera. As duas médias não se
+  // perdem: continuam no valor (é com elas que se confere o veto) e na base.
   if (eden.disponivel) {
-    rows.push(scRow(`MME ${8} × MME ${80}`,
-      `${fmtNum(eden.ema_rapida)} × ${fmtNum(eden.ema_lenta)}`, eden.motivo || ""));
+    rows.push(scRow(edenNome(eden) || `MME ${8} × MME ${80}`,
+      `${fmtNum(eden.ema_rapida)} × ${fmtNum(eden.ema_lenta)}`,
+      `MME 8 × MME 80 — ${eden.motivo || ""}`, "", edenAjuda(eden)));
   } else {
-    rows.push(`<div class="sc-row sc-sem"><span class="sc-k">Éden (MME 8 × MME 80)</span>` +
+    rows.push(`<div class="sc-row sc-sem" title="${escapeHtml(edenAjuda(eden))}">` +
+      `<span class="sc-k">${escapeHtml(edenNome(eden) || "Éden (MME 8 × MME 80)")}</span>` +
       `<span class="sc-v sc-sem-v">indisponível</span>` +
       `<span class="sc-basis">${escapeHtml(eden.motivo || "")}</span></div>`);
   }
@@ -2272,7 +2304,8 @@ function stormCardHtml(st, frameDoBloco) {
   // e o aviso do Stormer ("muito mais perigoso") sumiria na leitura de relance.
   const neutra = st.qualidade === "neutra";
   const selo = pat
-    ? `<div class="sc-verdict"><span class="sc-vk">filtro Éden</span>` +
+    ? `<div class="sc-verdict" title="${escapeHtml(edenAjuda(eden))}">` +
+      `<span class="sc-vk">${escapeHtml(edenNome(eden) || "filtro Éden")}</span>` +
       `<span class="sc-state ${neutra ? "aguardar_pullback" : (opera ? "ativo" : "sem_setup")}">` +
       `${neutra ? "OPERA COM CAUTELA" : (opera ? "opera" : "NÃO OPERA")}` +
       `${q ? ` · qualidade ${escapeHtml(q)}` : ""}</span></div>` +
@@ -2774,9 +2807,15 @@ function stormEstado(storm) {
 
 // A palavra do estado, pra etiqueta na vela e pra legenda. Vazia no operável: o
 // normal não se anuncia, só o que desvia dele.
-function stormEstadoTexto(estado) {
-  return estado === "invalidado" ? "invalidado"
-    : estado === "vetado" ? "não opera — Éden" : "";
+//
+// No VETADO ela diz QUAL Éden vetou — "não opera — armadilha" e "não opera — Éden de
+// Baixa" são vetos diferentes, e o segundo é o único que se resolve esperando. O nome
+// vem do vocabulário único (forma CURTA: aqui o espaço é a largura de uma vela).
+function stormEstadoTexto(estado, storm) {
+  if (estado === "invalidado") return "invalidado";
+  if (estado !== "vetado") return "";
+  const nome = edenCurto((storm || {}).eden);
+  return nome ? `não opera — ${nome}` : "não opera — Éden";
 }
 
 // FORMA DO MARCADOR = FAMÍLIA. Os dois métodos numeram 1-2-3 pontos DIFERENTES (no
@@ -2922,7 +2961,7 @@ function chartLegendHtml(chart, actionable) {
     const sp = actionable.storm.pattern;
     const [, dlabel] = PAT_DIR[sp.direction] || ["", ""];
     const q = familiasNaTela(actionable).length > 1 ? "Storm123 " : "";
-    const txt = stormEstadoTexto(est);
+    const txt = stormEstadoTexto(est, actionable.storm);
     legend.push(`<span class="lg"><span class="sw dia" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${txt ? ` (${escapeHtml(txt)})` : ""}</span>`);
   }
   return legend.join("");
@@ -2973,10 +3012,16 @@ function renderChartCard(chart, ticker, actionable) {
       `história, e os níveis dele saem do gráfico: descrevem um trade que não existe mais.`);
   }
   if (stormVetadoNaTela(actionable)) {
-    const veto = (actionable.storm || {}).veto || (actionable.storm || {}).motivo || "";
-    notes.push(`Storm123 <b>desenhado, mas não operável</b> — o filtro Éden veta` +
-      `${veto ? `: ${escapeHtml(veto)}` : ""}. Por isso o padrão aparece e os níveis ` +
-      `(gatilho, alvo, stop) não: eles estão no card, com o motivo inteiro.`);
+    const st = actionable.storm || {};
+    const veto = st.veto || st.motivo || "";
+    // O NOME uma vez, entre parênteses, e a prosa do veto logo em seguida: a prosa já
+    // costuma citar o estado ("padrão de venda contra Éden de Baixa"), e prefixá-la com
+    // o mesmo nome fazia a frase dizer duas vezes de quem se trata.
+    const quem = edenNome(st.eden);
+    notes.push(`Storm123 <b>desenhado, mas não operável</b>` +
+      `${quem ? ` (${escapeHtml(quem)})` : ""} — ` +
+      `${veto ? escapeHtml(veto) : "o filtro Éden veta"}. Por isso o padrão aparece e ` +
+      `os níveis (gatilho, alvo, stop) não: eles estão no card, com o motivo inteiro.`);
   }
   if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço — os níveis e a base de cada um ficam no card da análise.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
@@ -3450,7 +3495,12 @@ function rrDoGrafico(a) {
   }
   // Storm VETADO desenha o padrão mas não tem R:R operável — e o chip não pode calar,
   // pelo mesmo motivo do morto: gráfico sem chip é indistinguível de gráfico sem setup.
-  if (camadaVisivel("storm") && stormEstado(a.storm) === "vetado") vetado = true;
+  let edenNomeVeto = "", edenCurtoVeto = "";
+  if (camadaVisivel("storm") && stormEstado(a.storm) === "vetado") {
+    vetado = true;
+    edenNomeVeto = edenNome((a.storm || {}).eden);
+    edenCurtoVeto = edenCurto((a.storm || {}).eden);
+  }
   if (camadaVisivel("storm") && a.storm && a.storm.opera === true) {
     if (ehFantasma(a.storm.pattern)) {
       morto = true;
@@ -3464,7 +3514,8 @@ function rrDoGrafico(a) {
       }
     }
   }
-  return { rr: null, prefixo: "", morto, vetado };
+  return { rr: null, prefixo: "", morto, vetado,
+           edenNome: edenNomeVeto, edenCurto: edenCurtoVeto };
 }
 
 // As leituras DESENHADAS que morreram. É o que explica um gráfico com padrão na tela
@@ -4121,7 +4172,13 @@ function drawPriceChart(canvas, chart, a) {
           : [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1`])
       : (rrPlan ? ["R:R não calculável", "R:R sem base"]
                 : _rrG.morto ? ["R:R não vale — padrão invalidado", "R:R — invalidado"]
-                : _rrG.vetado ? ["R:R não vale — o Éden veta este setup", "R:R — Éden veta"]
+                // ESCADA de três degraus, e o NOME sobrevive aos dois primeiros: no
+                // telefone o chip cabe em ~250px, e "Éden de Baixa" × "armadilha" são
+                // vetos diferentes — só o primeiro se resolve esperando. Encolhe a
+                // frase, não o dado (DA-101).
+                : _rrG.vetado ? [`R:R não vale — ${_rrG.edenNome || "o Éden"} veta este setup`,
+                                 `R:R — ${_rrG.edenCurto || "Éden"} veta`,
+                                 "R:R — Éden veta"]
                 : []);
     ctx.font = "bold 11px ui-monospace, Menlo, monospace";
     const rrText = rrOpcoes.find((t) => ctx.measureText(t).width + 14 <= plotW)
@@ -4298,7 +4355,7 @@ function drawPriceChart(canvas, chart, a) {
       // o gatilho do Storm já é uma linha de nível rotulada (planZonesStorm) — não
       // se traça o mesmo nível duas vezes
       trigger: null, fantasma: _stormEst === "invalidado", vetado: _stormEst === "vetado",
-      estado: stormEstadoTexto(_stormEst), mostraNome: _duasFamilias,
+      estado: stormEstadoTexto(_stormEst, a.storm), mostraNome: _duasFamilias,
     }, _pontos123, _rotulos123);
   }
   canvas.dataset.pat123 = JSON.stringify(_pontos123);
@@ -6651,7 +6708,10 @@ function scanStormCellHtml(f) {
   const ent = st.entrada === "ponto3" ? "p3" : st.entrada === "ponto2" ? "p2" : "p2/3";
   const rr = st.rr != null ? `${scanFmt(st.rr)}` : "—";
   const detalhe = [
-    `Éden: ${st.eden_ok ? st.eden || "alinhado" : "desalinhado — não opera"}`,
+    // O rótulo vem PRONTO do scanner (mesmo vocabulário do card): a célula não
+    // reescreve nome de estado. Sem ele (linha antiga em cache), degrada pro que
+    // aquela linha sempre mostrou em vez de inventar um nome.
+    `Éden: ${st.eden_rotulo || (st.eden_ok ? st.eden || "alinhado" : "desalinhado — não opera")}`,
     st.qualidade ? `qualidade ${st.qualidade}` : "",
     st.veto || "",
     ...(st.leituras || []).map((L) => {

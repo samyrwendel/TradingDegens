@@ -1727,6 +1727,63 @@ def _candle_abaixo(high: float, low: float, media: float) -> bool:
     return _fracao_acima(high, low, media) < (1.0 - _FRACAO_ACIMA_MIN)
 
 
+# ── VOCABULÁRIO DO ÉDEN — UM lugar decide como o filtro se escreve ────────────
+#
+# *"nos cards de texto onde usamos Éden, identifica Éden de Alta e de Baixa na menção."*
+#
+# O dado sempre existiu (``direcao``, ``alinhado``, ``armadilha``, ``zona_neutra``) e
+# nunca chegava ao texto: o card mostrava "MME 8 × MME 80" com os dois valores e não
+# dizia de que Éden se tratava. E a prosa do módulo dizia "Éden de compra/venda" — o
+# nome do SINAL — quando o Éden é filtro de REGIME. **Alta/Baixa** é o rótulo de tela.
+#
+# Sai daqui e de nenhum outro lugar. Foi escrevendo rótulo à mão em cada superfície que
+# a tela ganhou três jeitos de dizer timeframe (DA-095); o Éden não repete isso.
+# ``rotulo`` é a forma de leitura e ``rotulo_curto`` a de espaço apertado (etiqueta na
+# vela, célula do scan) — mesmo par de formas do vocabulário de timeframe.
+_EDEN_ROTULO = {
+    "alta":         ("Éden de Alta", "Éden de Alta"),
+    "baixa":        ("Éden de Baixa", "Éden de Baixa"),
+    "armadilha":    ("ARMADILHA (entre as médias)", "armadilha"),
+    "neutra":       ("ZONA NEUTRA (entre as médias)", "zona neutra"),
+    "desalinhado":  ("sem Éden (médias desalinhadas)", "sem Éden"),
+    "indisponivel": ("Éden indisponível", "Éden indisponível"),
+}
+# A equivalência com a doutrina do Stormer, pro `title` — quem leu "Éden de compra" no
+# material precisa reconhecer o que está na tela.
+_EDEN_DOUTRINA = {"alta": "Éden de compra", "baixa": "Éden de venda"}
+
+
+def _eden_nomes(estado: str) -> dict[str, Any]:
+    """Os campos de NOME de um estado do Éden, prontos pra viajar no payload."""
+    rotulo, curto = _EDEN_ROTULO[estado]
+    out = {"estado": estado, "rotulo": rotulo, "rotulo_curto": curto}
+    if estado in _EDEN_DOUTRINA:
+        out["doutrina"] = _EDEN_DOUTRINA[estado]
+    return out
+
+
+def _eden_nome_curto(eden: dict[str, Any]) -> str:
+    """O nome CURTO do estado do Éden, sempre do vocabulário único.
+
+    Lê o rótulo pronto quando ele veio; senão o deriva de ``estado`` ou de ``direcao``
+    — nunca de uma segunda tabela. É por aqui que passa o Éden montado à mão (teste,
+    plano em cache antigo) sem virar prosa quebrada como "contra sem Éden".
+    """
+    pronto = eden.get("rotulo_curto")
+    if pronto:
+        return pronto
+    est = eden.get("estado")
+    if est in _EDEN_ROTULO:
+        return _EDEN_ROTULO[est][1]
+    direcao = eden.get("direcao")
+    if direcao:
+        return _EDEN_ROTULO["alta" if direcao == "compra" else "baixa"][1]
+    if eden.get("zona_neutra"):
+        return _EDEN_ROTULO["armadilha" if eden.get("armadilha") else "neutra"][1]
+    return _EDEN_ROTULO["indisponivel" if eden.get("disponivel") is False
+                        else "desalinhado"][1]
+
+
 def _eden(df: pd.DataFrame) -> dict[str, Any]:
     """Filtro ÉDEN DOS TRADERS: MME 8 × MME 80 × posição do preço.
 
@@ -1753,6 +1810,7 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
             "zona_neutra": False, "direcao_estrutural": None,
             "fracao_acima_rapida": None, "fracao_acima_lenta": None,
             "ema_rapida": None, "ema_lenta": None, "preco": None,
+            **_eden_nomes("indisponivel"),
             "motivo": (f"série com {n} candles — a MME {_STORM_EMA_LENTA} precisa de pelo "
                        f"menos {_STORM_EMA_LENTA} para significar alguma coisa"),
         }
@@ -1776,10 +1834,12 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
     base["direcao_estrutural"] = estrutural
     if rapida > lenta and ac_r and ac_l:
         return {**base, "alinhado": True, "direcao": "compra", "armadilha": False,
+                **_eden_nomes("alta"),
                 "motivo": (f"MME {_STORM_EMA_RAPIDA} acima da MME {_STORM_EMA_LENTA} e "
                            "preço acima das duas")}
     if rapida < lenta and ab_r and ab_l:
         return {**base, "alinhado": True, "direcao": "venda", "armadilha": False,
+                **_eden_nomes("baixa"),
                 "motivo": (f"MME {_STORM_EMA_RAPIDA} abaixo da MME {_STORM_EMA_LENTA} e "
                            "preço abaixo das duas")}
     # ZONA NEUTRA: o candle está ENTRE as duas médias. O Stormer batiza assim a faixa
@@ -1798,11 +1858,15 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
                 f"acima da MME {_STORM_EMA_RAPIDA} e abaixo da MME {_STORM_EMA_LENTA}")
         return {**base, "alinhado": False, "direcao": None, "zona_neutra": True,
                 "armadilha": bool(armadilha),
+                # ARMADILHA e ZONA NEUTRA são o mesmo lugar do gráfico com leituras
+                # opostas — cada um leva o SEU nome, nunca os dois como "sem Éden".
+                **_eden_nomes("armadilha" if armadilha else "neutra"),
                 "motivo": (f"ZONA NEUTRA: o preço está {onde} — a região entre as duas "
                            "médias. Operar aqui é muito mais perigoso: exige "
                            "seletividade extra, e o lado que vale depende da tendência "
                            f"({estrutural or 'indefinida'} pelas médias).")}
     return {**base, "alinhado": False, "direcao": None, "armadilha": False,
+            **_eden_nomes("desalinhado"),
             "motivo": (f"MME {_STORM_EMA_RAPIDA} e MME {_STORM_EMA_LENTA} cruzadas ou o "
                        "preço exatamente sobre uma delas — sem Éden")}
 
@@ -2060,18 +2124,23 @@ def _storm_qualidade(
                        "aqui é muito mais perigoso — o setup vale MENOS e exige "
                        "seletividade extra. Não é veto; é aviso."),
         }
+    # O NOME DO ESTADO vem do vocabulário único (:data:`_EDEN_ROTULO`), nunca escrito à
+    # mão aqui: era isto que fazia a mesma leitura sair como "sem Éden" no veto e como
+    # "ARMADILHA" no motivo, na mesma tela.
+    nome = _eden_nome_curto(eden)
     if not eden.get("alinhado"):
-        return {"qualidade": "ruim", "motivo": eden.get("motivo") or "sem Éden",
+        return {"qualidade": "ruim", "motivo": eden.get("motivo") or nome,
                 "opera": False,
-                "veto": f"sem Éden alinhado — {eden.get('motivo') or 'não opera'}"}
+                "veto": f"{nome} — {eden.get('motivo') or 'não opera'}"}
     if eden.get("direcao") != pat.direction:
+        do_padrao = "alta" if pat.direction == "compra" else "baixa"
         return {
             "qualidade": "ruim",
-            "motivo": (f"o Éden está de {eden.get('direcao')} e o padrão é de "
-                       f"{pat.direction}"),
+            "motivo": (f"o filtro está em {nome} e o padrão é de {pat.direction} "
+                       f"(estrutura de {do_padrao})"),
             "opera": False,
-            "veto": (f"padrão de {pat.direction} contra Éden de {eden.get('direcao')} — "
-                     "operar contra o Éden é o caso que a regra proíbe"),
+            "veto": (f"padrão de {pat.direction} contra {nome} — operar contra o Éden é "
+                     "o caso que a regra proíbe"),
         }
     compra = pat.direction != "venda"
     lado_certo = (
@@ -2081,11 +2150,11 @@ def _storm_qualidade(
     if lado_certo:
         onde = "acima" if compra else "abaixo"
         return {"qualidade": "perfeita", "opera": True, "veto": None,
-                "motivo": (f"ponto 3 inteiro {onde} da MME {_STORM_EMA_LENTA} — a tendência "
-                           "principal sustenta a reversão")}
+                "motivo": (f"{nome} e ponto 3 inteiro {onde} da MME {_STORM_EMA_LENTA} — a "
+                           "tendência principal sustenta a reversão")}
     onde = "acima" if compra else "abaixo"
     return {"qualidade": "boa", "opera": True, "veto": None,
-            "motivo": (f"estrutura válida e Éden alinhado, mas o ponto 3 não está inteiro "
+            "motivo": (f"estrutura válida sob {nome}, mas o ponto 3 não está inteiro "
                        f"{onde} da MME {_STORM_EMA_LENTA}")}
 
 
@@ -2159,7 +2228,8 @@ def build_storm_plan_dict(
             "timeframe": _plan_timeframe_ref(timeframe),
             "eden": {"disponivel": False, "alinhado": False, "direcao": None,
                      "armadilha": False, "ema_rapida": None, "ema_lenta": None,
-                     "preco": None, "motivo": "série indisponível para esta data/frame"},
+                     "preco": None, **_eden_nomes("indisponivel"),
+                     "motivo": "série indisponível para esta data/frame"},
             "pattern": None, "ema_lenta_no_p3": None, "projecao_p3": None,
             "invalidation": None, "stop": None, "leituras": [],
             "qualidade": None, "motivo": "sem dado para ler o Storm",
