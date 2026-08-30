@@ -100,6 +100,10 @@ _CAMPOS_DO_123 = (
     "frame", "estado", "direction", "pattern_state", "trigger", "price", "dist_pct",
     "dist_txt", "invalidacao", "sl", "tp", "tp_faixa", "rr", "rr_note", "rr_entry",
     "rr_basis", "rr_risco", "rr_retorno", "rr_residual",
+    # percurso do setup (task 20260830-008): vazios enquanto o padrão não aciona,
+    # mas a CHAVE existe sempre — a tela não pode ter que adivinhar se o campo
+    # sumiu porque não se aplica ou porque o scan esqueceu.
+    "andado_pct", "sobra_pct", "rr_gatilho", "rr_motivo",
 )
 
 
@@ -124,6 +128,9 @@ def test_a_linha_do_123_nao_perdeu_nem_mudou_nenhum_campo(monkeypatch):
     assert linha["estado"] == "formando"
     # e o Storm é UMA chave a mais, numa caixa só dele
     assert set(linha) - set(_CAMPOS_DO_123) == {"storm"}, set(linha)
+    # padrão FORMANDO: o percurso não se aplica, e o campo diz isso com None em vez
+    # de um zero que pareceria "não andou nada" medido
+    assert linha["andado_pct"] is None and linha["rr_gatilho"] is None, linha
 
 
 def test_sem_123_a_linha_ainda_reporta_o_storm(monkeypatch):

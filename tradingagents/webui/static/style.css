@@ -1294,6 +1294,17 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   margin-top: 6px; font-size: var(--fs-12); line-height: var(--lh-12);
   color: var(--text); overflow-wrap: anywhere;
 }
+/* R:R RETROSPECTIVO e PERCURSO (task 20260830-008). Depois que o padrão aciona, a
+   entrada de referência vira o preço atual e o stop não sai do ponto 3 — então o
+   R:R DESABA conforme o trade amadurece. Um 0,09 sozinho na tela lê-se como "o
+   método dá trade ruim"; ao lado do 5,97 que o setup oferecia no gatilho, lê-se
+   "cheguei tarde". As duas linhas de contexto ficam com peso MENOR que a de agora:
+   a que se opera é a de cima, e as outras explicam por que ela está baixa. */
+.sc-row.sc-retro .sc-v, .sc-row.sc-percurso .sc-v { color: var(--muted); font-weight: var(--fw-med); }
+.sc-row.sc-retro .sc-k, .sc-row.sc-percurso .sc-k { color: var(--dim); }
+/* percentual do percurso no chip do scan: o número que separa "ainda dá" de "já
+   foi", colado no estado, sem virar uma coluna nova numa lista já apertada */
+.scan-andado { font-weight: var(--fw-med); opacity: .8; }
 .sc-nenhum { border-left: 3px solid var(--border); }
 /* LEITURA EXPLORATÓRIA — o frame na tela não é o que produziu o veredito.
    Trocar o chip de tempo recalcula o PLANO INTEIRO: a mesma ação em 29/08 saía com

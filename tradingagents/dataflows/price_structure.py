@@ -967,6 +967,15 @@ def _nearest_support_low(
     return {"label": f"fundo anterior {best[0]}", "price": best[1]}
 
 
+# A base da entrada no GATILHO, escrita uma vez: ela é usada tanto pelo setup ainda
+# não acionado quanto pelo R:R retrospectivo do acionado (ver :func:`_com_percurso`),
+# e duas redações do mesmo motivo viram duas frases divergentes na tela.
+_ENTRY_BASIS_GATILHO = {
+    True: "gatilho — rompimento da máxima do ponto 2",
+    False: "gatilho — perda da mínima do ponto 2",
+}
+
+
 def _entry_ref(pattern: Pattern123, price: float, compra: bool) -> tuple[float, str]:
     """Entrada de referência do setup e o motivo dela, escrito.
 
@@ -975,10 +984,7 @@ def _entry_ref(pattern: Pattern123, price: float, compra: bool) -> tuple[float, 
     ATUAL — é o que ainda resta de trade para quem lê a tela agora."""
     if pattern.state == "acionado":
         return float(price), "preço atual (padrão já acionado)"
-    return float(pattern.trigger), (
-        "gatilho — rompimento da máxima do ponto 2" if compra
-        else "gatilho — perda da mínima do ponto 2"
-    )
+    return float(pattern.trigger), _ENTRY_BASIS_GATILHO[compra]
 
 
 def _pattern_levels(
@@ -1068,7 +1074,88 @@ def _pattern_levels(
         target["same_as_realize"] = rz_price is not None and rz_price == target["price"]
 
     risk_reward = _risk_reward(entry, entry_basis, stop, target, compra)
+    risk_reward = _com_percurso(risk_reward, pattern.trigger, pattern.state, price,
+                                stop, target, compra, _ENTRY_BASIS_GATILHO[compra])
     return invalidation, stop, target, risk_reward
+
+
+def _percurso(trigger: float | None, price: float,
+              target: dict | None, compra: bool) -> float | None:
+    """Quanto do caminho GATILHO → ALVO o preço já andou, em %.
+
+    Medida pura, sem faixa arbitrária: é a régua que separa "o método dá trade
+    ruim" de "cheguei tarde". Pode passar de 100 (o alvo já foi atingido) e pode
+    ficar negativa (o preço voltou para trás do gatilho depois de acionar) — os
+    dois são fatos, e nenhum se arredonda pra caber num rótulo bonito.
+    """
+    tgt = (target or {}).get("price")
+    if tgt is None or trigger is None:
+        return None
+    gat, tgt = float(trigger), float(tgt)
+    caminho = (tgt - gat) if compra else (gat - tgt)
+    if caminho <= 0:
+        return None      # alvo no gatilho ou atrás dele: o ``note`` do R:R já explica
+    andado = (float(price) - gat) if compra else (gat - float(price))
+    return round(andado / caminho * 100, 1)
+
+
+def _com_percurso(rr: dict | None, trigger: float | None, state: str | None,
+                  price: float, stop: dict | None, target: dict | None,
+                  compra: bool, basis_gatilho: str) -> dict | None:
+    """Acrescenta ao R:R o que ele sozinho não conta: **de onde ele caiu**.
+
+    Depois que o padrão aciona, :func:`_entry_ref` passa a medir a partir do PREÇO
+    ATUAL — honesto, é o que ainda resta de trade —, mas o stop continua ancorado
+    na invalidação. A consequência aritmética é que o R:R DESABA à medida que o
+    trade amadurece: no print de 29/08 (venda, ação de 465) o stop 526,92 contra
+    alvo 460,21 com o preço em 465,58 dá risco 61,34 × retorno 5,37 = **0,05**.
+    Não é alvo conservador nem stop largo — é um setup que já andou ~92% do
+    caminho.
+
+    A tela mostrava esse 0,05 com o mesmo peso de um setup fresco, e a conclusão
+    natural de quem lê é "o método dá trades ruins", quando o que houve foi chegar
+    tarde. Então vão junto, sempre que o padrão está ACIONADO:
+
+    * ``no_gatilho`` — o R:R que o setup OFERECIA no gatilho (o que o método
+      entregou de fato a quem entrou na hora);
+    * ``andado_pct`` / ``sobra_pct`` — a régua do percurso (:func:`_percurso`);
+    * ``motivo`` — a frase, pra o número baixo nunca aparecer sozinho.
+
+    Padrão não acionado devolve o R:R intacto: ali a entrada É o gatilho, não há
+    dois números a comparar, e inventar um segundo seria repetir o mesmo.
+
+    Recebe primitivos e não um ``Pattern123`` porque o Storm decai exatamente
+    igual — mesma regra de entrada, mesmo stop parado — e uma segunda cópia da
+    conta seria a mesma verdade escrita duas vezes, livre pra divergir.
+    """
+    if rr is None or trigger is None or state != "acionado":
+        return rr
+    andado = _percurso(trigger, price, target, compra)
+    gatilho = _risk_reward(float(trigger), basis_gatilho, stop, target, compra)
+    out = dict(rr)
+    if gatilho is not None:
+        out["no_gatilho"] = {k: gatilho.get(k) for k in
+                             ("entry", "entry_basis", "risk", "reward", "rr", "note")}
+    if andado is not None:
+        out["andado_pct"] = andado
+        out["sobra_pct"] = round(100.0 - andado, 1)
+        if andado >= 100:
+            out["motivo"] = (
+                f"o gatilho ficou para trás e o alvo já foi alcançado — o percurso "
+                f"do setup andou {andado:.0f}% e não sobra movimento a projetar."
+            )
+        elif andado > 0:
+            out["motivo"] = (
+                f"o gatilho ficou para trás: o preço já andou {andado:.0f}% do "
+                f"caminho até o alvo e sobra {100 - andado:.0f}%. O R:R daqui mede "
+                f"o que RESTA, não o que o setup ofereceu."
+            )
+        else:
+            out["motivo"] = (
+                "o padrão acionou e o preço voltou para trás do gatilho — o R:R "
+                "daqui mede a entrada a mercado agora, não a do rompimento."
+            )
+    return out
 
 
 def _risk_reward(
@@ -1656,9 +1743,15 @@ def _storm_levels(
             entry, entry_basis = float(price), "preço atual (entrada já acionada)"
         else:
             entry, entry_basis = trigger, f"gatilho — {e['label']}"
+        # O Storm decai igual ao 1-2-3: acionada a leitura, a entrada vira o preço
+        # e o stop não sai do ponto 2 — então o R:R de uma entrada que já andou não
+        # se compara com o que ela oferecia no rompimento. Vão os dois.
+        base_gat = f"gatilho — {e['label']}"
+        rr_leitura = _risk_reward(entry, entry_basis, stop, target, compra)
         leituras.append({
             **e, "target": target,
-            "risk_reward": _risk_reward(entry, entry_basis, stop, target, compra),
+            "risk_reward": _com_percurso(rr_leitura, trigger, e["state"], price,
+                                         stop, target, compra, base_gat),
         })
     return invalidation, stop, leituras
 

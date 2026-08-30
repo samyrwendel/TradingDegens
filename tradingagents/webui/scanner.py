@@ -90,6 +90,22 @@ _live_lock = threading.Lock()
 _URGENCIA = {"em_gatilho": 0, "formando": 1, "em_movimento": 2, "invalidou": 3, "sem_setup": 4, "sem_dado": 5}
 
 
+def _resto(r: dict) -> float:
+    """Quanto AINDA sobra do movimento, em %, pro desempate dentro de em_movimento.
+
+    Um setup acionado que andou 20% do caminho e outro que andou 95% são coisas
+    diferentes pra quem vai entrar agora, e a lista os empilhava lado a lado pela
+    distância do gatilho — que num acionado mede o quanto ele já FUGIU, ou seja,
+    ordenava ao contrário do interesse.
+
+    Sem faixa arbitrária: é a própria medida que ordena. Sem percurso (padrão não
+    acionado, ou sem alvo pra medir contra) devolve 100 — nada foi consumido, que é
+    a leitura certa pro que ainda não começou.
+    """
+    v = r.get("sobra_pct")
+    return float(v) if v is not None else 100.0
+
+
 def _fmt_pct(v: float | None) -> str:
     return f"{v * 100:.2f}%" if v is not None else "—"
 
@@ -244,6 +260,15 @@ def _frame_row(ticker: str, date: str, frame: str,
         "rr_risco": rr.get("risk"),
         "rr_retorno": rr.get("reward"),
         "rr_residual": rr_residual,
+        # PERCURSO — quanto do caminho gatilho→alvo o preço já andou, e o R:R que o
+        # setup oferecia NO GATILHO. É o que separa "o método dá trade ruim" de
+        # "cheguei tarde": um R:R 0,09 num setup que andou 91% do caminho não é um
+        # setup ruim, é um setup ESGOTADO, e a lista precisa mostrar a diferença.
+        # Vazios quando o padrão ainda não acionou (ali a entrada É o gatilho).
+        "andado_pct": rr.get("andado_pct"),
+        "sobra_pct": rr.get("sobra_pct"),
+        "rr_gatilho": (rr.get("no_gatilho") or {}).get("rr"),
+        "rr_motivo": rr.get("motivo"),
         # O STORM na MESMA linha, em célula própria — o objetivo declarado é comparar
         # os dois setups no mesmo ativo de relance. Nunca no mesmo campo: misturar os
         # dois numa coluna só faria a taxa de acerto descrever trade nenhum.
@@ -342,7 +367,7 @@ def scan_symbol(ticker: str, date: str, frames: tuple = SCAN_FRAMES) -> dict[str
     # "Melhor" só ordena a lista (urgência) — não escolhe nem esconde frame.
     # Cada ativo reporta TODOS os frames com seu 1-2-3; a UI mostra os dois lado
     # a lado (1d, 4h e 1h), sem hierarquia entre eles.
-    best = min(rows, key=lambda r: (_URGENCIA.get(r.get("estado"), 9),
+    best = min(rows, key=lambda r: (_URGENCIA.get(r.get("estado"), 9), -_resto(r),
                                     r.get("dist_pct") if r.get("dist_pct") is not None else 9.9))
     return {"ticker": ticker, "frames": rows, "melhor": best}
 
@@ -379,7 +404,12 @@ def scan_watchlist(tickers: list[str], date: str,
     n = max(1, min(workers, len(tickers)))
     with ThreadPoolExecutor(max_workers=n, thread_name_prefix="scan") as ex:
         out = list(ex.map(lambda t: scan_symbol(t, date, frames), tickers))
+    # Dentro do mesmo estado, quem tem MAIS movimento pela frente vem antes: um
+    # acionado que sobrou 80% do caminho ainda é aproveitável; um que sobrou 5% é
+    # um trade que já aconteceu, e mostrar os dois com o mesmo peso é o que faz o
+    # leitor concluir que o método só dá R:R ruim.
     out.sort(key=lambda s: (_URGENCIA.get(s["melhor"].get("estado"), 9),
+                            -_resto(s["melhor"]),
                             s["melhor"].get("dist_pct") if s["melhor"].get("dist_pct") is not None else 9.9))
     counts: dict[str, int] = {}
     for s in out:

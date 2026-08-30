@@ -681,3 +681,34 @@ observação estava certa e levou ao defeito real acima, que era outro.
 Provado em `tests/test_webui_troca_de_frame_atomica_e2e.py` (7 testes; a janela de
 transição é REPRODUZIDA embrulhando `window.fetch`, e medida três vezes dentro dela).
 Cada teste foi verificado contra o código antigo: 6 dos 7 falham lá. Governança: **DA-086**.
+
+---
+
+## 15. R:R sempre abaixo de 1 — não é o método, é o percurso (task 20260830-008)
+
+Depois que o padrão aciona, a entrada de referência vira o PREÇO ATUAL (é o que resta
+de trade) e o stop continua no ponto 3 — então **o R:R desaba conforme o trade
+amadurece**. No print: stop 526,92 · alvo 460,21 · preço 465,58 → **0,09**. No gatilho
+(517,35) o mesmo setup oferecia **5,97**, e o percurso já andou **91%**.
+
+A tela mostrava só o 0,09. Quem lê conclui "o método dá trade ruim", quando o que
+houve foi chegar tarde — conclusões opostas sobre o mesmo dado.
+
+**Agora, com o padrão acionado:**
+
+- `risco/retorno agora` **e** `no gatilho`, um debaixo do outro, com peso diferente —
+  o de cima é o que se opera, os de baixo explicam por que ele está baixo;
+- `percurso do setup: andou 91% · sobra 9%`, com o motivo escrito;
+- o estado do card distingue de relance: `acionado · andou 91% do caminho`;
+- o chip do gráfico explica pelo percurso em vez de repetir que o número é baixo.
+
+**Padrão NÃO acionado continua com UMA linha:** ali a entrada É o gatilho, e um
+segundo número seria o mesmo preço duas vezes (DA-077).
+
+**A régua é medida, não faixa arbitrária:** `andado_pct` é a fração do caminho
+gatilho→alvo. Pode passar de 100 (alvo batido) e ficar negativa (preço voltou atrás do
+gatilho). É ela que ordena o scan dentro de `em_movimento` — quem tem mais movimento
+pela frente vem antes —, então nenhum limiar novo foi inventado.
+
+Vale igual pro Storm (mesmo decaimento). Provado em `tests/test_rr_percurso.py` (10) e
+`tests/test_webui_rr_percurso_e2e.py` (8). Governança: **DA-087**.

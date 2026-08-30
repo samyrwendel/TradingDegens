@@ -2119,16 +2119,48 @@ function scSemNivel(nome, valor) {
 // ruim, bom ou inexistente — nos prints do Samyr (mesmo ativo, três frames) ele
 // aparecia só no diário, e no 1h e no 4h não havia nem a linha nem uma palavra.
 // Sem número, a linha carrega o MOTIVO, que o backend escreve.
+//
+// E QUANDO O PADRÃO JÁ ACIONOU SÃO DOIS NÚMEROS, não um. Depois do rompimento a
+// entrada de referência passa a ser o preço atual (é o que resta de trade), mas o
+// stop continua no ponto 3 — então o R:R desaba conforme o trade AMADURECE. Um
+// 0,09:1 sozinho na tela lê-se como "o método dá trade ruim"; ao lado do 5,97:1
+// que o setup oferecia NO GATILHO, lê-se como "cheguei tarde", que é a verdade.
+// Sem os dois, o leitor tira a conclusão errada sobre o método.
 function rrLinha(rr, entradaTxt) {
+  const linhas = [];
+  const temGatilho = !!(rr && rr.no_gatilho && rr.no_gatilho.rr != null);
+  const nome = temGatilho ? "risco/retorno agora" : "risco/retorno";
   if (rr && rr.rr != null) {
-    return scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
+    linhas.push(scRow(nome, `${fmtNum(rr.rr)}:1`,
       `${rrMarca(rr.rr)}${entradaTxt} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
-      rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : "");
+      rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
+  } else {
+    const motivo = (rr && rr.note) || "sem base: esta leitura não produziu stop nem alvo.";
+    linhas.push(`<div class="sc-row sc-sem"><span class="sc-k">${escapeHtml(nome)}</span>` +
+      `<span class="sc-v sc-sem-v">não calculável</span>` +
+      `<span class="sc-basis">${escapeHtml(motivo)}</span></div>`);
   }
-  const motivo = (rr && rr.note) || "sem base: esta leitura não produziu stop nem alvo.";
-  return `<div class="sc-row sc-sem"><span class="sc-k">risco/retorno</span>` +
-    `<span class="sc-v sc-sem-v">não calculável</span>` +
-    `<span class="sc-basis">${escapeHtml(motivo)}</span></div>`;
+  if (temGatilho) {
+    const g = rr.no_gatilho;
+    linhas.push(scRow("no gatilho", `${fmtNum(g.rr)}:1`,
+      `era o que o setup oferecia a quem entrou em ${fmtNum(g.entry)} · ` +
+      `risco ${fmtNum(g.risk)} · retorno ${fmtNum(g.reward)}`, "sc-retro"));
+  }
+  // O PERCURSO é a régua que explica a queda — medida, não faixa arbitrária.
+  if (rr && rr.andado_pct != null) {
+    linhas.push(scRow("percurso do setup",
+      `andou ${fmtPct0(rr.andado_pct)} · sobra ${fmtPct0(rr.sobra_pct)}`,
+      rr.motivo || "", "sc-percurso"));
+  } else if (rr && rr.motivo) {
+    linhas.push(`<div class="sc-row sc-warn">${escapeHtml(rr.motivo)}</div>`);
+  }
+  return linhas.join("");
+}
+
+// Percentual inteiro em pt-BR ("91%"). Aceita negativo e acima de 100 — os dois
+// são fatos do percurso (preço voltou atrás do gatilho / alvo já batido).
+function fmtPct0(v) {
+  return v == null ? "—" : `${Math.round(v)}%`;
 }
 
 // Rótulo pt-BR da qualidade do Storm — a spec só opera "perfeita" e "boa".
@@ -2297,7 +2329,12 @@ function renderSetupCards(a) {
     // O estado NATIVO do padrão fica sempre: "em formação" e "rompeu e retraçou
     // (não confirmado)" são fatos que o veredito não carrega — ele diz o que fazer,
     // não em que pé o padrão está.
-    const pstate = PAT_STATE[pat.state] || pat.state || "";
+    // O estado nativo do padrão ganha o PERCURSO junto: "acionado" sozinho não
+    // distingue um rompimento de ontem de um trade que já andou 91% do caminho, e
+    // são coisas diferentes pra quem vai entrar agora.
+    const andado = rr.andado_pct;
+    const pstate = (PAT_STATE[pat.state] || pat.state || "")
+      + (andado != null ? ` · andou ${fmtPct0(andado)} do caminho` : "");
     cards.push(
       `<section class="setup-card sc-123${pat.direction === "venda" ? " sc-venda" : ""}">` +
       `<div class="sc-head"><span class="sc-title">Setup123` +
@@ -3163,8 +3200,17 @@ function drawPriceChart(canvas, chart, a) {
     // preço. Em vez de cortar (perder letra) ou encolher a fonte (ilegível), o texto
     // DEGRADA por medida: cai pra forma mais curta que couber. A conta nunca se perde
     // de vez — o card logo abaixo carrega "risco > retorno (4,8x)" sempre.
+    // Com o padrão ACIONADO, o que explica o número baixo é o PERCURSO, não o
+    // múltiplo do risco — "andou 91% do caminho" diz por que sobrou pouco; "risco
+    // 11x o retorno" só repete que é pouco. O percurso vem primeiro quando existe.
+    const andou = rrTem && rrPlan.andado_pct != null
+      ? `andou ${Math.round(rrPlan.andado_pct)}%` : "";
     const rrOpcoes = rrTem
-      ? (rrRuim(rrPlan.rr)
+      ? (andou
+          ? [`R:R ${fmtNum(rrPlan.rr)}:1 · ${andou} do caminho`,
+             `R:R ${fmtNum(rrPlan.rr)}:1 · ${andou}`,
+             `R:R ${fmtNum(rrPlan.rr)}:1`]
+          : rrRuim(rrPlan.rr)
           ? [`R:R ${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x o retorno`,
              `R:R ${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x`,
              `R:R ${fmtNum(rrPlan.rr)}:1`]
@@ -5319,7 +5365,7 @@ const SCAN_ESTADO_PT = {
   sem_setup: ["sem setup", "·"],
   sem_dado: ["sem dado"],
 };
-function scanEstadoChip(estado, direction) {
+function scanEstadoChip(estado, direction, andado) {
   const entry = SCAN_ESTADO_PT[estado] || [estado];
   // em_gatilho é direção-aware: COMPRA (verde) ou VENDA (vermelho) — a ação na cara.
   if (estado === "em_gatilho") {
@@ -5335,7 +5381,15 @@ function scanEstadoChip(estado, direction) {
   const cls = estado === "em_movimento" ? "scan-chip movimento"
     : estado === "invalidou" ? "scan-chip invalidou"
     : "scan-chip";
-  return `<span class="${cls}">${escapeHtml(pt)}</span>`;
+  // "em movimento" sozinho não distingue um rompimento de ontem de um trade que já
+  // andou 91% do caminho — e é essa diferença que decide se ainda dá pra entrar.
+  // O percurso entra NO CHIP, que é o que se lê de relance na lista.
+  const pct = andado == null ? "" :
+    ` <span class="scan-andado">${Math.round(andado)}%</span>`;
+  const tit = andado == null ? "" :
+    ` title="${escapeHtml(`o preço já andou ${Math.round(andado)}% do caminho do ` +
+      `gatilho até o alvo — sobra ${Math.round(100 - andado)}%`)}"`;
+  return `<span class="${cls}"${tit}>${escapeHtml(pt)}${pct}</span>`;
 }
 function scanFmt(n) { return n == null ? "—" : Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 }); }
 
@@ -5665,6 +5719,20 @@ function scanStormCellHtml(f) {
     `<b class="ss-rr">${rr}</b></span>`;
 }
 
+// A frase do R:R de um setup ACIONADO, escrita uma vez pra célula e pra linha
+// detalhada. Ela carrega os DOIS números: o que sobra agora e o que o setup
+// oferecia no gatilho. Sem o segundo, um 0,09 lê-se como "o método dá trade ruim";
+// com ele, lê-se "cheguei tarde" — que é o que de fato aconteceu.
+function scanRrPercursoTxt(f) {
+  const base = "R:R medido do PREÇO ATUAL — o setup já foi acionado, então o "
+    + "número mede o que ainda sobra do trade";
+  const andou = f.andado_pct != null
+    ? `; o preço já andou ${Math.round(f.andado_pct)}% do caminho até o alvo` : "";
+  const gat = f.rr_gatilho != null
+    ? `; no gatilho o setup oferecia ${Number(f.rr_gatilho).toFixed(2)}:1` : "";
+  return base + andou + gat;
+}
+
 function scanRrCellHtml(f) {
   // Sem R:R o motivo já está na coluna do TP ("sem alvo — …"); aqui a célula diz
   // que não há número, com o porquê no title. Numa tabela a célula não pode sumir.
@@ -5678,7 +5746,7 @@ function scanRrCellHtml(f) {
     return `<span class="scan-cell scan-note" title="${escapeHtml("alvo praticamente alcançado" + sobra)}">no alvo</span>`;
   }
   const marca = scanRrDoPrecoAtual(f)
-    ? `<span class="scan-mark" title="R:R medido do PREÇO ATUAL — o setup já foi acionado, então o número mede o que ainda sobra do trade">*</span>` : "";
+    ? `<span class="scan-mark" title="${escapeHtml(scanRrPercursoTxt(f))}">*</span>` : "";
   return `<span class="scan-cell num">${scanCk("R:R")}<b>${f.rr.toFixed(2)}</b>${marca}</span>`;
 }
 
@@ -5697,10 +5765,18 @@ function scanRrHtml(f) {
       ? ` <span class="scan-sub">sobrou ${scanFmt(f.rr_retorno)} pra ${scanFmt(f.rr_risco)} de risco</span>` : "";
     return `<span class="scan-note">alvo praticamente alcançado${sobra}</span>`;
   }
-  // Acionado sem ser residual: o número vale, mas a base precisa estar dita.
-  const base = f.pattern_state === "acionado"
-    ? ` <span class="scan-sub">do preço atual</span>` : "";
-  return `<span>R:R <b>${f.rr.toFixed(2)}</b>${base}</span>`;
+  // Acionado sem ser residual: o número vale, mas a base precisa estar dita — e ao
+  // lado do que o setup oferecia NO GATILHO, que é o que separa "método ruim" de
+  // "perdi a entrada".
+  if (f.pattern_state === "acionado") {
+    const gat = f.rr_gatilho != null
+      ? ` <span class="scan-sub">no gatilho ${Number(f.rr_gatilho).toFixed(2)}</span>` : "";
+    const andou = f.andado_pct != null
+      ? ` <span class="scan-sub">andou ${Math.round(f.andado_pct)}%</span>` : "";
+    return `<span title="${escapeHtml(scanRrPercursoTxt(f))}">R:R <b>${f.rr.toFixed(2)}</b>` +
+      ` <span class="scan-sub">do preço atual</span>${gat}${andou}</span>`;
+  }
+  return `<span>R:R <b>${f.rr.toFixed(2)}</b></span>`;
 }
 
 // A legenda do "*" só aparece quando alguma linha o usa — legenda de marcador que
@@ -5778,7 +5854,7 @@ function paintScan(data) {
         `<b class="scan-tk-inline">${escapeHtml(a.ticker)}</b>` +
         `<span class="scan-price">$${scanFmt(f.price)}</span>` +
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
-        scanEstadoChip(f.estado, f.direction) +
+        scanEstadoChip(f.estado, f.direction, f.andado_pct) +
         scanLineCellsHtml(f) + `</li>`);
     }));
     // O cabeçalho só existe se houver tabela embaixo dele.
@@ -5797,7 +5873,7 @@ function paintScan(data) {
         scanTfBadge(f.frame) +
         `<span class="scan-price">$${scanFmt(f.price)}</span>` +
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
-        scanEstadoChip(f.estado, f.direction) +
+        scanEstadoChip(f.estado, f.direction, f.andado_pct) +
         scanLevelsHtml(f) + scanActionsHtml(a.ticker, f) + `</div>`).join("");
       // (CARDS segue com os rótulos por célula — lá não há cabeçalho de coluna.)
       return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
