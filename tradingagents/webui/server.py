@@ -53,7 +53,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tradingagents.webui import oauth_codex, oauth_providers, server_login, timeutil
+from tradingagents.webui import (
+    oauth_codex,
+    oauth_providers,
+    server_login,
+    static_publish,
+    timeutil,
+)
 from tradingagents.webui.auth import OwnerAuth
 from tradingagents.webui.errors import (
     NEED_KEY_CODE,
@@ -104,7 +110,17 @@ def _run_token(run_id: str) -> str:
                     hashlib.sha256).hexdigest()[:32]
 
 
-_STATIC_DIR = Path(__file__).parent / "static"
+# De onde o front é SERVIDO — o diretório PUBLICADO, não o do repo.
+#
+# Ler o repo a cada requisição fazia o instante em que um agente salvava ``app.js``
+# ser o instante em que o usuário via aquilo: sem commit, sem teste, sem deploy (e o
+# cache-buster por mtime garantia que o navegador nem segurasse a versão anterior).
+# Ver :mod:`tradingagents.webui.static_publish` — publicar passa a ser um passo
+# explícito, e ele copia da REVISÃO COMMITADA.
+#
+# Resolvido no IMPORT, não a cada requisição: o caminho não muda em voo, e resolver
+# por requisição reabriria a porta pra um estado intermediário aparecer na tela.
+_STATIC_DIR = static_publish.static_dir()
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".js": "application/javascript; charset=utf-8",
@@ -155,14 +171,17 @@ class _Handler(BaseHTTPRequestHandler):
         data = path.read_bytes()
         # Cache-buster: o index referencia app.js/style.css por nome puro, então o
         # navegador segurava a versão antiga e a tela "não mudava" depois de um deploy.
-        # Reescreve o link com o mtime do arquivo — muda quando o arquivo muda.
+        # Reescreve o link com a versão do ASSET PUBLICADO — o sha da revisão quando
+        # há publicação, o mtime no modo ao vivo (ver ``versao_do_asset``, que explica
+        # por que o mtime sozinho não serve depois que a publicação passou a vir de
+        # ``git archive``).
         if safe == "index.html":
             text = data.decode("utf-8")
             for asset in ("app.js", "style.css"):
-                f = _STATIC_DIR / asset
-                if f.is_file():
+                if (_STATIC_DIR / asset).is_file():
+                    versao = static_publish.versao_do_asset(_STATIC_DIR, asset)
                     text = text.replace(
-                        f"/static/{asset}", f"/static/{asset}?v={int(f.stat().st_mtime)}"
+                        f"/static/{asset}", f"/static/{asset}?v={versao}"
                     )
             data = text.encode("utf-8")
         self._send_bytes(data, ctype)
@@ -948,6 +967,23 @@ def _graceful_shutdown(httpd: ThreadingHTTPServer, runner: AnalysisRunner) -> No
 def main() -> None:
     host = os.getenv("TRADINGDEGENS_WEB_HOST", "0.0.0.0")
     port = int(os.getenv("TRADINGDEGENS_WEB_PORT", "8781"))
+    # DEPLOY DO FRONT: o restart do serviço — que já é o passo explícito de deploy em
+    # toda task — publica o front da REVISÃO COMMITADA. Fica aqui, no entrypoint, e
+    # não no import do módulo: a suíte importa ``server`` centenas de vezes e publicar
+    # ali faria rodar `git archive` em cada uma (e, pior, uma rodada de testes
+    # "deployaria" sem ninguém pedir).
+    #
+    # Front-only, sem restart: `python -m tradingagents.webui.static_publish` — o
+    # servidor lê o diretório publicado a cada requisição, então a nova publicação
+    # aparece na hora, com o cache-buster novo.
+    global _STATIC_DIR
+    try:
+        info = static_publish.publicar()
+        _STATIC_DIR = static_publish.publicado_dir()
+        print(f"Front publicado: {info['revisao'][:12]} → {info['destino']}", flush=True)
+    except Exception as exc:  # noqa: BLE001 — publicação nunca impede a subida
+        print(f"Aviso: não deu pra publicar o front ({exc}); servindo o que já estava "
+              f"em {_STATIC_DIR}", flush=True)
     # Constrói o runner primeiro pra RETOMAR as runs que um restart anterior matou
     # no meio (fila de descritores em disco) ANTES de aceitar tráfego.
     runner = AnalysisRunner()
