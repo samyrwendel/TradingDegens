@@ -26,7 +26,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
-from tradingagents.webui import ask as ask_module, timeutil
+from tradingagents.webui import ask as ask_module, execucao, timeutil
 from tradingagents.webui.compare import (
     build_column,
     confront_pair_valid,
@@ -2581,6 +2581,39 @@ class AnalysisRunner:
                                               "frame": f.get("frame"), "setup": "storm"})
             self._scan_memo = (date, time.time(), result)
             return result
+
+    def execution_card(self, ticker: str, date: str, timeframe: str,
+                       method: str = "padrao") -> dict[str, Any]:
+        """O CARD DE EXECUÇÃO do ativo: o que FAZER com os níveis que já estão na tela.
+
+        Junta três coisas que já existem e nunca tinham se encontrado: o plano
+        (níveis do :mod:`price_structure`), a política de execução (:mod:`execucao`,
+        modelada da spec do degenbot sobre o corpus do Erick) e o track record do
+        ledger (:func:`scanner.scan_verdicts`), este último passado pelo GATE DE N —
+        taxa de acerto com 3 casos é ruído que engana mais do que ajuda.
+
+        O índice vem do ledger INTEIRO, não deste ticker: é a confiabilidade do
+        SETUP, e recortá-la por símbolo deixaria toda amostra abaixo do gate. Só
+        leitura de série cacheada, $0 de LLM.
+        """
+        ticker = (ticker or "").strip().upper()
+        date = (date or "").strip() or timeutil.today()
+        if not ticker:
+            raise ValueError("ticker vazio")
+        plan = fetch_actionable_plan(ticker, date, timeframe, method)
+        if (method or "").startswith("storm"):
+            plan = dict(plan or {})
+            plan["storm"] = fetch_storm_plan(ticker, date, timeframe)
+        # O track record é fail-open: um ledger vazio ou ilegível não pode derrubar o
+        # card — ele só faz o índice dizer que não há amostra, que é a verdade.
+        try:
+            track = scan_verdicts(self.scan_log, date) or {}
+            por_setup = track.get("por_setup") or {}
+        except Exception:  # noqa: BLE001
+            logger.warning("track record indisponível para o card de execução")
+            por_setup = {}
+        return {"ticker": ticker, "date": date, "timeframe": timeframe,
+                "method": method, "card": execucao.card(plan, por_setup)}
 
     def scan_track_record(self, date: str) -> dict[str, Any]:
         """Re-avalia os gatilhos logados contra o preço da data dada.

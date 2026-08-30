@@ -758,3 +758,28 @@ ela **persiste na sessão**.
   liberdade de frame não apaga qual é o frame do veredito (DA-085).
 
 Provado em `tests/test_webui_camadas_e2e.py` (13). Governança: **DA-089**.
+
+---
+
+## 18. Card de execução + índice de confiabilidade (task 20260830-012)
+
+O print do CRWD mostra nove faixas de três famílias e **nenhuma frase dizendo o que
+FAZER com elas**. Os níveis já eram derivados; faltava a política.
+
+O card responde, nesta ordem: **veredito** (entrar agora / aguardar recuo até <nível> /
+passar, com a razão escrita) · **as ordens na sequência de digitar**, cada uma com a
+base do seu preço · **invalidação** · **realizar** (grosso em T1, resíduo até T2) ·
+**peso** (sempre relativo) · **proteção** (BE e trailing, desligados, com o porquê) ·
+**confiabilidade** por setup.
+
+- A entrada é sempre a LIMITE; no "aguardar", a ordem vai pra faixa de recuo.
+- PASSAR **não imprime onde comprar** — o número é o que fica na cabeça de quem lê.
+- A fração de cada alvo sai `a calibrar`: o corpus tem um único caso com número.
+- BE e trailing desligados não é omissão — o método compra o recuo à média, e ligá-los
+  ejetaria no pullback em que se adiciona. `sem evidência` de BE no corpus do Erick.
+- **Gate de N:** com n<5 a tela DIZ "amostra insuficiente" em vez de exibir taxa; de 5
+  a 19 a taxa sai sempre com o intervalo de Wilson; a expectativa (E[R]) vem antes.
+
+Backend em `tradingagents/webui/execucao.py` + `/api/execucao`. Provado em
+`tests/test_execucao.py` (22) e `tests/test_webui_exec_card_e2e.py` (11).
+Governança: **DA-090**.

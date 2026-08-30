@@ -1321,6 +1321,91 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* percentual do percurso no chip do scan: o número que separa "ainda dá" de "já
    foi", colado no estado, sem virar uma coluna nova numa lista já apertada */
 .scan-andado { font-weight: var(--fw-med); opacity: .8; }
+/* ── CARD DE EXECUÇÃO (task 20260830-012) ────────────────────────────────────
+   Os cards de leitura dizem o que o preço ESTÁ fazendo; este diz o que FAZER. Ele é
+   o único card com hierarquia de AÇÃO, então ganha a largura inteira e um veredito
+   com peso de manchete — o resto do card explica esse veredito.
+   Cor pelo estado, e só verde quando é pra ir (DA-085): "aguardar" e "passar" saem
+   em branco e cinza, com a PALAVRA carregando o sentido. */
+.exec-card {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); background: var(--panel-2);
+  padding: 11px 14px; margin: 0 0 10px; min-width: 0;
+}
+.ex-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
+.ex-title { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); color: var(--text); }
+.ex-vered {
+  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12);
+  font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text);
+}
+.ex-vered.ok { color: var(--green); }
+.ex-vered.espera { color: var(--text); }
+.ex-vered.nao { color: var(--muted); }
+.ex-motivo {
+  margin-top: 4px; font-size: var(--fs-12); line-height: var(--lh-12);
+  color: var(--text); overflow-wrap: anywhere;
+}
+.ex-sec {
+  display: block; margin: 9px 0 3px;
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+}
+/* A ORDEM é um roteiro, não uma lista de níveis: o passo numerado vem primeiro e o
+   preço encosta à direita, que é como se confere ao digitar na corretora. */
+.ex-ordem, .ex-row, .ex-prot, .ex-conf {
+  display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline;
+  gap: 2px 8px; padding: 3px 0; border-top: 1px solid var(--border); min-width: 0;
+}
+.ex-ordem:first-of-type, .ex-row:first-of-type, .ex-prot:first-of-type, .ex-conf:first-of-type { border-top: 0; }
+.ex-passo {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-bold); color: var(--accent);
+}
+.ex-tipo {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .4px;
+}
+.ex-papel { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text); min-width: 0; }
+.ex-preco, .ex-v {
+  font-family: var(--mono); font-size: var(--fs-13); line-height: var(--lh-13);
+  font-weight: var(--fw-bold); color: var(--text); text-align: right; min-width: 0;
+}
+/* só o PREÇO é atômico (número não parte no meio). O `.ex-v` das linhas de política
+   carrega FRASE — a política de saída é uma —, e nowrap ali a fazia atravessar a
+   borda no telefone em vez de quebrar. */
+.ex-preco { white-space: nowrap; }
+.ex-row .ex-v { text-align: left; font-family: var(--font); font-weight: var(--fw-med);
+  overflow-wrap: anywhere; }
+.ex-fracao { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--accent); text-transform: uppercase; letter-spacing: .4px; }
+.ex-k { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+/* a BASE ocupa a fileira inteira embaixo: é a justificativa do número, e espremê-la
+   numa coluna a truncaria — o defeito que a DA-078 regra 11 fechou */
+.ex-base, .ex-evid {
+  grid-column: 1 / -1; font-size: var(--fs-10); line-height: var(--lh-10);
+  color: var(--dim); overflow-wrap: anywhere;
+}
+.ex-estado {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .5px;
+}
+.ex-estado.on { color: var(--green); }
+.ex-estado.off { color: var(--muted); }
+/* o NÍVEL da amostra: "insuficiente" não é erro nem alarme — é o estado honesto de
+   um track record em construção, então sai em cinza, não em vermelho */
+.ex-nivel {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .5px;
+  color: var(--muted);
+}
+.ex-nivel.operavel { color: var(--green); }
+.ex-ic { color: var(--dim); }
+@media (max-width: 760px) {
+  /* no telefone o preço desce pra sua linha em vez de espremer o papel da ordem */
+  .ex-ordem, .ex-row, .ex-prot, .ex-conf { grid-template-columns: auto auto 1fr; }
+  .ex-preco, .ex-v { grid-column: 1 / -1; text-align: left; }
+}
 .sc-nenhum { border-left: 3px solid var(--border); }
 /* LEITURA EXPLORATÓRIA — o frame na tela não é o que produziu o veredito.
    Trocar o chip de tempo recalcula o PLANO INTEIRO: a mesma ação em 29/08 saía com

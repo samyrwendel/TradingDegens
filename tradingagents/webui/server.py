@@ -543,6 +543,25 @@ class _Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 date = (qs.get("date", [""])[0] or "").strip() or timeutil.today()
                 self._send_json(self.runner.scan_portfolio(date))
+            elif path == "/api/execucao":
+                # CARD DE EXECUÇÃO: o que fazer com os níveis do ativo aberto —
+                # veredito de oportunidade, ordens na sequência de digitar, saída
+                # fracionada, proteção (BE/trailing, opt-in) e o índice de
+                # confiabilidade com o gate de N. Público como o /api/chart: são
+                # níveis derivados de série, $0 de LLM.
+                qs = parse_qs(urlparse(self.path).query)
+                ticker = (qs.get("ticker", [""])[0] or "").strip()
+                date = (qs.get("date", [""])[0] or "").strip()
+                tf = (qs.get("tf", ["1d"])[0] or "1d").strip()
+                method = (qs.get("method", ["padrao"])[0] or "padrao").strip().lower()
+                if not ticker:
+                    self._send_json({"error": "informe um ticker"}, 400)
+                else:
+                    try:
+                        self._send_json(
+                            self.runner.execution_card(ticker, date, tf, method))
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, 400)
             elif path == "/api/scan/verdicts":
                 # TRACK RECORD do scan: cada gatilho flagrado é re-avaliado contra o
                 # preço de hoje (bateu TP / bateu SL / andamento) + taxa de acerto.

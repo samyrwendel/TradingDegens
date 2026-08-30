@@ -1191,6 +1191,7 @@ function renderResult(snap) {
   renderSetupCards(r.actionable);
   renderChartCard(r.price_chart, snap.ticker, r.actionable);
   renderTfSelector();
+  carregaExecCard();
 
   renderThesis("bull", r.bull);
   renderThesis("bear", r.bear);
@@ -2437,6 +2438,136 @@ function renderSetupCards(a) {
   el.classList.remove("hidden");
 }
 
+// ───────────────────────── CARD DE EXECUÇÃO (task 012) ──────────────────────
+//
+// "Quero um card explicando as entradas alvos como inserir as ordens e onde colocar
+// SL, TPS e onde invalida, e se ainda vale a pena entrar, ou se é pra aguardar recuo
+// até faixa tal." O print que abriu a task mostra por quê: nove faixas de três
+// famílias na tela e nenhuma frase dizendo o que FAZER com elas.
+//
+// Toda a POLÍTICA é decidida no backend (webui/execucao.py, modelada da spec do
+// degenbot sobre o corpus do Erick) — aqui é só desenho. Um veredito calculado em
+// dois lugares vira dois vereditos.
+const VEREDITO_CLS = { entrar: "ok", aguardar: "espera", passar: "nao", sem_setup: "nao" };
+
+function renderExecCard(dados) {
+  const el = $("execCard");
+  if (!el) return;
+  const c = dados && dados.card;
+  if (!c || !c.veredito || c.veredito.estado === "sem_setup") {
+    el.classList.add("hidden"); el.innerHTML = ""; return;
+  }
+  const v = c.veredito;
+  const linha = (k, valor, base, cls) =>
+    `<div class="ex-row${cls ? " " + cls : ""}"><span class="ex-k">${escapeHtml(k)}</span>` +
+    `<b class="ex-v">${escapeHtml(valor)}</b>` +
+    (base ? `<span class="ex-base">${escapeHtml(base)}</span>` : "") + "</div>";
+
+  // 1) O VEREDITO é a manchete: é a pergunta que ele fez olhando o gráfico.
+  const cab =
+    `<div class="ex-head"><span class="ex-title">Como operar</span>` +
+    `<span class="ex-vered ${VEREDITO_CLS[v.estado] || ""}">${escapeHtml(v.rotulo)}</span></div>` +
+    `<div class="ex-motivo">${escapeHtml(v.motivo)}</div>`;
+
+  // 2) AS ORDENS, na sequência em que se digitam. O passo numerado é o ponto: não é
+  // uma lista de níveis, é um roteiro.
+  const ordens = (c.ordens || []).map((o) =>
+    `<div class="ex-ordem"><span class="ex-passo">${o.passo}</span>` +
+    `<span class="ex-tipo">${escapeHtml(o.tipo)}</span>` +
+    `<span class="ex-papel">${escapeHtml(o.papel)}</span>` +
+    `<b class="ex-preco">${fmtNum(o.price)}</b>` +
+    (o.fracao ? `<span class="ex-fracao">${escapeHtml(o.fracao)}</span>` : "") +
+    `<span class="ex-base">${escapeHtml(o.base || "")}</span></div>`).join("");
+
+  const inv = c.invalidacao || {};
+  const linhas = [];
+  if (inv.price != null) {
+    linhas.push(linha("invalida em", fmtNum(inv.price),
+      inv.meaning || "onde o setup deixa de existir", "ex-inval"));
+  }
+  if (c.saida) linhas.push(linha("realizar", c.saida.texto, c.saida.calibrar || ""));
+  if (c.peso) linhas.push(linha("peso", c.peso.degrau, `${c.peso.motivo} · ${c.peso.nota}`));
+
+  // 3) PROTEÇÃO — desligada por default, e o card diz POR QUÊ. Um default silencioso
+  // aqui seria o pior dos mundos: o método compra o recuo à média, e um BE/trailing
+  // ligado ejeta no pullback em que se adiciona.
+  const p = c.protecao || {};
+  const prot = ["be", "trailing"].filter((k) => p[k]).map((k) => {
+    const x = p[k];
+    const como = k === "be"
+      ? (x.gatilhos || []).map((g) => g.texto).join(" · ")
+      // sem a nota aqui: ela sai na linha própria logo abaixo, e repetida vira a
+      // mesma frase duas vezes no mesmo bloco
+      : `${x.referencia} — ${x.disparo}`;
+    return `<div class="ex-prot"><span class="ex-k">${escapeHtml(x.rotulo)}</span>` +
+      `<span class="ex-estado ${x.ligado ? "on" : "off"}">${x.ligado ? "ligado" : "desligado"}</span>` +
+      `<span class="ex-base">ligar ${escapeHtml(como)}</span>` +
+      // A NOTA é o porquê do default, e é a parte que importa: sem ela, "desligado"
+      // parece descuido em vez de decisão de método.
+      `<span class="ex-base">${escapeHtml(x.nota || "")}</span>` +
+      `<span class="ex-evid">${escapeHtml(x.evidencia || "")}</span></div>`;
+  }).join("");
+
+  el.innerHTML = cab +
+    (ordens ? `<div class="ex-ordens"><span class="ex-sec">ordens, na sequência</span>${ordens}</div>` : "") +
+    (linhas.length ? `<div class="ex-rows">${linhas.join("")}</div>` : "") +
+    (prot ? `<div class="ex-prots"><span class="ex-sec">proteção</span>${prot}</div>` : "") +
+    confiabilidadeHtml(c.confiabilidade);
+  el.classList.remove("hidden");
+}
+
+// O ÍNDICE — e o gate de N é o ponto dele. Taxa de acerto com 3 casos é ruído que
+// engana mais do que ajuda, então abaixo do mínimo a tela DIZ que não há amostra em
+// vez de exibir um número. E lidera pela EXPECTATIVA: 70% de acerto com R:R 0,13
+// perde dinheiro.
+function confiabilidadeHtml(conf) {
+  if (!conf || !conf.setups) return "";
+  const nomes = { "123": "Setup123", storm: "Storm123" };
+  const blocos = Object.entries(conf.setups).map(([k, s]) => {
+    const cab = `<span class="ex-k">${escapeHtml(nomes[k] || k)}</span>` +
+      `<span class="ex-nivel ${escapeHtml(s.nivel)}">${escapeHtml(s.nivel)}</span>` +
+      `<span class="ex-base">${escapeHtml(s.texto || "")}</span>`;
+    if (s.nivel === "insuficiente") {
+      return `<div class="ex-conf">${cab}` +
+        `<span class="ex-base">${s.n_fechados} fechado(s) de ${s.n} gatilho(s) logado(s)</span></div>`;
+    }
+    const er = s.expectativa_r != null
+      ? `<b class="ex-v">E[R] ${fmtNum(s.expectativa_r)}</b>` +
+        `<span class="ex-base">por trade, em múltiplos de risco` +
+        (s.rr_medio != null ? ` · R:R médio ${fmtNum(s.rr_medio)}` : "") +
+        (s.acerto_equilibrio != null
+          ? ` · precisa acertar ${(s.acerto_equilibrio * 100).toFixed(1)}% só pra empatar` : "") +
+        `</span>`
+      : `<span class="ex-base">expectativa sem base (nenhum fechado com R:R conhecido)</span>`;
+    const ic = s.ic95
+      ? ` <span class="ex-ic">(${(s.ic95[0] * 100).toFixed(0)}–${(s.ic95[1] * 100).toFixed(0)}%, intervalo 95%)</span>`
+      : "";
+    const taxa = s.taxa_acerto != null
+      ? `<span class="ex-base">acerto ${(s.taxa_acerto * 100).toFixed(0)}% em ${s.n_fechados} fechados${ic}</span>`
+      : "";
+    return `<div class="ex-conf">${cab}${er}${taxa}</div>`;
+  }).join("");
+  return `<div class="ex-confs"><span class="ex-sec">confiabilidade — por setup, ` +
+    `${conf.n_minimo}+ fechados pra exibir taxa</span>${blocos}</div>`;
+}
+
+// Busca o card do ativo aberto. Falha é SILENCIOSA na tela (o card some), nunca um
+// erro vermelho sobre uma análise que está inteira: o card é leitura adicional.
+async function carregaExecCard() {
+  const el = $("execCard");
+  if (!_openTicker) { if (el) { el.classList.add("hidden"); el.innerHTML = ""; } return; }
+  const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "",
+                                  tf: _tf, method: _openMethod || "padrao" });
+  try {
+    const res = await fetch("/api/execucao?" + q.toString());
+    const data = await res.json();
+    if (!res.ok || data.error) { if (el) { el.classList.add("hidden"); el.innerHTML = ""; } return; }
+    renderExecCard(data);
+  } catch (err) {
+    if (el) { el.classList.add("hidden"); el.innerHTML = ""; }
+  }
+}
+
 // ---- thesis lead sentence -------------------------------------------------
 // Cada tese abre com UMA frase tirada do PRÓPRIO texto — nunca inventada. Pega a
 // primeira frase de prosa real (ignora títulos, listas, tabelas, código); sem
@@ -2938,6 +3069,7 @@ async function switchTimeframe(tf) {
     renderHeadPrice(data.actionable, data.live_price || _openLive);
     renderSetupCards(data.actionable);
     renderChartCard(data.price_chart, _openTicker, data.actionable);
+    carregaExecCard();          // outro frame, outro plano: o card acompanha
     if (data.degraded && data.notice) showDegrade(data.notice);
   } catch (err) {
     if (selo !== _tfSeq) return;
