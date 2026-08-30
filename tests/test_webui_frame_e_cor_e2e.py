@@ -152,8 +152,12 @@ _CHART = {"symbol": "AMD", "candles": _CANDLES, "ma": {}, "ema": {},
           "markers": {"buy_regions": [], "active_region": None, "pattern_123": None}}
 
 
-@pytest.fixture
-def base(tmp_path):
+def sobe_servidor(tmp_path):
+    """O servidor de teste, como FUNÇÃO e não como fixture — quem precisa dele noutro
+    arquivo declara a sua própria fixture chamando isto. Importar fixture de módulo de
+    teste funciona, mas faz o parâmetro `base` de cada teste parecer redefinição do
+    import (ruff F811), e um aviso repetido que se aprende a ignorar é pior que a
+    duplicação de três linhas."""
     runner = AnalysisRunner(
         base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
                      "deep_think_llm": "x", "quick_think_llm": "y"},
@@ -165,6 +169,11 @@ def base(tmp_path):
         yield f"http://127.0.0.1:{port}"
     finally:
         httpd.shutdown()
+
+
+@pytest.fixture
+def base(tmp_path):
+    yield from sobe_servidor(tmp_path)
 
 
 def _abre(page, base_url, actionable=None, viewport=None):

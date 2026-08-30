@@ -31,15 +31,20 @@ esperada por sorte — era exatamente o que o print A pegou e o que nenhum teste
 
 import pytest
 
-from tests.test_webui_frame_e_cor_e2e import (  # noqa: F401  (base é fixture)
+from tests.test_webui_frame_e_cor_e2e import (
     DESKTOP,
     TELEFONE,
     _abre,
-    base,
+    sobe_servidor,
     sync_playwright,
 )
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def base(tmp_path):
+    yield from sobe_servidor(tmp_path)
 
 # Atrasa a RESOLUÇÃO do /api/chart dentro da página: pro app é uma resposta lenta, e
 # a janela de transição fica larga o bastante pra ser medida em vez de perseguida.
