@@ -17,7 +17,7 @@ let _refreshSeen = false;            // o servidor já confirmou o refresh no sn
 // o clique não pegou e clica de novo). Guarda o run_id pedido; some quando vira terminal.
 let _cancelPending = "";
 let _cancelPause = false;             // o pedido foi Pausar (true) ou Parar (false)?
-const _STOP_LABEL = "⏹ Parar análise";
+const _STOP_LABEL = "Parar análise";
 let _openRunId = "";                 // run simples aberto (lado A de um confronto manual)
 let _openMethod = "padrao";          // método da análise aberta (Erick EMA 8/21 / Padrão MMS) — troca de TF mantém a estrutura do método
 let _openView = "padrao";            // o que a barra de reanálise destaca: "padrao" | "erick" | "compare" (compare = view de comparação aberta). Clicar o destaque = "Atualizar" (reanalisa hoje preservando o método).
@@ -153,15 +153,20 @@ function assetPt(t) {
   return ASSET_PT[k] || t || "";
 }
 
-// Setup state emitted by the deterministic actionable plan -> emoji anchor + pt-BR
-// label. Keeps the header's "what to do now" legible at a glance (DA-034).
+// Setup state emitted by the deterministic actionable plan -> rótulo pt-BR.
+//
+// Era um par [emoji, rótulo]. O emoji saiu (DA-076) e o estado NÃO ficou sem
+// marcador: quem o carrega é a COR da classe que acompanha o rótulo em toda
+// superfície onde ele aparece — `.sc-state.ativo` (verde), `.sc-state.aguardar_*`
+// (âmbar), `.sc-state.sem_*` (apagado) no card, e a mesma família de classes no
+// chip da lateral. Cor + palavra, nunca o vazio.
 const SETUP_PT = {
-  ativo: ["🎯", "Setup ativo agora"],
-  aguardar_pullback: ["⏳", "Aguardar recuo à média"],
-  aguardar_rompimento: ["⏳", "Aguardar rompimento"],
-  sem_setup: ["⚪", "Sem setup de preço definido"],
-  sem_dado: ["⚪", "Sem dado suficiente"],
-  intradiario_indisponivel: ["⚪", "Intradiário indisponível"],
+  ativo: "Setup ativo agora",
+  aguardar_pullback: "Aguardar recuo à média",
+  aguardar_rompimento: "Aguardar rompimento",
+  sem_setup: "Sem setup de preço definido",
+  sem_dado: "Sem dado suficiente",
+  intradiario_indisponivel: "Intradiário indisponível",
 };
 
 // DE QUAL setup veio o estado acima. São dois independentes, desenhados na mesma
@@ -188,11 +193,15 @@ const SETUP_COMPACT = {
   intradiario_indisponivel: "Indisponível",
 };
 
-// 1-2-3 direction/state -> emoji + pt-BR. Compra (fundo ascendente) e venda
-// (topo descendente) recebem cor distinta no card e no gráfico (fork brief 24/08).
+// 1-2-3 direction/state -> pt-BR. Compra (fundo ascendente) e venda (topo
+// descendente) recebem COR distinta no card e no gráfico (fork brief 24/08) — é ela
+// que carrega a direção desde que o emoji saiu (DA-076): `.sc-123` azul de compra,
+// `.sc-123.sc-venda` laranja, as mesmas de `PAT_COLORS` no canvas.
+// O índice 0 fica VAZIO de propósito: o rótulo é o [1] em todo consumidor, e
+// renumerar espalharia a mudança por lugares que não têm nada a ver com emoji.
 const PAT_DIR = {
-  compra: ["🟢", "de compra", "fundo ascendente"],
-  venda: ["🔴", "de venda", "topo descendente"],
+  compra: ["", "de compra", "fundo ascendente"],
+  venda: ["", "de venda", "topo descendente"],
 };
 // rótulo pt-BR do estado do gatilho 1-2-3 (task 014) — "rompeu_retracou" é token
 // de máquina; aqui vira texto legível pra nota do gráfico não mostrar o snake_case.
@@ -381,7 +390,7 @@ function applyCancelPendingUI() {
   if (stopBtn) {
     stopBtn.disabled = true;
     stopBtn.classList.add("is-stopping");
-    stopBtn.textContent = _cancelPause ? "⏸ pausando…" : "⏹ parando…";
+    stopBtn.textContent = _cancelPause ? "pausando…" : "parando…";
   }
   if (pauseBtn) pauseBtn.disabled = true;
   const lbl = $("progressLabel");
@@ -507,7 +516,7 @@ function renderProgress(snap) {
     _refreshSeen = true;
     $("progressPhase").textContent = "Atualizando";
     $("progressLabel").textContent =
-      "🔄 atualizando “" + (snap.refreshing.label || "etapa") + "” com dados frescos…";
+      "atualizando “" + (snap.refreshing.label || "etapa") + "” com dados frescos…";
   } else {
     if (_refreshSeen) { _refreshSeen = false; _refreshBusy = ""; }
     if (!pendingHere) $("progressLabel").textContent = p.label || "";
@@ -529,11 +538,9 @@ function renderProgress(snap) {
     cmpStepsEl.classList.remove("hidden");
     cmpStepsEl.innerHTML = p.compare_steps.map((s, i) => {
       const st = s.state || "pending";
-      const icon = { pending: "○", running: "⏳", done: "✅", reused: "♻" }[st] || "○";
       const stateTxt = { pending: "aguardando", running: "rodando…", done: "concluída", reused: "reusada do cache" }[st] || "";
       return `<li class="cmp-step is-${st}">` +
         `<span class="cmp-step-n">${i + 1}</span>` +
-        `<span class="cmp-step-icon">${icon}</span>` +
         `<span class="cmp-step-body"><span class="cmp-step-label">${escapeHtml(s.label)}</span>` +
         `<span class="cmp-step-state">${stateTxt}</span></span></li>`;
     }).join("");
@@ -551,7 +558,7 @@ function renderProgress(snap) {
 // executou da que voltou PRONTA do checkpoint numa retomada — e essa precisa
 // aparecer verde, senão a tela pinta de cinza justamente o trabalho preservado
 // (task 002). Snapshot antigo/sem `steps` cai no cruzamento de antes, intacto.
-// Cada etapa concluída ganha o 🔄 "atualizar": re-roda SÓ ela com dado fresco.
+// Cada etapa concluída ganha o ↻ "atualizar": re-roda SÓ ela com dado fresco.
 function renderSteps(steps, p, snap) {
   const activeLabel = p.label;
   const reached = new Set((p.reached || []).map((r) => r.label));
@@ -574,16 +581,16 @@ function renderSteps(steps, p, snap) {
                  (st === "running" && snap.status === "running") ? "active" : ""]
       .filter(Boolean).join(" ");
     const short = escapeHtml(String(s.label || "").split(" — ")[0]);
-    // ♻ = veio pronta do checkpoint, custo zero (DA-058: reúso é dito, não fingido).
+    // "cache" = veio pronta do checkpoint, custo zero (DA-058: reúso é dito, não fingido).
     const mark = st === "reused"
-      ? '<span class="step-reused" title="reaproveitada de onde a análise parou — custo zero">♻</span>'
+      ? '<span class="step-reused" title="reaproveitada de onde a análise parou — custo zero">cache</span>'
       : "";
     const busy = _refreshBusy && _refreshBusy === s.node;
     const btn = (canRefresh && done && s.node)
       ? `<button type="button" class="step-refresh${busy ? " is-busy" : ""}"` +
         ` data-node="${escapeHtml(s.node)}"${busy ? " disabled" : ""}` +
         ` title="Atualizar esta etapa com dados frescos — re-roda só ela"` +
-        ` aria-label="Atualizar ${short} com dados frescos">🔄</button>`
+        ` aria-label="Atualizar ${short} com dados frescos">↻</button>`
       : "";
     return `<li class="${cls}" data-label="${escapeHtml(s.label)}"` +
       ` data-state="${escapeHtml(st)}"><span class="step-name">${short}</span>` +
@@ -695,7 +702,7 @@ function renderThinking(items) {
     // reaproveitado no lugar do selo de modelo — nenhum LLM rodou pra produzi-lo
     // agora, e dizer isso é mais honesto que deixar o card sem explicação.
     const reusedSlot = card.querySelector("[data-tk-reused]");
-    if (reusedSlot) reusedSlot.textContent = it.reused ? "♻ reaproveitado" : "";
+    if (reusedSlot) reusedSlot.textContent = it.reused ? "reaproveitado" : "";
     const body = card.querySelector(".tk-body");
     // re-renderiza só quando o texto mudou de tamanho (streaming/parcial→final)
     if (body && body.dataset.len !== String(it.len)) {
@@ -712,12 +719,12 @@ function stepModelLabel(it) {
   return it.provider ? `${it.provider} · ${it.model}` : it.model;
 }
 
-// Selo de TIMEFRAME(s) da etapa (task 009): "⏱ semanal · diário" (Mercado) / "⏱ 4h · 15m"
+// Selo de TIMEFRAME(s) da etapa (task 009): "semanal · diário" (Mercado) / "4h · 15m"
 // (Erick). Vazio nos nós que não operam num tempo gráfico (some via CSS :empty). O TF vem
 // do backend (real do motor, não configurado) — nunca inventa aqui.
 function stepTfLabel(it) {
   if (!it || !it.timeframe) return "";
-  return "⏱ " + it.timeframe;
+  return it.timeframe;
 }
 
 // Escapa um id pra usar em querySelector([data-tk="..."]) sem quebrar com caracteres
@@ -738,7 +745,10 @@ function axisTag(axis) {
 // Checagem de consistência (item 7): o resultado do checker de contradições pré-
 // publicação. Aberto e no topo quando há achados (é um portão de QA); um selo verde
 // discreto quando limpo. Vazio quando o run não trouxe o campo.
-const _SEV_ICON = { alta: "🔴", "média": "🟡", baixa: "🟢" };
+// Severidade da inconsistência: PALAVRA com classe de cor (DA-076). A bolinha
+// colorida era o único marcador — e bolinha não se lê em leitor de tela nem
+// sobrevive a modo de alto contraste.
+const _SEV_CLS = { alta: "sev-alta", "média": "sev-media", baixa: "sev-baixa" };
 // Carimbo do veredito (task 016): banner âmbar ao lado do veredito quando os insumos
 // tinham inconsistência na hora da DECISÃO. O juiz recebeu os DADOS VERIFICADOS e
 // decidiu com eles; isto avisa o leitor + lista o que divergiu. Vazio → escondido.
@@ -757,16 +767,18 @@ function renderVerdictCaveat(caveat, findings) {
 function contradictionsHtml(findings) {
   if (findings === undefined || findings === null) return "";
   if (!Array.isArray(findings) || findings.length === 0) {
-    return `<div class="consistency-ok">✅ Checagem de consistência: sem inconsistências ` +
+    return `<div class="consistency-ok">Checagem de consistência: sem inconsistências ` +
       `(decisão única · gatilho 1-2-3 coerente · preço único · agregados batem).</div>`;
   }
   const items = findings.map((f) => {
-    const icon = _SEV_ICON[f && f.severity] || "•";
-    return `<li>${icon} <b>${escapeHtml((f && f.code) || "")}</b>: ` +
+    const sev = (f && f.severity) || "";
+    const cls = _SEV_CLS[sev] || "sev-baixa";
+    return `<li><span class="sev ${cls}">${escapeHtml(sev || "—")}</span> ` +
+      `<b>${escapeHtml((f && f.code) || "")}</b>: ` +
       `${escapeHtml((f && f.message) || "")}</li>`;
   }).join("");
   return `<details class="section consistency-warn" open>` +
-    `<summary>⚠️ Checagem de consistência — ${findings.length} inconsistência(s) a revisar</summary>` +
+    `<summary>Checagem de consistência — ${findings.length} inconsistência(s) a revisar</summary>` +
     `<div class="section-body"><ul class="consistency-list">${items}</ul></div></details>`;
 }
 
@@ -782,7 +794,7 @@ function tfTag(node) {
   } else if (node === "erick") {
     tf = "4h · 15m";
   }
-  return tf ? ` <span class="sec-tf">⏱ ${escapeHtml(tf)}</span>` : "";
+  return tf ? ` <span class="sec-tf">${escapeHtml(tf)}</span>` : "";
 }
 
 function section(title, mdText, axis, tfNode) {
@@ -846,7 +858,7 @@ function auditFooterHtml(audit, asOfPrice) {
       byStep.map((s) => {
         const lbl = stepModelLabel(s);
         // TF real da etapa (task 009) ao lado do modelo — só onde se aplica (Mercado/Erick).
-        const tf = s.timeframe ? `<span class="as-tf">⏱ ${escapeHtml(s.timeframe)}</span>` : "";
+        const tf = s.timeframe ? `<span class="as-tf">${escapeHtml(s.timeframe)}</span>` : "";
         return `<li><span class="as-step">${escapeHtml(s.label || s.node || "—")}</span>` +
           `<span class="as-meta">${tf}<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span></span>` +
           stepFallbackBadge(s.fallback) + `</li>`;
@@ -869,10 +881,10 @@ function errorCardHtml(message, code, runId) {
   const msg = message || "Falha ao rodar a análise.";
   const wantsConfig = _CFG_ERROR_CODES.has(code);
   const action = wantsConfig
-    ? `<button type="button" class="err-action" data-act="open-config">⚙️ Abrir Configurações</button>`
+    ? `<button type="button" class="err-action" data-act="open-config">Abrir Configurações</button>`
     : `<span class="err-hint">Você pode tentar de novo pelos botões de método/timeframe acima.</span>`;
   return `<div class="error-card ${escapeHtml(code || "error")}">` +
-    `<div class="err-title">⚠️ Não deu pra concluir</div>` +
+    `<div class="err-title">Não deu pra concluir</div>` +
     `<div class="err-msg">${escapeHtml(msg)}</div>` +
     `<div class="err-foot">${action}</div>` +
     escalateBoxHtml(runId) +
@@ -940,13 +952,13 @@ function partialBannerHtml(snap, r) {
   const msg = snap.error || "Uma etapa falhou.";
   const wantsConfig = _CFG_ERROR_CODES.has(snap.error_code);
   const action = wantsConfig
-    ? `<div class="err-foot"><button type="button" class="err-action" data-act="open-config">⚙️ Abrir Configurações</button></div>`
+    ? `<div class="err-foot"><button type="button" class="err-action" data-act="open-config">Abrir Configurações</button></div>`
     : "";
   const stepLine = step
     ? `<div class="err-msg">Parou em: <b>${step}</b>. As etapas concluídas abaixo estão <b>preservadas</b> — continue do ponto (escale a etapa ou retome), sem refazer tudo.</div>`
     : `<div class="err-msg">As etapas concluídas abaixo estão <b>preservadas</b> — continue do ponto, sem refazer tudo.</div>`;
   return `<div class="error-card partial ${escapeHtml(snap.error_code || "error")}">` +
-    `<div class="err-title">⚠️ Parou nesta etapa — o já feito foi preservado</div>` +
+    `<div class="err-title">Parou nesta etapa — o já feito foi preservado</div>` +
     `<div class="err-msg">${escapeHtml(msg)}</div>` +
     stepLine + action +
     escalateBoxHtml(snap.run_id) +
@@ -961,16 +973,16 @@ function partialReportsHtml(snap, r) {
   let html = partialBannerHtml(snap, r);
   html += fallbackBannerHtml(r.fallbacks);
   if (r.erick_report && r.erick_report.trim()) {
-    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
+    html += `<details class="section erick" open><summary>Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
   }
-  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
-  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
-  html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
-  html += section("💬 Sentimento", r.sentiment_report);
-  if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);
-  html += section("🎯 Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan, axes.trader);
-  html += section("🛡️ Decisão de Risco (parcial)", r.risk_decision);
+  html += section("Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
+  html += section("Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
+  html += section("Notícias — macro e mercados de previsão", r.news_report);
+  html += section("Sentimento", r.sentiment_report);
+  if (!isCrypto) html += section("Fundamentos", r.fundamentals_report);
+  html += section("Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan, axes.trader);
+  html += section("Decisão de Risco (parcial)", r.risk_decision);
   html += auditFooterHtml(r.audit, null);
   return html;
 }
@@ -1117,7 +1129,7 @@ function renderResult(snap) {
     if (railTheses) railTheses.classList.add("hidden");
     if ($("resumeBar")) $("resumeBar").classList.add("hidden");
     // Banner de erro HUMANO (sem stack, sem chave): a mensagem acionável do backend
-    // + botão pra abrir ⚙️ Configurações quando é problema de chave/crédito.
+    // + botão pra abrir as Configurações quando é problema de chave/crédito.
     $("sections").innerHTML = errorCardHtml(snap.error, snap.error_code, snap.run_id);
     bindErrorCard($("sections"));
     mountAskBox($("askSingle"), "");  // run com erro sem parcial não tem o que ancorar
@@ -1190,22 +1202,22 @@ function renderResult(snap) {
   // em alguma etapa, o banner de resumo abre logo abaixo do QA — visível de relance.
   html += fallbackBannerHtml(r.fallbacks);
   if (r.erick_report && r.erick_report.trim()) {
-    html += `<details class="section erick" open><summary>🧭 Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
+    html += `<details class="section erick" open><summary>Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
   }
   // For crypto, the deterministic derivatives feed goes first and open — it is
   // the data yfinance can't see and the source is always named here.
   if (isCrypto && r.derivatives_report && r.derivatives_report.trim()) {
-    html += `<details class="section" open><summary>🪙 Derivativos — taxa de financiamento <span class="orig">(funding)</span> · contratos em aberto <span class="orig">(open interest)</span> · liquidações <span class="orig">(liquidations)</span> (fonte nomeada)</summary>` +
+    html += `<details class="section" open><summary>Derivativos — taxa de financiamento <span class="orig">(funding)</span> · contratos em aberto <span class="orig">(open interest)</span> · liquidações <span class="orig">(liquidations)</span> (fonte nomeada)</summary>` +
       `<div class="section-body"><div class="md">${renderMarkdown(r.derivatives_report)}</div></div></details>`;
   }
-  html += section("⚖️ Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
-  html += section("📊 Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
-  html += section("📰 Notícias — macro e mercados de previsão", r.news_report);
-  html += section("💬 Sentimento", r.sentiment_report);
-  if (!isCrypto) html += section("📑 Fundamentos", r.fundamentals_report);
-  html += section("🎯 Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan, axes.trader);
-  html += section("🛡️ Decisão de Risco (veredito final na íntegra — a única decisão)", r.risk_decision || r.final_trade_decision, axes.veredito);
+  html += section("Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
+  html += section("Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
+  html += section("Notícias — macro e mercados de previsão", r.news_report);
+  html += section("Sentimento", r.sentiment_report);
+  if (!isCrypto) html += section("Fundamentos", r.fundamentals_report);
+  html += section("Plano do Trader (leitura — insumo, não é o veredito)", r.trader_plan, axes.trader);
+  html += section("Decisão de Risco (veredito final na íntegra — a única decisão)", r.risk_decision || r.final_trade_decision, axes.veredito);
   html += auditFooterHtml(r.audit, r.as_of_price);
   $("sections").innerHTML = html;
 
@@ -1230,13 +1242,13 @@ function metaSection(title, md) {
 function compareColumn(c, slot) {
   if (!c || !c.method) return "";
   const isErick = c.method === "erick";
-  const title = (isErick ? "🧭 " : "") + (c.label || (isErick ? "Método Erick" : "Padrão"));
+  const title = "" + (c.label || (isErick ? "Método Erick" : "Padrão"));
   const v = c.verdict || (c.status === "error" ? "error" : "");
   const plan = isErick
     ? (c.erick_report || c.trader_plan || c.final_decision || "")
     : (c.trader_plan || c.final_decision || "");
   const reused = c.reused
-    ? `<span class="cmp-reused" title="reaproveitado do cache — não re-rodou">♻ cache</span>`
+    ? `<span class="cmp-reused" title="reaproveitado do cache — não re-rodou">cache</span>`
     : "";
   const dateStr = c.date ? `<span class="cmp-col-date">${escapeHtml(fmtDate(c.date))}</span>` : "";
   const openBtn = c.run_id
@@ -1248,8 +1260,8 @@ function compareColumn(c, slot) {
   const degMissing = degItems.filter((d) => d.kind !== "suspect");
   const degSuspect = degItems.filter((d) => d.kind === "suspect");
   const deg =
-    (degMissing.length ? `<div class="cmp-degraded">⚠️ Feito sem: ${degMissing.map(degradedName).join(" · ")}</div>` : "") +
-    (degSuspect.length ? `<div class="cmp-degraded">🔎 Texto sinalizado: ${degSuspect.map(degradedName).join(" · ")}</div>` : "");
+    (degMissing.length ? `<div class="cmp-degraded">Feito sem: ${degMissing.map(degradedName).join(" · ")}</div>` : "") +
+    (degSuspect.length ? `<div class="cmp-degraded">Texto sinalizado: ${degSuspect.map(degradedName).join(" · ")}</div>` : "");
   const err = c.status === "error"
     ? `<div class="cmp-err">Leitura indisponível: ${escapeHtml(c.error || "falha")}</div>`
     : "";
@@ -1314,9 +1326,9 @@ function renderCompare(snap) {
   const agr = meta.agreement || "";
   const agrCls = agr === "concordam" ? "agree"
     : (agr === "divergem" ? "diverge" : (agr === "invalido" ? "invalid" : "partial"));
-  const agrLabel = agr === "concordam" ? "✅ Concordam"
-    : (agr === "divergem" ? "⚠️ Divergem"
-      : (agr === "invalido" ? "⛔ Inválido" : "◐ Parcial"));
+  const agrLabel = agr === "concordam" ? "Concordam"
+    : (agr === "divergem" ? "Divergem"
+      : (agr === "invalido" ? "Inválido" : "Parcial"));
   $("metaJudge").innerHTML =
     `<div class="mj-head ${agrCls}">` +
       `<span class="mj-badge">${agrLabel}</span>` +
@@ -1440,7 +1452,7 @@ function mountAskBox(container, runId) {
   if (container.dataset.runId === runId && container.firstChild) return;
   container.dataset.runId = runId;
   container.innerHTML =
-    `<div class="ask-head">💬 Pergunte sobre esta análise</div>` +
+    `<div class="ask-head">Pergunte sobre esta análise</div>` +
     `<div class="ask-thread"></div>` +
     `<form class="ask-form" autocomplete="off">` +
       `<input type="text" class="ask-input" maxlength="500" ` +
@@ -1695,7 +1707,7 @@ function renderLaunchModels() {
   const host = $("launchModels");
   if (!host) return;
   const chip = (level) => {
-    const icon = level === "deep" ? "🧠" : "⚡";
+    const icon = level === "deep" ? "pesado" : "rápido";
     const lead = level === "deep" ? "pesado" : "rápido";
     const set = (level === "deep" ? _llmCfg.deepModel : _llmCfg.quickModel) || "";
     const eff = set || _providerDefaultModel(level);
@@ -1781,14 +1793,14 @@ function openLaunchModelPicker(level, btn) {
   const el = document.createElement("div");
   el.className = "lb-model-pop";
   el.innerHTML =
-    `<div class="lbp-head">${level === "deep" ? "🧠" : "⚡"} Modelo ${lead}` +
+    `<div class="lbp-head">Modelo ${lead}` +
     (prov ? ` <span class="lbp-prov">${escapeHtml(prov)}</span>` : "") + `</div>` +
     `<input type="text" class="lbp-search" autocomplete="off" role="combobox" aria-autocomplete="list" ` +
       `placeholder="filtrar modelos… (id ou nome)" />` +
     `<ul class="lbp-list" role="listbox"></ul>` +
     `<div class="lbp-foot">` +
       `<button type="button" class="lbp-default">padrão do provedor</button>` +
-      `<button type="button" class="lbp-adv" title="Escolher o provedor deste nível nas Configurações">⚙️ provedor</button>` +
+      `<button type="button" class="lbp-adv" title="Escolher o provedor deste nível nas Configurações">provedor</button>` +
     `</div>`;
   const group = btn.closest(".lb-model") || btn.parentNode;
   group.appendChild(el);
@@ -2183,7 +2195,7 @@ function renderSetupCards(a) {
   // Carimbo do VEREDITO — estado + horizonte — no card da leitura que o produziu.
   // É o que torna a discordância LEGÍVEL: dá pra ver qual das duas decidiu, em vez
   // de um estado órfão pairando sobre as duas.
-  const vlabel = (SETUP_PT[a.setup_state] || [])[1] || a.setup_state;
+  const vlabel = SETUP_PT[a.setup_state] || a.setup_state;
   const carimbo =
     `<div class="sc-verdict"><span class="sc-vk">veredito do plano</span>` +
     `<span class="sc-state ${escapeHtml(a.setup_state)}">${escapeHtml(vlabel)}</span>` +
@@ -2593,7 +2605,7 @@ function renderDegraded(list) {
   if (missing.length) {
     const plural = missing.length > 1;
     heads.push(
-      `<div class="dg-head">⚠️ Análise feita <b>SEM</b> ${plural ? "as fontes" : "a fonte"}: ` +
+      `<div class="dg-head">Análise feita <b>SEM</b> ${plural ? "as fontes" : "a fonte"}: ` +
       `<b>${missing.map(degradedName).join(" · ")}</b></div>` +
       `<div class="dg-sub">Tentei automaticamente mais uma vez antes de seguir. As leituras acima ` +
       `não incluem ${plural ? "essas fontes" : "essa fonte"} — trate como ausente, não como sinal.</div>`
@@ -2602,7 +2614,7 @@ function renderDegraded(list) {
   if (suspect.length) {
     const plural = suspect.length > 1;
     heads.push(
-      `<div class="dg-head">🔎 Texto sinalizado ${plural ? "nos turnos" : "no turno"} de: ` +
+      `<div class="dg-head">Texto sinalizado ${plural ? "nos turnos" : "no turno"} de: ` +
       `<b>${suspect.map(degradedName).join(" · ")}</b></div>` +
       `<div class="dg-sub">${plural ? "Essas leituras entraram" : "Essa leitura entrou"} na análise — ` +
       `não ${plural ? "foram" : "foi"} descartada. O verificador de sanidade achou sinal de texto ` +
@@ -2699,7 +2711,7 @@ function bindTfSelector() {
 function showDegrade(msg) {
   const el = $("chartDegrade");
   if (!el) return;
-  el.textContent = "⚠️ " + msg;
+  el.textContent = msg;
   el.classList.remove("hidden");
 }
 function hideDegrade() {
@@ -3596,14 +3608,14 @@ function fmtPrice(v, currency) {
   return usd ? `$${num}` : `${num} ${escapeHtml(currency)}`;
 }
 
-// Linha de preço: valor + variação do dia (▲ verde / ▼ vermelho). Sem dado → "—".
+// Linha de preço: valor + variação do dia (↑ verde / ↓ vermelho). Sem dado → "—".
 function priceLineHtml(p) {
   if (!p || p.price == null) return `<span class="pdash">—</span>`;
   let chg = "";
   if (p.change_pct != null) {
     const up = p.change_pct > 0, dn = p.change_pct < 0;
     const cls = up ? "up" : (dn ? "down" : "flat");
-    const arrow = up ? "▲" : (dn ? "▼" : "·");
+    const arrow = up ? "↑" : (dn ? "↓" : "·");
     chg = ` <span class="pchg ${cls}">${arrow} ${Math.abs(p.change_pct).toFixed(2)}%</span>`;
   }
   return `<span class="pval">${fmtPrice(p.price, p.currency)}</span>${chg}`;
@@ -3797,7 +3809,7 @@ function paintHistory() {
     // marcador de término em 2º plano (só em run já concluído, some ao abrir)
     const flag = !running && _finishedFlags.get(r.run_id);
     const flagHtml = flag
-      ? `<span class="h-flag ${flag}">${flag === "error" ? "⚠ erro" : "✓ pronto"}</span>`
+      ? `<span class="h-flag ${flag}">${flag === "error" ? "erro" : "pronto"}</span>`
       : "";
     let vHtml, vClass, meta;
     if (running) {
@@ -3807,10 +3819,11 @@ function paintHistory() {
       meta = `${escapeHtml(p.phase || "processando")} · ${Math.round(r.elapsed || 0)}s`;
     } else {
       if (isSetup123) {
-        // Chip 1-2-3: emoji + rótulo compacto do setup, cor por estado. O title
-        // carrega a frase completa de SETUP_PT (acessível, não cabe na coluna).
-        const [emo, full] = SETUP_PT[setupState] || ["⚪", setupState];
-        vHtml = `${emo} ${escapeHtml(SETUP_COMPACT[setupState] || full)}`;
+        // Chip 1-2-3: rótulo compacto do setup, COR por estado (a classe vClass
+        // abaixo). O title carrega a frase completa de SETUP_PT (acessível, não
+        // cabe na coluna).
+        const full = SETUP_PT[setupState] || setupState;
+        vHtml = escapeHtml(SETUP_COMPACT[setupState] || full);
         vClass = setupState;
         vTitle = full;   // title ganha a frase legível, não o snake_case
       } else {
@@ -4181,7 +4194,7 @@ function renderSubscriptionBox() {
 
 // Monta as 3 linhas (uma vez). Cada linha tem duas caras: "conectar" (botão OAuth no
 // estilo do app + fallback avançado de colar token) e "conectada" (colapsada:
-// "✅ Label conectada · Desconectar"). O JS alterna as duas conforme o status.
+// "Label conectada · Desconectar"). O JS alterna as duas conforme o status.
 function buildSubscriptionRows() {
   const host = $("subProviders");
   if (!host || _subRowsBuilt) return;
@@ -4253,8 +4266,8 @@ function applySubRowState(meta, info) {
     // COLAPSA: esconde botão/texto/Avançado, deixa só a linha compacta.
     const viaServer = info.source === "server";
     label.textContent = viaServer
-      ? `✅ ${meta.label} conectada · login do servidor`
-      : `✅ ${meta.label} conectada`;
+      ? `${meta.label} conectada · login do servidor`
+      : `${meta.label} conectada`;
     // login do servidor não tem registro do app pra remover → oferece "Reconectar"
     // (reabre o OAuth); registro do app → "Desconectar" (remove só o registro).
     discBtn.textContent = viaServer ? "Reconectar" : "Desconectar";
@@ -4283,7 +4296,7 @@ function handleOwnerSessionLost(res, data) {
   renderConfigPanel();          // esconde a assinatura e mostra o login do dono
   const st = $("ownerStatus");
   if (st) {
-    st.textContent = "⚠️ Sua sessão expirou (o servidor reiniciou). Entre de novo pra conectar assinaturas.";
+    st.textContent = "Sua sessão expirou (o servidor reiniciou). Entre de novo pra conectar assinaturas.";
     st.className = "cfg-status err";
   }
   const pass = $("ownerPass");
@@ -4312,7 +4325,7 @@ async function subscriptionOAuthStart(provider) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.authorize_url) {
       if (handleOwnerSessionLost(res, data)) return;   // sessão caiu no restart: já pedimos re-login
-      if (st) { st.textContent = "❌ " + (data.error || "não deu pra iniciar"); st.className = "cfg-status sub-status err"; }
+      if (st) { st.textContent = (data.error || "não deu pra iniciar"); st.className = "cfg-status sub-status err"; }
       return;
     }
     // Abre o login oficial numa nova aba; o usuário autoriza lá e volta.
@@ -4320,7 +4333,7 @@ async function subscriptionOAuthStart(provider) {
     if (st) { st.textContent = `aguardando você autorizar no ${meta.label}…`; st.className = "cfg-status sub-status"; }
     startSubscriptionPoll();
   } catch (e) {
-    if (st) { st.textContent = "❌ erro de rede"; st.className = "cfg-status sub-status err"; }
+    if (st) { st.textContent = "erro de rede"; st.className = "cfg-status sub-status err"; }
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -4365,14 +4378,14 @@ async function subscriptionConnect(provider) {
     input.value = "";                       // não retém a credencial no navegador
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.connected) {
-      st.textContent = "✅ assinatura conectada"; st.className = "cfg-status sub-status ok";
+      st.textContent = "assinatura conectada"; st.className = "cfg-status sub-status ok";
     } else if (handleOwnerSessionLost(res, data)) {
       return;                                 // sessão caiu no restart: já pedimos re-login
     } else {
-      st.textContent = "❌ " + (data.error || "falhou"); st.className = "cfg-status sub-status err";
+      st.textContent = (data.error || "falhou"); st.className = "cfg-status sub-status err";
     }
   } catch (e) {
-    st.textContent = "❌ erro de rede"; st.className = "cfg-status sub-status err";
+    st.textContent = "erro de rede"; st.className = "cfg-status sub-status err";
   } finally {
     btn.disabled = false;
     refreshSubscriptionStatus();
@@ -4454,7 +4467,7 @@ function updateConfigBadge() {
         || _providerDefaultModel(level) || "padrão";
       return `${icon} ${prov || "?"} · ${model}`;
     };
-    const par = `${lvl("quick", "⚡")}   ${lvl("deep", "🧠")}`;
+    const par = `${lvl("quick", "rápido")}   ${lvl("deep", "pesado")}`;
     if (!_isOwner && !_llmCfg.apiKey) {
       act.textContent = "Sem chave — informe a sua acima ou entre como dono para rodar.";
     } else {
@@ -4484,11 +4497,11 @@ async function ownerLogin() {
       await applyConfig();          // recarrega owner/estado do servidor
       renderConfigPanel();
     } else {
-      st.textContent = "❌ " + (data.error || "senha incorreta");
+      st.textContent = (data.error || "senha incorreta");
       st.className = "cfg-status err";
     }
   } catch (e) {
-    st.textContent = "❌ erro de rede"; st.className = "cfg-status err";
+    st.textContent = "erro de rede"; st.className = "cfg-status err";
   } finally {
     btn.disabled = false;
   }
@@ -4569,7 +4582,7 @@ function onLevelProviderChange(level, opts) {
   applyModelCombosForProviders();
   const form = _readConfigForm();
   // Dono com assinatura conectada escolhendo o Anthropic PAGO: a dica vale mais que o
-  // "✅ N modelos" — as duas ocupam a mesma linha de status, então só uma escreve.
+  // "N modelos" — as duas ocupam a mesma linha de status, então só uma escreve.
   const suggest = _isOwner && !!_subConnected.anthropic && prov === "anthropic";
   // a chave BYOK é do provedor-base (o do PESADO); um nível em outro provedor lista
   // pela env do dono (ou cai no catálogo curado).
@@ -4587,7 +4600,7 @@ function onLevelProviderChange(level, opts) {
 function maybeSuggestClaudeCli() {
   if (!_isOwner || !_subConnected.anthropic) return;
   if (_cfgLevelProvider("quick") === "anthropic" || _cfgLevelProvider("deep") === "anthropic") {
-    setCfgStatus("💡 Assinatura Claude conectada — escolha “Claude — assinatura ($0/token)” em vez do Anthropic pago pra rodar sem gastar chave.", "");
+    setCfgStatus("Assinatura Claude conectada — escolha “Claude — assinatura ($0/token)” em vez do Anthropic pago pra rodar sem gastar chave.", "");
   }
 }
 
@@ -4649,7 +4662,7 @@ function bindConfig() {
 
 // Erro de "precisa de chave" (403 need_key): abre a config e aponta o caminho.
 function handleNeedKey(msg) {
-  $("formError").textContent = msg || "Informe sua chave nas Configurações (⚙️).";
+  $("formError").textContent = msg || "Informe sua chave nas Configurações.";
   $("configPanel").classList.remove("hidden");
   scrollToOpen($("configPanel"));
 }
@@ -4986,7 +4999,7 @@ let _modelsAbort = null;
 let _modelsSeq = 0;
 
 // Testa a chave E puxa a lista de modelos de UM provedor (POST /api/models), cacheando
-// por provedor. Cancela a requisição anterior. Sucesso ✅ popula; provedor sem listagem
+// por provedor. Cancela a requisição anterior. Sucesso popula; provedor sem listagem
 // (claude-cli) ou falha → cai no CATÁLOGO curado (nunca modelo de outro provedor).
 async function refreshModelsForProvider(provider, { apiKey = "", baseUrl = "", status = false } = {}) {
   if (!_canListProvider(provider, apiKey, baseUrl)) {
@@ -5013,20 +5026,20 @@ async function refreshModelsForProvider(provider, { apiKey = "", baseUrl = "", s
     if (data.ok) {
       fillModelLists(data.models, provider);
       preselectDefaults();
-      if (status) setCfgStatus(`✅ chave válida — ${data.count} modelos carregados`, "ok");
+      if (status) setCfgStatus(`chave válida — ${data.count} modelos carregados`, "ok");
     } else {
       applyModelCombosForProviders();             // catálogo do provedor
-      if (status) setCfgStatus(`❌ ${data.error || "não deu pra listar os modelos"}`, "err");
+      if (status) setCfgStatus(`${data.error || "não deu pra listar os modelos"}`, "err");
     }
   } catch (e) {
     if (e.name === "AbortError" || seq !== _modelsSeq) return;
-    if (status) setCfgStatus("❌ erro de rede ao listar modelos", "err");
+    if (status) setCfgStatus("erro de rede ao listar modelos", "err");
   }
 }
 
 // Entry-point do provedor SIMPLES/base (mesma assinatura de antes — mantém os callers).
 // Testa a chave e puxa os modelos dos provedores EM USO — os dois níveis (task 017).
-// Provedores iguais nos dois = uma requisição só. O status ✅/❌ é o do provedor-base
+// Provedores iguais nos dois = uma requisição só. O status (ok/erro) é o do provedor-base
 // (o do PESADO), que é o dono da chave digitada.
 async function refreshModels() {
   const form = _readConfigForm();
@@ -5056,14 +5069,14 @@ function fmtLatency(ms) {
 }
 
 // "Testar modelo": pinga o modelo RÁPIDO e o PESADO escolhidos com um prompt trivial
-// (POST /api/test-model) e mostra ✅ latência de cada (ou ❌ mensagem humana), SEM
+// (POST /api/test-model) e mostra a latência de cada (ou a mensagem de erro), SEM
 // rodar a análise. A chave viaja só no header X-LLM-Key; nada dela aparece na tela.
 let _modelTestAbort = null;
 async function testModel() {
   const form = _readConfigForm();
   // Mesmo gate do analyze: sem login do dono e sem chave própria não há o que testar.
   if (!_isOwner && !(form.apiKey || "").length) {
-    renderModelTest({ error: "Informe sua chave nas Configurações (⚙️) antes de testar o modelo." });
+    renderModelTest({ error: "Informe sua chave nas Configurações antes de testar o modelo." });
     return;
   }
   const btn = $("cfgTestModel");
@@ -5100,8 +5113,8 @@ async function testModel() {
   }
 }
 
-// Desenha o resultado do teste: uma linha por modelo (⚡ rápido / 🧠 pesado) com
-// ✅ latência + trecho, ou ❌ mensagem humana. `sample`/`error` vêm do modelo →
+// Desenha o resultado do teste: uma linha por modelo (rápido / pesado) com
+// a latência + trecho, ou a mensagem humana. `sample`/`error` vêm do modelo →
 // sempre escapados (anti-XSS). Erro de topo (need_key/rede) vira uma linha só.
 function renderModelTest(data) {
   const box = $("cfgModelTest");
@@ -5109,24 +5122,25 @@ function renderModelTest(data) {
   box.classList.remove("hidden");
   const models = (data && data.models) || [];
   if ((!models.length) && data && data.error) {
-    box.innerHTML = `<div class="mt-row err">❌ ${escapeHtml(String(data.error))}</div>`;
+    box.innerHTML = `<div class="mt-row err">${escapeHtml(String(data.error))}</div>`;
     return;
   }
   if (!models.length) {
-    box.innerHTML = '<div class="mt-row err">❌ não deu pra testar o modelo</div>';
+    box.innerHTML = '<div class="mt-row err">não deu pra testar o modelo</div>';
     return;
   }
   box.innerHTML = models.map((m) => {
-    const icon = m.role === "deep" ? "🧠" : "⚡";
+    // O pictograma que abria a linha saiu (DA-076). O nível continua dito: `label` já é
+    // "Rápido"/"Pesado" por extenso — repetir a palavra seria "rápido rápido".
     const label = escapeHtml(String(m.label || m.role || ""));
     const name = escapeHtml(String(m.model || "(padrão do provedor)"));
     if (m.ok) {
       const sample = m.sample ? ` — “${escapeHtml(String(m.sample))}”` : "";
-      return `<div class="mt-row ok">${icon} ${label} <code>${name}</code>: `
-        + `✅ <b>${escapeHtml(fmtLatency(m.latency_ms))}</b>${sample}</div>`;
+      return `<div class="mt-row ok">${label} <code>${name}</code>: `
+        + `<b>${escapeHtml(fmtLatency(m.latency_ms))}</b>${sample}</div>`;
     }
-    return `<div class="mt-row err">${icon} ${label} <code>${name}</code>: `
-      + `❌ ${escapeHtml(String(m.error || "falhou"))}</div>`;
+    return `<div class="mt-row err">${label} <code>${name}</code>: `
+      + `${escapeHtml(String(m.error || "falhou"))}</div>`;
   }).join("");
 }
 
@@ -5138,30 +5152,30 @@ let _scanData = null;        // último scan completo (pra re-pintar ao trocar f
 let _scanEstadoFilter = null; // estado selecionado no filtro de chips (null = todos)
 let _scanAt = null;          // quando o scan QUE ESTÁ NA TELA chegou (task 014)
 const SCAN_ESTADO_PT = {
-  em_gatilho: { compra: ["COMPRA", "🟢"], venda: ["VENDA", "🔴"] },
-  em_movimento: ["EM MOVIMENTO", "🔵"],
-  invalidou: ["INVALIDOU", "⚫"],
-  formando: ["FORMANDO", "⚪"],
+  em_gatilho: { compra: ["COMPRA"], venda: ["VENDA"] },
+  em_movimento: ["EM MOVIMENTO"],
+  invalidou: ["INVALIDOU"],
+  formando: ["FORMANDO"],
   sem_setup: ["sem setup", "·"],
-  sem_dado: ["sem dado", "⚠️"],
+  sem_dado: ["sem dado"],
 };
 function scanEstadoChip(estado, direction) {
-  const entry = SCAN_ESTADO_PT[estado] || [estado, "·"];
+  const entry = SCAN_ESTADO_PT[estado] || [estado];
   // em_gatilho é direção-aware: COMPRA (verde) ou VENDA (vermelho) — a ação na cara.
   if (estado === "em_gatilho") {
     const dir = direction === "venda" ? "venda" : "compra";
-    const [pt, dot] = entry[dir];
+    const [pt] = entry[dir];
     // O chip diz COMPRA/VENDA, e no scan isso é SEMPRE o 1-2-3 (o estado vem do
     // pattern). Diz isso no title pra que a mesma palavra na tela de análise —
     // onde também existe o recuo à média — não vire dúvida sobre qual setup.
     const tit = `padrão 1-2-3 de ${dir} acionado (gatilho rompido)`;
-    return `<span class="scan-chip ${dir}" title="${escapeHtml(tit)}">${dot} ${escapeHtml(pt)}</span>`;
+    return `<span class="scan-chip ${dir}" title="${escapeHtml(tit)}">${escapeHtml(pt)}</span>`;
   }
-  const [pt, dot] = entry;
+  const [pt] = entry;
   const cls = estado === "em_movimento" ? "scan-chip movimento"
     : estado === "invalidou" ? "scan-chip invalidou"
     : "scan-chip";
-  return `<span class="${cls}">${dot} ${escapeHtml(pt)}</span>`;
+  return `<span class="${cls}">${escapeHtml(pt)}</span>`;
 }
 function scanFmt(n) { return n == null ? "—" : Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 }); }
 
@@ -5259,7 +5273,7 @@ async function runScan() {
     const msg = escapeHtml(e.message);
     if (horaAnterior !== null) {
       // O anterior FICA. O aviso diz o que falhou e de quando é o que está na tela.
-      scanNotice(`⚠️ a atualização falhou (${msg}) — mostrando o scan das ` +
+      scanNotice(`a atualização falhou (${msg}) — mostrando o scan das ` +
                  `<b>${escapeHtml(horaAnterior)}</b>`, true);
     } else {
       $("scanSummary").innerHTML = `<span class="error">${msg}</span>`;
@@ -5280,10 +5294,13 @@ function renderScanFilters(s) {
   const hasAny = SCAN_FILTER_ORDER.some((k) => (s[k] || 0) > 0);
   if (!hasAny) { host.classList.add("hidden"); host.innerHTML = ""; return; }
   host.classList.remove("hidden");
-  const chip = (key, label, dot, n) => {
+  const chip = (key, label, n) => {
     const active = _scanEstadoFilter === key;
+    // A COR do chip vem da classe `scan-filter ${key}` — era ela e a bolinha
+    // colorida juntas; sem o pictograma (DA-076) ela faz o trabalho sozinha, com
+    // o rótulo do estado escrito ao lado.
     const cls = `scan-filter ${key}${active ? " is-active" : ""}`;
-    return `<button type="button" class="${cls}" data-filter="${key}">${dot} ${escapeHtml(label)} <b>${n}</b></button>`;
+    return `<button type="button" class="${cls}" data-filter="${key}">${escapeHtml(label)} <b>${n}</b></button>`;
   };
   // chip "Todos" pra desligar o filtro (só aparece quando há um ativo)
   const allChip = _scanEstadoFilter
@@ -5293,10 +5310,10 @@ function renderScanFilters(s) {
     .filter((k) => (s[k] || 0) > 0)
     .map((k) => {
       // em_gatilho é direção-aware no chip de linha ({compra,venda}), mas no
-      // filtro é genérico — achatamos pra um label único. Os demais são [label, dot].
+      // filtro é genérico — achatamos pra um label único. Os demais são [label].
       const entry = SCAN_ESTADO_PT[k];
-      const [label, dot] = (k === "em_gatilho") ? ["EM GATILHO", "🟢"] : entry;
-      return chip(k, label, dot, s[k] || 0);
+      const [label] = (k === "em_gatilho") ? ["EM GATILHO"] : entry;
+      return chip(k, label, s[k] || 0);
     }).join("");
   host.querySelectorAll("[data-filter]").forEach((b) => {
     b.addEventListener("click", () => {
@@ -5363,18 +5380,18 @@ function scanLevelsHtml(f) {
   const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
   if (!hasLevels) {
     return ((f.estado === "invalidou" && f.invalidacao != null)
-      ? `<div class="scan-levels"><span>⚫ invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
+      ? `<div class="scan-levels"><span class="scan-note">invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
       : "") + scanStormLinhaHtml(f);
   }
   return `<div class="scan-levels">` +
-    `<span>🎯 gatilho <b>${scanFmt(f.trigger)}</b></span>` +
-    `<span>🛑 SL <b>${scanFmt(f.sl)}</b></span>` +
+    `<span>gatilho <b>${scanFmt(f.trigger)}</b></span>` +
+    `<span>SL <b>${scanFmt(f.sl)}</b></span>` +
     // Sem alvo publicável, mostra o MOTIVO (o que a tela de análise já faz) em
-    // vez de um TP que o servidor recusou — antes vinha "🎯 TP 512,76" ao lado
-    // de "🎯 gatilho 512,76 · R:R não calculável", e o porquê era descartado.
+    // vez de um TP que o servidor recusou — antes vinha "TP 512,76" ao lado de
+    // "gatilho 512,76 · R:R não calculável", e o porquê era descartado.
     (f.tp != null
-      ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` + scanRrHtml(f)
-      : `<span class="scan-note">⚠️ sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
+      ? `<span>TP <b>${scanFmt(f.tp)}</b></span>` + scanRrHtml(f)
+      : `<span class="scan-note">sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
     `</div>` + scanStormLinhaHtml(f);
 }
 
@@ -5385,7 +5402,7 @@ function scanLevelsHtml(f) {
 // ZEC-USD começavam em três lugares diferentes. Aqui cada linha é uma GRADE com o
 // MESMO template, então a coluna existe de verdade.
 //
-// Os rótulos por célula (🎯 gatilho, 🛑 SL, 🎯 TP) saem: quem diz o que é cada
+// Os rótulos por célula (gatilho, SL, TP) saem: quem diz o que é cada
 // coluna é o CABEÇALHO, e a célula fica com o número — é isso que faz a coluna ser
 // lida como coluna. No modo CARDS os rótulos ficam (lá não há cabeçalho).
 const SCAN_COLUNAS = [
@@ -5444,7 +5461,7 @@ function scanLineCellsHtml(f) {
   }
   const tp = f.tp != null
     ? `<span class="scan-cell num">${scanCk("TP")}<b>${scanFmt(f.tp)}</b></span>`
-    : `<span class="scan-cell scan-note" title="${escapeHtml("sem alvo — " + (f.rr_note || "nível de alvo indefinido"))}">⚠️ sem alvo</span>`;
+    : `<span class="scan-cell scan-note" title="${escapeHtml("sem alvo — " + (f.rr_note || "nível de alvo indefinido"))}">sem alvo</span>`;
   return `<span class="scan-cell num">${scanCk("gatilho")}<b>${scanFmt(f.trigger)}</b></span>` +
     `<span class="scan-cell num">${scanCk("SL")}<b>${scanFmt(f.sl)}</b></span>` + tp +
     scanRrCellHtml(f) + scanStormCellHtml(f);
@@ -5498,7 +5515,7 @@ function scanRrCellHtml(f) {
   if (f.rr_residual) {
     const sobra = (f.rr_retorno != null && f.rr_risco != null)
       ? ` — sobrou ${scanFmt(f.rr_retorno)} pra ${scanFmt(f.rr_risco)} de risco` : "";
-    return `<span class="scan-cell scan-note" title="${escapeHtml("alvo praticamente alcançado" + sobra)}">🏁 no alvo</span>`;
+    return `<span class="scan-cell scan-note" title="${escapeHtml("alvo praticamente alcançado" + sobra)}">no alvo</span>`;
   }
   const marca = scanRrDoPrecoAtual(f)
     ? `<span class="scan-mark" title="R:R medido do PREÇO ATUAL — o setup já foi acionado, então o número mede o que ainda sobra do trade">*</span>` : "";
@@ -5518,7 +5535,7 @@ function scanRrHtml(f) {
   if (f.rr_residual) {
     const sobra = (f.rr_retorno != null && f.rr_risco != null)
       ? ` <span class="scan-sub">sobrou ${scanFmt(f.rr_retorno)} pra ${scanFmt(f.rr_risco)} de risco</span>` : "";
-    return `<span class="scan-note">🏁 alvo praticamente alcançado${sobra}</span>`;
+    return `<span class="scan-note">alvo praticamente alcançado${sobra}</span>`;
   }
   // Acionado sem ser residual: o número vale, mas a base precisa estar dita.
   const base = f.pattern_state === "acionado"
@@ -5661,7 +5678,7 @@ function paintScan(data) {
 function trackExpectancyHtml(data) {
   if (data.expectativa_r == null) {
     return data.n_fechados
-      ? '<div class="scan-summary hint">📐 expectativa indisponível — nenhum fechado com R:R conhecido</div>'
+      ? '<div class="scan-summary hint">expectativa indisponível — nenhum fechado com R:R conhecido</div>'
       : "";
   }
   const e = data.expectativa_r;
@@ -5669,7 +5686,7 @@ function trackExpectancyHtml(data) {
   const sinal = e > 0 ? "+" : "";
   const eq = data.acerto_equilibrio == null ? "—" : `${(data.acerto_equilibrio * 100).toFixed(1)}%`;
   const p = data.acerto_com_rr == null ? "—" : `${Math.round(data.acerto_com_rr * 100)}%`;
-  return `<div class="scan-summary">📐 expectativa <b class="${cls}">${sinal}${e.toFixed(2)}R</b> por trade` +
+  return `<div class="scan-summary">expectativa <b class="${cls}">${sinal}${e.toFixed(2)}R</b> por trade` +
     `<span class="hint"> — R:R médio ${data.rr_medio} · precisa de ${eq} pra empatar · base: ${data.n_com_rr} fechado(s) com R:R, ${p} de acerto neles</span></div>`;
 }
 
@@ -5684,30 +5701,30 @@ async function showScanTrack() {
     if (!res.ok) throw new Error(data.error || "falha");
     const taxa = data.taxa_acerto == null ? "—" : `${Math.round(data.taxa_acerto * 100)}%`;
     const rows = (data.verdicts || []).slice().reverse().slice(0, 30).map((v) => {
-      const vb = { bateu_tp: ["✅ bateu TP", "ok"], bateu_sl: ["❌ bateu SL", "bad"],
-        andamento_lucro: ["📈 no lucro", ""], andamento_prejuizo: ["📉 no prejuízo", ""],
+      const vb = { bateu_tp: ["bateu TP", "ok"], bateu_sl: ["bateu SL", "bad"],
+        andamento_lucro: ["no lucro", "ok"], andamento_prejuizo: ["no prejuízo", "bad"],
         // Série que não alcança o dia do gatilho: pode ter tocado sem ninguém ver.
         // É um estado próprio — chamar isso de "andamento" seria afirmar o que não
         // se sabe, e é assim que uma taxa de acerto vira ficção.
-        sem_serie_cobrindo: ["🕳️ sem série cobrindo", "warn"],
+        sem_serie_cobrindo: ["sem série cobrindo", "warn"],
         sem_dado: ["— sem dado", ""] }[v.veredito] || [v.veredito, ""];
       return `<li class="scan-row"><span class="scan-line">` +
         `<b>${escapeHtml(v.ticker || "")}</b><span class="scan-frame">${escapeHtml(v.frame || "")}</span>` +
-        `<span>${v.direction === "venda" ? "⬇️" : "⬆️"} gatilho ${scanFmt(v.trigger)}</span>` +
+        `<span>${v.direction === "venda" ? "↓" : "↑"} gatilho ${scanFmt(v.trigger)}</span>` +
         `<span class="scan-dist">agora ${scanFmt(v.preco_agora)}</span>` +
         // Fechado carrega a DATA do toque: o veredito veio da série (a barra que
         // tocou o nível), não da comparação com o preço de hoje — por isso não
         // muda mais amanhã. Mostrar a data é o que torna isso verificável.
         (v.fechado && v.fechado_em
-          ? `<span class="scan-dist">em ${escapeHtml(v.fechado_em)}${v.empate_na_barra ? " ⚠️ TP e SL na mesma barra" : ""}</span>`
+          ? `<span class="scan-dist">em ${escapeHtml(v.fechado_em)}${v.empate_na_barra ? " — TP e SL na mesma barra" : ""}</span>`
           : "") +
         // Alvo logado que não estava à frente da entrada (entradas gravadas antes do
         // fix): ignorado na leitura — o trade só pode fechar pelo SL. Dito na cara.
-        (v.tp_ignorado ? `<span class="scan-dist">⚠️ alvo inválido ignorado</span>` : "") +
+        (v.tp_ignorado ? `<span class="scan-dist">alvo inválido ignorado</span>` : "") +
         (v.motivo ? `<span class="scan-dist">${escapeHtml(v.motivo)}</span>` : "") +
         `<span class="scan-chip ${vb[1]}">${vb[0]}</span></span></li>`;
     }).join("");
-    box.innerHTML = `<div class="scan-summary">🎯 <b>${taxa}</b> de acerto em ${data.n_fechados || 0} gatilho(s) fechado(s)` +
+    box.innerHTML = `<div class="scan-summary"><b>${taxa}</b> de acerto em ${data.n_fechados || 0} gatilho(s) fechado(s)` +
       `${data.taxa_acerto == null ? ' <span class="hint">(nenhum fechado ainda — os abertos aparecem abaixo)</span>' : ""}</div>` +
       trackExpectancyHtml(data) +
       (rows ? `<ul class="scan-list">${rows}</ul>` : '<span class="hint">nenhum gatilho flagrado ainda — escaneie que os em-gatilho passam a ser medidos</span>');

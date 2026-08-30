@@ -421,7 +421,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _oauth_html(self, message: str, *, ok: bool) -> None:
         """Página de retorno do OAuth (aba nova). ``message`` é sempre gerada pelo
         servidor — nunca reflete input/segredo do usuário."""
-        icon = "✅" if ok else "⚠️"
+        # Sem pictograma (DA-076): a COR e a palavra da mensagem já dizem se deu
+        # certo. Esta é a aba de retorno do OAuth, mas é tela do produto igual.
         color = "#22c55e" if ok else "#f59e0b"
         safe = (message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
         html = (
@@ -435,7 +436,7 @@ class _Handler(BaseHTTPRequestHandler):
             ".i{font-size:40px;line-height:1}.m{margin:14px 0 0;font-size:15px;"
             f"line-height:1.5}}.s{{color:{color};font-weight:600}}"
             ".sub{color:#8a8a92;font-size:13px}</style></head><body><div class=\"card\">"
-            f"<div class=\"i\">{icon}</div><p class=\"m s\">{safe}</p>"
+            f"<p class=\"m s\">{safe}</p>"
             "<p class=\"m sub\">Esta janela é só o retorno do login.</p></div></body></html>"
         )
         self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8", 200)

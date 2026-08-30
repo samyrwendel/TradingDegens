@@ -2349,7 +2349,7 @@ class AnalysisRunner:
             return {"ok": False, "provider": provider, "using_user_key": False,
                     "error": NEED_KEY_MESSAGE, "error_code": NEED_KEY_CODE, "models": []}
         # Rápido primeiro (o mais provável de responder), pesado depois. Cada item traz
-        # role/label pra UI rotular ("⚡ rápido" / "🧠 pesado") sem adivinhar. A chave
+        # role/label pra UI rotular ("Rápido" / "Pesado") sem adivinhar. A chave
         # BYOK pertence ao provedor-base; um nível cujo provedor difere dele resolve a
         # própria credencial (assinatura/env) — não recebe a chave do outro.
         models = []

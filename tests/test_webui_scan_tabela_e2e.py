@@ -328,7 +328,10 @@ def test_o_modo_cards_nao_foi_tocado(base):
         })""")
         assert m["colunasDaGrade"] == 3, ("a grade de 3 colunas da 012 continua", m)
         assert m["linhaDeFrame"] != "grid", ("cards não virou tabela", m)
-        assert "gatilho" in m["niveis"] and "SL" in m["niveis"] and "🎯" in m["niveis"], m
+        # Os rótulos por célula CONTINUAM (é o que distingue os cards da tabela); o
+        # que saiu foi o pictograma que os antecedia (DA-076, task 025).
+        assert "gatilho" in m["niveis"] and "SL" in m["niveis"], m
+        assert "🎯" not in m["niveis"], ("pictograma saiu da tela (DA-076)", m)
         assert m["celulasDeTabela"] == 0 and m["cabecalho"] == 0, m
         assert m["legendaEscondida"], ("legenda é da tabela; em cards não há tabela", m)
         browser.close()

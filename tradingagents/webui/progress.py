@@ -250,19 +250,19 @@ class ProgressCallbackHandler(BaseCallbackHandler):
 # ordem em que o usuário assiste a análise ser construída). O debate alta×baixa e o
 # de risco ganham destaque (is_debate) — é o mais interessante de acompanhar.
 _THINKING_NODES: list[tuple[str, str, str, bool]] = [
-    ("Market Analyst",       "📊 Mercado — preço e tempos gráficos",       "Analistas", False),
-    ("Sentiment Analyst",    "💬 Sentimento",                              "Analistas", False),
-    ("News Analyst",         "📰 Notícias — macro e mercados de previsão", "Analistas", False),
-    ("Fundamentals Analyst", "📑 Fundamentos",                             "Analistas", False),
-    ("Erick Analyst",        "🧭 Método Erick",                            "Analistas", False),
-    ("Bull Researcher",      "🟢 Tese de Alta (bull)",                     "Debate",    True),
-    ("Bear Researcher",      "🔴 Tese de Baixa (bear)",                    "Debate",    True),
-    ("Research Manager",     "⚖️ Juiz do Debate",                          "Debate",    False),
-    ("Trader",               "🎯 Plano do Trader",                         "Execução",  False),
-    ("Aggressive Analyst",   "🔥 Risco — Agressivo",                       "Risco",     True),
-    ("Conservative Analyst", "🛡️ Risco — Conservador",                     "Risco",     True),
-    ("Neutral Analyst",      "⚖️ Risco — Neutro",                          "Risco",     True),
-    ("Portfolio Manager",    "🛡️ Decisão de Risco (veredito)",             "Risco",     False),
+    ("Market Analyst",       "Mercado — preço e tempos gráficos",       "Analistas", False),
+    ("Sentiment Analyst",    "Sentimento",                              "Analistas", False),
+    ("News Analyst",         "Notícias — macro e mercados de previsão", "Analistas", False),
+    ("Fundamentals Analyst", "Fundamentos",                             "Analistas", False),
+    ("Erick Analyst",        "Método Erick",                            "Analistas", False),
+    ("Bull Researcher",      "Tese de Alta (bull)",                     "Debate",    True),
+    ("Bear Researcher",      "Tese de Baixa (bear)",                    "Debate",    True),
+    ("Research Manager",     "Juiz do Debate",                          "Debate",    False),
+    ("Trader",               "Plano do Trader",                         "Execução",  False),
+    ("Aggressive Analyst",   "Risco — Agressivo",                       "Risco",     True),
+    ("Conservative Analyst", "Risco — Conservador",                     "Risco",     True),
+    ("Neutral Analyst",      "Risco — Neutro",                          "Risco",     True),
+    ("Portfolio Manager",    "Decisão de Risco (veredito)",             "Risco",     False),
 ]
 _THINKING_INDEX = {
     node: (i, label, phase, debate)

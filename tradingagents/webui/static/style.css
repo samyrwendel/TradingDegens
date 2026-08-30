@@ -394,12 +394,13 @@ details.section.erick > summary { color: #9cc7f5; }
 .steps li.active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 
 /* Retomada + atualizar etapa (task 002 / DA-062). O chip vira uma linha com três
-   peças: nome · ♻ (voltou pronta do checkpoint) · 🔄 (atualizar só ela com dado
-   fresco). O ♻ existe pra o verde não mentir: essa etapa foi REAPROVEITADA, não
-   re-executada agora. O 🔄 só aparece em etapa concluída de run retomável do dono. */
+   peças: nome · "cache" (voltou pronta do checkpoint) · ↻ (atualizar só ela com
+   dado fresco). O "cache" existe pra o verde não mentir: essa etapa foi
+   REAPROVEITADA, não re-executada agora. O ↻ só aparece em etapa concluída de run
+   retomável do dono. */
 .steps li { display: inline-flex; align-items: center; gap: 6px; }
 .steps li.reused { border-style: dashed; }
-/* ♻ e 🔄 são emoji: em 10px viram um quadradinho colorido ilegível. 14px é o menor
+/* a palavra "cache" e o ↻ precisam de corpo: em 10px viram borrão. 14px é o menor
    tamanho em que os dois se leem dentro do chip sem esticar a linha. */
 .step-reused { font-size: var(--fs-14); line-height: 1; opacity: .85; }
 .step-refresh {
@@ -523,7 +524,7 @@ details.section.erick > summary { color: #9cc7f5; }
 
 /* Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação, cada
    uma com número, ícone de estado e rótulo. Estados: aguardando (apagada) ·
-   rodando (accent, pulsa) · concluída (verde) · reusada do cache (âmbar/♻). */
+   rodando (accent, pulsa) · concluída (verde) · reusada do cache (âmbar). */
 .cmp-steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .cmp-step {
   display: flex; align-items: center; gap: 12px;
@@ -1696,7 +1697,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .subscription-box .sub-advanced .owner-login-row { margin-top: 0; }
 
 /* Multi-provedor (task 020): uma linha por assinatura; ao conectar, COLAPSA pra a
-   linha compacta "✅ Label conectada · Desconectar". Linhas separadas por divisória
+   linha compacta "Label conectada · Desconectar". Linhas separadas por divisória
    sutil, respiro entre elas. */
 .sub-providers { display: flex; flex-direction: column; }
 .sub-row { padding: 12px 0; border-top: 1px solid var(--border); }
@@ -1844,6 +1845,16 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
 /* Checagem de consistência (item 7): portão de QA pré-publicação. Verde discreto
    quando limpo; card de alerta aberto quando há inconsistências a revisar. */
+/* SEVERIDADE da inconsistência: palavra + cor (DA-076). Era uma bolinha colorida
+   (vermelha/amarela/verde) — o único marcador da linha, ilegível em leitor de tela e
+   frágil em alto contraste. Agora a palavra diz e a cor reforça. */
+.sev {
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-bold);
+  text-transform: uppercase; letter-spacing: .4px; margin-right: 4px;
+}
+.sev.sev-alta { color: var(--red); }
+.sev.sev-media { color: var(--amber); }
+.sev.sev-baixa { color: var(--muted); }
 .consistency-ok {
   margin: 8px 2px;
   padding: 6px 10px;
@@ -1861,7 +1872,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    O botão lateral abre o painel; a lista classifica por urgência (em_gatilho
    primeiro). Cores com FUNÇÃO: verde = agir agora, âmbar = vigiar, neutro = resto. */
 /* Caixa de busca da watchlist + ícone de scan compacto (no lugar do botão antigo).
-   Busca filtra por ticker ou nome; o 📡 abre o painel de scan de gatilhos. */
+   Busca filtra por ticker ou nome; o botão "scan" abre o painel de gatilhos. */
 .wl-search-wrap {
   display: flex; gap: 6px; margin: 6px 0 8px;
 }

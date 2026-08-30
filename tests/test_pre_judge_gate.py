@@ -125,4 +125,4 @@ def test_extract_result_carries_pre_judge_findings_and_caveat():
     assert r["pre_judge_findings"] == findings
     # o caveat é preenchido na finalização; extract_result inicia vazio
     assert r["verdict_caveat"] == ""
-    assert format_verdict_caveat(r["pre_judge_findings"]).startswith("⚠️")
+    assert format_verdict_caveat(r["pre_judge_findings"]).startswith("Decidido com")

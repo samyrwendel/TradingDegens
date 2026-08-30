@@ -10,7 +10,6 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">◪</span>
       <div>
         <h1>TradingDegens</h1>
         <p class="tagline">Multi-agente • debate alta × baixa • veredito com custo</p>
@@ -18,7 +17,7 @@
     </div>
     <div class="top-right">
       <button type="button" class="config-btn" id="configBtn"
-              title="Provedor, modelos e chave de API (traga a sua)">⚙️ <span id="configBtnLabel">Chaves</span></button>
+              title="Provedor, modelos e chave de API (traga a sua)"><span id="configBtnLabel">Chaves</span></button>
       <div class="net-note" id="netNote">rede Tailscale</div>
     </div>
   </header>
@@ -29,7 +28,7 @@
        do servidor (fallback). Só provider/modelo/base_url vão no corpo do POST. -->
   <section class="panel config-panel hidden" id="configPanel">
     <div class="config-head">
-      <h2 class="section-title">🔑 Provedor, modelos &amp; chave de API</h2>
+      <h2 class="section-title">Provedor, modelos &amp; chave de API</h2>
       <button type="button" class="config-close" id="configClose" aria-label="Fechar">✕</button>
     </div>
     <p class="config-note">
@@ -49,19 +48,19 @@
         </div>
       </div>
       <div class="owner-loggedin hidden" id="ownerLoggedIn">
-        <span class="owner-badge">✅ Dono logado — usando a chave do servidor.</span>
+        <span class="owner-badge">Dono logado — usando a chave do servidor.</span>
         <button type="button" id="ownerLogoutBtn" class="btn-ghost">Sair</button>
       </div>
     </div>
 
     <!-- Conectar assinatura (task 017; multi-provedor 020): SÓ o dono logado vê e usa.
          Três provedores (ChatGPT/Claude/Gemini), cada linha com botão OAuth no estilo
-         do app; ao conectar, a linha COLAPSA pra "✅ conectada · Desconectar". O token
+         do app; ao conectar, a linha COLAPSA pra "conectada · Desconectar". O token
          vai por HEADER direto pro servidor e NUNCA fica salvo no navegador. Público nem
          vê (JS) e o endpoint barra 403. As linhas são renderizadas por JS em #subProviders. -->
     <div class="subscription-box hidden" id="subscriptionBox">
       <div class="sub-head">
-        <span class="sub-title">🔗 Conectar assinatura</span>
+        <span class="sub-title">Conectar assinatura</span>
       </div>
       <p class="owner-lead">
         Abrimos o login oficial de cada provedor numa nova aba; o token fica só no
@@ -81,7 +80,6 @@
     <div class="cfg-levels" id="cfgLevels">
       <section class="cfg-level" id="cfgLevelQuick">
         <header class="cfg-level-head">
-          <span class="cfg-level-icon" aria-hidden="true">⚡</span>
           <span class="cfg-level-name">Rápido</span>
           <span class="cfg-level-role">analistas · debate · trader · risco</span>
         </header>
@@ -109,7 +107,6 @@
 
       <section class="cfg-level" id="cfgLevelDeep">
         <header class="cfg-level-head">
-          <span class="cfg-level-icon" aria-hidden="true">🧠</span>
           <span class="cfg-level-name">Pesado</span>
           <span class="cfg-level-role">pesquisa · juiz</span>
           <button type="button" class="cfg-mirror" id="cfgSameAsQuick"
@@ -160,7 +157,7 @@
       <span class="cfg-status" id="cfgStatus"></span>
     </div>
     <!-- Resultado do "Testar modelo": uma linha por modelo (rápido/pesado) com
-         ✅ latência + trecho, ou ❌ mensagem humana. Preenchido por renderModelTest. -->
+         latência + trecho, ou a mensagem de erro. Preenchido por renderModelTest. -->
     <div class="model-test hidden" id="cfgModelTest" aria-live="polite"></div>
     <p class="config-active" id="cfgActive"></p>
   </section>
@@ -175,7 +172,7 @@
           <input type="search" class="wl-search" id="watchlistSearch" placeholder="Buscar ativo ou nome…"
                  autocomplete="off" spellcheck="false" aria-label="Buscar na lista de observação">
           <button type="button" class="wl-scan-icon" id="scanOpenBtn"
-                  title="Varrer a watchlist: quem está em gatilho de compra/venda 1-2-3 (1d + 4h + 1h, sem LLM)">📡</button>
+                  title="Varrer a watchlist: quem está em gatilho de compra/venda 1-2-3 (1d + 4h + 1h, sem LLM)">scan</button>
         </div>
         <div class="h-tabs" id="historyTabs" role="tablist">
           <button type="button" class="h-tab is-active" data-filter="all">Todos</button>
@@ -193,7 +190,7 @@
 
     <div class="content">
       <!-- Barra ÚNICA (task 029): o launcher ABSORVEU a barra de reanálise (023).
-           Ativo · data (chip 📅, padrão hoje) · timeframe · método · Analisar · ↻.
+           Ativo · data (chip, padrão hoje) · timeframe · método · Analisar · ↻.
            Analisar roda com o método + TF escolhidos; ↻ reanalisa o ativo ABERTO
            hoje preservando o método aberto (absorve o antigo "Atualizar"). A barra de
            reanálise separada deixou de existir — método volta a viver aqui (reverte a
@@ -214,7 +211,7 @@
               <span class="lb-glabel">data <span class="tz" id="tzLabel"></span></span>
               <div class="date-chip-wrap">
                 <button type="button" class="date-chip" id="dateChip"
-                        title="Data da análise — clique pra escolher (padrão: hoje)">📅 <span id="dateChipLabel">Hoje</span></button>
+                        title="Data da análise — clique pra escolher (padrão: hoje)"><span id="dateChipLabel">Hoje</span></button>
                 <input id="date" name="date" type="date" class="date-native" aria-label="Data da análise" tabindex="-1" />
               </div>
             </div>
@@ -270,8 +267,8 @@
              Parar cancela limpo; Pausar (só run retomável) mantém o progresso pra
              Retomar. Populados/alternados por JS conforme o snapshot. -->
         <div class="progress-ctl hidden" id="progressCtl">
-          <button type="button" class="btn-ghost hidden" id="pauseRunBtn" title="Pausar mantendo o progresso — dá pra Retomar do último estágio">⏸ Pausar</button>
-          <button type="button" class="btn-secondary" id="stopRunBtn" title="Parar a análise em andamento">⏹ Parar análise</button>
+          <button type="button" class="btn-ghost hidden" id="pauseRunBtn" title="Pausar mantendo o progresso — dá pra Retomar do último estágio">Pausar</button>
+          <button type="button" class="btn-secondary" id="stopRunBtn" title="Parar a análise em andamento">Parar análise</button>
         </div>
         <div class="bar"><div class="bar-fill" id="barFill"></div></div>
         <ol class="steps" id="steps"></ol>
@@ -289,7 +286,7 @@
            run resumível; continua do último estágio (checkpoint da 022). Populado por JS. -->
       <div class="resume-bar hidden" id="resumeBar">
         <span class="resume-msg" id="resumeMsg">Análise pausada.</span>
-        <button type="button" class="btn-primary" id="resumeRunBtn">▶ Retomar</button>
+        <button type="button" class="btn-primary" id="resumeRunBtn">Retomar</button>
       </div>
 
       <section class="panel result-panel hidden" id="resultPanel">
@@ -307,7 +304,7 @@
                  análise já existente do mesmo ativo (Padrão×Erick ou dois TFs). -->
             <div class="confront-ctl hidden" id="confrontCtl">
               <select id="confrontSelect" class="confront-select" aria-label="Confrontar com outra análise deste ativo"></select>
-              <button type="button" class="confront-btn" id="confrontBtn" title="Meta-juiz sobre as duas análises">⚖️ Confrontar</button>
+              <button type="button" class="confront-btn" id="confrontBtn" title="Meta-juiz sobre as duas análises">Confrontar</button>
             </div>
             <!-- Exportar PDF: abre o diálogo de impressão do navegador já formatado
                  (só a análise, relatórios expandidos) → "Salvar como PDF". Sem lib. -->
@@ -387,11 +384,11 @@
               <h2 class="section-title">Teses em confronto</h2>
               <div class="theses">
                 <details class="thesis bull" id="bullBox">
-                  <summary><span class="th-tag">🟢 Alta</span><span class="th-lead" id="bullLead"></span></summary>
+                  <summary><span class="th-tag">Alta</span><span class="th-lead" id="bullLead"></span></summary>
                   <div class="md" id="bull"></div>
                 </details>
                 <details class="thesis bear" id="bearBox">
-                  <summary><span class="th-tag">🔴 Baixa</span><span class="th-lead" id="bearLead"></span></summary>
+                  <summary><span class="th-tag">Baixa</span><span class="th-lead" id="bearLead"></span></summary>
                   <div class="md" id="bear"></div>
                 </details>
               </div>
@@ -429,10 +426,10 @@
            estiver EM GATILHO abre a análise completa (Padrão/Erick) a um clique. -->
       <section class="panel scan-panel hidden" id="scanPanel">
         <div class="scan-head">
-          <h2>📡 Scan do portfólio — gatilhos 1-2-3 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>
+          <h2>Scan do portfólio — gatilhos 1-2-3 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>
           <div class="scan-actions">
             <button type="button" id="scanRunBtn" title="Varrer a watchlist nos frames 1d, 4h e 1h">Escanear</button>
-            <button type="button" id="scanTrackBtn" class="ghost-btn" title="Taxa de acerto dos gatilhos já flagrados">🎯 Track record</button>
+            <button type="button" id="scanTrackBtn" class="ghost-btn" title="Taxa de acerto dos gatilhos já flagrados">Track record</button>
             <button type="button" class="scan-close" id="scanCloseBtn" title="Fechar o scan">✕</button>
           </div>
         </div>
@@ -455,10 +452,10 @@
              ativo+frame, denso, pra varrer o portfólio inteiro de relance). -->
         <div class="scan-tools hidden" id="scanTools">
           <input type="search" id="scanSearch" class="scan-search" autocomplete="off"
-                 placeholder="🔎 filtrar por ativo (ex.: NVDA, BTC)" aria-label="Filtrar os resultados do scan" />
+                 placeholder="filtrar por ativo (ex.: NVDA, BTC)" aria-label="Filtrar os resultados do scan" />
           <div class="scan-views" role="group" aria-label="Modo de apresentação do scan">
-            <button type="button" class="scan-view is-active" data-view="cards" title="Agrupado por ativo">▦ Cards</button>
-            <button type="button" class="scan-view" data-view="lista" title="Uma linha por ativo e frame">☰ Lista</button>
+            <button type="button" class="scan-view is-active" data-view="cards" title="Agrupado por ativo">Cards</button>
+            <button type="button" class="scan-view" data-view="lista" title="Uma linha por ativo e frame">Lista</button>
           </div>
         </div>
         <ul class="scan-list" id="scanList"></ul>

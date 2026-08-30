@@ -11,7 +11,7 @@ Uso:
     # -> {"code": "no_credit", "message": "Sua chave OpenAI está sem crédito…"}
 
 ``code`` é estável (no_credit | invalid_key | rate_limit | unavailable | error) pra
-UI decidir o call-to-action (ex.: abrir ⚙️ Configurações). ``None`` de
+UI decidir o call-to-action (ex.: abrir as Configurações). ``None`` de
 :func:`classify_provider_error` significa 'não reconhecido' — o caller usa o
 fallback genérico (mensagem curta + tipo do erro, já redigida)."""
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 # público precisa de BYOK; só o dono usa a chave do servidor. Nunca cai na env.
 NEED_KEY_CODE = "need_key"
 NEED_KEY_MESSAGE = (
-    "Informe sua chave de API nas Configurações (⚙️) para rodar. "
+    "Informe sua chave de API nas Configurações para rodar. "
     "Só o dono logado usa a chave do servidor."
 )
 
@@ -93,10 +93,10 @@ def humanize_provider_error(text: str, provider: str | None = None) -> dict | No
     lbl = provider_label(provider)
     if code == "no_credit":
         msg = (f"Sua chave {lbl} está sem crédito. Adicione crédito na conta do "
-               f"provider ou troque de provider nas Configurações (⚙️).")
+               f"provider ou troque de provider nas Configurações.")
     elif code == "invalid_key":
         msg = (f"Chave inválida ou ausente para {lbl}. Confira a chave em "
-               f"Configurações (⚙️).")
+               f"Configurações.")
     elif code == "rate_limit":
         msg = "Limite de requisições atingido — tente de novo em instantes."
     elif code == "unavailable":

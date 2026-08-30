@@ -196,8 +196,8 @@ def _frame_row(ticker: str, date: str, frame: str,
     rr = plan.get("risk_reward") or {}
     # ALVO INCOERENTE NÃO SE PUBLICA. ``_risk_reward`` já detecta o alvo atrás da
     # entrada (ou o stop do lado errado) e devolve ``rr=None`` com o motivo escrito;
-    # o scan publicava o ``tp`` assim mesmo, e a tela mostrava "🎯 TP 512,76" ao lado
-    # de "🎯 gatilho 512,76 · R:R não calculável" — número sem sentido, e o MOTIVO,
+    # o scan publicava o ``tp`` assim mesmo, e a tela mostrava "TP 512,76" ao lado de
+    # "gatilho 512,76 · R:R não calculável" — número sem sentido, e o MOTIVO,
     # que a tela de análise mostra, era descartado aqui. Pior: esse tp ia pro
     # ScanLog e virava ACERTO FABRICADO — alvo igual ao gatilho é "bateu_tp" no
     # instante em que aciona. Com ``tp=None`` o track record só pode fechar pelo SL

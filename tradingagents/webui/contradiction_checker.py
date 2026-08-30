@@ -387,21 +387,25 @@ def check_contradictions(result: dict[str, Any] | None) -> list[dict[str, str]]:
     return findings
 
 
-_SEVERITY_ICON = {"alta": "🔴", "média": "🟡", "baixa": "🟢"}
+# Severidade em PALAVRA (DA-076: nada de pictograma na webui, e o markdown
+# desta seção é renderizado nela). A bolinha colorida era o único marcador —
+# e bolinha não se lê em leitor de tela.
+_SEVERITY_TXT = {"alta": "ALTA", "média": "MÉDIA", "baixa": "BAIXA"}
 
 
 def render_contradictions_section(findings: list[dict[str, str]]) -> str:
     """Render the findings as a pt-BR markdown section for the report."""
     if not findings:
         return (
-            "## ✅ Checagem de consistência\n\n"
+            "## Checagem de consistência\n\n"
             "_Nenhuma inconsistência detectada: decisão única, gatilho 1-2-3 coerente, "
             "preço de referência único, agregados batem._"
         )
-    lines = ["## ⚠️ Checagem de consistência", ""]
+    lines = ["## Checagem de consistência", ""]
     for f in findings:
-        icon = _SEVERITY_ICON.get(f.get("severity", ""), "•")
-        lines.append(f"- {icon} **{f.get('code', '')}**: {f.get('message', '')}")
+        sev = _SEVERITY_TXT.get(f.get("severity", ""), "")
+        marca = f"`{sev}` " if sev else ""
+        lines.append(f"- {marca}**{f.get('code', '')}**: {f.get('message', '')}")
     return "\n".join(lines)
 
 
@@ -447,7 +451,7 @@ def build_verified_context(reports: dict[str, Any]) -> tuple[str, list[dict[str,
     if anchors:
         out += ["", anchors]
     if findings:
-        out += ["", f"### ⚠️ {len(findings)} inconsistência(s) detectada(s) nos insumos "
+        out += ["", f"### {len(findings)} inconsistência(s) detectada(s) nos insumos "
                 "(use o valor verificado, não o citado):"]
         for f in findings:
             out.append(f"- {f.get('message', '')}")
@@ -460,5 +464,5 @@ def format_verdict_caveat(findings: list[dict[str, str]] | None) -> str:
     n = len(findings or [])
     if not n:
         return ""
-    return (f"⚠️ Decidido com {n} inconsistência(s) nos insumos — os valores "
+    return (f"Decidido com {n} inconsistência(s) nos insumos — os valores "
             "verificados foram dados ao juiz; tratar com cautela.")

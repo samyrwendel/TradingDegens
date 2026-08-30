@@ -1,8 +1,8 @@
 """E2E (Playwright) do botão "Testar modelo" (BYOK).
 
 Prova o pedido do Samyr ("tem um teste de modelo?"): clicar em "Testar modelo"
-pinga o modelo RÁPIDO e o PESADO escolhidos com um prompt trivial e mostra ✅ +
-latência de CADA um (ou ❌ mensagem humana), sem rodar a análise de 12min. O
+pinga o modelo RÁPIDO e o PESADO escolhidos com um prompt trivial e mostra a
+latência de CADA um (ou a mensagem humana de erro), sem rodar a análise de 12min. O
 ``create_llm_client`` é injetado (nada bate na rede): um modelo responde rápido,
 o outro devagar (latências diferentes), e um modelo ruim vira erro humano — a
 chave nunca aparece na tela.
@@ -115,8 +115,10 @@ def test_test_model_shows_latency_for_both(live_server):
             box = page.inner_text("#cfgModelTest")
             # os dois modelos escolhidos foram pingados e nomeados
             assert "fast-quick" in box and "slow-deep" in box
-            # cada um mostra ✅ e uma latência real (ms/s)
-            assert box.count("✅") == 2
+            # cada um mostra uma latência real (ms/s), e o PASSOU/FALHOU é a CLASSE
+            # da linha (.mt-row.ok / .mt-row.err) desde que o pictograma saiu (DA-076)
+            assert page.locator(".model-test .mt-row.ok").count() == 2, box
+            assert page.locator(".model-test .mt-row.err").count() == 0, box
             assert re.search(r"\d+\s*(ms|s)\b", box)
             # a chave NUNCA aparece na tela
             assert "sk-e2e-secret" not in page.content()
@@ -139,8 +141,9 @@ def test_test_model_bad_model_shows_human_error(live_server):
             # 401 vira a frase acionável (mapa da 041), sem stack, sem "401" cru
             assert "Configurações" in box
             assert "401" not in box
-            # o rápido ainda respondeu ✅; a chave não vaza
-            assert "✅" in box
+            # o rápido ainda respondeu (linha .ok); a chave não vaza
+            assert page.locator(".model-test .mt-row.ok").count() == 1, box
+            assert page.locator(".model-test .mt-row.err").count() == 1, box
             assert "sk-e2e-secret" not in page.content()
         finally:
             browser.close()

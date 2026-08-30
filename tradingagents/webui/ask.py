@@ -114,7 +114,7 @@ def _zone_line(label_pt: str, zone: dict | None) -> tuple[str, bool]:
     lo, hi = _num(zone.get("low")), _num(zone.get("high"))
     band = f" (faixa {lo}–{hi})" if lo and hi else ""
     head = f"{lbl} → " if lbl else ""
-    note = f" — ⚠️ {zone['overlap_note']}" if zone.get("overlap_note") else ""
+    note = f" — atenção: {zone['overlap_note']}" if zone.get("overlap_note") else ""
     return f"{label_pt}: {head}{price}{band}{note}.", True
 
 
