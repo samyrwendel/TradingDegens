@@ -1672,6 +1672,49 @@ class StormPattern:
         }
 
 
+# "ACIMA DA MÉDIA" É PROPORÇÃO, NÃO UM PONTO CONTRA UM NÍVEL.
+#
+# A comparação era ``preço > média`` — o fechamento, um ponto só. Nos exemplos em
+# gráfico da aula o Stormer não exige o candle INTEIRO acima da MME 8: basta a maior
+# parte dele estar acima, e um candle que só encosta na média por baixo continua
+# contando como acima.
+#
+# PROCEDÊNCIA, declarada: a regra vem da leitura dos exemplos gráficos, relatada pelo
+# Samyr — a fala da aula não a enuncia. E medir pelo RANGE (máxima−mínima) em vez do
+# corpo (abertura−fechamento) é INTERPRETAÇÃO NOSSA: o range é o que o desenho mostra
+# como "o candle", e o corpo ignoraria pavios que são metade da barra. O corte na
+# METADE é convenção declarada, não doutrina — nenhuma fala numera isso.
+_FRACAO_ACIMA_MIN = 0.5
+
+
+def _fracao_acima(high: float, low: float, media: float) -> float:
+    """Que fração do RANGE do candle fica acima de ``media`` (0 a 1).
+
+    Candle inteiro acima → 1,0; inteiro abaixo → 0,0; cortado ao meio → 0,5. Candle
+    sem range (doji perfeito) não tem proporção a medir: vale 1 se está acima da
+    média, 0 se abaixo, 0,5 se exatamente nela.
+    """
+    rng = float(high) - float(low)
+    if rng <= 0:
+        return 1.0 if high > media else (0.0 if high < media else 0.5)
+    acima = float(high) - max(float(media), float(low))
+    return max(0.0, min(1.0, acima / rng))
+
+
+def _candle_acima(high: float, low: float, media: float) -> bool:
+    """O candle conta como ACIMA da média?
+
+    Estritamente MAIOR que a metade. O empate exato (metade acima, metade abaixo) não
+    é nem acima nem abaixo — e num filtro que AUTORIZA trade, empate não autoriza:
+    ``_candle_acima`` e ``_candle_abaixo`` são ambos falsos ali, de propósito.
+    """
+    return _fracao_acima(high, low, media) > _FRACAO_ACIMA_MIN
+
+
+def _candle_abaixo(high: float, low: float, media: float) -> bool:
+    return _fracao_acima(high, low, media) < (1.0 - _FRACAO_ACIMA_MIN)
+
+
 def _eden(df: pd.DataFrame) -> dict[str, Any]:
     """Filtro ÉDEN DOS TRADERS: MME 8 × MME 80 × posição do preço.
 
@@ -1695,35 +1738,59 @@ def _eden(df: pd.DataFrame) -> dict[str, Any]:
     if n < _STORM_EMA_LENTA or col_r not in df.columns or col_l not in df.columns:
         return {
             "disponivel": False, "alinhado": False, "direcao": None, "armadilha": False,
+            "zona_neutra": False, "direcao_estrutural": None,
+            "fracao_acima_rapida": None, "fracao_acima_lenta": None,
             "ema_rapida": None, "ema_lenta": None, "preco": None,
             "motivo": (f"série com {n} candles — a MME {_STORM_EMA_LENTA} precisa de pelo "
                        f"menos {_STORM_EMA_LENTA} para significar alguma coisa"),
         }
     rapida = round(float(df[col_r].iloc[-1]), 2)
     lenta = round(float(df[col_l].iloc[-1]), 2)
-    preco = round(float(df["Close"].astype(float).iloc[-1]), 2)
-    base = {"disponivel": True, "ema_rapida": rapida, "ema_lenta": lenta, "preco": preco}
-    if rapida > lenta and preco > rapida and preco > lenta:
+    ult = df.iloc[-1]
+    high, low = float(ult["High"]), float(ult["Low"])
+    preco = round(float(ult["Close"]), 2)
+    # O CANDLE contra cada média, por proporção do range (ver :func:`_fracao_acima`).
+    ac_r, ab_r = _candle_acima(high, low, rapida), _candle_abaixo(high, low, rapida)
+    ac_l, ab_l = _candle_acima(high, low, lenta), _candle_abaixo(high, low, lenta)
+    base = {"disponivel": True, "ema_rapida": rapida, "ema_lenta": lenta, "preco": preco,
+            "fracao_acima_rapida": round(_fracao_acima(high, low, rapida), 3),
+            "fracao_acima_lenta": round(_fracao_acima(high, low, lenta), 3),
+            "zona_neutra": False, "direcao_estrutural": None}
+    # A DIREÇÃO ESTRUTURAL é só das médias — ela existe mesmo sem o preço estar do
+    # lado certo, e é ela que diz, na zona neutra, qual lado é recuo e qual é repique.
+    estrutural = "compra" if rapida > lenta else ("venda" if rapida < lenta else None)
+    base["direcao_estrutural"] = estrutural
+    if rapida > lenta and ac_r and ac_l:
         return {**base, "alinhado": True, "direcao": "compra", "armadilha": False,
-                "motivo": (f"MME {_STORM_EMA_RAPIDA} acima da MME {_STORM_EMA_LENTA} e "
-                           "preço acima das duas")}
-    if rapida < lenta and preco < rapida and preco < lenta:
+                "motivo": (f"MME {_STORM_EMA_RAPIDA} acima da MME {_STORM_EMA_LENTA} e o "
+                           "candle majoritariamente acima das duas")}
+    if rapida < lenta and ab_r and ab_l:
         return {**base, "alinhado": True, "direcao": "venda", "armadilha": False,
-                "motivo": (f"MME {_STORM_EMA_RAPIDA} abaixo da MME {_STORM_EMA_LENTA} e "
-                           "preço abaixo das duas")}
-    armadilha_compra = preco > rapida and preco < lenta
-    armadilha_venda = preco < rapida and preco > lenta
-    if armadilha_compra:
-        motivo = (f"ARMADILHA: preço acima da MME {_STORM_EMA_RAPIDA} mas ABAIXO da MME "
-                  f"{_STORM_EMA_LENTA} — repique dentro de tendência de baixa, não reversão")
-    elif armadilha_venda:
-        motivo = (f"ARMADILHA: preço abaixo da MME {_STORM_EMA_RAPIDA} mas ACIMA da MME "
-                  f"{_STORM_EMA_LENTA} — recuo dentro de tendência de alta, não reversão")
-    else:
-        motivo = (f"MME {_STORM_EMA_RAPIDA} e MME {_STORM_EMA_LENTA} cruzadas ou o preço "
-                  "entre elas — sem Éden")
-    return {**base, "alinhado": False, "direcao": None,
-            "armadilha": bool(armadilha_compra or armadilha_venda), "motivo": motivo}
+                "motivo": (f"MME {_STORM_EMA_RAPIDA} abaixo da MME {_STORM_EMA_LENTA} e o "
+                           "candle majoritariamente abaixo das duas")}
+    # ZONA NEUTRA: o candle está ENTRE as duas médias. O Stormer batiza assim a faixa
+    # entre a MME 8 e a MME 80 — "esta região, operar aqui é muito mais perigoso" —,
+    # e ela NÃO é o mesmo que "sem Éden": o preço está do lado certo de UMA das médias
+    # e no meio do caminho da outra. É um TERCEIRO estado, e é o `_storm_qualidade`
+    # que decide o que fazer com ele, porque a leitura depende da DIREÇÃO do padrão:
+    # entre as médias, o mesmo lugar é recuo saudável pra um lado e repique-armadilha
+    # pro outro.
+    entre = (ab_r and ac_l) or (ac_r and ab_l)
+    if entre:
+        de_baixo = ab_r and ac_l          # abaixo da rápida, acima da lenta
+        armadilha = (estrutural == "venda" and ac_r) or (estrutural == "compra" and ab_r)
+        onde = (f"abaixo da MME {_STORM_EMA_RAPIDA} e acima da MME {_STORM_EMA_LENTA}"
+                if de_baixo else
+                f"acima da MME {_STORM_EMA_RAPIDA} e abaixo da MME {_STORM_EMA_LENTA}")
+        return {**base, "alinhado": False, "direcao": None, "zona_neutra": True,
+                "armadilha": bool(armadilha),
+                "motivo": (f"ZONA NEUTRA: o candle está {onde} — a região entre as duas "
+                           "médias. Operar aqui é muito mais perigoso: exige "
+                           "seletividade extra, e o lado que vale depende da tendência "
+                           f"({estrutural or 'indefinida'} pelas médias).")}
+    return {**base, "alinhado": False, "direcao": None, "armadilha": False,
+            "motivo": (f"MME {_STORM_EMA_RAPIDA} e MME {_STORM_EMA_LENTA} cruzadas ou o "
+                       "candle sem maioria de nenhum lado — sem Éden")}
 
 
 def _storm_ponto(df: pd.DataFrame, idx: int, kind: str, fmt: str) -> dict[str, Any]:
@@ -1932,10 +1999,16 @@ def _storm_levels(
 def _storm_qualidade(
     pat: StormPattern | None, eden: dict[str, Any], ema_lenta_no_p3: float | None,
 ) -> dict[str, Any]:
-    """Classificação perfeita/boa/ruim + o VETO, escrito.
+    """Classificação perfeita/boa/**neutra**/ruim + o VETO, escrito.
 
-    A spec só opera **perfeita** e **boa**. As regras, na ordem em que vetam:
+    Opera **perfeita**, **boa** e — com aviso — **neutra**. As regras, na ordem:
 
+    0. **ZONA NEUTRA (o candle entre a MME 8 e a MME 80)**: o terceiro estado do
+       Éden. A favor da tendência das médias → ``neutra``: **opera**, com o setup
+       valendo MENOS e o aviso escrito ("operar aqui é muito mais perigoso"). Contra
+       ela → é a ARMADILHA que a spec nomeia, e aí sim veta. O mesmo lugar do
+       gráfico significa coisas opostas conforme a direção do padrão, e é por isso
+       que a decisão mora aqui e não no ``_eden``.
     1. **Sem Éden alinhado → ruim, não opera.** É veto, não desconto: a tela diz
        "não opera" e o motivo (inclusive quando o motivo é a armadilha nomeada).
     2. **Éden alinhado na direção CONTRÁRIA à do padrão → ruim, não opera.** Um 1-2-3
@@ -1950,6 +2023,29 @@ def _storm_qualidade(
     if pat is None:
         return {"qualidade": None, "motivo": "nenhum 1-2-3 Storm na janela lida",
                 "opera": False, "veto": None}
+    # ZONA NEUTRA — o terceiro estado, entre o alinhado e o desalinhado. Aqui o
+    # mesmo lugar do gráfico significa coisas OPOSTAS conforme a direção do padrão:
+    # com a tendência das médias é um recuo comprável; contra ela é o repique que a
+    # spec nomeia como ARMADILHA. Por isso a decisão mora aqui e não no `_eden`, que
+    # não conhece o padrão.
+    if eden.get("zona_neutra"):
+        estrutural = eden.get("direcao_estrutural")
+        if estrutural is not None and pat.direction != estrutural:
+            contra = ("repique dentro de tendência de baixa" if estrutural == "venda"
+                      else "recuo dentro de tendência de alta")
+            return {
+                "qualidade": "ruim", "motivo": eden.get("motivo") or "zona neutra",
+                "opera": False,
+                "veto": (f"ARMADILHA na zona neutra: padrão de {pat.direction} com as "
+                         f"médias de {estrutural} — é {contra}, não reversão"),
+            }
+        return {
+            "qualidade": "neutra", "opera": True, "veto": None,
+            "motivo": ("ZONA NEUTRA (entre a MME 8 e a MME 80): a estrutura existe e vai "
+                       f"a favor das médias ({estrutural or 'indefinida'}), mas operar "
+                       "aqui é muito mais perigoso — o setup vale MENOS e exige "
+                       "seletividade extra. Não é veto; é aviso."),
+        }
     if not eden.get("alinhado"):
         return {"qualidade": "ruim", "motivo": eden.get("motivo") or "sem Éden",
                 "opera": False,

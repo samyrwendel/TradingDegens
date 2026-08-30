@@ -268,28 +268,52 @@ def test_eden_de_venda_e_o_espelho():
     assert e["ema_rapida"] < e["ema_lenta"] and e["preco"] < e["ema_rapida"]
 
 
+def _poe_candle(d, low, high):
+    """Move o ÚLTIMO candle inteiro pra uma posição escolhida.
+
+    Depois da task 016 o Éden compara o CANDLE com a média (proporção do range), não
+    o fechamento com a média — então mexer só no Close deixaria a barra na posição
+    antiga e o teste mediria outra coisa."""
+    i = d.index[-1]
+    d.loc[i, "Low"], d.loc[i, "High"] = low, high
+    d.loc[i, "Open"] = d.loc[i, "Close"] = (low + high) / 2
+    return d
+
+
 def test_sem_alinhamento_o_eden_VETA_e_nao_apenas_desconta():
-    """Tendência de alta, mas o preço caiu ABAIXO das duas médias: não é Éden de
-    compra (o preço não está acima das duas) nem de venda (a rápida segue acima da
+    """Tendência de alta, mas o CANDLE caiu abaixo das duas médias: não é Éden de
+    compra (o candle não está acima das duas) nem de venda (a rápida segue acima da
     lenta). O resultado é VETO, não um sinal mais fraco."""
     d = _serie_eden(subindo=True)
-    d.loc[d.index[-1], "Close"] = float(d["EMA80"].iloc[-1]) * 0.9
+    lenta = float(d["EMA80"].iloc[-1])
+    _poe_candle(d, lenta * 0.88, lenta * 0.92)      # o candle INTEIRO abaixo das duas
     e = ps._eden(d)
     assert not e["alinhado"] and e["direcao"] is None
+    assert not e["zona_neutra"], ("abaixo das DUAS não é a região entre elas", e)
     assert e["motivo"]
 
 
-def test_a_ARMADILHA_ganha_nome_proprio_no_motivo():
-    """Preço acima da MME 8 e ABAIXO da MME 80 é repique em tendência de baixa — o
-    caso mais caro. Ele já cai no veto pela regra geral; nomeá-lo é o que impede a
-    tela de dizer só "desalinhado" justamente aí."""
+def test_o_candle_entre_as_medias_e_ZONA_NEUTRA_e_diz_isso():
+    """Candle acima da MME 8 e ABAIXO da MME 80, em tendência de baixa: é a região
+    que o Stormer chama de ZONA NEUTRA — "operar aqui é muito mais perigoso".
+
+    ANTES da task 016 isto caía no balaio genérico do "sem Éden", e a tela dizia só
+    "desalinhado" no caso mais caro. Agora é um TERCEIRO estado, com nome e frase; o
+    que se faz com ele depende da direção do padrão, e quem decide é a qualidade."""
     d = _serie_eden(subindo=False)
     rapida, lenta = float(d["EMA8"].iloc[-1]), float(d["EMA80"].iloc[-1])
     assert rapida < lenta
-    d.loc[d.index[-1], "Close"] = (rapida + lenta) / 2   # entre as duas
+    meio = (rapida + lenta) / 2
+    _poe_candle(d, meio * 0.999, meio * 1.001)      # o candle inteiro entre as duas
     e = ps._eden(d)
-    assert not e["alinhado"] and e["armadilha"] is True
-    assert "ARMADILHA" in e["motivo"]
+    assert not e["alinhado"] and e["zona_neutra"] is True, e
+    assert "ZONA NEUTRA" in e["motivo"], e["motivo"]
+    assert "muito mais perigoso" in e["motivo"], e["motivo"]
+    assert e["direcao_estrutural"] == "venda", e
+    # e o nome ARMADILHA continua existindo — agora no VETO da qualidade, porque ele
+    # só faz sentido contra uma DIREÇÃO de padrão (o mesmo lugar é recuo pra um lado)
+    q = ps._storm_qualidade(_pat_compra(), e, None)
+    assert q["opera"] is False and "ARMADILHA" in (q["veto"] or ""), q
 
 
 def test_serie_curta_nao_finge_ter_MME_80():
@@ -304,6 +328,10 @@ def test_serie_curta_nao_finge_ter_MME_80():
 # --------------------------------------------------------------- qualidade ----
 def _pat_compra():
     return ps._storm_123(_df(_COMPRA))
+
+
+def _pat_venda():
+    return ps._storm_123(_df(_VENDA))
 
 
 def test_sem_eden_a_qualidade_e_ruim_e_o_veto_esta_escrito():
@@ -374,3 +402,96 @@ def test_a_MME_80_so_e_DESENHADA_no_metodo_storm():
     assert 80 not in ps._chart_emas("padrao")
     assert 80 not in ps._chart_emas("erick")
     assert 80 in ps._chart_emas("storm")
+
+
+# ─────────── ZONA NEUTRA + "acima da média" por proporção (task 016) ──────────
+@pytest.mark.unit
+@pytest.mark.parametrize("high,low,media,esperado,nome", [
+    (110.0, 105.0, 100.0, 1.0, "candle inteiro acima"),
+    (110.0, 100.0, 102.0, 0.8, "maioria acima — o caso que MUDA"),
+    (110.0, 100.0, 108.0, 0.2, "maioria abaixo"),
+    (110.0, 100.0, 105.0, 0.5, "cortado exatamente ao meio"),
+    (110.0, 100.0, 100.0, 1.0, "só encosta na média por baixo"),
+    (110.0, 100.0, 120.0, 0.0, "inteiro abaixo"),
+])
+def test_a_fracao_acima_e_do_RANGE_do_candle(high, low, media, esperado, nome):
+    """A regra nova: "acima da média" deixou de ser um PONTO contra um nível e virou
+    a PROPORÇÃO do candle. Medir pelo RANGE (máxima−mínima) e não pelo corpo é
+    interpretação declarada — o corpo ignoraria pavios que são metade da barra."""
+    assert ps._fracao_acima(high, low, media) == pytest.approx(esperado), nome
+
+
+@pytest.mark.unit
+def test_o_candle_com_MAIORIA_acima_conta_como_acima():
+    """É o caso que a regra antiga errava: fechamento abaixo da média com 80% do
+    candle acima dela saía como "abaixo"."""
+    assert ps._candle_acima(110.0, 100.0, 102.0) is True
+    assert ps._candle_abaixo(110.0, 100.0, 102.0) is False
+
+
+@pytest.mark.unit
+def test_o_EMPATE_exato_nao_e_nem_acima_nem_abaixo():
+    """O desempate, definido e declarado: num filtro que AUTORIZA trade, meio a meio
+    não autoriza. Os dois testes dão falso de propósito — a alternativa seria um
+    critério que decide por arredondamento."""
+    assert ps._candle_acima(110.0, 100.0, 105.0) is False
+    assert ps._candle_abaixo(110.0, 100.0, 105.0) is False
+
+
+@pytest.mark.unit
+def test_candle_com_maioria_acima_das_duas_ALINHA_o_eden():
+    """Fim a fim: a mesma barra que a régua antiga (fechamento) reprovava agora
+    alinha, porque a maior parte dela está acima das duas médias."""
+    d = _serie_eden(subindo=True)
+    rapida, lenta = float(d["EMA8"].iloc[-1]), float(d["EMA80"].iloc[-1])
+    # candle com 80% acima da rápida (e inteiro acima da lenta), fechando ABAIXO dela
+    baixo = rapida - (rapida - lenta) * 0.05
+    alto = rapida + (rapida - lenta) * 0.20
+    _poe_candle(d, baixo, alto)
+    d.loc[d.index[-1], "Close"] = rapida * 0.999      # fechamento ABAIXO da rápida
+    e = ps._eden(d)
+    assert e["fracao_acima_rapida"] > 0.5, e
+    assert e["alinhado"] is True and e["direcao"] == "compra", e
+
+
+@pytest.mark.unit
+def test_na_zona_neutra_a_FAVOR_das_medias_o_setup_OPERA_com_aviso():
+    """O terceiro estado, e o ponto dele: não é veto. "Operar aqui é muito mais
+    perigoso" vira qualidade REBAIXADA com a frase escrita — o setup vale menos e
+    exige seletividade extra, mas a tela não o esconde."""
+    d = _serie_eden(subindo=False)
+    rapida, lenta = float(d["EMA8"].iloc[-1]), float(d["EMA80"].iloc[-1])
+    meio = (rapida + lenta) / 2
+    _poe_candle(d, meio * 0.999, meio * 1.001)
+    e = ps._eden(d)
+    assert e["zona_neutra"] and e["direcao_estrutural"] == "venda", e
+    q = ps._storm_qualidade(_pat_venda(), e, None)
+    assert q["qualidade"] == "neutra", q
+    assert q["opera"] is True, ("não é veto automático — é aviso", q)
+    assert q["veto"] is None, q
+    assert "muito mais perigoso" in q["motivo"], q["motivo"]
+    assert "seletividade extra" in q["motivo"], q["motivo"]
+
+
+@pytest.mark.unit
+def test_na_zona_neutra_CONTRA_as_medias_continua_veto():
+    """O outro lado, e é o que impede a regra nova de virar afrouxamento: o MESMO
+    lugar do gráfico é recuo saudável a favor da tendência e ARMADILHA contra ela."""
+    d = _serie_eden(subindo=False)
+    rapida, lenta = float(d["EMA8"].iloc[-1]), float(d["EMA80"].iloc[-1])
+    meio = (rapida + lenta) / 2
+    _poe_candle(d, meio * 0.999, meio * 1.001)
+    q = ps._storm_qualidade(_pat_compra(), ps._eden(d), None)
+    assert q["opera"] is False and q["qualidade"] == "ruim", q
+    assert "ARMADILHA" in q["veto"] and "repique" in q["veto"], q["veto"]
+
+
+@pytest.mark.unit
+def test_zona_neutra_NAO_e_a_mesma_coisa_que_sem_eden():
+    """A distinção que a task pediu: hoje os dois caíam no mesmo balaio."""
+    d = _serie_eden(subindo=True)
+    lenta = float(d["EMA80"].iloc[-1])
+    _poe_candle(d, lenta * 0.88, lenta * 0.92)     # abaixo das DUAS, em alta
+    fora = ps._eden(d)
+    assert fora["zona_neutra"] is False and fora["alinhado"] is False, fora
+    assert "ZONA NEUTRA" not in fora["motivo"], fora["motivo"]

@@ -323,6 +323,10 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
     # proíbe não é "em movimento", é um trade que não se faz.
     if not plano.get("opera"):
         linha_estado = "vetado"
+    elif plano.get("qualidade") == "neutra":
+        # OPERA, mas na região que o Stormer chama de perigosa. Estado próprio: uma
+        # lista que mostra "em gatilho" igual pros dois esconde justamente o aviso.
+        linha_estado = "zona_neutra"
     elif dist is not None and dist <= _GATILHO_TOL:
         linha_estado = "em_gatilho"
     elif estado == "acionado":
@@ -348,6 +352,10 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
         "veto": plano.get("veto"),
         "eden": (plano.get("eden") or {}).get("direcao"),
         "eden_ok": bool((plano.get("eden") or {}).get("alinhado")),
+        # ZONA NEUTRA viaja na linha (task 016): ela OPERA, então `opera` sozinho não
+        # a distingue de um Éden alinhado — e o aviso do Stormer ("operar aqui é
+        # muito mais perigoso") sumiria numa lista onde os dois saem iguais.
+        "zona_neutra": bool((plano.get("eden") or {}).get("zona_neutra")),
         # As DUAS leituras viajam pro title da célula: a linha mostra a mais
         # próxima, mas esconder a outra seria decidir pelo leitor.
         "leituras": [{"entrada": L.get("entrada"), "ordem": L.get("ordem"),

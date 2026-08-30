@@ -360,3 +360,39 @@ def test_o_card_do_storm_cabe_no_desktop_e_no_telefone(base, w, h):
         }""")
         assert m["fora"] == [] and not m["rola"], m
         browser.close()
+
+
+# ─────────────────── ZONA NEUTRA na tela (task 20260830-016) ──────────────────
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+@pytest.mark.parametrize("largura", [1500, 390])
+def test_a_zona_neutra_NAO_se_veste_de_opera_limpo(base, largura):
+    """O terceiro estado do Éden precisa se distinguir de relance. "opera · qualidade
+    zona neutra" lido rápido vira só "opera", e o aviso do Stormer ("operar aqui é
+    muito mais perigoso") sumiria justamente na leitura que importa."""
+    st = _storm()
+    st["qualidade"] = "neutra"
+    st["opera"] = True
+    st["veto"] = None
+    st["motivo"] = ("ZONA NEUTRA (entre a MME 8 e a MME 80): a estrutura existe e vai a "
+                    "favor das médias (compra), mas operar aqui é muito mais perigoso — "
+                    "o setup vale MENOS e exige seletividade extra. Não é veto; é aviso.")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": largura, "height": 1100})
+        _abre(page, base, st)
+        m = page.evaluate("""() => {
+          const el = document.querySelector('#setupCards .sc-storm');
+          const s = el.querySelector('.sc-state');
+          return {estado: s.innerText.trim(), cls: s.className,
+                  txt: el.innerText,
+                  cortados: [...el.querySelectorAll('*')]
+                    .filter(e => e.scrollWidth > e.clientWidth + 1).length};
+        }""")
+        assert "OPERA COM CAUTELA" in m["estado"], m
+        assert "zona neutra" in m["estado"], ("a qualidade nomeada", m)
+        assert "ativo" not in m["cls"], ("não pode se vestir do verde de 'ativo'", m)
+        assert "muito mais perigoso" in m["txt"], m["txt"]
+        assert "seletividade extra" in m["txt"], m["txt"]
+        assert "Não é veto" in m["txt"], ("o que ela É, escrito", m["txt"])
+        assert m["cortados"] == 0, ("nada cortado", m)
+        browser.close()

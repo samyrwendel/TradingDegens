@@ -2168,9 +2168,11 @@ function fmtPct0(v) {
   return v == null ? "—" : `${Math.round(v)}%`;
 }
 
-// Rótulo pt-BR da qualidade do Storm — a spec só opera "perfeita" e "boa".
+// Rótulo pt-BR da qualidade do Storm. "neutra" é o terceiro estado do Éden (task
+// 016): o candle entre a MME 8 e a MME 80 — a ZONA NEUTRA que o Stormer nomeia.
+// Ela OPERA, mas vale menos: não é veto, é aviso, e o card escreve o porquê.
 const STORM_QUALIDADE = {
-  perfeita: "perfeita", boa: "boa", ruim: "ruim",
+  perfeita: "perfeita", boa: "boa", neutra: "zona neutra", ruim: "ruim",
 };
 // Nome curto de cada ENTRADA do Storm. São DUAS leituras do MESMO padrão (mesmos
 // pontos, mesmo stop, mesma amplitude), com gatilhos diferentes — a spec escreve
@@ -2263,10 +2265,15 @@ function stormCardHtml(st) {
 
   // A manchete: OPERA / NÃO OPERA + a qualidade, e o motivo escrito embaixo.
   const q = STORM_QUALIDADE[st.qualidade] || st.qualidade || "";
+  // A ZONA NEUTRA opera, mas NÃO se veste de "opera" limpo: ela tem estado próprio
+  // na tela, porque "opera · qualidade zona neutra" lido rápido vira só "opera" —
+  // e o aviso do Stormer ("muito mais perigoso") sumiria na leitura de relance.
+  const neutra = st.qualidade === "neutra";
   const selo = pat
     ? `<div class="sc-verdict"><span class="sc-vk">filtro Éden</span>` +
-      `<span class="sc-state ${opera ? "ativo" : "sem_setup"}">` +
-      `${opera ? "opera" : "NÃO OPERA"}${q ? ` · qualidade ${escapeHtml(q)}` : ""}</span></div>` +
+      `<span class="sc-state ${neutra ? "aguardar_pullback" : (opera ? "ativo" : "sem_setup")}">` +
+      `${neutra ? "OPERA COM CAUTELA" : (opera ? "opera" : "NÃO OPERA")}` +
+      `${q ? ` · qualidade ${escapeHtml(q)}` : ""}</span></div>` +
       (st.veto ? `<div class="sc-veto">${escapeHtml(st.veto)}</div>`
                : (st.motivo ? `<div class="sc-hz">${escapeHtml(st.motivo)}</div>` : ""))
     : "";
@@ -6275,6 +6282,10 @@ function scanLineCellsHtml(f) {
 // que aquilo é o Storm, e o `title` da célula leva o estado por extenso.
 const SCAN_STORM_ESTADO = {
   em_gatilho: "gatilho", em_movimento: "movimento",
+  // ZONA NEUTRA (task 016): opera, mas na região entre a MME 8 e a MME 80, que o
+  // Stormer chama de perigosa. Estado PRÓPRIO na lista — mostrá-la como "gatilho"
+  // igual às outras é onde o aviso se perderia.
+  zona_neutra: "zona neutra",
   formando: "formando", vetado: "vetado", sem_setup: "sem setup", sem_dado: "sem dado",
 };
 

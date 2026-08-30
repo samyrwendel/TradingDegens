@@ -806,3 +806,24 @@ com o GATILHO, e um padrão pode ter acionado e depois perdido o ponto 3.
 
 Provado em `tests/test_invalidado_e_projecao.py` (15) e `tests/test_webui_fantasma_e2e.py`
 (11). Governança: **DA-091**.
+
+---
+
+## 20. Zona neutra do Éden + "acima da média" por proporção (task 20260830-016)
+
+**Zona neutra:** a região entre a MME 8 e a MME 80 vira o TERCEIRO estado do Éden —
+"operar aqui é muito mais perigoso". Não é veto: o setup opera com a qualidade
+rebaixada (`OPERA COM CAUTELA · qualidade zona neutra`), fora do verde de "ativo", com
+a frase inteira no card. **Mas contra a tendência das médias continua veto** — ali é a
+ARMADILHA que a spec nomeia, e o mesmo lugar do gráfico significa coisas opostas
+conforme a direção do padrão.
+
+**Proporção:** "acima da média" deixou de ser fechamento × média e virou a fração do
+RANGE do candle acima dela, com corte na metade. Empate exato não é nem acima nem
+abaixo — num filtro que autoriza trade, empate não autoriza.
+
+**Impacto medido** (watchlist real, 14 × 3 = 42 leituras): Éden mudou em **14**,
+qualidade em **6**, **13** em zona neutra. Na decisão: 4 passam a operar, 2 são
+rebaixadas sem deixar de operar. Tabela em `/tmp/devbot-td-016/impacto-watchlist.txt`.
+
+Governança: **DA-092**.
