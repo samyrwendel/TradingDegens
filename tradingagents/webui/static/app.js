@@ -2189,8 +2189,10 @@ const STORM_ORDEM_CURTO = { antecipada: "antecipada", confirmada: "confirmada", 
 // ENTRADAS do mesmo padrão. O veto é a manchete do card, não uma nota de rodapé —
 // e a borda muda de cor com ele, que é a gramática que a DA-076 pede (estado é cor
 // + palavra).
-function stormCardHtml(st) {
+function stormCardHtml(st, frameDoBloco) {
   const pat = st.pattern;
+  const frameProprio = (st.timeframe && frameDoBloco && st.timeframe !== frameDoBloco)
+    ? st.timeframe : "";
   const eden = st.eden || {};
   const opera = st.opera === true;
   const dir = pat ? ((PAT_DIR[pat.direction] || [])[1] || "") : "";
@@ -2282,6 +2284,9 @@ function stormCardHtml(st) {
     `${pat && pat.direction === "venda" ? " sc-venda" : ""}">` +
     `<div class="sc-head"><span class="sc-title">Storm123` +
     (dir ? ` <span class="sc-dir">${escapeHtml(dir)}</span>` : "") + "</span>" +
+    // Frame PRÓPRIO só quando difere do bloco: aí ele salta, porque um card lido
+    // sob o carimbo errado é um stop lido no frame errado. Igual ao bloco, cala.
+    (frameProprio ? `<span class="sc-frame-card">${escapeHtml(frameProprio)}</span>` : "") +
     "</div>" + selo +
     `<div class="sc-rows">${rows.join("")}</div></section>`;
 }
@@ -2309,7 +2314,7 @@ function renderSetupCards(a) {
   // "por que não opera" precisa do que ele seria.
   const st = a.storm;
   if (st) {
-    cards.push(stormCardHtml(st));
+    cards.push(stormCardHtml(st, a.timeframe));
   }
 
   // ---- card do PADRÃO 1-2-3 (existe quando existe padrão) -------------------
@@ -2467,16 +2472,24 @@ function renderSetupCards(a) {
       + '<div class="sc-rows"><div class="sc-row sc-sem-txt">Nem o padrão 1-2-3 nem o '
       + 'recuo à média produziram nível neste frame.</div></div></section>');
   }
-  // O FRAME é o chão comum: as duas leituras foram calculadas nele, então ele não
-  // se repete dentro de card nenhum — fica uma vez, embaixo das duas.
+  // O FRAME SOBE PRO TOPO DO BLOCO. Ele era o chão comum, escrito UMA vez — mas no
+  // rodapé, em cinza, DEPOIS dos três cards. Quem lia o card do meio não sabia em que
+  // frame aquele stop valia sem rolar até o fim, e o rodapé é o menor peso visual da
+  // tela justamente para a informação que qualifica todo o resto.
+  //
+  // Um carimbo por card seria a mesma frase três vezes num celular; um carimbo no
+  // TOPO, grudado (sticky), acompanha a rolagem e vale pros três. É a hierarquia que
+  // o pedido pede: uma vez, mas onde não sai da vista.
+  //
   // "as leituras", sem contar: um card pode carregar MAIS de uma leitura dentro (o
   // Storm tem duas entradas), então contar cards diria um número que não é o de
   // leituras — e um número errado é pior que nenhum.
-  const frame = a.timeframe
-    ? `<span class="sc-frame">${cards.length > 1 ? "as leituras" : "leitura"}` +
-      ` no ${escapeHtml(a.timeframe)}</span>`
+  const frameTopo = a.timeframe
+    ? `<div class="sc-frame-topo"><span class="sc-frame-k">` +
+      `${cards.length > 1 ? "as leituras" : "leitura"} no</span>` +
+      `<b class="sc-frame-v">${escapeHtml(a.timeframe)}</b></div>`
     : "";
-  const rodape = ((!semCard && !donoNaTela) ? carimbo : "") + frame;
+  const rodape = (!semCard && !donoNaTela) ? carimbo : "";
 
   // LEITURA EXPLORATÓRIA — o frame na tela não é o que decidiu. Trocar o chip de
   // tempo recalcula o plano inteiro, e os planos discordam de verdade (mesma ação,
@@ -2492,7 +2505,8 @@ function renderSetupCards(a) {
       `${escapeHtml(TF_LABEL[_verdictTf] || _verdictTf)}.</span></div>`
     : "";
   el.classList.toggle("is-exploratorio", explor);
-  el.innerHTML = aviso + cards.join("") + (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
+  el.innerHTML = frameTopo + aviso + cards.join("") +
+    (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
   el.classList.remove("hidden");
 }
 

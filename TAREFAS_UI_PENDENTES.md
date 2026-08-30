@@ -848,3 +848,17 @@ contra o código original: nenhum ativo perde alinhamento; 12 leituras passam de
 Éden" para ZONA NEUTRA, 4 mudam de qualidade, 4 passam a operar com aviso.
 
 Governança: **DA-093** (supersede a regra 2 da DA-092).
+
+---
+
+## 22. O timeframe de cada leitura, sem rolar (task 20260830-029)
+
+Três cards com gatilho, stop e alvo — e o frame só no rodapé, em cinza, depois de
+todos. Quem lê o card do meio não sabe em que timeframe aquele stop vale.
+
+O carimbo subiu pro **topo do bloco** e é **grudado**: no celular os cards passam de
+uma tela, e um carimbo que sai de vista volta a ser rodapé. Um por card seria a mesma
+frase três vezes — a duplicação que a DA-077 veio matar.
+
+Card de frame DIFERENTE do bloco carrega o próprio, em destaque; quem é do frame do
+bloco não repete. Governança: **DA-094**.

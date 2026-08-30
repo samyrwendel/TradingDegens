@@ -1422,6 +1422,34 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    lida como "entre nesta faixa" antes de o setup existir */
 .sc-row.sc-prep .sc-k { color: var(--muted); }
 .sc-row.sc-prep .sc-v { color: var(--muted); font-weight: var(--fw-med); }
+/* O CARIMBO DE FRAME NO TOPO DO BLOCO (task 20260830-029). Ele estava no rodapé, em
+   cinza, DEPOIS dos três cards: quem lia o card do meio não sabia em que timeframe
+   aquele stop valia sem rolar até o fim — e o rodapé é o menor peso visual da tela
+   pra informação que qualifica todo o resto.
+   GRUDADO (sticky): no celular os três cards passam de uma tela, e um carimbo que
+   sai de vista volta a ser rodapé. Assim ele vale pros três sem virar a mesma frase
+   repetida três vezes. Fundo opaco porque ele passa POR CIMA dos cards ao rolar. */
+.setup-cards .sc-frame-topo {
+  grid-column: 1 / -1; position: sticky; top: 0; z-index: 3;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px;
+  padding: 5px 2px 6px; margin: 0; background: var(--bg);
+  border-bottom: 1px solid var(--border); min-width: 0;
+}
+.sc-frame-k {
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+}
+.sc-frame-v {
+  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12);
+  font-weight: var(--fw-bold); color: var(--text); overflow-wrap: anywhere; min-width: 0;
+}
+/* frame PRÓPRIO de um card que difere do bloco: tem de saltar, porque um card lido
+   sob o carimbo errado é um stop lido no frame errado */
+.sc-frame-card {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-bold); color: var(--accent);
+  text-transform: uppercase; letter-spacing: .4px;
+}
 .sc-nenhum { border-left: 3px solid var(--border); }
 /* LEITURA EXPLORATÓRIA — o frame na tela não é o que produziu o veredito.
    Trocar o chip de tempo recalcula o PLANO INTEIRO: a mesma ação em 29/08 saía com

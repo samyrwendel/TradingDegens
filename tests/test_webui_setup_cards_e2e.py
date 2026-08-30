@@ -299,19 +299,31 @@ def test_veredito_sem_dono_cai_no_rodape_compartilhado_e_nao_num_card(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_frame_e_chao_comum_e_sai_uma_vez_so_embaixo_dos_dois(base):
-    """O timeframe é de NINGUÉM: as duas leituras foram calculadas nele. Repetir em
-    cada card seria criar a mesma duplicata que a 021 veio matar."""
+def test_o_frame_e_chao_comum_e_sai_uma_vez_so_NO_TOPO(base):
+    """O timeframe é de NINGUÉM: as leituras foram calculadas nele. Repetir em cada
+    card seria a mesma duplicata que a 021 veio matar — mas ele SUBIU pro topo do
+    bloco (task 029): no rodapé, quem lia o card do meio não sabia em que frame
+    aquele stop valia sem rolar até o fim."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1100})
         _abre(page, base, _ACT)
-        m = page.evaluate("""() => ({
-          rodape: document.querySelector('#setupCards .sc-foot').innerText,
-          c123: document.querySelector('#setupCards .sc-123').innerText,
-          recuo: document.querySelector('#setupCards .sc-recuo').innerText,
-        })""")
-        assert "as leituras no 4h" in m["rodape"], m
+        m = page.evaluate("""() => {
+          const el = document.getElementById('setupCards');
+          const topo = el.querySelector('.sc-frame-topo');
+          const cards = el.querySelector('.setup-card');
+          return {topo: topo ? topo.innerText : '',
+                  topoAntes: topo && cards
+                    ? topo.getBoundingClientRect().top < cards.getBoundingClientRect().top
+                    : false,
+                  c123: el.querySelector('.sc-123').innerText,
+                  recuo: el.querySelector('.sc-recuo').innerText};
+        }""")
+        # o rótulo é caixa alta por CSS e o valor cai em linha própria: compara-se o
+        # texto normalizado, não a caixa nem a quebra
+        topo = " ".join(m["topo"].split()).lower()
+        assert "as leituras no 4h" in topo, m
+        assert m["topoAntes"], ("o carimbo vem ANTES dos cards, não depois", m)
         assert "4h" not in m["c123"] and "4h" not in m["recuo"], ("uma vez só", m)
         browser.close()
 
@@ -489,4 +501,73 @@ def test_venda_muda_a_cor_do_card_porque_o_emoji_nao_esta_mais_la(base):
         assert m["borda"] == "rgb(255, 159, 67)", ("laranja do 1-2-3 de venda", m)
         assert m["dir"].strip() == "de venda", m
         assert any("perda da mínima do ponto 2" in b for b in m["base"]), m
+        browser.close()
+
+
+# ───────────── o frame não depende do rodapé (task 20260830-029) ──────────────
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+@pytest.mark.parametrize("w,h", [(390, 844), (1500, 1100)])
+def test_o_carimbo_de_frame_NAO_SAI_DA_VISTA_ao_rolar_os_cards(base, w, h):
+    """O pedido, literal: "identificar qual timeframe pertence a análise". No print,
+    três cards com gatilho, stop e alvo — e o frame só no rodapé, em cinza, DEPOIS de
+    todos. Quem lê o card do meio não sabe em que frame aquele stop vale.
+
+    O carimbo subiu pro topo e é GRUDADO: no celular os cards passam de uma tela, e
+    um carimbo que sai de vista volta a ser rodapé."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": w, "height": h})
+        _abre(page, base, _ACT, largura=w)
+        m = page.evaluate("""() => {
+          const el = document.getElementById('setupCards');
+          const c = el.querySelector('.sc-frame-topo');
+          // rola até o ÚLTIMO card — o instante em que o rodapé ainda não apareceu
+          const ultimo = [...el.querySelectorAll('.setup-card')].pop();
+          ultimo.scrollIntoView({block: 'center'});
+          const r = c.getBoundingClientRect();
+          return {grudado: getComputedStyle(c).position,
+                  topo: Math.round(r.top), altura: Math.round(r.height),
+                  naTela: r.top >= -1 && r.bottom <= window.innerHeight + 1,
+                  txt: " ".join ? '' : '',
+                  texto: c.innerText.replace(/\\s+/g, ' ').trim()};
+        }""")
+        assert m["grudado"] == "sticky", ("o carimbo tem de acompanhar a rolagem", m)
+        assert m["altura"] > 0, m
+        assert m["naTela"], ("com os cards rolados, o frame continua visível", m)
+        assert "4h" in m["texto"], m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_card_de_frame_DIFERENTE_do_bloco_salta(base):
+    """O outro lado: se um card for de outro timeframe, isso não pode ficar escondido
+    sob o carimbo do bloco — um card lido sob o frame errado é um stop lido no frame
+    errado."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1500, "height": 1100})
+        _abre(page, base, _ACT)
+        m = page.evaluate("""(base) => {
+          // o mesmo plano, com o Storm vindo de OUTRO frame
+          const a = JSON.parse(JSON.stringify(base));
+          a.storm = {opera: true, qualidade: "boa", veto: null, motivo: "",
+                     timeframe: "1 hora (intradiário)",
+                     eden: {disponivel: true, ema_rapida: 1, ema_lenta: 2, motivo: ""},
+                     pattern: {p1: {date: "2026-08-24", price: 1},
+                               p2: {date: "2026-08-25", price: 2},
+                               p3: {date: "2026-08-26", price: 3},
+                               direction: "compra", amplitude: 1},
+                     invalidation: {price: 1, meaning: ""}, stop: {price: 1, basis: ""},
+                     leituras: []};
+          renderSetupCards(a);
+          const st = document.querySelector('#setupCards .sc-storm');
+          const outros = document.querySelector('#setupCards .sc-123');
+          return {storm: st ? st.innerText : '',
+                  marca: st ? !!st.querySelector('.sc-frame-card') : false,
+                  outroMarcado: outros ? !!outros.querySelector('.sc-frame-card') : false};
+        }""", _ACT)
+        assert m["marca"], ("o card de outro frame tem de se identificar", m)
+        assert "1 hora" in m["storm"].lower(), ("o rótulo é caixa alta por CSS",
+                                                 m["storm"])
+        assert not m["outroMarcado"], ("quem é do frame do bloco NÃO repete", m)
         browser.close()
