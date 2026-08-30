@@ -296,7 +296,9 @@ def test_rr_maior_que_um_nao_vira_alarme(base, snap):
 @pytest.mark.parametrize("largura", [1500, 1280])
 def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
     """Nada do arranjo de telefone pode vazar pro desktop: a legenda continua ACIMA do
-    gráfico, a tira segue encostada à direita e as duas unidades de preço lado a lado."""
+    gráfico, a régua entre as duas unidades de preço fica e elas seguem lado a lado.
+    (O "encostada à direita" saiu com a regra 11 da DA-078 — a tira agora flui junto
+    da meta e a sobra de espaço fica no fim da fileira, não num buraco no meio.)"""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": largura, "height": 1200})
@@ -305,7 +307,11 @@ def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
           const r = (s) => document.querySelector(s).getBoundingClientRect();
           return {
             legendaAcima: r('#chartLegend').top < r('.chart-wrap').top,
-            direita: Math.round(r('#resultPanel').right) - Math.round(r('#headPrice').right) < 40,
+            // regra 11 da DA-078: a tira DEIXOU de ser pinçada na borda direita — ela
+            // flui depois da meta, na mesma fileira, e o que sobra fica no FIM. O que
+            // continua valendo é ela começar onde a informação começa (à esquerda do
+            // painel), nunca com um buraco atrás.
+            naEsquerda: Math.round(r('#headPrice').left) - Math.round(r('.result-info').left) < 8,
             regua: getComputedStyle(document.querySelector('.hp-ref')).borderLeftWidth,
             // `align-items: baseline` alinha a LINHA DE BASE, não o topo: com o
             // preço em 16px e a referência em 14px os topos diferem mesmo lado a
@@ -319,7 +325,7 @@ def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
           };
         }""")
         assert m["legendaAcima"], m
-        assert m["direita"], ("a tira do mercado continua encostada à direita", m)
+        assert m["naEsquerda"], ("a tira flui com a meta, sem buraco atrás (DA-078 r.11)", m)
         assert m["regua"] != "0px", ("a régua entre cotação e análise fica no desktop", m)
         assert m["unidadesLadoALado"], ("no desktop as duas ficam lado a lado", m)
         browser.close()

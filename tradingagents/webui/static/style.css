@@ -58,6 +58,38 @@
   --primary: #2563eb;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   AUDITORIA DA REGRA 11 (DA-078) — "o espaço vago fica ONDE SOBRA, não no meio"
+   feita em 30/08, ocorrência por ocorrência de `justify-content: space-between` e
+   `margin-left: auto`. A regra não proíbe o padrão: proíbe o par VÃO CENTRAL +
+   CONTEÚDO TRUNCADO na mesma linha. Onde os dois grupos são de fato independentes e
+   nada corta, distribuir aos extremos é o certo — é o que separa título de ação.
+
+   REAGRUPADO (era o print "espaços mal aproveitados"):
+   • cabeçalho do resultado — a meta ("Data · Tipo · Método · Custo · Tempo") ficava
+     numa linha e a cotação encostada à DIREITA noutra, com o vão sendo a tela
+     inteira menos os dois conteúdos, e o da direita ainda cortando na borda. Viraram
+     uma fileira só (`.result-info`): o conteúdo flui e a sobra fica no FIM.
+
+   MANTIDOS, com o motivo:
+   • .topbar — marca × controles: grupos independentes, nada trunca (a barra tem a
+     largura da janela).
+   • .result-head — identidade do ativo × navegação (calendário, exportar): o vão é o
+     que separa "quem é isto" de "o que fazer com isto".
+   • .progress-head, .chart-head, .config-head, .scan-head, .cmp-col-head,
+     .sub-row-connected, .resume-bar, .lbp-foot — TÍTULO × AÇÃO. É o caso canônico
+     de dois grupos independentes: juntá-los faria o botão parecer parte do texto.
+   • .audit-steps-list li, .sc-head — rótulo × valor numa linha de dado; o vão é o
+     leader que liga os dois, e ambos quebram (`flex-wrap`) antes de truncar.
+   • ::after com `margin-left: auto` (marcador ▸/▾ dos <details>) — o marcador vive
+     na ponta por definição; não há segundo grupo pra "agrupar".
+
+   O QUE SEGURA ISSO DAQUI PRA FRENTE não é este comentário: é
+   `tests/test_webui_espaco_regra11_e2e.py`, que varre o DOM RENDERIZADO em três
+   larguras e reprova qualquer fileira que tenha vão central E conteúdo cortado ao
+   mesmo tempo. Comentário não segura regra — foi a lição do bump de cache (DA-073).
+   ══════════════════════════════════════════════════════════════════════════════ */
+
 * { box-sizing: border-box; }
 
 /* trava de segurança: nada rola pro lado no celular, e mídia nunca estoura */
@@ -573,15 +605,23 @@ details.section.erick > summary { color: #9cc7f5; }
    saiu na 021 — ela não era uma família do cabeçalho, era o conteúdo de UMA das duas
    leituras da tela, e foi pro card dela. O que sobra aqui é o que não pertence a
    leitura nenhuma: a âncora contra a qual as duas se medem. */
+/* A fileira ÚNICA: meta + mercado. O espaço que sobra fica no FIM dela, não num
+   buraco no meio (DA-078 regra 11) — e `flex-wrap` põe o mercado na linha de baixo
+   quando não couber, em vez de espremer os dois. */
+.result-info {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 4px 16px; margin-bottom: 8px; min-width: 0;
+}
+.result-info .result-meta { margin: 0; }
 .head-levels {
-  display: flex; flex-direction: column; align-items: flex-end;
-  gap: 3px; margin: 0 0 8px; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 3px; margin: 0; min-width: 0;
 }
 /* A linha quebra ENTRE unidades quando falta largura — nunca no meio de um número e
    nunca cortando. É a resposta ao pior defeito da tira: informação que simplesmente
    sumia na borda. */
 .head-price {
-  display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end;
+  display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-start;
   gap: 2px 14px; min-width: 0; max-width: 100%;
 }
 /* rótulo de unidade: caixa alta miúda e apagada, nunca do mesmo peso do dado. É o

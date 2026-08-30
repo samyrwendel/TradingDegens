@@ -311,7 +311,13 @@
             <button type="button" class="export-pdf-btn hidden" id="exportPdfBtn" title="Exportar esta análise como PDF (imprimir → salvar como PDF)">⤓ Exportar PDF</button>
           </div>
         </div>
-        <div class="result-meta" id="resultMeta"></div>
+        <!-- META + MERCADO na MESMA fileira (DA-078 regra 11). Eram duas linhas: a
+             meta à esquerda e a cotação encostada à DIREITA, com um vão enorme no
+             meio — e o preço ainda cortando na borda. O conteúdo se agrupa e o
+             espaço livre sobra numa PONTA; quando falta largura, a fileira quebra
+             (e a quebra é entre unidades, que é o contrato da task 018). -->
+        <div class="result-info">
+          <div class="result-meta" id="resultMeta"></div>
         <!-- Rodapé do cabeçalho: o MERCADO — a cotação agora e o preço da análise,
              cada um com a SESSÃO declarada (fechamento × pré × pós são preços
              diferentes) e o seu carimbo de hora. Ver renderHeadPrice.
@@ -322,8 +328,9 @@
              assunto do cabeçalho, era o conteúdo de UMA das duas leituras que a tela
              desenha. A cotação continua aqui porque é a ÂNCORA contra a qual as duas
              leituras se medem: não pertence a nenhuma delas. -->
-        <div class="head-levels hidden" id="headLevels">
-          <div class="head-price hidden" id="headPrice"></div>
+          <div class="head-levels hidden" id="headLevels">
+            <div class="head-price hidden" id="headPrice"></div>
+          </div>
         </div>
         <!-- Carimbo do veredito (task 016): quando os insumos tinham inconsistência
              na hora da decisão, o juiz recebeu os DADOS VERIFICADOS e decidiu com
