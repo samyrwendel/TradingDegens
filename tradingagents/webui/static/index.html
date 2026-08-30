@@ -368,16 +368,21 @@
             </div>
           </div>
 
-          <aside class="stage-rail">
-            <!-- UM CARD POR ANÁLISE (task 021). A tela desenha DUAS leituras
-                 independentes, que podem coexistir e discordar: o PADRÃO 1-2-3 e o
-                 RECUO À MÉDIA. A 015 deu nome a cada uma (setup_source); aqui elas
-                 ganham caixa própria, porque leitura independente amontoada num
-                 bloco só é o que faz uma parecer contradizer a outra.
-                 Quem não existe no dado não abre card — nunca uma caixa vazia com
-                 travessão inventado. Ver renderSetupCards. -->
-            <div class="setup-cards hidden" id="setupCards"></div>
+          <!-- UM CARD POR ANÁLISE (task 021, layout revisto na 024). A tela desenha
+               leituras INDEPENDENTES do mesmo candle, que podem coexistir e discordar:
+               o PADRÃO 1-2-3, o RECUO À MÉDIA e o 1-2-3 STORM (este com DUAS entradas
+               dentro dele). A 015 deu nome a cada uma (setup_source); aqui cada uma tem
+               caixa própria COM OS SEUS NÍVEIS COMPLETOS — leitura independente
+               amontoada num bloco só é o que faz uma parecer contradizer a outra.
 
+               A FILEIRA é larga de propósito: empilhados numa coluna de 340px, três
+               cards viram 870px de rolagem; lado a lado eles ficam COMPARÁVEIS de
+               relance, que é o ponto de mostrar as três. Quem não existe no dado não
+               abre card — nunca uma caixa vazia com travessão inventado.
+               Ver renderSetupCards. -->
+          <div class="setup-cards hidden" id="setupCards"></div>
+
+          <aside class="stage-rail">
             <div class="rail-theses">
               <h2 class="section-title">Teses em confronto</h2>
               <div class="theses">

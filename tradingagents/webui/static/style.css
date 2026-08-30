@@ -1170,7 +1170,17 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    Card QUADRADO e CHAPADO (DA-070): o raio é o token único de card do projeto e
    não existe degradê nenhum — a cor que aparece aqui é ESTADO, não textura.
    =========================================================================== */
-.setup-cards { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 10px; min-width: 0; }
+/* FILEIRA de cards, não coluna (task 024). Empilhados numa coluna de 340px, os três
+   cards (Storm com as duas entradas dentro, 1-2-3 e recuo à média) somavam ~870px de
+   rolagem — a parede que o pedido proíbe. Lado a lado eles ficam COMPARÁVEIS de
+   relance, que é o ponto de mostrar as três: mesmos rótulos na mesma altura, números
+   diferentes por construção.
+   `auto-fit` faz a conta de quantas cabem: 3 numa tela de 1500, 2 em 1280, 1 no
+   telefone — sem media query, porque a largura útil muda com a lateral arrastada. */
+.setup-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px; margin: 2px 0 10px; min-width: 0; align-items: start;
+}
 .setup-card {
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2);
   padding: 10px 13px; min-width: 0;
@@ -1269,6 +1279,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    comum, não pertence a nenhuma) e o veredito ÓRFÃO, quando o backend não elege
    nenhuma das duas. */
 .sc-foot {
+  grid-column: 1 / -1;   /* o que é de NINGUÉM atravessa a fileira inteira */
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted);
 }
@@ -1443,7 +1454,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .stage-rail { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 /* no palco o cartão do gráfico não precisa de margem própria — o gap cuida */
 .stage-main .chart-card { margin: 0; }
-.stage-rail .setup-cards { margin: 0; }
+.result-stage > .setup-cards { margin: 0; }
 .rail-theses .section-title { margin: 4px 0 8px; }
 
 /* Telas largas: gráfico protagonista à esquerda, contexto fixo à direita.
@@ -1451,6 +1462,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    Só dispara com espaço confortável (sidebar do histórico já ocupa ~250px). */
 @media (min-width: 1280px) {
   .result-stage { grid-template-columns: minmax(0, 1fr) 340px; }
+  /* Posição EXPLÍCITA: gráfico e teses dividem a primeira fileira; os cards das
+     análises ocupam a segunda INTEIRA. Sem isso o auto-placement jogaria os cards
+     na coluna estreita e eles voltariam a empilhar. */
+  .stage-main { grid-column: 1; grid-row: 1; }
+  .stage-rail { grid-column: 2; grid-row: 1; }
+  .result-stage > .setup-cards { grid-column: 1 / -1; grid-row: 2; }
   /* teses empilhadas na coluna estreita (lado a lado só quando full-width) */
   .stage-rail .theses { grid-template-columns: 1fr; }
   /* gráfico como protagonista: mais alto do que os 380px padrão */

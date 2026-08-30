@@ -2326,8 +2326,11 @@ function renderSetupCards(a) {
   }
   // O FRAME é o chão comum: as duas leituras foram calculadas nele, então ele não
   // se repete dentro de card nenhum — fica uma vez, embaixo das duas.
+  // "as leituras", sem contar: um card pode carregar MAIS de uma leitura dentro (o
+  // Storm tem duas entradas), então contar cards diria um número que não é o de
+  // leituras — e um número errado é pior que nenhum.
   const frame = a.timeframe
-    ? `<span class="sc-frame">${cards.length > 1 ? `as ${cards.length} leituras` : "leitura"}` +
+    ? `<span class="sc-frame">${cards.length > 1 ? "as leituras" : "leitura"}` +
       ` no ${escapeHtml(a.timeframe)}</span>`
     : "";
   const rodape = ((!semCard && !donoNaTela) ? carimbo : "") + frame;
