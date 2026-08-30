@@ -246,12 +246,19 @@ def test_remove_button_deletes_ticker(live):
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_finished_flag_sits_on_price_line(live):
-    """Marcador "✓ pronto"/"⚠ erro" mora na LINHA DO PREÇO, não na do ticker (task 007).
+    """Marcador "pronto"/"erro" mora ABAIXO do ticker, nunca na linha dele (task 007;
+    a fileira própria veio na 20260830-002).
 
     Espremido ao lado do ticker ele quebrava a linha (o ticker é nowrap e a coluna é
-    estreita). Aqui provamos as duas coisas que o Samyr pediu: (1) o flag NÃO é filho
-    do ``.h-sym``; (2) ele fica na mesma faixa vertical do ``.h-price``, encostado à
-    direita — e o poller de preço (que reescreve ``.h-price``) não o apaga.
+    estreita) — foi por isso que a 007 o tirou de lá. Ele dividiu a fileira do PREÇO
+    por um tempo, e isso custava ao preço a largura que ele precisa: numa lateral de
+    200px a coluna dele dava 74px e "$465.58 ↓ 2.33%" pede 100, então o preço saía
+    cortado. O marcador é TRANSITÓRIO (some ao abrir a análise) e o preço é dado
+    permanente: quem ganha fileira própria é o transitório.
+
+    O que continua travado: (1) o flag NÃO é filho do ``.h-sym``; (2) ele fica ABAIXO
+    do ticker, encostado à direita; (3) o poller de preço (que reescreve ``.h-price``)
+    não o apaga; (4) abrir a análise o limpa.
     """
     base, _store = live
     with sync_playwright() as p:
@@ -275,11 +282,13 @@ def test_finished_flag_sits_on_price_line(live):
         flag = mcd.query_selector(".h-flag")
         assert "pronto" in flag.inner_text()
 
-        # (2) mesma faixa vertical do preço, à direita dele
+        # (2) fileira PRÓPRIA, abaixo do preço e encostada à direita: o preço passou
+        # a ocupar a fileira inteira, senão ele é quem sai cortado na lateral estreita
         fb = flag.bounding_box()
         pb = mcd.query_selector(".h-price").bounding_box()
-        assert abs((fb["y"] + fb["height"] / 2) - (pb["y"] + pb["height"] / 2)) < 12, (fb, pb)
-        assert fb["x"] > pb["x"] + pb["width"], (fb, pb)
+        assert fb["y"] >= pb["y"] + pb["height"] - 1, ("o flag desceu pra fileira dele", fb, pb)
+        li = mcd.bounding_box()
+        assert fb["x"] + fb["width"] > li["x"] + li["width"] - 24, ("encostado à direita", fb, li)
         # e abaixo do ticker (não na linha 1)
         assert fb["y"] > mcd.query_selector(".tk-sym").bounding_box()["y"], fb
 

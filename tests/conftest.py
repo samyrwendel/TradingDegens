@@ -73,6 +73,23 @@ def _disable_datacache(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _e2e_testa_o_working_tree(monkeypatch):
+    """A suíte mede o WORKING TREE, não o front publicado.
+
+    Desde a DA-080 o servidor lê os estáticos de um diretório PUBLICADO (a revisão
+    commitada) — que é exatamente o que se quer em produção e exatamente o que NÃO se
+    quer aqui: um teste de CSS/JS tem de medir o arquivo que está prestes a ser
+    commitado, senão ele valida a versão anterior e passa por acidente.
+
+    Os testes da própria publicação (``test_webui_static_publish``) apontam o
+    ``_STATIC_DIR`` pra onde precisam nas suas fixtures, que rodam DEPOIS desta.
+    """
+    from tradingagents.webui import server as _sv, static_publish as _sp
+
+    monkeypatch.setattr(_sv, "_STATIC_DIR", _sp.REPO_STATIC, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _limpa_cache_de_serie_preparada():
     """Zera o cache de :func:`price_structure._prep` entre testes.
 

@@ -932,7 +932,14 @@ details.section[open] > summary::before { content: "▾"; }
 .history { list-style: none; margin: 0; padding: 0; display: block; }
 .history li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  /* O ATIVO é a chave da linha e NUNCA é a informação sacrificada.
+     Era `minmax(0, 1fr) auto auto`: a coluna do veredito, sendo `auto` com texto
+     `nowrap`, tomava o tamanho do conteúdo ANTES de o `1fr` receber o que sobrasse —
+     e "Aguardar rompimento" (o pior caso real) saía inteiro enquanto o ticker virava
+     "AMI…" e o nome "A…". Estava invertido: o rótulo sobrevivia, a identidade sumia.
+     Duas faixas `fr` com min 0: as duas encolhem, a do ativo com peso maior, e quem
+     trunca é o VEREDITO — com o texto completo no `title`. */
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto;
   align-items: start;
   column-gap: 10px; row-gap: 2px;
   padding: 10px 4px;   /* respiro sem régua: o espaçamento é que separa as linhas */
@@ -945,10 +952,14 @@ details.section[open] > summary::before { content: "▾"; }
 .history li .h-ticker { grid-row: 1; grid-column: 1; }
 .history li .h-right  { grid-row: 1; grid-column: 2; }
 .history li .h-remove { grid-row: 1; grid-column: 3; align-self: center; }
-/* linha de baixo: PREÇO LIVE à esquerda · marcador "pronto/erro" à direita (task
-   007: saiu da linha do ticker, que espremia/quebrava, pra cá onde há espaço) */
-.history li .h-price  { grid-row: 2; grid-column: 1; }
-.history li .h-flag   { grid-row: 2; grid-column: 2 / -1; justify-self: end; align-self: center; }
+/* linha de baixo: PREÇO LIVE, na LARGURA INTEIRA da linha (task 007 o tinha posto
+   na coluna 1, dividindo a fileira com o marcador "pronto/erro"). Numa lateral de
+   200px aquela coluna dava 74px e "$465.58 ↓ 2.33%" pede 100 — o preço saía cortado
+   junto com o ticker, que é o defeito que esta rodada veio matar. Ele passa a ocupar
+   a fileira toda, e o marcador — que é transitório e some sozinho — ganha a de baixo
+   em vez de disputar espaço com o dado permanente. */
+.history li .h-price  { grid-row: 2; grid-column: 1 / -1; min-width: 0; }
+.history li .h-flag   { grid-row: 3; grid-column: 1 / -1; justify-self: end; align-self: center; }
 .history li:hover { background: var(--panel-2); }
 
 /* esquerda: ticker em negrito SOBRE o nome da empresa em cinza (duas linhas) */
@@ -975,7 +986,10 @@ details.section[open] > summary::before { content: "▾"; }
 .history .h-price .pdash { color: var(--muted); }
 
 /* direita: veredito (cor da função) SOBRE a meta (data · custo · tempo) */
-.history .h-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; white-space: nowrap; }
+.history .h-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; white-space: nowrap; min-width: 0; }
+/* o que não couber na coluna do veredito vira reticências — e o texto inteiro fica
+   no `title`, que o JS já preenche com a frase legível do estado */
+.history .h-right > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* × discreto pra remover o ativo da lista (some/aparece no hover) */
 .history .h-remove {
   font: inherit; font-size: 16px; line-height: 1; color: var(--muted);
