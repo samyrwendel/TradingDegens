@@ -186,11 +186,13 @@ def test_no_celular_o_aviso_e_o_seletor_ficam_com_o_grafico_na_tela(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_storm_VETADO_pelo_eden_nao_e_anunciado(base):
-    """Setup vetado não ganha traço no gráfico — logo, não se oferece a camada dele.
-    Agora que a leitura viaja em toda run, um botão "mostrar Storm123" que não desenha
-    nada apareceria em TODA análise, prometendo um desenho que nunca vem. Os números e
-    o motivo do veto continuam inteiros no card."""
+def test_storm_VETADO_pelo_eden_TAMBEM_se_anuncia(base):
+    """SUPERSEDE a regra de algumas horas atrás ("só se anuncia o que desenha", com o
+    desenho exigindo ``opera``). O padrão vetado passou a ser DESENHADO — com o veto
+    escrito na vela —, então a camada dele tem o que ligar e o aviso volta a valer.
+
+    A regra que fica é a mesma dos dois lados: **camada que desenha se oferece**. O que
+    o veto tira são os NÍVEIS, não a figura."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
@@ -215,10 +217,17 @@ def test_storm_VETADO_pelo_eden_nao_e_anunciado(base):
         page.wait_for_selector("#setupCards:not(.hidden)")
         page.wait_for_timeout(300)
 
-        assert not page.evaluate(_AVISO)["visivel"], "camada que não desenha não se anuncia"
+        m = page.evaluate(_AVISO)
+        assert m["visivel"] and m["botoes"] == ["storm"], m
         assert page.evaluate("() => camadasDisponiveis(document.getElementById"
-                             "('priceChart')._actionable || {})") == ["plano"]
-        # mas o card do Storm está lá, com o veto escrito
+                             "('priceChart')._actionable || {})") == ["plano", "storm"]
+        # e ligar de fato DESENHA o padrão, marcado como vetado — sem níveis
+        page.click('#camadasAviso .cav-btn[data-camada="storm"]')
+        page.wait_for_timeout(350)
+        d = page.evaluate(_DESENHO)
+        assert "storm" in set(d["pontos"]), ("o padrão vetado é desenhado", d)
+        assert not any("Storm" in t for t in d["zonas"]), ("mas sem NÍVEL operável", d)
+        # o card continua com o veto escrito
         txt = page.evaluate("() => document.getElementById('setupCards').innerText")
         assert "NÃO OPERA" in txt and "sem Éden alinhado" in txt, txt
         browser.close()

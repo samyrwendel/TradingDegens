@@ -2749,6 +2749,36 @@ function stormColor(pat) {
   return ehFantasma(pat) ? COR_FANTASMA : ZONE_COLORS.storm;
 }
 
+// OS TRÊS ESTADOS DO STORM NO GRÁFICO — e nenhum deles é "sumir".
+//
+// O padrão vetado pelo Éden era DETECTADO, DESCRITO no card com todos os níveis e
+// simplesmente não desenhado. O usuário lia "Storm123 de compra · NÃO OPERA" no card
+// e não achava nada na vela: a tela contradizendo a si mesma. E ver o setup que NÃO se
+// opera é parte de aprender a reconhecê-lo — é literalmente o que o card já faz em
+// texto.
+//
+//   operável   — cor do Storm, contorno sólido, NÍVEIS na tela
+//   vetado     — mesma cor (a estrutura é real e atual), peso menor, contorno
+//                TRACEJADO e a palavra "não opera — Éden". SEM níveis: o gráfico é a
+//                figura operável, e traçar gatilho/alvo/stop de um trade que a regra
+//                proíbe é convidar a operá-lo
+//   invalidado — cinza, mais apagado ainda, e a palavra "invalidado" (DA-091)
+//
+// Precedência: morto ganha de vetado. Uma vez morto, morto — o veto descreve um setup
+// que ainda existe; a invalidação, um que não existe mais.
+function stormEstado(storm) {
+  if (!storm || !storm.pattern) return null;
+  if (ehFantasma(storm.pattern)) return "invalidado";
+  return storm.opera === true ? "operavel" : "vetado";
+}
+
+// A palavra do estado, pra etiqueta na vela e pra legenda. Vazia no operável: o
+// normal não se anuncia, só o que desvia dele.
+function stormEstadoTexto(estado) {
+  return estado === "invalidado" ? "invalidado"
+    : estado === "vetado" ? "não opera — Éden" : "";
+}
+
 // FORMA DO MARCADOR = FAMÍLIA. Os dois métodos numeram 1-2-3 pontos DIFERENTES (no
 // Setup123 o ponto 2 é o topo do repique e o 3 um fundo ascendente; no Storm o 2 é
 // o EXTREMO do movimento e o 3 a tentativa que falha), e as cores não separam: o
@@ -2887,13 +2917,13 @@ function chartLegendHtml(chart, actionable) {
     const morto = ehFantasma(pat) ? " (invalidado)" : "";
     legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
   }
-  const sp = camadaVisivel("storm") && actionable && actionable.storm
-    && actionable.storm.opera === true ? actionable.storm.pattern : null;
-  if (sp) {
+  const est = camadaVisivel("storm") && actionable ? stormEstado(actionable.storm) : null;
+  if (est) {
+    const sp = actionable.storm.pattern;
     const [, dlabel] = PAT_DIR[sp.direction] || ["", ""];
     const q = familiasNaTela(actionable).length > 1 ? "Storm123 " : "";
-    const morto = ehFantasma(sp) ? " (invalidado)" : "";
-    legend.push(`<span class="lg"><span class="sw dia" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
+    const txt = stormEstadoTexto(est);
+    legend.push(`<span class="lg"><span class="sw dia" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${txt ? ` (${escapeHtml(txt)})` : ""}</span>`);
   }
   return legend.join("");
 }
@@ -2941,6 +2971,12 @@ function renderChartCard(chart, ticker, actionable) {
   if (mortos.length) {
     notes.push(`${mortos.join(" e ")} <b>invalidado</b> — os pontos ficam em cinza como ` +
       `história, e os níveis dele saem do gráfico: descrevem um trade que não existe mais.`);
+  }
+  if (stormVetadoNaTela(actionable)) {
+    const veto = (actionable.storm || {}).veto || (actionable.storm || {}).motivo || "";
+    notes.push(`Storm123 <b>desenhado, mas não operável</b> — o filtro Éden veta` +
+      `${veto ? `: ${escapeHtml(veto)}` : ""}. Por isso o padrão aparece e os níveis ` +
+      `(gatilho, alvo, stop) não: eles estão no card, com o motivo inteiro.`);
   }
   if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço — os níveis e a base de cada um ficam no card da análise.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
@@ -3407,11 +3443,14 @@ function rrDoGrafico(a) {
   // não existe mais, o mesmo defeito que a DA-091 tirou do gatilho e da pílula. Aqui
   // não basta devolver vazio: se a leitura desenhada morreu, o chip DIZ isso (gráfico
   // sem chip é indistinguível de gráfico sem setup).
-  let morto = false;
+  let morto = false, vetado = false;
   if (camadaVisivel("plano") && a.risk_reward) {
     if (ehFantasma(a.pattern)) morto = true;
     else return { rr: a.risk_reward, prefixo: duas ? "Setup123 " : "", morto: false };
   }
+  // Storm VETADO desenha o padrão mas não tem R:R operável — e o chip não pode calar,
+  // pelo mesmo motivo do morto: gráfico sem chip é indistinguível de gráfico sem setup.
+  if (camadaVisivel("storm") && stormEstado(a.storm) === "vetado") vetado = true;
   if (camadaVisivel("storm") && a.storm && a.storm.opera === true) {
     if (ehFantasma(a.storm.pattern)) {
       morto = true;
@@ -3425,7 +3464,7 @@ function rrDoGrafico(a) {
       }
     }
   }
-  return { rr: null, prefixo: "", morto };
+  return { rr: null, prefixo: "", morto, vetado };
 }
 
 // As leituras DESENHADAS que morreram. É o que explica um gráfico com padrão na tela
@@ -3435,9 +3474,15 @@ function fantasmasNaTela(chart, a) {
   const nomes = [];
   const pat = chart && chart.markers && chart.markers.pattern_123;
   if (camadaVisivel("plano") && ehFantasma(pat)) nomes.push("Setup123");
-  if (camadaVisivel("storm") && a && a.storm && a.storm.opera === true
-      && ehFantasma(a.storm.pattern)) nomes.push("Storm123");
+  if (camadaVisivel("storm") && a && stormEstado(a.storm) === "invalidado") nomes.push("Storm123");
   return nomes;
+}
+
+// O STORM VETADO NA NOTA. Ele está desenhado e sem nível nenhum — sem uma linha
+// dizendo por quê, a nota cairia no "Nenhum setup identificado" sobre três pontos
+// numerados na vela, que é a contradição que esta task veio desfazer.
+function stormVetadoNaTela(a) {
+  return !!(camadaVisivel("storm") && a && stormEstado(a.storm) === "vetado");
 }
 
 // As camadas que EXISTEM neste plano — só se oferece o que há pra mostrar.
@@ -3446,12 +3491,12 @@ function camadasDisponiveis(a) {
   // Camada que não tem nível nenhum não é camada: oferecê-la seria um botão que
   // liga o nada, e a legenda diria que há algo desenhado onde não há.
   if (a && (a.pattern || a.buy_zone || a.stop || a.target || a.realize_zone)) fam.push("plano");
-  // O STORM SÓ SE OFERECE QUANDO O ÉDEN AUTORIZA — que é a mesma condição do desenho.
-  // Setup vetado não ganha traço no gráfico (regra do módulo), então oferecer a camada
-  // dele seria um botão que liga o nada; e agora que a leitura viaja em TODA run, esse
-  // botão apareceria em toda análise, prometendo um desenho que nunca vem. Os números
-  // e o motivo do veto continuam inteiros no card do Storm.
-  if (a && a.storm && a.storm.pattern && a.storm.opera === true) fam.push("storm");
+  // BASTA HAVER PADRÃO. A camada exigiu `opera === true` por algumas horas, quando o
+  // desenho também exigia — e a consequência era o pior dos mundos: o card descrevendo
+  // "Storm123 de compra · NÃO OPERA" enquanto nem a camada existia pra procurar. Agora
+  // o padrão vetado É DESENHADO (com o veto escrito na vela), então a camada dele tem
+  // o que ligar. O que o veto continua tirando são os NÍVEIS, não a figura.
+  if (a && a.storm && a.storm.pattern) fam.push("storm");
   return fam.length ? fam : ["plano"];
 }
 
@@ -3721,11 +3766,16 @@ function drawAxisPill(ctx, axisX, gutter, ry, text, bg, fg, strong) {
 // operar — a linha do gatilho. Continua na tela porque a história explica onde o
 // preço está, mas para de competir com o que ainda vale (DA-091).
 function desenha123(ctx, g, cfg, saida, rotulos) {
-  const { pts, cor, forma, dash, fantasma, nome, mostraNome, trigger, dist, familia } = cfg;
+  const { pts, cor, forma, dash, fantasma, vetado, estado, nome, mostraNome,
+          trigger, dist, familia } = cfg;
   if (!pts || !pts.length) return;
   const { x, y, padL, plotW } = g;
   ctx.save();
+  // PESO = ESTADO. Vivo cheio, vetado a 0,7 (a estrutura é real e atual — só não se
+  // opera), morto a 0,45 (não existe mais). A palavra vai na etiqueta; a opacidade só
+  // ordena o que compete pela atenção.
   if (fantasma) ctx.globalAlpha = 0.45;
+  else if (vetado) ctx.globalAlpha = 0.7;
   ctx.strokeStyle = cor; ctx.setLineDash(dash); ctx.lineWidth = 1.5;
   ctx.beginPath();
   pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
@@ -3748,7 +3798,11 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
     } else {
       ctx.arc(px, my, 8, 0, Math.PI * 2);
     }
-    ctx.fill(); ctx.strokeStyle = cor; ctx.stroke();
+    ctx.fill(); ctx.strokeStyle = cor;
+    // Contorno TRACEJADO no vetado: um anel quebrado se lê como "não vale operar"
+    // antes de qualquer palavra, e não gasta cor nova (DA-078 regra 3).
+    if (vetado) ctx.setLineDash([3, 2]);
+    ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = cor; ctx.fillText(p.lab, px, my);
     // O MARCADOR É OBSTÁCULO pro texto: sem isto o respaldo de um preço pousava em
     // cima do número de outro ponto e tampava justamente o que a task veio marcar.
@@ -3759,8 +3813,11 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
     // etiqueta da outra, e o número desaparecia.
     const preco = fmtNum(p.price);
     rotulos.push({ x: px, y: my + lado * 16, text: preco, align: "centro", pilula: false,
-                   cor: fantasma ? COR_FANTASMA : "#8b97ad", opaco: fantasma ? 0.45 : 1 });
-    if (saida) saida.push({ familia, nome, lab: p.lab, preco, forma, cor, fantasma: !!fantasma });
+                   cor: fantasma ? COR_FANTASMA : "#8b97ad",
+                   opaco: fantasma ? 0.45 : (vetado ? 0.7 : 1) });
+    if (saida) saida.push({ familia, nome, lab: p.lab, preco, forma, cor,
+                            fantasma: !!fantasma, vetado: !!vetado,
+                            estado: estado || (fantasma ? "invalidado" : "") });
   });
   // Etiquetas ao lado do PRIMEIRO ponto: o nome da família (só quando há mais de uma
   // na tela — prefixo repetido num gráfico de uma leitura só é ruído) e "invalidado".
@@ -3772,15 +3829,19 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
   const base = y(p0.price) + lado0 * dist;
   const etiquetas = [];
   if (mostraNome) etiquetas.push(nome);
-  if (fantasma) etiquetas.push("invalidado");
+  // O ESTADO, ESCRITO. "invalidado" e "não opera (Éden)" são a mesma família de aviso:
+  // o desenho está na tela, e a palavra diz o que fazer com ele.
+  if (estado) etiquetas.push(estado);
+  else if (fantasma) etiquetas.push("invalidado");
   // NA COLUNA DO PONTO 1, logo depois do preço dele — não ao LADO do marcador. Ao
   // lado, a pílula (≈60px) cruzava a coluna dos pontos vizinhos e a de-colisão a
   // empurrava 90px pra baixo: um selo "Storm123" solto no meio do gráfico não nomeia
   // padrão nenhum. Na coluna, ela desce no máximo o que a própria coluna ocupa, e as
   // duas famílias se separam sozinhas quando os marcadores apontam pra lados opostos.
+  const peso = fantasma ? 0.45 : (vetado ? 0.7 : 1);
   etiquetas.forEach((t, k) => rotulos.push(
     { x: x(p0.i), y: base + lado0 * (32 + k * 15), text: t, cor, align: "centro",
-      pilula: true, opaco: fantasma ? 0.45 : 1 }));
+      pilula: true, opaco: peso }));
   ctx.restore();
 }
 
@@ -4059,7 +4120,9 @@ function drawPriceChart(canvas, chart, a) {
              `R:R ${_pre}${fmtNum(rrPlan.rr)}:1`]
           : [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1`])
       : (rrPlan ? ["R:R não calculável", "R:R sem base"]
-                : (_rrG.morto ? ["R:R não vale — padrão invalidado", "R:R — invalidado"] : []));
+                : _rrG.morto ? ["R:R não vale — padrão invalidado", "R:R — invalidado"]
+                : _rrG.vetado ? ["R:R não vale — o Éden veta este setup", "R:R — Éden veta"]
+                : []);
     ctx.font = "bold 11px ui-monospace, Menlo, monospace";
     const rrText = rrOpcoes.find((t) => ctx.measureText(t).width + 14 <= plotW)
       || rrOpcoes[rrOpcoes.length - 1] || "";
@@ -4221,8 +4284,8 @@ function drawPriceChart(canvas, chart, a) {
   //
   // Com as duas camadas ligadas o marcador do Storm sai MAIS LONGE da vela (os dois
   // padrões podem cair no mesmo candle, e aí os dois selos ocupariam o mesmo pixel).
-  const _stormPat = camadaVisivel("storm") && a && a.storm
-    && a.storm.opera === true ? a.storm.pattern : null;
+  const _stormEst = camadaVisivel("storm") && a ? stormEstado(a.storm) : null;
+  const _stormPat = _stormEst ? a.storm.pattern : null;
   if (_stormPat) {
     const compra = _stormPat.direction !== "venda";
     const kinds = compra ? ["H", "L", "H"] : ["L", "H", "L"];
@@ -4234,7 +4297,8 @@ function drawPriceChart(canvas, chart, a) {
       forma: FORMA_DA_FAMILIA.storm, dash: [3, 3], dist: _duasFamilias ? 34 : 14,
       // o gatilho do Storm já é uma linha de nível rotulada (planZonesStorm) — não
       // se traça o mesmo nível duas vezes
-      trigger: null, fantasma: ehFantasma(_stormPat), mostraNome: _duasFamilias,
+      trigger: null, fantasma: _stormEst === "invalidado", vetado: _stormEst === "vetado",
+      estado: stormEstadoTexto(_stormEst), mostraNome: _duasFamilias,
     }, _pontos123, _rotulos123);
   }
   canvas.dataset.pat123 = JSON.stringify(_pontos123);

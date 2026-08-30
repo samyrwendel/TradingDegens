@@ -303,9 +303,13 @@ def test_sem_eden_a_tela_diz_NAO_OPERA_e_o_motivo(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_setup_vetado_nao_ganha_traco_no_grafico(base):
-    """O gráfico é a figura OPERÁVEL. Desenhar os níveis de um trade que a regra
-    proíbe é convidar a operá-lo — e nada se perde, o card tem cada número."""
+def test_setup_vetado_nao_ganha_NIVEL_no_grafico(base):
+    """O gráfico é a figura OPERÁVEL. Desenhar os NÍVEIS de um trade que a regra proíbe
+    é convidar a operá-lo — e nada se perde, o card tem cada número.
+
+    O PADRÃO em si é outra coisa: ele passou a ser desenhado mesmo vetado, com o veto
+    escrito na vela (task 034) — ver o setup que não se opera é parte de aprender a
+    reconhecê-lo. O que este teste trava é a fronteira entre os dois."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1100})
