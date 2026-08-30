@@ -1228,6 +1228,14 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   /* altura do gráfico proporcional à tela, não 380px fixo */
   #priceChart { height: 46vh; min-height: 240px; max-height: 340px; }
 
+  /* AVISO de camada disponível: ENCOLHE pra caber (DA-101). Na largura de 390 ele
+     quebrava em três linhas e empurrava o canvas pra baixo da dobra — e o que se
+     perde quando um aviso cresce é o DADO que estava embaixo dele. Mesmo texto,
+     mesmo botão, mesma informação: só a escala cede. */
+  .camadas-aviso { gap: 4px 8px; margin-bottom: 6px; padding: 5px 8px; }
+  .camadas-aviso .cav-txt { font-size: var(--fs-10); line-height: var(--lh-10); }
+  .camadas-aviso .cav-btn { padding: 3px 8px; }
+
   /* ---- a tira do cabeçalho no TELEFONE (task 020) ----------------------------
      "Tá bem zoado pra celular." No desktop a tira encosta à direita; no telefone
      isso serrilha: cada linha começa num lugar. Aqui ela encosta à ESQUERDA e
@@ -1250,11 +1258,22 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .chart-card { display: flex; flex-direction: column; }
   .chart-head { order: 1; }
   .tf-selector { order: 2; }
-  .reeval-btn { order: 3; }
-  .chart-degrade { order: 4; }
-  .chart-wrap { order: 5; }
-  #chartLegend { order: 6; margin-top: 10px; }
-  .chart-note { order: 7; }
+  /* O SELETOR DE CAMADAS E O AVISO ficavam ANTES do título do bloco: sem `order`
+     declarado eles caíam no 0 e subiam pro topo por acidente de flex, o que fazia a
+     tela abrir por um controle solto em vez de dizer do que ela trata. Agora eles
+     ficam onde pertencem — logo ACIMA do gráfico, que é o que eles controlam e o que
+     o aviso fala sobre. */
+  #camadasSelector { order: 3; }
+  #camadasAviso { order: 4; }
+  .reeval-btn { order: 5; }
+  .chart-degrade { order: 6; }
+  .chart-wrap { order: 7; }
+  #chartLegend { order: 8; margin-top: 10px; }
+  .chart-note { order: 9; }
+  /* LEGENDA no telefone: mesma informação, escala menor (DA-101). Com 11 itens a
+     12px ela somava cinco linhas depois do gráfico; a 10px cabe em três, e nenhum
+     item sai. */
+  #chartLegend { font-size: var(--fs-10); line-height: var(--lh-10); gap: 6px 10px; }
 
   /* tabela larga rola dentro do próprio bloco, nunca empurra o body pro lado */
   .md table { display: block; overflow-x: auto; max-width: 100%; }

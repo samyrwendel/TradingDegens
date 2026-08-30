@@ -11,7 +11,25 @@ Anotado a pedido dele: **entra depois** das prioridades de correção (seguranç
   anterior dizia só "card, linha ou chip" e era mais estreita que a instrução do Samyr.)
   Estado continua sendo cor, mas chapada (preenchimento sólido ou borda-esquerda).
   Única exceção: degradê que carrega INFORMAÇÃO — a máscara tracejada da legenda EMA.
-- Toda mudança aqui exige print antes/depois (DA-062).
+- Toda mudança aqui exige print antes/depois (DA-062) — em **390×844 REAL**, nunca
+  desktop encolhido.
+
+## Regra de CELULAR que vale pra todos os itens (DA-101)
+
+*"pra vc melhorar a responsividade no celular vc pode reduzir pra caber, não precisa
+aumentar o tamanho dos itens, o gráfico pra mim está bom como está, só alinha e ajusta
+os textos, legendas etc"* — Samyr, 30/08.
+
+- **Encolher, nunca inflar.** A saída pro apertado é fonte/padding/altura de linha
+  MENORES. Nada de alvo de toque de 44px: ele lê muito dado numa tela pequena, e item
+  grande empurra informação pra fora da dobra. O que se perde ao inflar é DADO.
+- **O canvas do gráfico está aprovado** — proporção, altura e densidade não se mexem. O
+  trabalho é em texto, legenda, rótulo e alinhamento AO REDOR dele.
+- **Encolher ≠ sumir.** Nunca esconder dado atrás de menu, acordeão ou reticências sem
+  `title`.
+- Se só couber aumentando algo, **DIGA em vez de aumentar** — é sinal de conteúdo a
+  reorganizar, não a inflar.
+- Portão automático: `tests/test_webui_mobile_encolhe_nao_infla.py`.
 
 ## 1. Barra de controle — tudo numa linha só
 
