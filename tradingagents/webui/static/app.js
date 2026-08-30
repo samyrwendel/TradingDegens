@@ -1158,8 +1158,8 @@ function renderResult(snap) {
 
     `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
     `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
-    (r.storm123 ? `<span>Método <b>1-2-3 Storm + Éden — leitura estrutural, sem LLM</b></span>` : "") +
-    (r.setup123 ? `<span>Método <b>1-2-3 — leitura estrutural, sem LLM</b></span>` : "") +
+    (r.storm123 ? `<span>Método <b>Storm123 + Éden — leitura estrutural, sem LLM</b></span>` : "") +
+    (r.setup123 ? `<span>Método <b>Setup123 — leitura estrutural, sem LLM</b></span>` : "") +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
     (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
@@ -1595,11 +1595,15 @@ function normMethod(v) {
   if (_METODOS_ESTRUTURAIS.has(v)) return v;
   return "padrao";
 }
+// RÓTULO de tela, não identificador. Os dois métodos SÃO um 1-2-3 — a diferença
+// está em QUAL —, e "1-2-3" × "Storm" obrigava a lembrar de qual era qual. "Setup123"
+// e "Storm123" nomeiam sozinhos. O valor interno (`setup123`/`storm123`) fica intacto:
+// ele é o que já está gravado no histórico, no reúso e no ledger do track record.
 function methodLabel(v) {
   if (v === "compare") return "Comparar";
   if (v === "erick") return "Erick";
-  if (v === "setup123") return "1-2-3";
-  if (v === "storm123") return "Storm";
+  if (v === "setup123") return "Setup123";
+  if (v === "storm123") return "Storm123";
   return "Padrão";
 }
 
@@ -1651,8 +1655,8 @@ function renderLaunchBar() {
       ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
     ]],
     ["estrutural", [
-      ["setup123", "1-2-3", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
-      ["storm123", "Storm", "1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
+      ["setup123", "Setup123", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
+      ["storm123", "Storm123", "O 1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
     ]],
   ];
   mEl.innerHTML = methodRows.map(([faixa, itens]) =>
@@ -1938,7 +1942,8 @@ function runReanalyze(method, tf) {
   const boot = compare
     ? "Comparando Padrão × Erick…"
     : (m === "erick" ? "Método Erick — subindo o motor…"
-      : m === "setup123" ? "1-2-3 — leitura estrutural, sem LLM…"
+      : m === "setup123" ? "Setup123 — leitura estrutural, sem LLM…"
+      : m === "storm123" ? "Storm123 + Éden — leitura estrutural, sem LLM…"
       : "Subindo o motor…");
   renderProgress({
     status: "running", ticker: _openTicker, elapsed: 0, cost: null,
@@ -2188,7 +2193,7 @@ function stormCardHtml(st) {
     : "";
   return `<section class="setup-card sc-storm${opera ? "" : " sc-vetado"}` +
     `${pat && pat.direction === "venda" ? " sc-venda" : ""}">` +
-    `<div class="sc-head"><span class="sc-title">1-2-3 Storm` +
+    `<div class="sc-head"><span class="sc-title">Storm123` +
     (dir ? ` <span class="sc-dir">${escapeHtml(dir)}</span>` : "") + "</span>" +
     "</div>" + selo +
     `<div class="sc-rows">${rows.join("")}</div></section>`;
@@ -2276,7 +2281,7 @@ function renderSetupCards(a) {
     const pstate = PAT_STATE[pat.state] || pat.state || "";
     cards.push(
       `<section class="setup-card sc-123${pat.direction === "venda" ? " sc-venda" : ""}">` +
-      `<div class="sc-head"><span class="sc-title">Padrão 1-2-3` +
+      `<div class="sc-head"><span class="sc-title">Setup123` +
       (pdir ? ` <span class="sc-dir">${escapeHtml(pdir)}</span>` : "") + "</span>" +
       (pstate ? `<span class="sc-now">${escapeHtml(pstate)}</span>` : "") +
       "</div>" +
@@ -5368,13 +5373,13 @@ function scanStormLinhaHtml(f) {
   if (!e || e === "sem_setup" || e === "sem_dado") return "";
   if (!st.opera) {
     return `<div class="scan-levels scan-storm-linha vetado">` +
-      `<span class="ss-tag">Storm</span>` +
+      `<span class="ss-tag">Storm123</span>` +
       `<span class="scan-note" title="${escapeHtml(st.veto || "")}">não opera — Éden desalinhado</span>` +
       `</div>`;
   }
   const n = st.entrada === "ponto3" ? "ponto 3" : st.entrada === "ponto2" ? "ponto 2" : "pontos 2 e 3";
   return `<div class="scan-levels scan-storm-linha">` +
-    `<span class="ss-tag">Storm</span>` +
+    `<span class="ss-tag">Storm123</span>` +
     `<span class="ss-ent">entrada no ${escapeHtml(n)}${st.ordem ? ` · ${escapeHtml(st.ordem)}` : ""}</span>` +
     `<span>gatilho <b>${scanFmt(st.trigger)}</b></span>` +
     `<span>SL <b>${scanFmt(st.sl)}</b></span>` +
@@ -5426,7 +5431,7 @@ const SCAN_COLUNAS = [
   // ponto 2, outro stop, outro alvo, e um filtro com poder de VETO. Por isso ele
   // ganha COLUNA — some-lo às células do 1-2-3 misturaria dois métodos no mesmo
   // número, que é exatamente o que a task 008 provou não descrever trade nenhum.
-  ["Storm", "1-2-3 Storm (Stormer) + filtro Éden — setup DIFERENTE do 1-2-3 desta lista"],
+  ["Storm123", "O 1-2-3 do Stormer + filtro Éden — setup DIFERENTE do Setup123 desta lista"],
 ];
 
 function scanCabecalhoHtml() {

@@ -230,7 +230,7 @@ def test_o_storm_tem_chip_proprio_na_barra(base):
         # a barra além dos 1440 e o campo ATIVO encolhia pra pagar.
         assert m["fileiras"] == [["padrao", "erick", "compare"],
                                  ["setup123", "storm123"]], m
-        assert "Storm" in m["rotulos"], m
+        assert "Storm123" in m["rotulos"], m
         # e o chip do Storm NÃO é o chip do 1-2-3 (são métodos, não uma flag)
         assert m["metodos"].count("storm123") == 1 and m["metodos"].count("setup123") == 1
         browser.close()
@@ -250,8 +250,8 @@ def test_o_card_do_storm_traz_os_niveis_DELE(base):
           leituras: document.querySelectorAll('#setupCards .sc-storm .sc-leitura').length,
           badge: document.querySelector('#verdictBadge').innerText.trim(),
         })""")
-        assert "Storm" in m["titulo"] and "de compra" in m["titulo"], m
-        assert m["badge"] == "Storm", ("o veredito do cabeçalho diz o método", m)
+        assert "Storm123" in m["titulo"] and "de compra" in m["titulo"], m
+        assert m["badge"] == "Storm123", ("o veredito do cabeçalho diz o método", m)
         # os níveis DELE: ponto 2 como invalidação/stop, alvo por projeção, R:R.
         # Stop e invalidação são O MESMO nível no Storm (sem folga inventada), então
         # saem numa linha só — dois rótulos com o mesmo número seria a duplicata que

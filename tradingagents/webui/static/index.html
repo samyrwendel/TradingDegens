@@ -172,7 +172,7 @@
           <input type="search" class="wl-search" id="watchlistSearch" placeholder="Buscar ativo ou nome…"
                  autocomplete="off" spellcheck="false" aria-label="Buscar na lista de observação">
           <button type="button" class="wl-scan-icon" id="scanOpenBtn"
-                  title="Varrer a watchlist: quem está em gatilho de compra/venda 1-2-3 (1d + 4h + 1h, sem LLM)">scan</button>
+                  title="Varrer a watchlist: quem está em gatilho de compra/venda do Setup123 e do Storm123 (1d + 4h + 1h, sem LLM)">scan</button>
         </div>
         <div class="h-tabs" id="historyTabs" role="tablist">
           <button type="button" class="h-tab is-active" data-filter="all">Todos</button>
@@ -324,7 +324,7 @@
 
              Aqui fica SÓ o mercado (task 021). A linha do PLANO (gatilho · SL · TP ·
              R:R) que morava embaixo desta desceu pro card da análise que a produz —
-             o 1-2-3 —, na coluna de contexto: aquela fila de níveis nunca foi um
+             o Setup123 —, na coluna de contexto: aquela fila de níveis nunca foi um
              assunto do cabeçalho, era o conteúdo de UMA das duas leituras que a tela
              desenha. A cotação continua aqui porque é a ÂNCORA contra a qual as duas
              leituras se medem: não pertence a nenhuma delas. -->
@@ -374,7 +374,7 @@
 
           <!-- UM CARD POR ANÁLISE (task 021, layout revisto na 024). A tela desenha
                leituras INDEPENDENTES do mesmo candle, que podem coexistir e discordar:
-               o PADRÃO 1-2-3, o RECUO À MÉDIA e o 1-2-3 STORM (este com DUAS entradas
+               o SETUP123, o RECUO À MÉDIA e o STORM123 (este com DUAS entradas
                dentro dele). A 015 deu nome a cada uma (setup_source); aqui cada uma tem
                caixa própria COM OS SEUS NÍVEIS COMPLETOS — leitura independente
                amontoada num bloco só é o que faz uma parecer contradizer a outra.
@@ -429,11 +429,11 @@
       </section>
 
       <!-- SCAN DE PORTFÓLIO (28/08): o olho barato ($0 de LLM) — varre a watchlist
-           em 1d+4h e classifica pela distância do preço ao gatilho do 1-2-3. O que
+           em 1d+4h e classifica pela distância do preço ao gatilho do Setup123. O que
            estiver EM GATILHO abre a análise completa (Padrão/Erick) a um clique. -->
       <section class="panel scan-panel hidden" id="scanPanel">
         <div class="scan-head">
-          <h2>Scan do portfólio — gatilhos 1-2-3 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>
+          <h2>Scan do portfólio — gatilhos Setup123 e Storm123 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>
           <div class="scan-actions">
             <button type="button" id="scanRunBtn" title="Varrer a watchlist nos frames 1d, 4h e 1h">Escanear</button>
             <button type="button" id="scanTrackBtn" class="ghost-btn" title="Taxa de acerto dos gatilhos já flagrados">Track record</button>

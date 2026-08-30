@@ -144,7 +144,7 @@ def test_cada_informacao_tem_a_sua_coluna_e_a_coluna_e_a_mesma_em_toda_linha(bas
         assert len(grade["linha"].split(" ")) == 10, grade
         assert [n.lower() for n in grade["nomes"]] == [
             "tf", "ativo", "preço", "dist", "estado", "gatilho", "sl", "tp", "r:r",
-            "storm"], grade
+            "storm123"], grade
         # altura igual em todas as linhas: chip que quebra em duas desmancha a
         # leitura em coluna tanto quanto o desalinhamento
         alturas = page.evaluate("""() => [...new Set([...document.querySelectorAll('.scan-line-row')]

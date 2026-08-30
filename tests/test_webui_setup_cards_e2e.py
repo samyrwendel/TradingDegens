@@ -164,7 +164,7 @@ def test_cada_analise_ganha_card_proprio_com_titulo_dizendo_qual_e(base):
             return {raio: c.borderTopLeftRadius, fundo: c.backgroundImage}; })(),
         })""")
         assert len(m["titulos"]) == 2, m
-        assert "1-2-3" in m["titulos"][0], m
+        assert "Setup123" in m["titulos"][0], m
         assert "Recuo à média" in m["titulos"][1], m
         assert any("sc-123" in c for c in m["classes"]), m
         assert any("sc-recuo" in c for c in m["classes"]), m

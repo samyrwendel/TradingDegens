@@ -129,10 +129,14 @@ def test_os_niveis_saem_do_cabecalho_e_viram_o_card_do_123(base):
         }""")
         # veredito EM CIMA da tira (pedido: ele permanece onde está)
         assert m["veredito"]["top"] < m["tira"]["top"], m
-        # tira ALINHADA À DIREITA do card (a menos da borda/padding)
-        assert m["card"]["right"] - m["tira"]["right"] < 40, m
+        # A tira DEIXOU de ser pinçada na borda direita (DA-078 regra 11, task 004):
+        # ela flui junto da meta e a sobra de espaço fica no FIM da fileira. O que
+        # vale agora é ela começar onde a informação começa.
+        info = page.evaluate("""() => Math.round(
+            document.querySelector('.result-info').getBoundingClientRect().left)""")
+        assert m["tira"]["left"] - info < 8, ("a tira começa junto com a informação", m, info)
         # o card do 1-2-3 DIZ de qual análise se trata e carrega os níveis
-        assert "1-2-3" in m["titulo"], m
+        assert "Setup123" in m["titulo"], m
         for chave, num in (("gatilho", "512,76"), ("stop (SL)", "471,35"), ("alvo (TP)", "515,06")):
             assert chave in m["txt123"] and num in m["txt123"], (chave, m)
         # DENTE: o mesmo número nos dois lugares era o defeito que a 021 matou
@@ -278,7 +282,7 @@ def test_as_duas_familias_ficam_em_superficies_separadas_e_com_nome(base):
         assert "835,37" in m["unidades"][0] and "COTAÇÃO AGORA" in m["unidades"][0].upper(), m
         assert "834,74" in m["unidades"][1] and "ANÁLISE" in m["unidades"][1].upper(), m
         # o plano ganhou caixa E nome: "Padrão 1-2-3 de compra"
-        assert "1-2-3" in m["titulo123"] and "compra" in m["titulo123"], m
+        assert "Setup123" in m["titulo123"] and "compra" in m["titulo123"], m
         browser.close()
 
 
