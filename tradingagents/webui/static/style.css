@@ -780,6 +780,22 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .tf-btn:hover:not(.is-off):not(.is-active) { color: var(--text); }
 .tf-btn.is-active { color: var(--green); font-weight: var(--fw-bold); }
+/* CAMADAS de outros métodos: seleção, então TEXTO (DA-078 regra 9) — mesma
+   gramática do seletor de timeframe, com o ativo em verde e peso. */
+.camadas { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 0 0 8px; }
+.camadas-k {
+  font-family: var(--font); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-med); color: var(--muted); text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.camada-btn {
+  font-family: var(--mono); font-size: var(--fs-12); line-height: var(--lh-12);
+  font-weight: var(--fw-med); color: var(--muted); background: none; border: none;
+  border-radius: 0; padding: 2px 6px; cursor: pointer; transition: color .12s;
+}
+.camada-btn:hover:not(.is-active) { color: var(--text); }
+.camada-btn.is-active { color: var(--green); font-weight: var(--fw-bold); }
+
 /* PENDENTE: o frame foi clicado e a resposta ainda não chegou. Não pode se parecer
    com o ATIVO — é justamente essa confusão que punha o chip no "D" com os níveis do
    "4h" na tela. Sublinhado pontilhado (o vocabulário de "em andamento"), sem mudar

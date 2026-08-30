@@ -1182,6 +1182,10 @@ function renderResult(snap) {
   renderDegraded(r.degraded);
   hideDegrade();
 
+  // Camada extra é escolha da tela que se está lendo, não preferência global:
+  // carregá-la pra outra análise mostraria níveis de um método que talvez nem exista
+  // ali, com o rótulo nomeado sem que ninguém tenha pedido.
+  _camadas = new Set();
   _openLive = r.live_price || null;
   renderHeadPrice(r.actionable, _openLive);
   renderSetupCards(r.actionable);
@@ -2587,9 +2591,12 @@ function tfFaixas() {
 // pra ser reusada pelos mini-gráficos da comparação.
 function chartLegendHtml(chart, actionable) {
   const zones = planZones(actionable);
-  const wins = (chart.ma_windows || [20, 50, 200]).map(String);
-  const ewins = (chart.ema_windows || []).map(String);
-  const pat = chart.markers && chart.markers.pattern_123;
+  // A legenda descreve o DESENHO. Listar sete médias com três traçadas é pior que
+  // não ter legenda: ela vira uma lista do que o backend sabe, não do que está lá.
+  const med = mediasVisiveis(actionable);
+  const wins = (chart.ma_windows || [20, 50, 200]).map(String).filter((w) => med.ma.has(w));
+  const ewins = (chart.ema_windows || []).map(String).filter((w) => med.ema.has(w));
+  const pat = camadaVisivel("plano") ? (chart.markers && chart.markers.pattern_123) : null;
   const legend = [];
   wins.forEach((w) => {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
@@ -2600,7 +2607,15 @@ function chartLegendHtml(chart, actionable) {
   zones.forEach((z) => legend.push(`<span class="lg"><span class="sw band" style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
   if (pat) {
     const [, dlabel] = PAT_DIR[pat.direction] || ["", ""];
-    legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>1-2-3 ${escapeHtml(dlabel)}</span>`);
+    const q = familiasNaTela(actionable).length > 1 ? "Setup123 " : "";
+    legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}</span>`);
+  }
+  const sp = camadaVisivel("storm") && actionable && actionable.storm
+    && actionable.storm.opera === true ? actionable.storm.pattern : null;
+  if (sp) {
+    const [, dlabel] = PAT_DIR[sp.direction] || ["", ""];
+    const q = familiasNaTela(actionable).length > 1 ? "Storm123 " : "";
+    legend.push(`<span class="lg"><span class="sw dot" style="background:${ZONE_COLORS.storm}"></span>${q}1-2-3 ${escapeHtml(dlabel)}</span>`);
   }
   return legend.join("");
 }
@@ -2625,6 +2640,7 @@ function renderChartCard(chart, ticker, actionable) {
   // linha do preço em vez de repetidas em texto. buy/pullback coincidem no caso
   // "aguardar recuo" (mesma média) — desenha-se uma só (ver drawPriceChart).
   const zones = planZones(actionable);
+  renderCamadasSelector(actionable);
   $("chartLegend").innerHTML = chartLegendHtml(chart, actionable);
 
   // NOTA DO GRÁFICO — o que está DESENHADO, e só isso (task 021).
@@ -2799,6 +2815,43 @@ function reevaluate(tf) {
     .catch(() => { $("formError").textContent = "falha ao reavaliar"; });
 }
 
+// O seletor de CAMADAS. Aparece só quando o plano tem uma segunda leitura pra
+// oferecer — controle que nunca faz nada é ruído. É seleção, então é TEXTO (DA-078
+// regra 9), e diz no title o que acontece ao ligar: os rótulos passam a se nomear.
+function renderCamadasSelector(a) {
+  const el = $("camadasSelector");
+  if (!el) return;
+  const outras = camadasDisponiveis(a).filter((f) => f !== camadaDoMetodo());
+  if (!outras.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.innerHTML = `<span class="camadas-k">camadas</span>` + outras.map((f) => {
+    const on = _camadas.has(f);
+    const tit = on
+      ? `Esconder os níveis do ${CAMADA_NOME[f]} — eles continuam inteiros no card dele`
+      : `Mostrar também os níveis do ${CAMADA_NOME[f]} neste gráfico; com as duas ` +
+        `famílias na tela cada rótulo passa a dizer de qual método é`;
+    return `<button type="button" class="camada-btn${on ? " is-active" : ""}" ` +
+      `data-camada="${f}" aria-pressed="${on}" title="${escapeHtml(tit)}">` +
+      `${escapeHtml(CAMADA_NOME[f])}</button>`;
+  }).join("");
+  el.classList.remove("hidden");
+  bindCamadasSelector();
+}
+
+function bindCamadasSelector() {
+  const el = $("camadasSelector");
+  if (!el || el._bound) return;
+  el._bound = true;
+  el.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.camada-btn");
+    if (!btn) return;
+    const f = btn.dataset.camada;
+    if (_camadas.has(f)) _camadas.delete(f); else _camadas.add(f);
+    // redesenha com o estado do canvas (o plano e o chart moram nele)
+    const cv = $("priceChart");
+    if (cv && cv._chart) renderChartCard(cv._chart, _openTicker, cv._actionable);
+  });
+}
+
 function bindTfSelector() {
   const el = $("tfSelector");
   if (!el || el._bound) return;
@@ -2875,6 +2928,109 @@ async function switchTimeframe(tf) {
   }
 }
 
+// ────────────────────────── UM GRÁFICO, UM MÉTODO ───────────────────────────
+//
+// "Percebo tbm que mistura tudo em um gráfico só, Storm123, Setup123 e Padrão com
+// Erick." Estava certo, e eram TRÊS misturas empilhadas na mesma tela:
+//
+//   1. as MÉDIAS — as duas famílias eram desenhadas sempre, pra todo método: MMS
+//      20/50/200 (Padrão) mais EMA 8/21/50 (Erick), mais a EMA 80 do Éden nas runs
+//      do Storm. Sete linhas, das quais o método aberto usa três;
+//   2. os NÍVEIS — numa run do Storm o gráfico traçava os do Storm E os do plano
+//      (Setup123 + recuo à média), porque a única condição era o Storm ter opinião.
+//      Daí os "dois stops empilhados" a 0,39 um do outro, sem nada dizendo que são
+//      de famílias diferentes;
+//   3. os PONTOS numerados — os círculos 1-2-3 vêm do detector de SWINGS, mesmo
+//      numa run do Storm, cujo 1-2-3 é outro (três candles). Mesma numeração, pontos
+//      diferentes: a colisão que o comentário do módulo já declarava.
+//
+// A regra: **o gráfico desenha a leitura que dá NOME ao método aberto.** As outras
+// leituras continuam INTEIRAS nos cards (DA-077 — uma leitura, um card); no gráfico
+// só entram se pedidas, e aí vêm nomeadas. E quando duas famílias dividem a tela,
+// TODO rótulo carrega a sua — "stop (SL)" vira "Setup123 · stop (SL)" ao lado de
+// "Storm123 · stop (SL)", porque dois níveis do mesmo papel sem dono é o defeito.
+const CAMADA_DO_METODO = {
+  padrao: "plano", erick: "plano", setup123: "plano", storm123: "storm",
+};
+const CAMADA_NOME = { plano: "Setup123", storm: "Storm123" };
+// A média é parte da leitura, não enfeite: o Éden É a MME 8 × MME 80, e o recuo do
+// Padrão é a MMS. Ligar uma camada traz as médias que a justificam.
+const MEDIAS_DA_CAMADA = {
+  plano: { padrao: ["20", "50", "200"], erick: [], setup123: ["20", "50", "200"] },
+  storm: { ema: ["8", "80"] },
+};
+// Camadas EXTRA que o usuário pediu (fora a do método aberto). Some ao trocar de
+// análise: é escolha de leitura daquela tela, não preferência global.
+let _camadas = new Set();
+
+function camadaDoMetodo() {
+  return CAMADA_DO_METODO[_openMethod] || "plano";
+}
+
+function camadaVisivel(familia) {
+  return familia === camadaDoMetodo() || _camadas.has(familia);
+}
+
+// O R:R QUE O GRÁFICO CARIMBA É O DA LEITURA DESENHADA. Ele saía sempre de
+// `a.risk_reward` — o do plano —, então numa run do Storm o chip mostrava o número
+// de uma leitura que não estava traçada em lugar nenhum da tela. É a mesma mistura
+// que esta task veio desfazer, só que num carimbo em vez de numa linha.
+//
+// Com as duas famílias na tela o número ganha DONO no próprio texto; sozinha, fica
+// limpo. O Storm tem duas entradas: leva a ANTECIPADA (a que o preço alcança
+// primeiro) com o nome dela — as duas continuam inteiras no card.
+function rrDoGrafico(a) {
+  if (!a) return { rr: null, prefixo: "" };
+  const duas = familiasNaTela(a).length > 1;
+  if (camadaVisivel("plano") && a.risk_reward) {
+    return { rr: a.risk_reward, prefixo: duas ? "Setup123 " : "" };
+  }
+  if (camadaVisivel("storm") && a.storm && a.storm.opera === true) {
+    const ls = (a.storm.leituras || []).slice().sort(
+      (x, y) => (x.ordem === "confirmada" ? 1 : 0) - (y.ordem === "confirmada" ? 1 : 0));
+    const L = ls.find((x) => x.risk_reward);
+    if (L) {
+      const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
+      return { rr: L.risk_reward, prefixo: `${duas ? "Storm123 " : ""}${n} ` };
+    }
+  }
+  return { rr: null, prefixo: "" };
+}
+
+// As camadas que EXISTEM neste plano — só se oferece o que há pra mostrar.
+function camadasDisponiveis(a) {
+  const fam = [];
+  // Camada que não tem nível nenhum não é camada: oferecê-la seria um botão que
+  // liga o nada, e a legenda diria que há algo desenhado onde não há.
+  if (a && (a.pattern || a.buy_zone || a.stop || a.target || a.realize_zone)) fam.push("plano");
+  if (a && a.storm && a.storm.pattern) fam.push("storm");
+  return fam.length ? fam : ["plano"];
+}
+
+// Quantas famílias estão na tela agora. Com mais de uma, todo rótulo se identifica.
+function familiasNaTela(a) {
+  return camadasDisponiveis(a).filter(camadaVisivel);
+}
+
+function nomeiaTag(tag, familia, precisa) {
+  return precisa ? `${CAMADA_NOME[familia]} · ${tag}` : tag;
+}
+
+// Médias que o gráfico desenha: as do método aberto + as das camadas ligadas.
+function mediasVisiveis(a) {
+  const fams = familiasNaTela(a);
+  const ma = new Set(), ema = new Set();
+  fams.forEach((f) => {
+    if (f === "storm") { (MEDIAS_DA_CAMADA.storm.ema || []).forEach((w) => ema.add(w)); return; }
+    const doMetodo = MEDIAS_DA_CAMADA.plano[_openMethod];
+    // Método do plano desconhecido (ou o plano ligado como camada extra numa run do
+    // Storm): cai na família Padrão, que é a que o plano estrutural usa de fato.
+    (doMetodo || MEDIAS_DA_CAMADA.plano.padrao).forEach((w) => ma.add(w));
+    if (_openMethod === "erick") ["8", "21", "50"].forEach((w) => ema.add(w));
+  });
+  return { ma, ema };
+}
+
 // O frame EXIBIDO é o que produziu o veredito? Só quando os dois são conhecidos e
 // DIFERENTES a leitura é exploratória — frame desconhecido não vira acusação.
 //
@@ -2897,6 +3053,11 @@ function ehExploratorio(tf) {
 function planZones(a) {
   if (!a) return [];
   const out = [];
+  // Duas famílias na tela ⇒ todo rótulo diz de quem é. Uma só ⇒ rótulo limpo, que é
+  // o caso normal e não merece prefixo repetido em cada linha.
+  const marcar = familiasNaTela(a).length > 1;
+  const vePlano = camadaVisivel("plano");
+  if (!vePlano) return planZonesStorm(a, out, marcar);
   // A zona da média é o setup do RECUO — NUNCA sai rotulada só "compra", porque
   // o 1-2-3 de compra é OUTRO setup, com outro gatilho, desenhado no mesmo gráfico.
   // Era essa colisão de nome que fazia o ZEC-USD 4h parecer contradição: a faixa
@@ -2914,8 +3075,8 @@ function planZones(a) {
     // em menos letra; a longa continua na legenda, que tem a linha inteira.
     const curto = `recuo ${buy.ma_label || "média"}`;
     out.push({ ...buy, color: fora ? ZONE_COLORS.inativa : ZONE_COLORS.buy,
-               inactive: fora,
-               tag: fora ? `${nome} — não ativa agora` : nome,
+               inactive: fora, familia: "plano",
+               tag: nomeiaTag(fora ? `${nome} — não ativa agora` : nome, "plano", marcar),
                tagCurto: fora ? `${curto} (inativa)` : curto });
   }
   // A região de realização só se chama "alvo" quando de fato é: num setup de VENDA
@@ -2925,7 +3086,8 @@ function planZones(a) {
   const rz = a.realize_zone;
   if (rz && rz.price != null && rz.role !== "gatilho") {
     const rzColor = rz.role === "resistencia" ? ZONE_COLORS.resist : ZONE_COLORS.realize;
-    out.push({ ...rz, color: rzColor, tag: rz.role_label || "realização (alvo)",
+    out.push({ ...rz, color: rzColor, familia: "plano",
+               tag: nomeiaTag(rz.role_label || "realização (alvo)", "plano", marcar),
                tagCurto: rz.role === "resistencia" ? "resistência" : "realização" });
   }
   // Alvo (TP) do padrão. Mesmo nível da realização → NÃO desenha um segundo: a
@@ -2933,20 +3095,27 @@ function planZones(a) {
   const tg = a.target;
   if (tg && tg.price != null) {
     const twin = tg.same_as_realize && out.find((z) => z.color === ZONE_COLORS.realize && z.price === tg.price);
-    if (twin) { twin.tag = "realização = alvo (TP)"; twin.tagCurto = "alvo"; twin.color = ZONE_COLORS.target; }
-    else out.push({ ...tg, color: ZONE_COLORS.target, tag: "alvo (TP)", tagCurto: "alvo" });
+    if (twin) {
+      twin.tag = nomeiaTag("realização = alvo (TP)", "plano", marcar);
+      twin.tagCurto = "alvo"; twin.color = ZONE_COLORS.target;
+    } else {
+      out.push({ ...tg, color: ZONE_COLORS.target, familia: "plano",
+                 tag: nomeiaTag("alvo (TP)", "plano", marcar), tagCurto: "alvo" });
+    }
   }
   // Invalidação e stop são LINHAS (nível exato), não faixas: a invalidação é o
   // ponto 3 da série e o stop é ela com a folga de ATR declarada pelo backend.
   const inv = a.invalidation;
   if (inv && inv.price != null) {
     out.push({ label: inv.label, price: inv.price, low: null, high: null,
-               color: ZONE_COLORS.invalid, tag: "invalidação", dash: [2, 3] });
+               color: ZONE_COLORS.invalid, familia: "plano",
+               tag: nomeiaTag("invalidação", "plano", marcar), dash: [2, 3] });
   }
   const st = a.stop;
   if (st && st.price != null) {
     out.push({ label: st.label, price: st.price, low: null, high: null,
-               color: ZONE_COLORS.stop, tag: "stop (SL)", tagCurto: "stop", dash: [6, 4] });
+               color: ZONE_COLORS.stop, familia: "plano",
+               tag: nomeiaTag("stop (SL)", "plano", marcar), tagCurto: "stop", dash: [6, 4] });
   }
   // NÍVEIS DO STORM — outra leitura, outra cor, e o nome dela no rótulo: nunca se
   // confundem com os do 1-2-3 deste módulo, que estão no mesmo gráfico com números
@@ -2956,31 +3125,45 @@ function planZones(a) {
   // a figura operável, e desenhar níveis de um trade que a regra proíbe é convidar a
   // operá-lo. Nada se perde — o card do Storm continua com cada número e com o
   // motivo do veto escrito.
-  const storm = a.storm;
-  if (storm && storm.opera === true && storm.pattern) {
-    const stLinha = (price, tag, curto, dash) => {
-      if (price == null) return;
-      out.push({ label: tag, price, low: null, high: null,
-                 color: ZONE_COLORS.storm, tag, tagCurto: curto, dash });
-    };
-    // O stop é UM (comum às duas entradas); gatilho e alvo são de CADA leitura, e
-    // por isso o rótulo diz de qual — dois "Storm · gatilho" no mesmo gráfico seriam
-    // dois níveis com o mesmo nome, que é o defeito da DA-075.
-    stLinha((storm.stop || {}).price, "Storm · stop (SL)", "Storm SL", [6, 4]);
-    (storm.leituras || []).forEach((L) => {
-      const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
-      stLinha(L.trigger, `Storm ${n} · gatilho`, `Storm ${n} gat.`, [5, 3]);
-      stLinha((L.target || {}).price, `Storm ${n} · alvo (TP)`, `Storm ${n} TP`, [2, 3]);
-    });
-  }
+  if (camadaVisivel("storm")) planZonesStorm(a, out, marcar);
   const pb = a.pullback_zone;
   const buyPrice = buy && buy.price;
   const isBand = pb && pb.low != null && pb.high != null;
   // só desenha o recuo separado quando é uma FAIXA distinta da compra (não o
   // gatilho-ponto do 1-2-3, que a própria marcação do padrão já traça)
   if (pb && pb.price != null && isBand && pb.price !== buyPrice) {
-    out.push({ ...pb, color: ZONE_COLORS.pullback, tag: "recuo a aguardar" });
+    out.push({ ...pb, color: ZONE_COLORS.pullback, familia: "plano",
+               tag: nomeiaTag("recuo a aguardar", "plano", marcar) });
   }
+  return out;
+}
+
+// NÍVEIS DO STORM — outra leitura, outra cor, e o nome dela no rótulo. Só quando o
+// Éden AUTORIZA: setup vetado não ganha traço no gráfico, porque o gráfico é a
+// figura operável e desenhar níveis de um trade que a regra proíbe é convidar a
+// operá-lo. Nada se perde — o card do Storm continua com cada número e com o veto
+// escrito.
+function planZonesStorm(a, out, marcar) {
+  const storm = a.storm;
+  if (!storm || storm.opera !== true || !storm.pattern) return out;
+  // O prefixo é o NOME do método quando as duas famílias dividem a tela, e a forma
+  // curta de sempre quando o Storm está sozinho — prefixo repetido em cada linha de
+  // um gráfico que só tem Storm é ruído, não informação.
+  const pre = marcar ? "Storm123" : "Storm";
+  const stLinha = (price, tag, curto, dash) => {
+    if (price == null) return;
+    out.push({ label: tag, price, low: null, high: null, familia: "storm",
+               color: ZONE_COLORS.storm, tag, tagCurto: curto, dash });
+  };
+  // O stop é UM (comum às duas entradas); gatilho e alvo são de CADA leitura, e por
+  // isso o rótulo diz de qual — dois "Storm · gatilho" no mesmo gráfico seriam dois
+  // níveis com o mesmo nome, que é o defeito da DA-075.
+  stLinha((storm.stop || {}).price, `${pre} · stop (SL)`, "Storm SL", [6, 4]);
+  (storm.leituras || []).forEach((L) => {
+    const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
+    stLinha(L.trigger, `${pre} ${n} · gatilho`, `Storm ${n} gat.`, [5, 3]);
+    stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `Storm ${n} TP`, [2, 3]);
+  });
   return out;
 }
 
@@ -3072,7 +3255,9 @@ function drawPriceChart(canvas, chart, a) {
   Object.values(chart.ma || {}).forEach((arr) => { for (let i = v0; i < v1; i++) grow(arr[i]); });
   Object.values(chart.ema || {}).forEach((arr) => { for (let i = v0; i < v1; i++) grow(arr[i]); });
   const pat = chart.markers && chart.markers.pattern_123;
-  if (pat) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach(grow);
+  // a escala vertical cresce pelo que está DESENHADO — incluir os pontos de uma
+  // camada escondida achataria o gráfico por causa de níveis que ninguém vê
+  if (pat && camadaVisivel("plano")) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach(grow);
   zones.forEach((z) => { grow(z.price); grow(z.low); grow(z.high); });
   grow(price);
   if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
@@ -3190,7 +3375,9 @@ function drawPriceChart(canvas, chart, a) {
     //
     // E o fundo é OPACO. Com 0,85 de alfa a faixa verde do alvo atravessava o chip
     // por baixo e o tingia — a cor certa no texto e a errada atrás dele.
-    const rrPlan = (a && a.risk_reward) || null;
+    const _rrG = rrDoGrafico(a);
+    const rrPlan = _rrG.rr;
+    const _pre = _rrG.prefixo;
     const rrTem = rrPlan && rrPlan.rr != null;
     // Sem número a linha NÃO desaparece: ela diz que não é calculável. Um gráfico sem
     // chip nenhum é indistinguível de um sem setup, e era assim que o R:R aparecia só
@@ -3207,14 +3394,14 @@ function drawPriceChart(canvas, chart, a) {
       ? `andou ${Math.round(rrPlan.andado_pct)}%` : "";
     const rrOpcoes = rrTem
       ? (andou
-          ? [`R:R ${fmtNum(rrPlan.rr)}:1 · ${andou} do caminho`,
-             `R:R ${fmtNum(rrPlan.rr)}:1 · ${andou}`,
-             `R:R ${fmtNum(rrPlan.rr)}:1`]
+          ? [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1 · ${andou} do caminho`,
+             `R:R ${_pre}${fmtNum(rrPlan.rr)}:1 · ${andou}`,
+             `R:R ${_pre}${fmtNum(rrPlan.rr)}:1`]
           : rrRuim(rrPlan.rr)
-          ? [`R:R ${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x o retorno`,
-             `R:R ${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x`,
-             `R:R ${fmtNum(rrPlan.rr)}:1`]
-          : [`R:R ${fmtNum(rrPlan.rr)}:1`])
+          ? [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x o retorno`,
+             `R:R ${_pre}${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x`,
+             `R:R ${_pre}${fmtNum(rrPlan.rr)}:1`]
+          : [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1`])
       : (rrPlan ? ["R:R não calculável", "R:R sem base"] : []);
     ctx.font = "bold 11px ui-monospace, Menlo, monospace";
     const rrText = rrOpcoes.find((t) => ctx.measureText(t).width + 14 <= plotW)
@@ -3290,8 +3477,14 @@ function drawPriceChart(canvas, chart, a) {
     ctx.fillRect(cx - cw / 2, top, cw, h);
   });
 
-  // moving-average polylines
+  // MÉDIAS DO MÉTODO ABERTO, e só. As duas famílias eram desenhadas sempre — MMS
+  // 20/50/200 do Padrão MAIS EMA 8/21/50 do Erick, mais a EMA 80 do Éden nas runs
+  // do Storm: sete linhas numa tela onde o método usa três. A média é parte da
+  // LEITURA (o Éden É a MME 8 × MME 80), então ela acompanha a camada, e ligar uma
+  // camada extra traz as médias que a justificam.
+  const _med = mediasVisiveis(a);
   Object.entries(chart.ema || {}).forEach(([w, arr]) => {
+    if (!_med.ema.has(String(w))) return;
     const color = EMA_COLORS[w]; if (!color) return;
     ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.setLineDash([4, 3]); ctx.beginPath();
     let st = false;
@@ -3304,6 +3497,7 @@ function drawPriceChart(canvas, chart, a) {
     ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
   });
   Object.entries(chart.ma || {}).forEach(([w, arr]) => {
+    if (!_med.ma.has(String(w))) return;
     const color = MA_COLORS[w]; if (!color) return;
     ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
     let started = false;
@@ -3334,7 +3528,12 @@ function drawPriceChart(canvas, chart, a) {
   // 1-2-3 pattern: connecting line, labelled points (with price), trigger level
   // + trigger/state label. Colour and point kinds follow the direction — compra
   // (L-H-L, blue) vs venda (H-L-H, orange) — so the two never read the same.
-  if (pat) {
+  //
+  // OS PONTOS SÃO DA CAMADA DO PLANO. Estes vêm do detector de SWINGS; o 1-2-3 do
+  // Storm é outro padrão (três candles consecutivos) com a MESMA numeração para
+  // pontos DIFERENTES. Desenhá-los juntos, sem dizer de quem é cada círculo, é a
+  // colisão que o módulo já declarava e a tela cometia.
+  if (pat && camadaVisivel("plano")) {
     const col = patColor(pat);
     const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
     const pts = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
@@ -3359,8 +3558,52 @@ function drawPriceChart(canvas, chart, a) {
         ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8b97ad";
         ctx.fillText(fmtNum(p.price), px, cy + off + (p.kind === "L" ? 16 : -16));
       });
+      // Com as duas famílias na tela, o primeiro ponto leva o NOME da sua — sem
+      // isso os círculos "1 2 3" de dois padrões diferentes ficam indistinguíveis.
+      if (familiasNaTela(a).length > 1) {
+        const p0 = pts[0], py0 = y(p0.price) + (p0.kind === "L" ? 14 : -14);
+        ctx.font = "bold 10px ui-monospace, Menlo, monospace";
+        ctx.textAlign = "left"; ctx.fillStyle = col;
+        ctx.fillText("Setup123", x(p0.i) + 11, py0);
+      }
       // o número do gatilho vai pra pílula no eixo direito (junto com preço/zonas);
       // aqui fica só a linha do 1-2-3 e os pontos numerados na vela.
+    }
+  }
+
+  // OS TRÊS CANDLES DO STORM, numerados. Até aqui o Storm só existia no gráfico
+  // como linhas de nível: o padrão que dá nome ao método era invisível, enquanto os
+  // círculos 1-2-3 na tela eram de OUTRO detector. Agora cada camada desenha o SEU.
+  const _stormPat = camadaVisivel("storm") && a && a.storm
+    && a.storm.opera === true ? a.storm.pattern : null;
+  if (_stormPat) {
+    const col = ZONE_COLORS.storm;
+    const compra = _stormPat.direction !== "venda";
+    const kinds = compra ? ["H", "L", "H"] : ["L", "H", "L"];
+    const pts = [["1", _stormPat.p1], ["2", _stormPat.p2], ["3", _stormPat.p3]]
+      .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
+      .filter((p) => p.i != null);
+    if (pts.length) {
+      ctx.strokeStyle = col; ctx.setLineDash([3, 3]); ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+      ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+      pts.forEach((p) => {
+        const px = x(p.i), cy = y(p.price), off = p.kind === "L" ? 14 : -14;
+        ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(px, cy + off, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = col; ctx.stroke();
+        ctx.fillStyle = col; ctx.fillText(p.lab, px, cy + off);
+      });
+      if (familiasNaTela(a).length > 1) {
+        const p0 = pts[0];
+        ctx.font = "bold 10px ui-monospace, Menlo, monospace";
+        ctx.textAlign = "left"; ctx.fillStyle = col;
+        // 11px ABAIXO do rótulo do Setup123: os dois padrões podem começar no MESMO
+        // candle, e aí as duas etiquetas se sobrepunham numa palavra ilegível.
+        ctx.fillText("Storm123", x(p0.i) + 11,
+                     y(p0.price) + (p0.kind === "L" ? 14 : -14) + 11);
+      }
     }
   }
 
@@ -3400,7 +3643,7 @@ function drawPriceChart(canvas, chart, a) {
     // O chip de R:R agora existe também quando não há número (ele diz o porquê), e
     // o topo dos rótulos tem de descer nos DOIS casos — senão o primeiro rótulo de
     // nível encosta no chip.
-    const labelTop = padT + ((a && a.risk_reward) ? 52 : 30);
+    const labelTop = padT + (rrDoGrafico(a).rr ? 52 : 30);
     layoutAxisPills(tagPills, labelTop, padT + plotH - 10, 17);
     // rótulos realmente PINTADOS ficam observáveis (mesmo padrão do zoom em
     // dataset.v0/v1): é assim que o E2E prova que estão no candle, não só na legenda

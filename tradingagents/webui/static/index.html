@@ -360,6 +360,12 @@
                    tempo gráfico. Cripto tem a escada intradiária (candle real de
                    exchange); ação só o diário (intradiário aparece desabilitado). -->
               <div class="tf-selector" id="tfSelector" role="group" aria-label="Timeframe do gráfico"></div>
+              <!-- CAMADAS: o gráfico desenha a leitura do MÉTODO ABERTO. A leitura da
+                   outra família só entra se pedida aqui, e aí todo rótulo passa a
+                   dizer de quem é (Setup123 · stop × Storm123 · stop). Só aparece
+                   quando há outra camada no plano. -->
+              <div class="camadas hidden" id="camadasSelector" role="group"
+                   aria-label="Camadas de outros métodos no gráfico"></div>
               <!-- Reavaliar o VEREDITO no timeframe escolhido: roda uma análise real
                    com o analista de mercado lendo esse frame (o veredito pode mudar). -->
               <button type="button" class="reeval-btn hidden" id="reevalBtn"></button>

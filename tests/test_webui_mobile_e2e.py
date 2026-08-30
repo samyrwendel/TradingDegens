@@ -185,7 +185,22 @@ def test_a_legenda_desce_pra_depois_do_grafico_sem_perder_item(base, snap, w, h)
         }""")
         # DENTE: a legenda vinha ANTES (legTop < grTop)
         assert m["legTop"] >= m["grBottom"], ("a legenda tem que ficar DEPOIS do gráfico", m)
-        assert m["itens"] == 11, ("nenhum item pode sumir", m)
+        # NENHUM ITEM SUME POR CAUSA DA LARGURA. O número deixou de ser fixo em 11
+        # quando a DA-088 fez a legenda descrever o DESENHO em vez do payload: o
+        # método aberto não traça as sete médias das duas famílias. O invariante é o
+        # mesmo — a legenda do telefone tem de ser IGUAL à do desktop, item por item;
+        # o que ela não pode é encolher pra caber.
+        largo = browser.new_page(viewport={"width": 1500, "height": 1000})
+        _abre(largo, base, snap)
+        ref = largo.evaluate(
+            """() => [...document.querySelectorAll('#chartLegend .lg')]
+                     .map(e => e.innerText.trim())""")
+        largo.close()
+        itens = page.evaluate(
+            """() => [...document.querySelectorAll('#chartLegend .lg')]
+                     .map(e => e.innerText.trim())""")
+        assert itens == ref, ("a legenda perdeu item no telefone", itens, ref)
+        assert m["itens"] == len(ref) and m["itens"] > 0, (m, ref)
         assert m["visivel"] != "none", m
         browser.close()
 

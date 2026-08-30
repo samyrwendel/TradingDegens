@@ -712,3 +712,28 @@ pela frente vem antes —, então nenhum limiar novo foi inventado.
 
 Vale igual pro Storm (mesmo decaimento). Provado em `tests/test_rr_percurso.py` (10) e
 `tests/test_webui_rr_percurso_e2e.py` (8). Governança: **DA-087**.
+
+---
+
+## 16. Um gráfico, um método (task 20260830-009)
+
+"Percebo tbm que mistura tudo em um gráfico só, Storm123, Setup123 e Padrão com
+Erick." Eram três misturas empilhadas:
+
+1. **médias** — as duas famílias sempre desenhadas: MMS 20/50/200 + EMA 8/21/50, mais
+   a EMA 80 do Éden. Sete linhas onde o método usa três;
+2. **níveis** — numa run do Storm, os do Storm E os do plano, daí os dois stops a 0,39
+   um do outro sem dono;
+3. **pontos numerados** — os círculos 1-2-3 vinham do detector de swings mesmo na run
+   do Storm, cujo 1-2-3 é outro padrão. Mesma numeração, pontos diferentes.
+
+**Agora:** o gráfico desenha a leitura do método aberto — níveis, médias, pontos e o
+carimbo de R:R. As outras continuam inteiras nos cards; no gráfico entram por um
+seletor de CAMADAS que só aparece quando há o que oferecer. Com duas famílias na tela,
+todo rótulo se identifica (`Setup123 · stop (SL)` × `Storm123 · stop (SL)`); com uma
+só, o rótulo fica limpo.
+
+Por método: padrão e Setup123 → MMS 20/50/200 · Erick → EMA 8/21/50 · Storm123 →
+EMA 8/80 (o par do Éden). A camada extra não vaza pra outra análise.
+
+Provado em `tests/test_webui_um_grafico_um_metodo_e2e.py` (13). Governança: **DA-088**.
