@@ -752,6 +752,10 @@ details.section[open] > summary::before { content: "▾"; }
 .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .chart-legend .sw { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
 .chart-legend .sw.dot { width: 9px; height: 9px; border-radius: 50%; }
+/* LOSANGO = Storm123. A forma do marcador desenhado na vela, repetida aqui:
+   é ela que separa as duas numerações 1-2-3 quando as duas camadas estão
+   ligadas, e uma legenda só com cor deixaria o leitor sem essa chave. */
+.chart-legend .sw.dia { width: 9px; height: 9px; border-radius: 1px; transform: rotate(45deg); }
 /* EMA legend swatch reads as a DASHED line (matches the dashed EMA polyline);
    a mask punches the gaps so the inline swatch colour still shows through. */
 .chart-legend .sw.ema {
@@ -1400,6 +1404,14 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   color: var(--muted);
 }
 .ex-nivel.operavel { color: var(--green); }
+/* Expectativa NEGATIVA: o número perde o realce de valor e ganha a frase ao
+   lado. Sem cor nova (DA-078 regra 3) — o aviso é palavra; o que muda é que ele
+   para de se vestir como um número bom. */
+.ex-v.ex-neg { color: var(--text); }
+.ex-alerta {
+  grid-column: 1 / -1; font-size: var(--fs-10); line-height: var(--lh-10);
+  color: var(--text); font-weight: var(--fw-bold); overflow-wrap: anywhere;
+}
 .ex-ic { color: var(--dim); }
 @media (max-width: 760px) {
   /* no telefone o preço desce pra sua linha em vez de espremer o papel da ordem */

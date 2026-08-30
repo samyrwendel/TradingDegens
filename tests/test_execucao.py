@@ -330,3 +330,26 @@ def test_o_limiar_do_card_e_o_MESMO_do_scanner():
     gatilho" e o card dizendo "aguardar" sobre o mesmo preço."""
     assert ex._RR_RESIDUAL is _RR_RESIDUAL
     assert ex._GATILHO_TOL is _GATILHO_TOL
+
+
+@pytest.mark.unit
+def test_o_indice_declara_os_DOIS_setups_mesmo_com_ledger_vazio():
+    """DENTE: o índice iterava só o que o ledger devolveu, então com track record
+    vazio ou ilegível (o caminho fail-open do runner) o bloco SUMIA da tela — e um
+    bloco ausente não diz "não há amostra", diz nada, justamente onde se decide."""
+    c = ex.confiabilidade({})
+    assert list(c["setups"]) == ["123", "storm"], c
+    for nome, s in c["setups"].items():
+        assert s["nivel"] == "insuficiente", (nome, s)
+        assert s["taxa_acerto"] is None and s["n_fechados"] == 0, (nome, s)
+        assert "amostra insuficiente (n=0)" in s["texto"], (nome, s)
+
+
+@pytest.mark.unit
+def test_a_ordem_dos_setups_nao_depende_do_que_o_ledger_mandou():
+    """Um ledger que só tem Storm não pode fazer o Storm subir pro topo do card: a
+    ordem da tela é a do ledger declarado, senão o bloco troca de lugar sozinho."""
+    c = ex.confiabilidade({"storm": {"n": 40, "n_fechados": 25, "taxa_acerto": 0.6}})
+    assert list(c["setups"]) == ["123", "storm"], c
+    assert c["setups"]["storm"]["nivel"] == "operavel", c
+    assert c["setups"]["123"]["n_fechados"] == 0, c

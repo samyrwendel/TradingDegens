@@ -2599,20 +2599,34 @@ function renderExecCard(dados) {
 function confiabilidadeHtml(conf) {
   if (!conf || !conf.setups) return "";
   const nomes = { "123": "Setup123", storm: "Storm123" };
+  // O nível é uma CHAVE do backend ("operavel"), e ela estava indo crua pra tela —
+  // a pílula dizia "OPERAVEL", sem acento, no meio de um card escrito em português.
+  const niveis = { insuficiente: "sem amostra", preliminar: "preliminar",
+                   operavel: "operável" };
   const blocos = Object.entries(conf.setups).map(([k, s]) => {
     const cab = `<span class="ex-k">${escapeHtml(nomes[k] || k)}</span>` +
-      `<span class="ex-nivel ${escapeHtml(s.nivel)}">${escapeHtml(s.nivel)}</span>` +
+      `<span class="ex-nivel ${escapeHtml(s.nivel)}">${escapeHtml(niveis[s.nivel] || s.nivel)}</span>` +
       `<span class="ex-base">${escapeHtml(s.texto || "")}</span>`;
     if (s.nivel === "insuficiente") {
       return `<div class="ex-conf">${cab}` +
         `<span class="ex-base">${s.n_fechados} fechado(s) de ${s.n} gatilho(s) logado(s)</span></div>`;
     }
+    // O SINAL DA EXPECTATIVA TEM DE SE LER. Ela lidera o bloco justamente porque é ela
+    // que responde "isso ganha dinheiro?" — e saía no mesmo cinza-claro fosse +0,35 ou
+    // −0,42, com a pílula VERDE de "operável" logo acima (que qualifica a AMOSTRA, não
+    // o setup). Verde em cima de expectativa negativa é a cor afirmando o contrário do
+    // número, o defeito que a DA-078 nomeou. Negativa não ganha cor nova — ganha a
+    // PALAVRA, que é a regra 3 da mesma decisão.
+    const negativa = s.expectativa_r != null && s.expectativa_r < 0;
     const er = s.expectativa_r != null
-      ? `<b class="ex-v">E[R] ${fmtNum(s.expectativa_r)}</b>` +
+      ? `<b class="ex-v${negativa ? " ex-neg" : ""}">E[R] ${fmtNum(s.expectativa_r)}</b>` +
+        (negativa
+          ? `<span class="ex-alerta">expectativa NEGATIVA — do jeito que foi medido, ` +
+            `este setup perde dinheiro por trade</span>` : "") +
         `<span class="ex-base">por trade, em múltiplos de risco` +
         (s.rr_medio != null ? ` · R:R médio ${fmtNum(s.rr_medio)}` : "") +
         (s.acerto_equilibrio != null
-          ? ` · precisa acertar ${(s.acerto_equilibrio * 100).toFixed(1)}% só pra empatar` : "") +
+          ? ` · precisa acertar ${pctBR(s.acerto_equilibrio * 100)}% só pra empatar` : "") +
         `</span>`
       : `<span class="ex-base">expectativa sem base (nenhum fechado com R:R conhecido)</span>`;
     const ic = s.ic95
@@ -2726,6 +2740,23 @@ function patColor(pat) {
   if (ehFantasma(pat)) return COR_FANTASMA;
   return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
 }
+
+// O FANTASMA VALE PARA AS DUAS LEITURAS. O cinza do morto nasceu no 1-2-3 de
+// swings e ficou só lá: no gráfico, um Storm invalidado continuava com o azul de
+// um Storm vivo — e o Storm é o método mais usado. A regra é a mesma dos dois
+// lados, então a cor sai da mesma função.
+function stormColor(pat) {
+  return ehFantasma(pat) ? COR_FANTASMA : ZONE_COLORS.storm;
+}
+
+// FORMA DO MARCADOR = FAMÍLIA. Os dois métodos numeram 1-2-3 pontos DIFERENTES (no
+// Setup123 o ponto 2 é o topo do repique e o 3 um fundo ascendente; no Storm o 2 é
+// o EXTREMO do movimento e o 3 a tentativa que falha), e as cores não separam: o
+// azul de compra do Setup123 (#6ea8fe) e o azul do Storm (#7cb0ff) são o mesmo azul
+// a um palmo de distância. Com as duas camadas ligadas, ①②③ de um viraria ①②③ do
+// outro. A FORMA separa antes da cor — círculo é Setup123, losango é Storm123 — e a
+// legenda carrega a mesma forma, então o vínculo se lê sem decorar nada.
+const FORMA_DA_FAMILIA = { plano: "circulo", storm: "losango" };
 // Faixas do plano acionável desenhadas no gráfico: compra (verde), realização /
 // alvo (dourado), recuo a aguardar (púrpura, só quando difere da compra) e os
 // níveis que tornam o setup operável — invalidação (vermelho claro, pontilhado:
@@ -2846,17 +2877,23 @@ function chartLegendHtml(chart, actionable) {
     if (EMA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${EMA_COLORS[w]}"></span>EMA${w}</span>`);
   });
   zones.forEach((z) => legend.push(`<span class="lg"><span class="sw band" style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
+  // A legenda carrega a FORMA do marcador, não só a cor: é ela que separa as duas
+  // numerações no candle, e uma legenda que só mostra cor deixaria o leitor sem a
+  // chave da desambiguação. "invalidado" entra no texto porque o cinza sozinho
+  // pede que se saiba de cor o que ele significa.
   if (pat) {
     const [, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     const q = familiasNaTela(actionable).length > 1 ? "Setup123 " : "";
-    legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}</span>`);
+    const morto = ehFantasma(pat) ? " (invalidado)" : "";
+    legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
   }
   const sp = camadaVisivel("storm") && actionable && actionable.storm
     && actionable.storm.opera === true ? actionable.storm.pattern : null;
   if (sp) {
     const [, dlabel] = PAT_DIR[sp.direction] || ["", ""];
     const q = familiasNaTela(actionable).length > 1 ? "Storm123 " : "";
-    legend.push(`<span class="lg"><span class="sw dot" style="background:${ZONE_COLORS.storm}"></span>${q}1-2-3 ${escapeHtml(dlabel)}</span>`);
+    const morto = ehFantasma(sp) ? " (invalidado)" : "";
+    legend.push(`<span class="lg"><span class="sw dia" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
   }
   return legend.join("");
 }
@@ -2899,6 +2936,11 @@ function renderChartCard(chart, ticker, actionable) {
   const notes = [];
   const nreg = (chart.markers && chart.markers.buy_regions || []).length;
   if (nreg) notes.push(`${nreg} região(ões) de <b>recuo à média</b> marcada(s) no período.`);
+  const mortos = fantasmasNaTela(chart, actionable);
+  if (mortos.length) {
+    notes.push(`${mortos.join(" e ")} <b>invalidado</b> — os pontos ficam em cinza como ` +
+      `história, e os níveis dele saem do gráfico: descrevem um trade que não existe mais.`);
+  }
   if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço — os níveis e a base de cada um ficam no card da análise.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
   $("chartNote").innerHTML = notes.map((n) => `<span class="cn-line">${n}</span>`).join("");
@@ -3313,21 +3355,44 @@ function iniciaCamadas(a) {
 // limpo. O Storm tem duas entradas: leva a ANTECIPADA (a que o preço alcança
 // primeiro) com o nome dela — as duas continuam inteiras no card.
 function rrDoGrafico(a) {
-  if (!a) return { rr: null, prefixo: "" };
+  if (!a) return { rr: null, prefixo: "", morto: false };
   const duas = familiasNaTela(a).length > 1;
+  // PADRÃO MORTO NÃO CARIMBA R:R. O chip é a razão que decide se o setup vale o
+  // risco — carimbá-lo sobre um padrão invalidado é oferecer a conta de um trade que
+  // não existe mais, o mesmo defeito que a DA-091 tirou do gatilho e da pílula. Aqui
+  // não basta devolver vazio: se a leitura desenhada morreu, o chip DIZ isso (gráfico
+  // sem chip é indistinguível de gráfico sem setup).
+  let morto = false;
   if (camadaVisivel("plano") && a.risk_reward) {
-    return { rr: a.risk_reward, prefixo: duas ? "Setup123 " : "" };
+    if (ehFantasma(a.pattern)) morto = true;
+    else return { rr: a.risk_reward, prefixo: duas ? "Setup123 " : "", morto: false };
   }
   if (camadaVisivel("storm") && a.storm && a.storm.opera === true) {
-    const ls = (a.storm.leituras || []).slice().sort(
-      (x, y) => (x.ordem === "confirmada" ? 1 : 0) - (y.ordem === "confirmada" ? 1 : 0));
-    const L = ls.find((x) => x.risk_reward);
-    if (L) {
-      const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
-      return { rr: L.risk_reward, prefixo: `${duas ? "Storm123 " : ""}${n} ` };
+    if (ehFantasma(a.storm.pattern)) {
+      morto = true;
+    } else {
+      const ls = (a.storm.leituras || []).slice().sort(
+        (x, y) => (x.ordem === "confirmada" ? 1 : 0) - (y.ordem === "confirmada" ? 1 : 0));
+      const L = ls.find((x) => x.risk_reward);
+      if (L) {
+        const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
+        return { rr: L.risk_reward, prefixo: `${duas ? "Storm123 " : ""}${n} `, morto: false };
+      }
     }
   }
-  return { rr: null, prefixo: "" };
+  return { rr: null, prefixo: "", morto };
+}
+
+// As leituras DESENHADAS que morreram. É o que explica um gráfico com padrão na tela
+// e sem nível nenhum — sem isto, a nota dizia "Nenhum setup identificado" sobre um
+// gráfico que tem três pontos numerados em cinza, o que é falso.
+function fantasmasNaTela(chart, a) {
+  const nomes = [];
+  const pat = chart && chart.markers && chart.markers.pattern_123;
+  if (camadaVisivel("plano") && ehFantasma(pat)) nomes.push("Setup123");
+  if (camadaVisivel("storm") && a && a.storm && a.storm.opera === true
+      && ehFantasma(a.storm.pattern)) nomes.push("Storm123");
+  return nomes;
 }
 
 // As camadas que EXISTEM neste plano — só se oferece o que há pra mostrar.
@@ -3513,6 +3578,14 @@ function planZones(a) {
 function planZonesStorm(a, out, marcar) {
   const storm = a.storm;
   if (!storm || storm.opera !== true || !storm.pattern) return out;
+  // PADRÃO MORTO NÃO TEM NÍVEL OPERÁVEL. Gatilho, alvo e stop do Storm saem TODOS do
+  // padrão (o gatilho é a perda do extremo do ponto 2, o alvo é a amplitude dele
+  // projetada, o stop é o próprio ponto 2 com folga): quando o padrão é invalidado,
+  // os três descrevem um trade que não existe mais. Desenhá-los seria a mesma
+  // armadilha da DA-091 — o gatilho de um setup extinto na tela é o pior nível que
+  // ela pode ter. Os três pontos continuam desenhados em fantasma, e o card do Storm
+  // continua com cada número e com a data da invalidação escrita.
+  if (ehFantasma(storm.pattern)) return out;
   // O prefixo é o NOME do método quando as duas famílias dividem a tela, e a forma
   // curta de sempre quando o Storm está sozinho — prefixo repetido em cada linha de
   // um gráfico que só tem Storm é ruído, não informação.
@@ -3532,6 +3605,12 @@ function planZonesStorm(a, out, marcar) {
     stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `${pre} ${n} TP`, [2, 3]);
   });
   return out;
+}
+
+// Percentual com UMA casa, em pt-BR. A tela inteira escreve "218,56"; o acerto de
+// equilíbrio saía "88.5%" com ponto — o único número da tela falando outro idioma.
+function pctBR(v) {
+  return Number(v).toFixed(1).replace(".", ",");
 }
 
 function fmtNum(v) {
@@ -3581,6 +3660,155 @@ function drawAxisPill(ctx, axisX, gutter, ry, text, bg, fg, strong) {
   if (strong) { ctx.strokeStyle = "rgba(0,0,0,0.28)"; ctx.lineWidth = 1; ctx.stroke(); }
   ctx.fillStyle = fg; ctx.textAlign = "left"; ctx.textBaseline = "middle";
   ctx.fillText(text, x0 + padX, ry + 0.5);
+}
+
+// ── O 1-2-3 DESENHADO NA VELA, para as duas leituras ────────────────────────
+// Linha tracejada ligando os três pontos, marcador numerado em cada um COM O PREÇO
+// ao lado, e a linha do gatilho quando ela existe. O que a família decide: a cor, a
+// FORMA do marcador (círculo/losango), o quanto ele se afasta da vela e o nome.
+//
+// FANTASMA: padrão morto perde opacidade, veste o cinza e perde o que convida a
+// operar — a linha do gatilho. Continua na tela porque a história explica onde o
+// preço está, mas para de competir com o que ainda vale (DA-091).
+function desenha123(ctx, g, cfg, saida, rotulos) {
+  const { pts, cor, forma, dash, fantasma, nome, mostraNome, trigger, dist, familia } = cfg;
+  if (!pts || !pts.length) return;
+  const { x, y, padL, plotW } = g;
+  ctx.save();
+  if (fantasma) ctx.globalAlpha = 0.45;
+  ctx.strokeStyle = cor; ctx.setLineDash(dash); ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+  ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+  if (trigger != null && !fantasma) {
+    const ty = y(trigger);
+    ctx.strokeStyle = cor + "80"; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  pts.forEach((p) => {
+    const px = x(p.i), cy = y(p.price), lado = p.kind === "L" ? 1 : -1;
+    const my = cy + lado * dist;
+    ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#000000";
+    ctx.beginPath();
+    if (forma === "losango") {
+      ctx.moveTo(px, my - 9.5); ctx.lineTo(px + 9.5, my);
+      ctx.lineTo(px, my + 9.5); ctx.lineTo(px - 9.5, my); ctx.closePath();
+    } else {
+      ctx.arc(px, my, 8, 0, Math.PI * 2);
+    }
+    ctx.fill(); ctx.strokeStyle = cor; ctx.stroke();
+    ctx.fillStyle = cor; ctx.fillText(p.lab, px, my);
+    // O MARCADOR É OBSTÁCULO pro texto: sem isto o respaldo de um preço pousava em
+    // cima do número de outro ponto e tampava justamente o que a task veio marcar.
+    if (rotulos) rotulos.obstaculos.push({ x: px - 10, y: my, w: 20, h: 20 });
+    // O PREÇO ao lado do número — sem ele o marcador diz que ali houve um ponto, mas
+    // não a QUE altura, que é justamente o número usado pra montar a ordem. Vai pra
+    // fila junto com as etiquetas: com duas famílias na tela, preço de uma caía sob
+    // etiqueta da outra, e o número desaparecia.
+    const preco = fmtNum(p.price);
+    rotulos.push({ x: px, y: my + lado * 16, text: preco, align: "centro", pilula: false,
+                   cor: fantasma ? COR_FANTASMA : "#8b97ad", opaco: fantasma ? 0.45 : 1 });
+    if (saida) saida.push({ familia, nome, lab: p.lab, preco, forma, cor, fantasma: !!fantasma });
+  });
+  // Etiquetas ao lado do PRIMEIRO ponto: o nome da família (só quando há mais de uma
+  // na tela — prefixo repetido num gráfico de uma leitura só é ruído) e "invalidado".
+  // NÃO são pintadas aqui: vão pra fila e saem por último, POR CIMA de tudo e com
+  // fundo opaco. Pintadas em linha, a etiqueta de uma família caía sobre o PREÇO de
+  // um ponto da outra e as duas viravam uma palavra só ("Storm123462,00") — a
+  // confusão que esta tela existe pra não ter.
+  const p0 = pts[0], lado0 = p0.kind === "L" ? 1 : -1;
+  const base = y(p0.price) + lado0 * dist;
+  const etiquetas = [];
+  if (mostraNome) etiquetas.push(nome);
+  if (fantasma) etiquetas.push("invalidado");
+  // NA COLUNA DO PONTO 1, logo depois do preço dele — não ao LADO do marcador. Ao
+  // lado, a pílula (≈60px) cruzava a coluna dos pontos vizinhos e a de-colisão a
+  // empurrava 90px pra baixo: um selo "Storm123" solto no meio do gráfico não nomeia
+  // padrão nenhum. Na coluna, ela desce no máximo o que a própria coluna ocupa, e as
+  // duas famílias se separam sozinhas quando os marcadores apontam pra lados opostos.
+  etiquetas.forEach((t, k) => rotulos.push(
+    { x: x(p0.i), y: base + lado0 * (32 + k * 15), text: t, cor, align: "centro",
+      pilula: true, opaco: fantasma ? 0.45 : 1 }));
+  ctx.restore();
+}
+
+// PREÇOS E ETIQUETAS DO 1-2-3, por último e sem se cobrirem.
+//
+// Pintados em linha, dentro do laço de cada família, o preço de um ponto de uma
+// leitura caía sob a etiqueta da outra e as duas viravam uma palavra só
+// ("Storm123462,00"). Aqui eles saem depois de TODOS os marcadores, com de-colisão
+// vertical: quem cai sobre um já colocado desce 13px até sair de cima dele. Um número
+// deslocado ainda se lê; um número coberto some — e era o preço do ponto, que é o
+// número usado pra montar a ordem.
+const _FONTE_ROTULO = { pilula: "bold 10px ui-monospace, Menlo, monospace",
+                        texto: "10px ui-monospace, Menlo, monospace" };
+
+function pintaRotulos123(ctx, rotulos, limites) {
+  if (!rotulos.length) return [];
+  ctx.save();
+  ctx.textBaseline = "middle";
+  // Começa pelos MARCADORES: eles já estão pintados e não se movem, então entram
+  // como caixas ocupadas. O que se move é o texto.
+  const caixas = (rotulos.obstaculos || []).slice();
+  const ALT = 15;
+  // AS ETIQUETAS DE FAMÍLIA SE ACOMODAM PRIMEIRO. Quem entra depois é quem se desloca,
+  // e uma pílula "Storm123" empurrada 100px pra longe do ponto 1 deixa de nomear o
+  // padrão — vira um selo solto no meio do gráfico. O preço deslocado continua na
+  // coluna do seu marcador; o nome, não.
+  const fila = rotulos.slice().sort((a, b) => (b.pilula ? 1 : 0) - (a.pilula ? 1 : 0));
+  // O SLOT LIVRE MAIS PRÓXIMO, alternando abaixo e acima do lugar natural. Empurrar
+  // sempre PRA BAIXO empilhava seis preços (duas famílias × três pontos) numa coluna
+  // só no telefone, e o último saía do gráfico por cima da régua de datas. Busca
+  // finita e limitada ao plot: sem candidato legível, o rótulo NÃO é pintado — número
+  // sobreposto não se lê, e o card carrega cada um deles por escrito.
+  const passos = [0];
+  for (let k = 1; k <= 12; k++) passos.push(k * ALT, -k * ALT);
+  const pintados = [];
+  fila.forEach((r) => {
+    ctx.font = r.pilula ? _FONTE_ROTULO.pilula : _FONTE_ROTULO.texto;
+    const w = ctx.measureText(r.text).width + (r.pilula ? 10 : 4);
+    const x0 = r.align === "centro" ? r.x - w / 2 : r.x - 4;
+    const livre = (yy) => !caixas.some(
+      (o) => x0 < o.x + o.w && o.x < x0 + w && Math.abs(yy - o.y) < (o.h + ALT) / 2 - 0.5);
+    // ALCANCE: um preço só vale colado no SEU marcador. Deslocado meia tela ele deixa
+    // de dizer quanto vale aquele ponto e vira um número solto — pior que ausente,
+    // porque o olho o atribui ao ponto errado. Passando do alcance, não se pinta: o
+    // card carrega cada número por escrito, e a régua carrega os níveis. A pílula da
+    // família tem alcance maior (é uma por leitura, e nomear é o trabalho dela).
+    // 3 passos ≈ 45px: cabe o lado OPOSTO do próprio marcador (o preço "por cima" em
+    // vez de "por baixo", 32px de distância), que é o primeiro lugar a tentar quando o
+    // natural está ocupado. Com 2 passos o ponto 2 — o EXTREMO do movimento — perdia o
+    // preço por 2px de folga.
+    const alcance = (r.pilula ? 5 : 3) * ALT;
+    let yy = null;
+    for (const d of passos) {
+      if (Math.abs(d) > alcance) break;
+      const cand = r.y + d;
+      if (cand < limites.topo || cand > limites.base) continue;
+      if (livre(cand)) { yy = cand; break; }
+    }
+    if (yy == null) return;
+    caixas.push({ x: x0, y: yy, w, h: ALT });
+    pintados.push(r.text);
+    ctx.globalAlpha = r.opaco;
+    // Fundo escuro em AMBOS: a etiqueta da família leva pílula com borda (ela nomeia
+    // a leitura), o preço leva só o respaldo. Sem ele, "474,00" sobre pavio verde e
+    // média tracejada some no telefone, onde a área útil é ~250px e os três candles
+    // do Storm caem quase no mesmo x.
+    roundRect(ctx, x0, yy - 7.5, w, 15, 3);
+    ctx.globalAlpha = r.opaco * (r.pilula ? 0.92 : 0.78);
+    ctx.fillStyle = "#0b0b0b"; ctx.fill();
+    ctx.globalAlpha = r.opaco;
+    if (r.pilula) {
+      ctx.strokeStyle = r.cor + "88"; ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.fillStyle = r.cor; ctx.textAlign = "left";
+    ctx.fillText(r.text, x0 + (r.pilula ? 5 : 2), yy + 0.5);
+  });
+  ctx.restore();
+  return pintados;
 }
 
 function drawPriceChart(canvas, chart, a) {
@@ -3677,7 +3905,10 @@ function drawPriceChart(canvas, chart, a) {
       axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#000000" });
     }
   });
-  if (pat) {
+  // A pílula é do que está DESENHADO. Com a camada do plano desligada o gatilho do
+  // 1-2-3 de swings continuava no eixo, sozinho, sem a linha nem os pontos que o
+  // explicam — um preço operável de uma leitura que o usuário mandou sumir.
+  if (pat && camadaVisivel("plano")) {
     // sem pílula de gatilho num padrão morto: o eixo é onde o olho procura preço
     // operável, e pôr ali o gatilho de um setup extinto é convidar a operá-lo
     if (!ehFantasma(pat)) {
@@ -3777,7 +4008,8 @@ function drawPriceChart(canvas, chart, a) {
              `R:R ${_pre}${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x`,
              `R:R ${_pre}${fmtNum(rrPlan.rr)}:1`]
           : [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1`])
-      : (rrPlan ? ["R:R não calculável", "R:R sem base"] : []);
+      : (rrPlan ? ["R:R não calculável", "R:R sem base"]
+                : (_rrG.morto ? ["R:R não vale — padrão invalidado", "R:R — invalidado"] : []));
     ctx.font = "bold 11px ui-monospace, Menlo, monospace";
     const rrText = rrOpcoes.find((t) => ctx.measureText(t).width + 14 <= plotW)
       || rrOpcoes[rrOpcoes.length - 1] || "";
@@ -3900,102 +4132,67 @@ function drawPriceChart(canvas, chart, a) {
     ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
   });
 
-  // 1-2-3 pattern: connecting line, labelled points (with price), trigger level
-  // + trigger/state label. Colour and point kinds follow the direction — compra
-  // (L-H-L, blue) vs venda (H-L-H, orange) — so the two never read the same.
+  // 1-2-3 NA VELA — as DUAS leituras, pelo mesmo desenhador.
   //
-  // OS PONTOS SÃO DA CAMADA DO PLANO. Estes vêm do detector de SWINGS; o 1-2-3 do
-  // Storm é outro padrão (três candles consecutivos) com a MESMA numeração para
-  // pontos DIFERENTES. Desenhá-los juntos, sem dizer de quem é cada círculo, é a
-  // colisão que o módulo já declarava e a tela cometia.
+  // Eram dois blocos quase iguais, e por serem dois divergiram: o do Storm ficou sem
+  // o preço ao lado do ponto e sem o tratamento de fantasma. O método que o Samyr
+  // mais usa era o único cujos três pontos não diziam quanto valem, e cujo padrão
+  // morto continuava desenhado com a cor de um vivo. Agora há UM desenhador: o que
+  // muda entre as famílias é a cor, a FORMA do marcador e o nome — nunca o cuidado.
+  //
+  // `_pontos123` acumula o que foi PINTADO (família, número, preço, forma, cor,
+  // fantasma) e sai em `dataset.pat123`: regra de tela que não se mede volta sozinha.
+  const _pontos123 = [];
+  const _rotulos123 = [];
+  _rotulos123.obstaculos = [];
+  const _geom = { x, y, padL, plotW };
+  const _duasFamilias = familiasNaTela(a).length > 1;
+
+  // OS PONTOS DO PLANO vêm do detector de SWINGS; os do Storm são três candles
+  // consecutivos com a MESMA numeração para pontos DIFERENTES. Desenhá-los juntos
+  // sem dizer de quem é cada marcador é a colisão que o módulo já declarava.
   if (pat && camadaVisivel("plano")) {
-    const col = patColor(pat);
-    // Além da cor, o PESO: o morto perde opacidade e a linha do gatilho, que é o
-    // convite a operar. Um gatilho desenhado num padrão que já morreu é o pior
-    // nível da tela — diz "compre aqui" sobre um setup que não existe mais.
-    const fantasma = ehFantasma(pat);
-    if (fantasma) ctx.globalAlpha = 0.45;
     const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
     const pts = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
       .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
       .filter((p) => p.i != null);
-    if (pts.length) {
-      ctx.strokeStyle = col; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-      ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
-      // trigger horizontal line (translucent version of the direction colour)
-      if (!fantasma) {
-        const ty = y(pat.trigger);
-        ctx.strokeStyle = col + "80"; ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke(); ctx.setLineDash([]);
-      }
-      // point circles with number + price beside them
-      pts.forEach((p) => {
-        const px = x(p.i), cy = y(p.price), off = p.kind === "L" ? 14 : -14;
-        ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(px, cy + off, 8, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = col; ctx.stroke();
-        ctx.fillStyle = col; ctx.fillText(p.lab, px, cy + off);
-        ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8b97ad";
-        ctx.fillText(fmtNum(p.price), px, cy + off + (p.kind === "L" ? 16 : -16));
-      });
-      // Com as duas famílias na tela, o primeiro ponto leva o NOME da sua — sem
-      // isso os círculos "1 2 3" de dois padrões diferentes ficam indistinguíveis.
-      if (familiasNaTela(a).length > 1) {
-        const p0 = pts[0], py0 = y(p0.price) + (p0.kind === "L" ? 14 : -14);
-        ctx.font = "bold 10px ui-monospace, Menlo, monospace";
-        ctx.textAlign = "left"; ctx.fillStyle = col;
-        ctx.fillText("Setup123", x(p0.i) + 11, py0);
-      }
-      // o número do gatilho vai pra pílula no eixo direito (junto com preço/zonas);
-      // aqui fica só a linha do 1-2-3 e os pontos numerados na vela.
-      if (fantasma) {
-        const p0 = pts[0];
-        ctx.font = "bold 10px ui-monospace, Menlo, monospace";
-        ctx.textAlign = "left"; ctx.fillStyle = col;
-        ctx.fillText("invalidado", x(p0.i) + 11,
-                     y(p0.price) + (p0.kind === "L" ? 26 : -26));
-      }
-      ctx.globalAlpha = 1;
-    }
+    desenha123(ctx, _geom, {
+      pts, familia: "plano", nome: "Setup123", cor: patColor(pat),
+      forma: FORMA_DA_FAMILIA.plano, dash: [4, 3], dist: 14,
+      // O gatilho é o convite a operar: um padrão morto não o desenha.
+      trigger: pat.trigger, fantasma: ehFantasma(pat), mostraNome: _duasFamilias,
+    }, _pontos123, _rotulos123);
   }
 
-  // OS TRÊS CANDLES DO STORM, numerados. Até aqui o Storm só existia no gráfico
-  // como linhas de nível: o padrão que dá nome ao método era invisível, enquanto os
-  // círculos 1-2-3 na tela eram de OUTRO detector. Agora cada camada desenha o SEU.
+  // OS TRÊS CANDLES DO STORM. Até a DA-088 o Storm só existia no gráfico como linhas
+  // de nível — o padrão que dá nome ao método era invisível, enquanto os círculos
+  // 1-2-3 na tela eram de OUTRO detector. Agora ele desenha o SEU, com preço e com
+  // fantasma, e o marcador em LOSANGO pra não se confundir com o círculo do plano.
+  //
+  // Com as duas camadas ligadas o marcador do Storm sai MAIS LONGE da vela (os dois
+  // padrões podem cair no mesmo candle, e aí os dois selos ocupariam o mesmo pixel).
   const _stormPat = camadaVisivel("storm") && a && a.storm
     && a.storm.opera === true ? a.storm.pattern : null;
   if (_stormPat) {
-    const col = ZONE_COLORS.storm;
     const compra = _stormPat.direction !== "venda";
     const kinds = compra ? ["H", "L", "H"] : ["L", "H", "L"];
     const pts = [["1", _stormPat.p1], ["2", _stormPat.p2], ["3", _stormPat.p3]]
       .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
       .filter((p) => p.i != null);
-    if (pts.length) {
-      ctx.strokeStyle = col; ctx.setLineDash([3, 3]); ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-      ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
-      pts.forEach((p) => {
-        const px = x(p.i), cy = y(p.price), off = p.kind === "L" ? 14 : -14;
-        ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(px, cy + off, 8, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = col; ctx.stroke();
-        ctx.fillStyle = col; ctx.fillText(p.lab, px, cy + off);
-      });
-      if (familiasNaTela(a).length > 1) {
-        const p0 = pts[0];
-        ctx.font = "bold 10px ui-monospace, Menlo, monospace";
-        ctx.textAlign = "left"; ctx.fillStyle = col;
-        // 11px ABAIXO do rótulo do Setup123: os dois padrões podem começar no MESMO
-        // candle, e aí as duas etiquetas se sobrepunham numa palavra ilegível.
-        ctx.fillText("Storm123", x(p0.i) + 11,
-                     y(p0.price) + (p0.kind === "L" ? 14 : -14) + 11);
-      }
-    }
+    desenha123(ctx, _geom, {
+      pts, familia: "storm", nome: "Storm123", cor: stormColor(_stormPat),
+      forma: FORMA_DA_FAMILIA.storm, dash: [3, 3], dist: _duasFamilias ? 34 : 14,
+      // o gatilho do Storm já é uma linha de nível rotulada (planZonesStorm) — não
+      // se traça o mesmo nível duas vezes
+      trigger: null, fantasma: ehFantasma(_stormPat), mostraNome: _duasFamilias,
+    }, _pontos123, _rotulos123);
   }
+  canvas.dataset.pat123 = JSON.stringify(_pontos123);
+  // Os rótulos são pintados DEPOIS de todos os marcadores das duas famílias, dentro
+  // dos limites do plot — e o dataset guarda o que de fato saiu na tela, não o que se
+  // pretendia (é o que deixa "nada foi coberto nem cortado" ser medido).
+  canvas.dataset.rotulos123 = JSON.stringify(
+    pintaRotulos123(ctx, _rotulos123, { topo: padT + 8, base: padT + plotH - 8 }));
 
   // linha fina do preço atual cruzando o gráfico até a régua direita (o número
   // vira pílula no eixo, logo abaixo — nada de caixa sobre as velas).
@@ -6557,7 +6754,7 @@ function trackExpectancyHtml(data) {
   const e = data.expectativa_r;
   const cls = e > 0 ? "ok" : "bad";
   const sinal = e > 0 ? "+" : "";
-  const eq = data.acerto_equilibrio == null ? "—" : `${(data.acerto_equilibrio * 100).toFixed(1)}%`;
+  const eq = data.acerto_equilibrio == null ? "—" : `${pctBR(data.acerto_equilibrio * 100)}%`;
   const p = data.acerto_com_rr == null ? "—" : `${Math.round(data.acerto_com_rr * 100)}%`;
   return `<div class="scan-summary">expectativa <b class="${cls}">${sinal}${e.toFixed(2)}R</b> por trade` +
     `<span class="hint"> — R:R médio ${data.rr_medio} · precisa de ${eq} pra empatar · base: ${data.n_com_rr} fechado(s) com R:R, ${p} de acerto neles</span></div>`;

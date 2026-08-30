@@ -30,7 +30,7 @@ from typing import Any
 # ── constantes emprestadas do scanner, pra o card decidir igual à lista ──────────
 # Importadas de lá de propósito: dois limiares com o mesmo nome e valores diferentes
 # seria a lista dizendo "em gatilho" e o card dizendo "aguardar" sobre o mesmo preço.
-from tradingagents.webui.scanner import _GATILHO_TOL, _RR_RESIDUAL
+from tradingagents.webui.scanner import _GATILHO_TOL, _RR_RESIDUAL, SETUPS_DO_LEDGER
 
 # Piso de R:R-de-agora pra o card dizer ENTRAR. **`a calibrar por backtest`** — a spec
 # é explícita de que este número é convenção, não corpus. 1,0 é o mínimo defensável
@@ -327,7 +327,13 @@ def confiabilidade(por_setup: dict[str, Any] | None) -> dict[str, Any]:
     nenhum (lição da task 008).
     """
     out: dict[str, Any] = {"n_minimo": _N_MINIMO, "n_operavel": _N_OPERAVEL, "setups": {}}
-    for nome, bloco in (por_setup or {}).items():
+    # OS DOIS SETUPS SEMPRE. Iterar só o que o ledger devolveu fazia o índice SUMIR da
+    # tela quando o track record vinha vazio ou ilegível (o caminho fail-open do
+    # runner) — e um bloco ausente não diz "não há amostra", diz nada. O gate é a
+    # informação: com n=0 a tela declara "amostra insuficiente (n=0)", que é a
+    # verdade, em vez de calar justamente onde a pessoa decide.
+    fonte = {n: (por_setup or {}).get(n) or {} for n in SETUPS_DO_LEDGER}
+    for nome, bloco in {**fonte, **(por_setup or {})}.items():
         b = bloco or {}
         n = int(b.get("n_fechados") or 0)
         taxa = b.get("taxa_acerto")
