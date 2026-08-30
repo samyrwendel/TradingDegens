@@ -1065,7 +1065,7 @@ function renderResult(snap) {
     const er = snap.result || {};
     const hasPartial = er.partial === true || _hasAnyReport(er);
     $("chartCard").classList.add("hidden");
-    $("actionable").classList.add("hidden");
+    $("setupCards").classList.add("hidden");
     $("headPrice").classList.add("hidden");
     $("headLevels").classList.add("hidden");   // run com erro não tem gatilho nem cotação a mostrar
     $("verdictTf").classList.add("hidden");
@@ -1167,8 +1167,7 @@ function renderResult(snap) {
   hideDegrade();
 
   renderHeadPrice(r.actionable, r.live_price);
-  renderHeadTriggers(r.actionable);
-  renderActionable(r.actionable);
+  renderSetupCards(r.actionable);
   renderChartCard(r.price_chart, snap.ticker, r.actionable);
   renderTfSelector();
 
@@ -1983,74 +1982,222 @@ function renderHeadPrice(a, live) {
     el.innerHTML = atual + analise;
     el.classList.remove("hidden");
   }
-  if (box) box.classList.toggle("hidden", !el.innerHTML && !$("headTriggers").innerHTML);
+  if (box) box.classList.toggle("hidden", !el.innerHTML);
 }
 
-// Os GATILHOS do 1-2-3 na tira inferior direita: gatilho · SL · TP · R:R. Cada um
-// some quando não existe (nunca "—" inventado); sem alvo publicável, mostra o MOTIVO
-// (mesma regra do scan: número recusado vira explicação, não um valor sem sentido).
-function renderHeadTriggers(a) {
-  const el = $("headTriggers");
+// ---- UM CARD POR ANÁLISE ---------------------------------------------------
+// A tela desenha DUAS leituras independentes sobre o mesmo candle, e elas podem
+// coexistir e discordar: o PADRÃO 1-2-3 (gatilho na máxima do ponto 2) e o RECUO
+// À MÉDIA (a faixa verde da média ascendente). A task 015 deu NOME a cada uma
+// (``setup_source``) porque "Setup ativo agora" não dizia de quem falava. A 021 dá
+// CAIXA: enquanto as duas dividiam um amontoado — uma tira de níveis no cabeçalho
+// e um bloco de estado solto na coluna, sem vínculo visual entre eles —, a
+// discordância entre elas lia como CONTRADIÇÃO DA TELA.
+//
+// A DIVISÃO SAI DO DADO, não de palpite. Cada campo do ``actionable`` tem um dono
+// determinado por como ``price_structure.build_actionable_plan`` o produz:
+//   • 1-2-3         → pattern, invalidation, stop, target, risk_reward — os cinco
+//                     saem de ``_pattern_levels(struct.pattern, …)`` e são ``None``
+//                     JUNTOS quando não há padrão;
+//   • recuo à média → buy_zone (e o pullback_zone que é recuo), de
+//                     ``struct.active_region`` / ``struct.buy_regions``;
+//   • de NINGUÉM    → price, as_of, timeframe e a cotação: o chão comum contra o
+//                     qual as duas se medem (cabeçalho em cima, frame no rodapé);
+//   • setup_state + horizon → vão pro card que ``setup_source`` NOMEAR. É
+//                     literalmente pra isso que o campo existe. Sem dono (o
+//                     backend pode eleger nenhuma), o carimbo cai no rodapé
+//                     compartilhado em vez de ser enfiado num card que não o gerou.
+//
+// Consequências que a divisão obriga:
+//   • nenhum número aparece nos dois cards, e o R:R — que saía DUAS VEZES, na tira
+//     do cabeçalho e no bloco do setup — passa a sair uma só, no 1-2-3, que é de
+//     onde ele vem (entrada = gatilho, risco = stop, retorno = alvo);
+//   • as BASES dos níveis ("invalidação + folga de 0.5·ATR14", "topo anterior …")
+//     desceram da nota do gráfico pra cá, ao lado do número que elas justificam —
+//     a nota parou de listar os mesmos preços que o canvas já pinta (ver
+//     renderChartCard);
+//   • card que não tem dado não abre: sem padrão não há card de 1-2-3, sem faixa
+//     não há card de recuo. Nunca uma caixa vazia com travessão inventado.
+// SEM PICTOGRAMA (DA-076: "tira todos os emojis" — o estado volta a ser cor e
+// palavra). Nesta superfície nova a regra já entra valendo: a leitura se identifica
+// pela COR da borda (a mesma do gráfico: azul/laranja no 1-2-3 por direção, verde no
+// recuo) e pelo NOME escrito por extenso. O ícone que estava aqui não dizia nada que
+// o rótulo não diga — e com quatro leituras na mesma coluna (Storm, tasks 022/023)
+// vira mosaico.
+
+// "3.5" -> "3,5% acima" — a distância do preço até a média é o único número desta
+// leitura que o gráfico NÃO desenha (ele desenha a faixa, não o quanto falta).
+function fmtDist(pct) {
+  const s = Math.abs(pct).toFixed(1).replace(".", ",");
+  return `${s}% ${pct >= 0 ? "acima" : "abaixo"}`;
+}
+
+// Uma linha do card: nome · NÚMERO · a base que o justifica. A base é o que
+// transforma "stop (SL) 764,76" em nível defensável; ela morava na nota do gráfico,
+// longe do número, e agora mora colada nele.
+function scRow(nome, valor, base, cls, titulo) {
+  return `<div class="sc-row${cls ? " " + cls : ""}"` +
+    (titulo ? ` title="${escapeHtml(titulo)}"` : "") + ">" +
+    `<span class="sc-k">${escapeHtml(nome)}</span>` +
+    `<b class="sc-v">${escapeHtml(valor)}</b>` +
+    (base ? `<span class="sc-basis">${escapeHtml(base)}</span>` : "") +
+    "</div>";
+}
+
+// Nível que a análise não produziu: diz "sem nível definido" em vez de inventar
+// número (mesma regra que a nota do gráfico aplicava antes de perder essas linhas).
+// Nível que NÃO EXISTE naquela leitura é outra coisa: nem linha ele ganha.
+function scSemNivel(nome) {
+  return `<div class="sc-row sc-sem"><span class="sc-k">${escapeHtml(nome)}</span>` +
+    `<span class="sc-v sc-sem-v">sem nível definido</span></div>`;
+}
+
+function renderSetupCards(a) {
+  const el = $("setupCards");
   if (!el) return;
-  const pat = (a || {}).pattern || {};
-  const partes = [];
-  if (pat.trigger != null) {
-    const seta = pat.direction === "venda" ? "⬇️" : "⬆️";
-    partes.push(`<span class="hl-item">${seta} gatilho <b>${fmtNum(pat.trigger)}</b></span>`);
-  }
-  const sl = (a || {}).stop || {};
-  if (sl.price != null) partes.push(`<span class="hl-item">🛑 SL <b>${fmtNum(sl.price)}</b></span>`);
-  const tp = (a || {}).target || {};
-  const rr = (a || {}).risk_reward || {};
-  if (tp.price != null && !(rr.note && rr.rr == null)) {
-    partes.push(`<span class="hl-item">🎯 TP <b>${fmtNum(tp.price)}</b></span>`);
-  } else if (rr.note) {
-    partes.push(`<span class="hl-item hl-warn">⚠️ ${escapeHtml(rr.note)}</span>`);
-  }
-  if (rr.rr != null) {
-    partes.push(`<span class="hl-item${rrRuim(rr.rr) ? " rr-ruim" : ""}"` +
-      (rrRuim(rr.rr) ? ` title="${escapeHtml("R:R" + rrAviso(rr.rr))}"` : "") +
-      `>⚖️ R:R <b>${fmtNum(rr.rr)}</b></span>`);
-  }
-  // A família se declara: estes quatro são NÍVEIS DO PLANO, e a linha de cima é
-  // cotação de mercado. Sem o rótulo, "R:R 0,31" e "835,37" ficavam lado a lado como
-  // se fossem do mesmo assunto (defeito 2).
-  el.innerHTML = partes.length ? `<span class="hl-k">plano</span>` + partes.join("") : "";
-  el.classList.toggle("hidden", !partes.length);
-  // A tira some só quando NENHUM dos dois lados tem conteúdo (gatilhos e preço são
-  // independentes: um 1-2-3 sem padrão ainda mostra a cotação).
-  const box = $("headLevels");
-  if (box) box.classList.toggle("hidden", !partes.length && !$("headPrice").innerHTML);
-}
-
-// A faixa do setup carrega SÓ o que o gráfico não desenha: estado, horizonte e
-// timeframe. As faixas de preço e o 1-2-3 agora vivem dentro do gráfico, então
-// aqui não se repete um número sequer.
-function renderActionable(a) {
-  const el = $("actionable");
   if (!a || !a.setup_state) { el.classList.add("hidden"); el.innerHTML = ""; return; }
-  const [emo, label] = SETUP_PT[a.setup_state] || ["⚪", a.setup_state];
-  // O R:R entra aqui (e não no gráfico) porque é RAZÃO, não nível de preço — os
-  // níveis que o compõem (stop e alvo) já estão desenhados na linha do preço.
-  const rr = a.risk_reward;
-  let rrHtml = "";
-  if (rr && rr.rr != null) {
-    const detail = `entrada ${fmtNum(rr.entry)} (${rr.entry_basis || ""}) · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`;
-    rrHtml = `<span class="act-fact${rrRuim(rr.rr) ? " rr-ruim" : ""}" ` +
-      `title="${escapeHtml(detail + rrAviso(rr.rr))}">` +
-      `<span class="act-k">⚖️ Risco/retorno</span> ${fmtNum(rr.rr)}:1</span>`;
-  } else if (rr && rr.note) {
-    rrHtml = `<span class="act-fact" title="${escapeHtml(rr.note)}"><span class="act-k">⚖️ Risco/retorno</span> não calculável</span>`;
+
+  // Carimbo do VEREDITO — estado + horizonte — no card da leitura que o produziu.
+  // É o que torna a discordância LEGÍVEL: dá pra ver qual das duas decidiu, em vez
+  // de um estado órfão pairando sobre as duas.
+  const vlabel = (SETUP_PT[a.setup_state] || [])[1] || a.setup_state;
+  const carimbo =
+    `<div class="sc-verdict"><span class="sc-vk">veredito do plano</span>` +
+    `<span class="sc-state ${escapeHtml(a.setup_state)}">${escapeHtml(vlabel)}</span>` +
+    (a.horizon ? `<span class="sc-hz">horizonte: ${escapeHtml(a.horizon)}</span>` : "") + "</div>";
+  const dono = a.setup_source ? String(a.setup_source) : "";
+  const cards = [];
+
+  // ---- card do PADRÃO 1-2-3 (existe quando existe padrão) -------------------
+  // Leva o conjunto COMPLETO dos níveis DELE: gatilho (e a entrada, quando ela não
+  // é o gatilho) · invalidação · stop · alvo · R:R. Não é duplicata do outro card —
+  // são análises diferentes, com números diferentes por construção.
+  const pat = a.pattern;
+  if (pat) {
+    const pdir = (PAT_DIR[pat.direction] || [])[1] || "";
+    const rr = a.risk_reward || {};
+    const rows = [];
+    if (pat.trigger != null) {
+      rows.push(scRow("gatilho", fmtNum(pat.trigger),
+        pat.direction === "venda" ? "perda da mínima do ponto 2"
+                                  : "rompimento da máxima do ponto 2"));
+    }
+    // Entrada SÓ vira linha quando difere do gatilho (padrão já acionado entra a
+    // preço de mercado). Igual ao gatilho, repeti-la seria o mesmo número duas
+    // vezes no mesmo card — que é precisamente o que não se faz.
+    const entradaPropria = rr.entry != null && rr.entry !== pat.trigger;
+    if (entradaPropria) rows.push(scRow("entrada", fmtNum(rr.entry), rr.entry_basis || ""));
+    const inv = a.invalidation || {};
+    rows.push(inv.price != null
+      ? scRow("invalidação", fmtNum(inv.price), inv.meaning || inv.label || "")
+      : scSemNivel("invalidação"));
+    const sl = a.stop || {};
+    rows.push(sl.price != null
+      ? scRow("stop (SL)", fmtNum(sl.price), sl.basis || "")
+      : scSemNivel("stop (SL)"));
+    const tp = a.target || {};
+    // Alvo recusado não vira número sem sentido: vira o MOTIVO (DA-072 — alvo
+    // incoerente não se publica, e a tela mostra por quê).
+    if (tp.price != null && !(rr.note && rr.rr == null)) {
+      rows.push(scRow("alvo (TP)", fmtNum(tp.price),
+        (tp.label || "") + (tp.same_as_realize ? " (é o mesmo nível da região de realização)" : "")));
+    } else if (rr.note) {
+      rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
+    } else {
+      rows.push(scSemNivel("alvo (TP)"));
+    }
+    if (rr.rr != null) {
+      // A conta do R:R declara a entrada — mas quando ela É o gatilho (o caso comum),
+      // repetir o número seria escrever o mesmo preço duas vezes no mesmo card: aqui
+      // ele vira NOME ("entrada no gatilho").
+      const entrada = entradaPropria ? `entrada ${fmtNum(rr.entry)}` : "entrada no gatilho";
+      rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
+        `${entrada} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
+        rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
+    } else if (!rr.note) {
+      rows.push(`<div class="sc-row sc-sem"><span class="sc-k">risco/retorno</span>` +
+        `<span class="sc-v sc-sem-v">sem base (stop ou alvo indefinido)</span></div>`);
+    }
+    // O estado NATIVO do padrão fica sempre: "em formação" e "rompeu e retraçou
+    // (não confirmado)" são fatos que o veredito não carrega — ele diz o que fazer,
+    // não em que pé o padrão está.
+    const pstate = PAT_STATE[pat.state] || pat.state || "";
+    cards.push(
+      `<section class="setup-card sc-123${pat.direction === "venda" ? " sc-venda" : ""}">` +
+      `<div class="sc-head"><span class="sc-title">Padrão 1-2-3` +
+      (pdir ? ` <span class="sc-dir">${escapeHtml(pdir)}</span>` : "") + "</span>" +
+      (pstate ? `<span class="sc-now">${escapeHtml(pstate)}</span>` : "") +
+      "</div>" +
+      (dono === "123" ? carimbo : "") +
+      `<div class="sc-rows">${rows.join("")}</div></section>`);
   }
-  // O estado sozinho é ambíguo quando os dois setups convivem — o nome da FONTE
-  // vai colado nele, não numa nota que o leitor tem que ir procurar.
-  const fonte = setupSourcePt(a.setup_source);
-  el.innerHTML =
-    `<span class="act-setup ${escapeHtml(a.setup_state)}">${emo} ${escapeHtml(label)}` +
-    (fonte ? `<span class="act-src">${escapeHtml(fonte)}</span>` : "") + `</span>` +
-    `<span class="act-fact"><span class="act-k">🕐 Horizonte</span> ${escapeHtml(a.horizon || "—")}</span>` +
-    `<span class="act-fact"><span class="act-k">📐 Timeframe</span> ${escapeHtml(a.timeframe || "—")}</span>` +
-    rrHtml;
+
+  // ---- card do RECUO À MÉDIA (existe quando existe a faixa) -----------------
+  // Os níveis DESTA leitura são outros: a entrada é a faixa da média (não um
+  // rompimento) e o alvo é a região de realização acima. Stop e invalidação não
+  // existem aqui — e nível que não existe SOME; herdar o do 1-2-3 seria pior que
+  // omitir, porque daria ao leitor um stop que esta leitura não calculou.
+  const bz = a.buy_zone;
+  if (bz && bz.price != null) {
+    const ma = bz.ma_label || "média";
+    const dentro = bz.active_now === true;
+    const rows = [];
+    const faixa = (bz.low != null && bz.high != null)
+      ? `faixa ${fmtNum(bz.low)}–${fmtNum(bz.high)}${bz.band_basis ? ` (${bz.band_basis})` : ""}`
+      : (bz.band_basis || "");
+    rows.push(scRow(`entrada na ${ma}`, fmtNum(bz.price), faixa));
+    if (bz.distance_pct != null) {
+      rows.push(scRow("distância do preço", fmtDist(bz.distance_pct),
+        dentro ? "dentro da faixa desenhada no gráfico"
+               : "fora da faixa desenhada — não é entrada agora"));
+    }
+    // Região de realização: é o alvo DESTA leitura. Quando ela é o próprio gatilho
+    // do 1-2-3 (``role: gatilho``), o número já é do outro card — e aí não sai aqui.
+    const rz = a.realize_zone;
+    if (rz && rz.price != null && rz.role !== "gatilho") {
+      const tp = a.target || {};
+      const mesmo = tp.price === rz.price && tp.same_as_realize;
+      rows.push(scRow(rz.role_label || "realização (alvo)", fmtNum(rz.price),
+        mesmo ? "as duas leituras convergem neste nível: é também o alvo do 1-2-3"
+              : (rz.label || "")));
+    }
+    // Faixa de compra cobrindo a de realização é setup degenerado, e o backend
+    // carimba isso; some da tela seria esconder o defeito, não corrigi-lo.
+    if (bz.overlap_note) rows.push(`<div class="sc-row sc-warn">${escapeHtml(bz.overlap_note)}</div>`);
+    cards.push(
+      `<section class="setup-card sc-recuo">` +
+      `<div class="sc-head"><span class="sc-title">Recuo à média` +
+      ` <span class="sc-dir">${escapeHtml(ma)}</span></span>` +
+      `<span class="sc-now">${dentro ? "preço na faixa" : "preço fora da faixa"}</span>` +
+      "</div>" +
+      (dono === "recuo_media" ? carimbo : "") +
+      `<div class="sc-rows">${rows.join("")}</div>` +
+      "</section>");
+  }
+
+  // Veredito ÓRFÃO: o backend pode não eleger nenhuma das duas (``setup_source``
+  // nulo — é o caso do 1-2-3 já acionado sem média ativa). Enfiá-lo num card seria
+  // atribuir a uma leitura um estado que ela não produziu; ele fica no rodapé, que
+  // é o lugar do que não pertence a ninguém.
+  const semCard = cards.length === 0;
+  const donoNaTela = (dono === "123" && !!pat)
+    || (dono === "recuo_media" && !!(bz && bz.price != null));
+  if (semCard) {
+    // Sem nenhuma das duas leituras, o rodapé É o card: um só, dizendo o que o
+    // plano concluiu e por que não há nível — nunca dois cards vazios com "—".
+    cards.push('<section class="setup-card sc-nenhum">'
+      + '<div class="sc-head"><span class="sc-title">Sem leitura de preço</span></div>'
+      + carimbo
+      + '<div class="sc-rows"><div class="sc-row sc-sem-txt">Nem o padrão 1-2-3 nem o '
+      + 'recuo à média produziram nível neste frame.</div></div></section>');
+  }
+  // O FRAME é o chão comum: as duas leituras foram calculadas nele, então ele não
+  // se repete dentro de card nenhum — fica uma vez, embaixo das duas.
+  const frame = a.timeframe
+    ? `<span class="sc-frame">${cards.length > 1 ? "as duas leituras" : "leitura"} no ${escapeHtml(a.timeframe)}</span>`
+    : "";
+  const rodape = ((!semCard && !donoNaTela) ? carimbo : "") + frame;
+  el.innerHTML = cards.join("") + (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
   el.classList.remove("hidden");
 }
 
@@ -2232,50 +2379,22 @@ function renderChartCard(chart, ticker, actionable) {
   const zones = planZones(actionable);
   $("chartLegend").innerHTML = chartLegendHtml(chart, actionable);
 
-  // note: pt-BR summary of what's marked
+  // NOTA DO GRÁFICO — o que está DESENHADO, e só isso (task 021).
+  //
+  // Ela listava, em prosa, os mesmos preços que o canvas já pinta na linha e que o
+  // card da análise agora carrega com a base ao lado: gatilho, invalidação, stop,
+  // alvo e R:R saíam aqui pela TERCEIRA vez. Três cópias do mesmo número não são
+  // redundância inofensiva — é o leitor tendo que conferir se as três dizem a mesma
+  // coisa. As bases ("invalidação + folga de 0.5·ATR14", "topo anterior …") não se
+  // perderam: desceram pro card, coladas no número que justificam.
+  //
+  // Fica aqui só o que é sobre o DESENHO e não sai em nenhum card: quantas regiões
+  // de recuo o período marcou e que as faixas estão rotuladas na própria linha do
+  // preço — mais o estado vazio, quando não há nada marcado.
   const notes = [];
-  if (active) {
-    // A frase antiga dizia "preço na MMS50 (2,8% acima)" — afirmava e desmentia na
-    // mesma linha. Agora ela nomeia o setup, dá a distância REAL do preço até a
-    // média e diz se isso ainda está DENTRO da faixa desenhada.
-    const bz = (actionable || {}).buy_zone || {};
-    const d = bz.distance_pct != null ? bz.distance_pct : active.distance_pct;
-    const onde = d >= 0 ? "acima" : "abaixo";
-    const dentro = bz.active_now === false
-      ? " — <b>fora da faixa</b>, não é entrada agora"
-      : " — dentro da faixa";
-    notes.push(`🎯 <b>Recuo à média</b>: preço ${Math.abs(d).toFixed(1)}% ${onde} da ` +
-               `${escapeHtml(active.ma_label)}${dentro}.`);
-  }
   const nreg = (chart.markers && chart.markers.buy_regions || []).length;
   if (nreg) notes.push(`${nreg} região(ões) de <b>recuo à média</b> marcada(s) no período.`);
-  if (pat) {
-    const [demo, dlabel] = PAT_DIR[pat.direction] || ["", ""];
-    const verb = pat.direction === "venda" ? "perda de" : "rompimento de";
-    notes.push(`${demo} Padrão 1-2-3 ${dlabel}: gatilho ${verb} ${fmtNum(pat.trigger)} — <b>${PAT_STATE[pat.state] || pat.state}</b>.`);
-    // Onde INVALIDA (a frase inteira, não só o número), stop, alvo e R:R — sem
-    // base, cada um diz "sem nível definido" em vez de exibir número inventado.
-    const a2 = actionable || {};
-    notes.push(a2.invalidation && a2.invalidation.price != null
-      ? `🛑 <b>Invalidação</b>: ${escapeHtml(a2.invalidation.meaning || "")}`
-      : "🛑 <b>Invalidação</b>: sem nível definido.");
-    notes.push(a2.stop && a2.stop.price != null
-      ? `🧷 <b>Stop (SL)</b>: ${fmtNum(a2.stop.price)} — ${escapeHtml(a2.stop.basis || "")}.`
-      : "🧷 <b>Stop (SL)</b>: sem nível definido.");
-    notes.push(a2.target && a2.target.price != null
-      ? `🎯 <b>Alvo (TP)</b>: ${fmtNum(a2.target.price)} — ${escapeHtml(a2.target.label || "")}` +
-        (a2.target.same_as_realize ? " (é o mesmo nível da região de realização)." : ".")
-      : "🎯 <b>Alvo (TP)</b>: sem nível definido.");
-    const rr2 = a2.risk_reward;
-    if (rr2 && rr2.rr != null) {
-      notes.push(`⚖️ <b>Risco/retorno ${fmtNum(rr2.rr)}:1</b> — entrada ${fmtNum(rr2.entry)} (${escapeHtml(rr2.entry_basis || "")}), risco ${fmtNum(rr2.risk)}, retorno ${fmtNum(rr2.reward)}.`);
-    } else if (rr2 && rr2.note) {
-      notes.push(`⚖️ <b>Risco/retorno</b>: não calculável — ${escapeHtml(rr2.note)}`);
-    } else {
-      notes.push("⚖️ <b>Risco/retorno</b>: sem base (stop ou alvo indefinido).");
-    }
-  }
-  if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço.");
+  if (zones.length) notes.push("Faixas do plano rotuladas na linha do preço — os níveis e a base de cada um ficam no card da análise.");
   if (!notes.length) notes.push("Nenhum setup identificado na janela do gráfico.");
   $("chartNote").innerHTML = notes.map((n) => `<span class="cn-line">${n}</span>`).join("");
 
@@ -2471,8 +2590,7 @@ async function switchTimeframe(tf) {
     if (Array.isArray(data.timeframes) && data.timeframes.length) _timeframes = data.timeframes;
     renderTfSelector();
     renderHeadPrice(data.actionable, data.live_price);
-    renderHeadTriggers(data.actionable);
-    renderActionable(data.actionable);
+    renderSetupCards(data.actionable);
     renderChartCard(data.price_chart, _openTicker, data.actionable);
     if (data.degraded && data.notice) showDegrade(data.notice);
   } catch (err) {

@@ -9,6 +9,13 @@ preço está mostrando. O plano é date-guarded — o número que ele carrega é
 FECHAMENTO da série (MSFT em 29/08: 505,06 de 27/08 com o papel valendo 513,53) — e
 a tela o exibia como se fosse "agora". Fechamento, pré-market e after-market são
 preços diferentes; o rótulo é o que impede a tela de chamar qualquer um de "agora".
+
+Task 021: a segunda linha da tira — o PLANO (gatilho · SL · TP · R:R) — saiu daqui.
+Ela não era uma família do cabeçalho: era o conteúdo de UMA das duas leituras que a
+tela desenha (o padrão 1-2-3), e foi pro card dela, na coluna de contexto. O que o
+pedido 2 defendia — os níveis não terem que ser caçados no texto abaixo do gráfico —
+continua travado, agora contra o card. No cabeçalho fica o MERCADO, que é o chão
+comum: não pertence a leitura nenhuma.
 """
 
 import json
@@ -88,7 +95,12 @@ def _abre_resultado(page, snap):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_gatilhos_no_canto_inferior_direito_com_o_veredito_em_cima(base):
+def test_os_niveis_saem_do_cabecalho_e_viram_o_card_do_123(base):
+    """Pedido 2 na forma da 021: o VEREDITO continua em cima e a tira do cabeçalho
+    segue encostada à direita — mas ela carrega só o MERCADO. Os níveis operáveis
+    (gatilho · SL · TP · R:R) não voltaram pro texto abaixo do gráfico: eles são o
+    conteúdo do card do PADRÃO 1-2-3, que os mostra com o nome da análise no
+    título. O que não pode acontecer é o número existir nos dois lugares."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -96,32 +108,29 @@ def test_gatilhos_no_canto_inferior_direito_com_o_veredito_em_cima(base):
         page.goto(base, wait_until="networkidle")
         page.evaluate("() => watchRun('R-HEAD')")
         page.wait_for_selector("#headLevels:not(.hidden)")
+        page.wait_for_selector("#setupCards:not(.hidden)")
 
         m = page.evaluate("""() => {
           const box = (s) => { const e = document.querySelector(s); if (!e) return null;
             const r = e.getBoundingClientRect(); return {top: r.top, right: r.right, left: r.left}; };
+          const c123 = document.querySelector('#setupCards .sc-123');
           return {veredito: box('#verdictBadge'), tira: box('#headLevels'),
-                  gatilhos: box('#headTriggers'), preco: box('#headPrice'),
-                  card: box('#resultPanel'),
-                  txtGatilhos: document.querySelector('#headTriggers').innerText,
-                  txtPreco: document.querySelector('#headPrice').innerText};
+                  preco: box('#headPrice'), card: box('#resultPanel'),
+                  txtTira: document.querySelector('#headLevels').innerText,
+                  titulo: c123.querySelector('.sc-title').innerText,
+                  txt123: c123.innerText};
         }""")
         # veredito EM CIMA da tira (pedido: ele permanece onde está)
         assert m["veredito"]["top"] < m["tira"]["top"], m
         # tira ALINHADA À DIREITA do card (a menos da borda/padding)
         assert m["card"]["right"] - m["tira"]["right"] < 40, m
-        # Gatilhos e cotação na mesma tira, no canto inferior direito. Esta linha era
-        # `gatilhos.left < preco.left` (lado a lado); desde a task 018 as duas famílias
-        # ficam em LINHAS separadas — os gatilhos logo ABAIXO da cotação, ambos
-        # encostados na direita. O que o pedido 2 defendia era o canto inferior
-        # direito (antes os níveis só existiam no texto abaixo do gráfico), e é isso
-        # que continua travado aqui.
-        assert m["gatilhos"]["top"] > m["preco"]["top"], m
-        assert abs(m["gatilhos"]["right"] - m["preco"]["right"]) <= 1, m
-        # e os níveis estão lá, com os números da análise
-        assert "gatilho" in m["txtGatilhos"] and "512,76" in m["txtGatilhos"], m
-        assert "SL" in m["txtGatilhos"] and "471,35" in m["txtGatilhos"], m
-        assert "TP" in m["txtGatilhos"] and "515,06" in m["txtGatilhos"], m
+        # o card do 1-2-3 DIZ de qual análise se trata e carrega os níveis
+        assert "1-2-3" in m["titulo"], m
+        for chave, num in (("gatilho", "512,76"), ("stop (SL)", "471,35"), ("alvo (TP)", "515,06")):
+            assert chave in m["txt123"] and num in m["txt123"], (chave, m)
+        # DENTE: o mesmo número nos dois lugares era o defeito que a 021 matou
+        for num in ("512,76", "471,35", "515,06"):
+            assert num not in m["txtTira"], (num, m["txtTira"])
         browser.close()
 
 
@@ -219,7 +228,7 @@ _ZEC = {
 _CORTADOS = """() => {
   const tira = document.querySelector('#headLevels');
   const t = tira.getBoundingClientRect();
-  const pecas = [...tira.querySelectorAll('.hp-unit, .hl-item, .hl-k')];
+  const pecas = [...tira.querySelectorAll('.hp-unit, .hp-k')];
   const fora = pecas.filter(e => { const r = e.getBoundingClientRect();
     return r.left < t.left - 1 || r.right > t.right + 1; });
   const cortado = [tira, ...tira.querySelectorAll('*')]
@@ -237,30 +246,32 @@ def _abre_zec(page, base, snap=None):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_as_duas_familias_ficam_em_linhas_separadas_e_com_nome(base):
+def test_as_duas_familias_ficam_em_superficies_separadas_e_com_nome(base):
+    """A 018 separou MERCADO e PLANO em duas linhas da mesma tira; a 021 os separa em
+    duas SUPERFÍCIES, porque nunca foram duas famílias do mesmo assunto — um é o chão
+    comum (a cotação) e o outro é o conteúdo de uma das leituras. O que se prova aqui
+    é que a tira ficou só com o mercado, em duas unidades fechadas, e que o plano tem
+    caixa própria com título."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _abre_zec(page, base)
-        m = page.evaluate("""() => {
-          const r = (s) => { const b = document.querySelector(s).getBoundingClientRect();
-            return {top: Math.round(b.top), right: Math.round(b.right)}; };
-          return {mercado: r('#headPrice'), plano: r('#headTriggers'),
-                  familia: document.querySelector('#headTriggers .hl-k').innerText.trim(),
-                  unidades: [...document.querySelectorAll('#headPrice .hp-unit')]
-                    .map(u => u.innerText.replace(/\\n/g, ' ')),
-                  ordemDom: [...document.querySelector('#headLevels').children].map(c => c.id)};
-        }""")
-        # DENTE: as duas famílias eram uma fila só, o R:R encostado na cotação
-        assert m["plano"]["top"] > m["mercado"]["top"], ("famílias em linhas separadas", m)
-        assert abs(m["plano"]["right"] - m["mercado"]["right"]) <= 1, ("as duas à direita", m)
-        # a cotação vem primeiro: é a âncora contra a qual os níveis se leem
-        assert m["ordemDom"] == ["headPrice", "headTriggers"], m
-        assert m["familia"].upper() == "PLANO", m
+        m = page.evaluate("""() => ({
+          unidades: [...document.querySelectorAll('#headPrice .hp-unit')]
+            .map(u => u.innerText.split('\\n').join(' ')),
+          filhosDaTira: [...document.querySelector('#headLevels').children].map(c => c.id),
+          titulo123: document.querySelector('#setupCards .sc-123 .sc-title').innerText,
+          txtTira: document.querySelector('#headLevels').innerText,
+        })""")
+        # a tira carrega SÓ o mercado — a linha do plano saiu daqui
+        assert m["filhosDaTira"] == ["headPrice"], m
+        assert "PLANO" not in m["txtTira"].upper(), m
         # e a linha de mercado são DUAS unidades fechadas (cotação | análise)
         assert len(m["unidades"]) == 2, m
         assert "835,37" in m["unidades"][0] and "COTAÇÃO AGORA" in m["unidades"][0].upper(), m
         assert "834,74" in m["unidades"][1] and "ANÁLISE" in m["unidades"][1].upper(), m
+        # o plano ganhou caixa E nome: "Padrão 1-2-3 de compra"
+        assert "1-2-3" in m["titulo123"] and "compra" in m["titulo123"], m
         browser.close()
 
 
@@ -276,9 +287,13 @@ def test_a_tira_degrada_empilhando_e_nunca_cortando(base, largura):
         _abre_zec(page, base)
         assert page.evaluate(_CORTADOS) == [], f"algo foi cortado em {largura}px"
         txt = page.inner_text("#headLevels")
-        for n in ("834,82", "764,76", "856,72", "0,31", "835,37", "834,74"):
+        for n in ("835,37", "834,74"):
             assert n in txt, (n, largura, txt)
         assert "29/08 20:42" in txt and "29/08 20:00" in txt, (largura, txt)
+        # os níveis não sumiram da tela — mudaram de caixa (task 021)
+        card = page.inner_text("#setupCards")
+        for n in ("834,82", "764,76", "856,72", "0,31"):
+            assert n in card, (n, largura, card)
         assert page.evaluate(
             "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth")
         browser.close()

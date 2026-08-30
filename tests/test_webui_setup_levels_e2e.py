@@ -85,13 +85,13 @@ _SEED_JS = r"""
     markers: { buy_regions: [], active_region: null, pattern_123: plan.pattern },
   };
   renderHeadPrice(plan);
-  renderActionable(plan);
+  renderSetupCards(plan);
   renderChartCard(chart, 'SYN', plan);
   const cv = document.getElementById('priceChart');
   return {
     legend: document.getElementById('chartLegend').textContent,
     note: document.getElementById('chartNote').textContent,
-    strip: document.getElementById('actionable').textContent,
+    card: document.getElementById('setupCards').innerText,
     zones: planZones(plan).map((z) => z.tag),
     // rótulos DESENHADOS no candle + chip de R:R (expostos em dataset pelo draw)
     painted: JSON.parse(cv.dataset.levelLabels || '[]'),
@@ -161,13 +161,17 @@ def test_compra_mostra_invalidacao_stop_alvo_e_rr(live_server):
             assert "invalidação" in out["legend"]
             assert "stop (SL)" in out["legend"]
             assert "alvo (TP)" in out["legend"]
-            # a FRASE da invalidação, não só o número
-            assert "morre se perder" in out["note"]
-            assert "131" in out["note"]
+            # a FRASE da invalidação, não só o número — desde a 021 ela mora no CARD
+            # da análise que a produz (o 1-2-3), colada no nível que explica; a nota do
+            # gráfico parou de repetir preço que o canvas já pinta.
+            assert "morre se perder" in out["card"]
+            assert "131" in out["card"]
             # o stop declara a folga de ATR (não é percentual chutado)
-            assert "0.5·ATR14" in out["note"]
-            # R:R na faixa do setup
-            assert "Risco/retorno" in out["strip"] and "1,02:1" in out["strip"]
+            assert "0.5·ATR14" in out["card"]
+            # R:R no card do 1-2-3 — e UMA vez só (era o número que saía em duplicata)
+            assert "risco/retorno" in out["card"] and "1,02:1" in out["card"]
+            assert out["card"].count("1,02:1") == 1, out["card"]
+            assert "1,02" not in out["note"], out["note"]
             # a realização que É o gatilho não vira uma segunda faixa
             assert "realização (alvo)" not in out["zones"]
             # PINTADO no candle: cada nível com rótulo E preço no próprio gráfico
@@ -205,7 +209,7 @@ def test_alvo_igual_a_realizacao_desenha_uma_faixa_so(live_server):
             assert tags.count("realização = alvo (TP)") == 1
             assert "alvo (TP)" not in tags          # não há uma SEGUNDA faixa de alvo
             assert "realização (alvo)" not in tags  # nem a etiqueta antiga sozinha
-            assert "mesmo nível da região de realização" in out["note"]
+            assert "mesmo nível da região de realização" in out["card"]
             # e no candle sai UM rótulo só, dizendo que são o mesmo nível
             pintados = [t for t in out["painted"] if "176,00" in t]
             assert pintados == ["realização = alvo (TP) 176,00"]
@@ -247,9 +251,9 @@ def test_venda_nao_herda_esqueleto_de_long(live_server):
             assert "topo anterior (resistência)" in out["zones"]
             assert "realização (alvo)" not in out["zones"]   # topo NÃO é alvo de short
             assert "alvo (TP)" in out["zones"]
-            assert "voltar acima" in out["note"]
-            assert "fundo anterior" in out["note"]
-            assert "1,93:1" in out["strip"]
+            assert "voltar acima" in out["card"]
+            assert "fundo anterior" in out["card"]
+            assert "1,93:1" in out["card"]
             # PINTADO no candle, no sentido de VENDA: stop acima, alvo abaixo
             assert "invalidação 152,00" in out["painted"]
             assert "stop (SL) 154,50" in out["painted"]
@@ -272,11 +276,11 @@ def test_sem_base_diz_sem_nivel_definido(live_server):
             plan = _plan(target=None, risk_reward=None, realize_zone=None)
             out = _seed(page, plan)
             _shot(page, "depois-sem-nivel.png")
-            assert "Alvo (TP): sem nível definido" in out["note"]
-            assert "Risco/retorno: sem base" in out["note"]
+            assert "alvo (TP)" in out["card"] and "sem nível definido" in out["card"]
+            assert "sem base (stop ou alvo indefinido)" in out["card"]
             # invalidação e stop continuam com número real
-            assert "morre se perder" in out["note"]
-            assert "128,5" in out["note"]
+            assert "morre se perder" in out["card"]
+            assert "128,5" in out["card"]
             assert "alvo (TP)" not in out["zones"]
             # sem alvo e sem R:R nada é pintado no lugar deles
             assert not any(t.startswith("alvo (TP)") for t in out["painted"])

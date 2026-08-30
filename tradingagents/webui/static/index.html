@@ -315,18 +315,18 @@
           </div>
         </div>
         <div class="result-meta" id="resultMeta"></div>
-        <!-- Rodapé do cabeçalho (pedido do Samyr): o VEREDITO fica em cima; os
-             GATILHOS descem pro canto inferior DIREITO, ao lado do preço atual,
-             alinhados à direita. O preço vem com a SESSÃO declarada (fechamento ×
-             pré × pós são preços diferentes) — ver renderHeadLevels. -->
-        <!-- DUAS famílias, DUAS linhas (task 018): em cima o MERCADO (cotação agora
-             + o preço da análise), embaixo o PLANO (gatilho · SL · TP · R:R). Antes
-             eram oito números numa fila só, correndo até a borda — o olho lia uma
-             lista, não dois assuntos. A cotação vai em cima porque é a âncora contra
-             a qual todos os níveis do plano se leem. -->
+        <!-- Rodapé do cabeçalho: o MERCADO — a cotação agora e o preço da análise,
+             cada um com a SESSÃO declarada (fechamento × pré × pós são preços
+             diferentes) e o seu carimbo de hora. Ver renderHeadPrice.
+
+             Aqui fica SÓ o mercado (task 021). A linha do PLANO (gatilho · SL · TP ·
+             R:R) que morava embaixo desta desceu pro card da análise que a produz —
+             o 1-2-3 —, na coluna de contexto: aquela fila de níveis nunca foi um
+             assunto do cabeçalho, era o conteúdo de UMA das duas leituras que a tela
+             desenha. A cotação continua aqui porque é a ÂNCORA contra a qual as duas
+             leituras se medem: não pertence a nenhuma delas. -->
         <div class="head-levels hidden" id="headLevels">
           <div class="head-price hidden" id="headPrice"></div>
-          <div class="hl-levels" id="headTriggers"></div>
         </div>
         <!-- Carimbo do veredito (task 016): quando os insumos tinham inconsistência
              na hora da decisão, o juiz recebeu os DADOS VERIFICADOS e decidiu com
@@ -369,9 +369,14 @@
           </div>
 
           <aside class="stage-rail">
-            <!-- Faixa do setup: só o que o gráfico NÃO diz — estado, horizonte,
-                 timeframe. As faixas e os pontos do 1-2-3 vivem dentro do gráfico. -->
-            <div class="actionable hidden" id="actionable"></div>
+            <!-- UM CARD POR ANÁLISE (task 021). A tela desenha DUAS leituras
+                 independentes, que podem coexistir e discordar: o PADRÃO 1-2-3 e o
+                 RECUO À MÉDIA. A 015 deu nome a cada uma (setup_source); aqui elas
+                 ganham caixa própria, porque leitura independente amontoada num
+                 bloco só é o que faz uma parecer contradizer a outra.
+                 Quem não existe no dado não abre card — nunca uma caixa vazia com
+                 travessão inventado. Ver renderSetupCards. -->
+            <div class="setup-cards hidden" id="setupCards"></div>
 
             <div class="rail-theses">
               <h2 class="section-title">Teses em confronto</h2>

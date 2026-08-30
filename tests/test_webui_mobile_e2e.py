@@ -88,29 +88,40 @@ def _celular(browser, w, h):
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 @pytest.mark.parametrize("w,h", CELULARES)
-def test_o_plano_empilha_2x2_de_proposito_e_o_rr_nao_fica_orfao(base, snap, w, h):
+def test_no_telefone_os_niveis_do_plano_ficam_um_por_linha_e_nada_vaza(base, snap, w, h):
+    """Item 1 na forma da 021. O defeito era a tira do PLANO quebrar por ACIDENTE e
+    deixar o R:R órfão numa segunda fileira; a 020 respondeu com uma grade 2×2. Os
+    níveis agora são LINHAS do card do 1-2-3 — a quebra deixou de ser possível: cada
+    nível ocupa a sua linha, o número encosta à direita e nada sai da caixa."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = _celular(browser, w, h)
         _abre(page, base, snap)
         m = page.evaluate("""() => {
-          const itens = [...document.querySelectorAll('#headTriggers .hl-item')];
-          const tops = [...new Set(itens.map(e => Math.round(e.getBoundingClientRect().top)))];
-          const tira = document.querySelector('#headLevels').getBoundingClientRect();
+          const card = document.querySelector('#setupCards .sc-123');
+          const c = card.getBoundingClientRect();
+          const rows = [...card.querySelectorAll('.sc-row')];
+          const tops = rows.map(e => Math.round(e.getBoundingClientRect().top));
           return {
-            n: itens.length, fileiras: tops.length,
-            porFileira: tops.map(t => itens.filter(
-              e => Math.round(e.getBoundingClientRect().top) === t).length),
-            grade: getComputedStyle(document.querySelector('#headTriggers')).display,
-            fora: itens.filter(e => { const r = e.getBoundingClientRect();
-              return r.left < tira.left - 1 || r.right > tira.right + 1; }).map(e => e.innerText),
+            n: rows.length,
+            fileiras: [...new Set(tops)].length,
+            // o NÚMERO de cada linha alinha com o dos outros: coluna, não fila
+            direitas: [...new Set(rows.filter(e => e.querySelector('.sc-v'))
+              .map(e => Math.round(e.querySelector('.sc-v').getBoundingClientRect().right)))],
+            fora: rows.filter(e => { const r = e.getBoundingClientRect();
+              return r.left < c.left - 1 || r.right > c.right + 1; }).map(e => e.innerText),
             rola: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            txt: card.innerText,
           };
         }""")
-        # DENTE: era [3, 1] — o R:R sozinho na segunda fileira, desalinhado
-        assert m["n"] == 4 and m["porFileira"] == [2, 2], m
-        assert m["grade"] == "grid", ("2×2 é decisão, não sobra de flex-wrap", m)
+        # cada nível na SUA linha — nenhum divide fileira com outro
+        assert m["n"] >= 4 and m["fileiras"] == m["n"], m
+        # DENTE: era o R:R sobrando desalinhado; aqui todos os números alinham na
+        # mesma coluna, então "ficar órfão" deixou de existir como estado
+        assert len(m["direitas"]) == 1, ("os números numa coluna só", m)
         assert m["fora"] == [] and not m["rola"], m
+        for chave in ("gatilho", "stop (SL)", "risco/retorno"):
+            assert chave in m["txt"], (chave, m["txt"])
         browser.close()
 
 
@@ -227,15 +238,16 @@ def test_rr_abaixo_de_um_e_estado_visual_nao_um_numero_qualquer(base, snap, w, h
         page = _celular(browser, w, h)
         _abre(page, base, snap)
         m = page.evaluate("""() => {
-          const rr = [...document.querySelectorAll('#headTriggers .hl-item')]
-            .find(e => e.innerText.includes('R:R'));
-          const act = document.querySelector('.act-fact.rr-ruim');
+          const rows = [...document.querySelectorAll('#setupCards .sc-row')];
+          const rr = rows.find(e => e.innerText.includes('risco/retorno'));
+          const sl = rows.find(e => e.innerText.includes('stop (SL)'));
           return {classe: rr.className, cor: getComputedStyle(rr).color,
-                  corNumero: getComputedStyle(rr.querySelector('b')).color,
+                  corNumero: getComputedStyle(rr.querySelector('.sc-v')).color,
                   title: rr.getAttribute('title'),
-                  corNeutra: getComputedStyle([...document.querySelectorAll('#headTriggers .hl-item')]
-                    .find(e => e.innerText.includes('SL'))).color,
-                  act: act ? act.innerText : null};
+                  corNeutra: getComputedStyle(sl).color,
+                  // quantas vezes o R:R aparece na TELA inteira
+                  vezes: (document.querySelector('#resultPanel').innerText
+                    .match(/0,31/g) || []).length};
         }""")
         assert "rr-ruim" in m["classe"], m
         assert m["cor"] == "rgb(245, 180, 69)", ("âmbar de atenção (--amber)", m)
@@ -244,7 +256,10 @@ def test_rr_abaixo_de_um_e_estado_visual_nao_um_numero_qualquer(base, snap, w, h
         # e diz POR QUE é ruim, com a conta feita
         assert "risco MAIOR que o retorno" in (m["title"] or ""), m
         assert "3.2x" in (m["title"] or "") or "3,2x" in (m["title"] or ""), m
-        assert m["act"] and "0,31" in m["act"], ("a faixa do setup também", m)
+        # DENTE da 021: o R:R saía DUAS vezes (tira do cabeçalho + bloco do setup).
+        # Ele pertence ao 1-2-3 — entrada é o gatilho, risco é o stop, retorno é o
+        # alvo — e aparece uma vez só, no card dele.
+        assert m["vezes"] == 1, ("o mesmo número em duas caixas era o defeito", m)
         browser.close()
 
 
@@ -259,14 +274,14 @@ def test_rr_maior_que_um_nao_vira_alarme(base, snap):
         page = browser.new_page(viewport={"width": 390, "height": 844})
         _abre(page, base, bom)
         m = page.evaluate("""() => {
-          const rr = [...document.querySelectorAll('#headTriggers .hl-item')]
-            .find(e => e.innerText.includes('R:R'));
+          const rr = [...document.querySelectorAll('#setupCards .sc-row')]
+            .find(e => e.innerText.includes('risco/retorno'));
           return {classe: rr.className, cor: getComputedStyle(rr).color,
-                  act: document.querySelectorAll('.act-fact.rr-ruim').length};
+                  ruins: document.querySelectorAll('.sc-row.rr-ruim').length};
         }""")
         assert "rr-ruim" not in m["classe"], m
         assert m["cor"] != "rgb(245, 180, 69)", m
-        assert m["act"] == 0, m
+        assert m["ruins"] == 0, m
         browser.close()
 
 
@@ -274,19 +289,16 @@ def test_rr_maior_que_um_nao_vira_alarme(base, snap):
 @pytest.mark.parametrize("largura", [1500, 1280])
 def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
     """Nada do arranjo de telefone pode vazar pro desktop: a legenda continua ACIMA do
-    gráfico, a tira segue encostada à direita e o plano numa fileira só."""
+    gráfico, a tira segue encostada à direita e as duas unidades de preço lado a lado."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": largura, "height": 1200})
         _abre(page, base, snap)
         m = page.evaluate("""() => {
           const r = (s) => document.querySelector(s).getBoundingClientRect();
-          const itens = [...document.querySelectorAll('#headTriggers .hl-item')];
           return {
             legendaAcima: r('#chartLegend').top < r('.chart-wrap').top,
-            planoFileiras: [...new Set(itens.map(e => Math.round(e.getBoundingClientRect().top)))].length,
-            planoDisplay: getComputedStyle(document.querySelector('#headTriggers')).display,
-            direita: Math.round(r('#headTriggers').right) === Math.round(r('#headPrice').right),
+            direita: Math.round(r('#resultPanel').right) - Math.round(r('#headPrice').right) < 40,
             regua: getComputedStyle(document.querySelector('.hp-ref')).borderLeftWidth,
             // `align-items: baseline` alinha a LINHA DE BASE, não o topo: com o
             // preço em 16px e a referência em 14px os topos diferem mesmo lado a
@@ -300,8 +312,7 @@ def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
           };
         }""")
         assert m["legendaAcima"], m
-        assert m["planoFileiras"] == 1 and m["planoDisplay"] == "flex", m
-        assert m["direita"], ("as duas famílias continuam alinhadas à direita", m)
+        assert m["direita"], ("a tira do mercado continua encostada à direita", m)
         assert m["regua"] != "0px", ("a régua entre cotação e análise fica no desktop", m)
         assert m["unidadesLadoALado"], ("no desktop as duas ficam lado a lado", m)
         browser.close()

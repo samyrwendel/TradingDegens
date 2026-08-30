@@ -179,7 +179,7 @@ def _abre_resultado(page, base, plano):
     """Injeta o plano do ZEC na view aberta — o mesmo caminho que uma run 1-2-3."""
     page.goto(base, wait_until="networkidle")
     page.evaluate("""(a) => {
-      renderActionable(a);
+      renderSetupCards(a);
       renderChartCard({candles: [
         {d: '2026-08-27', o: 800, h: 840, l: 790, c: 830},
         {d: '2026-08-28', o: 830, h: 845, l: 800, c: 810},
@@ -202,7 +202,7 @@ def test_na_tela_a_faixa_da_media_nao_se_chama_compra(webui, plano):
         _abre_resultado(page, webui, plano)
         m = page.evaluate("""() => ({
           legenda: document.querySelector('#chartLegend').textContent,
-          setup: document.querySelector('#actionable .act-setup').textContent,
+          setup: document.querySelector('#setupCards .sc-recuo').innerText,
           nota: document.querySelector('.chart-note') ? document.querySelector('.chart-note').textContent : '',
         })""")
         # DENTE: antes a legenda trazia a faixa rotulada só "compra", encostada no
@@ -211,8 +211,9 @@ def test_na_tela_a_faixa_da_media_nao_se_chama_compra(webui, plano):
         assert not re.search(r"(^|[^a-zà-ú])compra([^a-zà-ú]|$)",
                              m["legenda"].replace("1-2-3 de compra", "")
                                           .replace("recuo à média", "")), m
-        # o veredito diz DE QUAL setup veio
-        assert "Setup ativo agora" in m["setup"] and "recuo à média" in m["setup"], m
+        # o veredito diz DE QUAL setup veio — desde a 021 ele mora DENTRO do card
+        # da leitura que o produziu, e o título do card é o nome dela
+        assert "Setup ativo agora" in m["setup"] and "Recuo à média" in m["setup"], m
         browser.close()
 
 
@@ -225,11 +226,15 @@ def test_na_tela_a_faixa_fora_do_preco_declara_que_nao_esta_ativa(webui, plano):
         _abre_resultado(page, webui, plano)
         m = page.evaluate("""() => ({
           legenda: document.querySelector('#chartLegend').textContent,
+          card: document.querySelector('#setupCards .sc-recuo').innerText,
           nota: [...document.querySelectorAll('.chart-note')].map(e => e.textContent).join(' '),
         })""")
         assert "não ativa agora" in m["legenda"], m
-        # e a nota parou de afirmar e desmentir na mesma frase
-        assert "fora da faixa" in m["nota"], m
-        assert "preço na MMS50" not in m["nota"], m
-        assert "Recuo à média" in m["nota"], m
+        # A frase parou de afirmar e desmentir na mesma linha. Desde a 021 ela mora no
+        # card do RECUO À MÉDIA (a leitura de quem ela fala), e não na nota do gráfico
+        # — que voltou a ser só sobre o desenho e não repete mais nível nenhum.
+        assert "fora da faixa" in m["card"], m
+        assert "preço na MMS50" not in m["card"], m
+        assert "Recuo à média" in m["card"], m
+        assert "MMS50" not in m["nota"], ("a nota não fala mais de nível", m)
         browser.close()

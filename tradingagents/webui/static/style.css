@@ -549,41 +549,29 @@ details.section.erick > summary { color: #9cc7f5; }
 }
 .head-main { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; min-width: 0; }
 .head-nav { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
-/* Rodapé do cabeçalho: GATILHOS + preço no canto inferior DIREITO (pedido do
-   Samyr). O veredito continua em cima; aqui embaixo ficam os níveis operáveis ao
-   lado do preço, alinhados à direita — antes os níveis só existiam no texto abaixo
-   do gráfico e o gatilho tinha que ser caçado. */
-/* DUAS famílias, DUAS linhas (task 018). Antes era uma fila só com oito números —
-   "R:R 0,31" encostado em "835,37" como se fossem do mesmo assunto, correndo até a
-   borda direita até a última data não caber. São assuntos diferentes: em cima
-   MERCADO (a cotação e o preço da análise, com o momento de cada uma), embaixo
-   PLANO (gatilho · SL · TP · R:R). A cotação fica em cima porque é a âncora contra
-   a qual os níveis do plano se leem — e porque o número grande no MEIO da fila era
-   metade do motivo da tira ser ilegível.
-   As duas linhas continuam alinhadas À DIREITA (contrato da task 010: os níveis no
-   canto inferior direito do card, ao lado da cotação — agora logo abaixo dela). */
+/* Rodapé do cabeçalho: o MERCADO no canto inferior DIREITO. O veredito continua em
+   cima; aqui embaixo fica a cotação com a sessão declarada, alinhada à direita.
+   A linha do PLANO que morava logo abaixo desta (task 018: gatilho · SL · TP · R:R)
+   saiu na 021 — ela não era uma família do cabeçalho, era o conteúdo de UMA das duas
+   leituras da tela, e foi pro card dela. O que sobra aqui é o que não pertence a
+   leitura nenhuma: a âncora contra a qual as duas se medem. */
 .head-levels {
   display: flex; flex-direction: column; align-items: flex-end;
   gap: 3px; margin: 0 0 8px; min-width: 0;
 }
-/* Cada linha quebra ENTRE unidades quando falta largura — nunca no meio de um
-   número e nunca cortando. É a resposta ao pior defeito da tira: informação que
-   simplesmente sumia na borda. */
-.hl-levels, .head-price {
+/* A linha quebra ENTRE unidades quando falta largura — nunca no meio de um número e
+   nunca cortando. É a resposta ao pior defeito da tira: informação que simplesmente
+   sumia na borda. */
+.head-price {
   display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end;
   gap: 2px 14px; min-width: 0; max-width: 100%;
 }
-/* rótulo de família / de unidade: caixa alta miúda e apagada, nunca do mesmo peso
-   do dado. É o que faz "análise" e "plano" SEPARAREM em vez de virarem mais um item. */
-.hl-k, .hp-k {
+/* rótulo de unidade: caixa alta miúda e apagada, nunca do mesmo peso do dado. É o
+   que faz "análise" SEPARAR em vez de virar mais um item da fila. */
+.hp-k {
   font-family: var(--font); font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
   color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
 }
-.hl-item { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); white-space: nowrap; }
-.hl-item b { font-family: var(--mono); font-weight: var(--fw-bold); color: var(--text); margin-left: 3px; }
-/* Alvo recusado: âmbar de ATENÇÃO (o setup existe, o alvo é que não) — mesma
-   semântica da linha do scan, pra a cor querer dizer a mesma coisa nas duas telas. */
-.hl-warn { color: var(--amber); white-space: normal; }
 /* A cotação ATUAL vem com a SESSÃO declarada: fechamento, pré e pós são preços
    diferentes, e o rótulo é o que impede a tela de chamar qualquer um deles de
    "agora". O preço da ANÁLISE fica ao lado, menor, como referência. */
@@ -594,7 +582,7 @@ details.section.erick > summary { color: #9cc7f5; }
    defeito 1 de volta, só que por outra porta. O que continua atômico é o que não
    pode partir — número e carimbo de hora. */
 .hp-unit { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 1px 6px; max-width: 100%; }
-.hp-unit b, .hp-when, .hp-k, .hl-k { white-space: nowrap; }
+.hp-unit b, .hp-when, .hp-k { white-space: nowrap; }
 .hp-live b { font-family: var(--mono); font-size: var(--fs-16); line-height: var(--lh-16);
   font-weight: var(--fw-bold); color: var(--text); }
 .hp-tag { font-family: var(--font); font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
@@ -609,7 +597,7 @@ details.section.erick > summary { color: #9cc7f5; }
 /* R:R < 1: ÂMBAR de atenção — arrisca mais do que pretende ganhar. Mesma gramática
    que o gráfico já usa dentro do canvas (verde ≥ 1, âmbar < 1) desde a task 029; o
    texto estava mostrando o número em cor neutra, como se 0,31 fosse igual a 2,50. */
-.hl-item.rr-ruim, .hl-item.rr-ruim b, .act-fact.rr-ruim, .act-fact.rr-ruim .act-k { color: var(--amber); }
+.sc-row.rr-ruim, .sc-row.rr-ruim .sc-k, .sc-row.rr-ruim .sc-v { color: var(--amber); }
 .hp-ref { border-left: 1px solid var(--border); padding-left: 14px; }
 /* Sem cotação atual (run reaberta noutro dia), a análise é a ÚNICA unidade da linha
    — e uma régua abrindo a linha separaria o quê? Some. */
@@ -1111,11 +1099,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
   /* ---- a tira do cabeçalho no TELEFONE (task 020) ----------------------------
      "Tá bem zoado pra celular." No desktop a tira encosta à direita; no telefone
-     isso serrilha: cada linha começa num lugar e o R:R sobrava sozinho numa
-     segunda fileira — quebra por ACIDENTE, não por decisão. Aqui ela encosta à
-     ESQUERDA e empilha DE PROPÓSITO. */
+     isso serrilha: cada linha começa num lugar. Aqui ela encosta à ESQUERDA e
+     empilha DE PROPÓSITO. (A grade 2×2 do PLANO que a 020 declarou aqui saiu com a
+     021: os níveis viraram linhas do card da análise, que já empilha por conta.) */
   .head-levels { align-items: stretch; }
-  .hl-levels, .head-price { justify-content: flex-start; }
+  .head-price { justify-content: flex-start; }
   /* MERCADO: uma unidade por linha, cada preço com o SEU carimbo, e o rótulo na
      frente — no telefone o que se procura primeiro é "qual desses é o de agora". */
   .hp-unit { width: 100%; }
@@ -1123,12 +1111,6 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   /* a régua separava duas unidades LADO A LADO; empilhadas, ela abriria a linha
      sem separar nada (o rótulo "análise" já faz esse trabalho aqui) */
   .hp-ref { border-left: 0; padding-left: 0; }
-  /* PLANO: 2×2 declarado. Os quatro níveis são a informação que decide o trade —
-     o que não pode é o quarto cair sozinho numa fileira desalinhada. */
-  .hl-levels { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
-  .hl-levels .hl-k { grid-column: 1 / -1; }
-  .hl-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hl-warn { grid-column: 1 / -1; white-space: normal; }
 
   /* LEGENDA depois do GRÁFICO: com 11 itens ela comia 4 linhas ANTES do gráfico
      aparecer — no telefone isso é meia tela de rolagem pra chegar no que interessa.
@@ -1161,28 +1143,90 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .chart-zoom-hint { display: none; }
 }
 
-/* setup strip — SÓ o que o gráfico não desenha: estado, horizonte, timeframe.
-   As faixas de preço e o 1-2-3 agora são rotulados dentro do gráfico. */
-.actionable {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px;
+/* ===========================================================================
+   UM CARD POR ANÁLISE (task 021)
+   A tela desenha DUAS leituras independentes que podem discordar — o padrão 1-2-3
+   e o recuo à média. Amontoadas (uma tira de níveis no cabeçalho + um bloco de
+   estado solto aqui na coluna), a discordância lia como contradição da tela.
+   Cada uma passa a ter caixa própria, com TÍTULO dizendo de qual se trata.
+   Card QUADRADO e CHAPADO (DA-070): o raio é o token único de card do projeto e
+   não existe degradê nenhum — a cor que aparece aqui é ESTADO, não textura.
+   =========================================================================== */
+.setup-cards { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 10px; min-width: 0; }
+.setup-card {
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2);
-  padding: 9px 14px; margin: 2px 0 10px;
+  padding: 10px 13px; min-width: 0;
 }
-.act-setup {
+/* A borda-esquerda dá a cor da LEITURA — e é ela que carrega o que o pictograma
+   carregava antes (DA-076: estado é cor + palavra, nunca emoji). São exatamente as
+   cores que o gráfico já usa: azul e laranja do 1-2-3 por direção (PAT_COLORS em
+   app.js) e verde da faixa do recuo, então o olho liga o card à marcação sem
+   legenda extra. Sólida, nunca degradê (DA-070). */
+.sc-123 { border-left: 3px solid #6ea8fe; }
+.sc-123.sc-venda { border-left-color: #ff9f43; }
+.sc-123 .sc-dir { color: #6ea8fe; }
+.sc-123.sc-venda .sc-dir { color: #ff9f43; }
+.sc-recuo { border-left: 3px solid #2ecc71; }
+.sc-nenhum { border-left: 3px solid var(--border); }
+.sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+.sc-title {
+  font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); color: var(--text);
+}
+/* qualificador do título (direção do padrão, nome da média): mesmo assunto, peso
+   menor — não é um segundo título competindo. */
+.sc-dir { font-weight: var(--fw-med); color: var(--muted); }
+/* Estado NATIVO da leitura ("em formação", "preço na faixa"): o que ELA diz de si,
+   independente de o plano ter escolhido essa leitura ou a outra. */
+.sc-now { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); white-space: nowrap; }
+/* Carimbo do VEREDITO: só aparece no card da leitura que o produziu (setup_source).
+   É o que torna a discordância legível — dá pra ver qual das duas decidiu. */
+.sc-verdict {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.sc-vk {
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.sc-state {
   font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); border-radius: 999px;
   padding: 3px 11px; border: 1px solid var(--border); color: var(--text);
 }
-.act-setup.ativo { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
-.act-setup.aguardar_pullback, .act-setup.aguardar_rompimento {
+.sc-state.ativo { color: var(--green); background: var(--green-dim); border-color: #1e5c3c; }
+.sc-state.aguardar_pullback, .sc-state.aguardar_rompimento {
   color: var(--amber); background: #3a2f10; border-color: #5c4a17;
 }
-.act-setup.sem_setup, .act-setup.sem_dado { color: var(--muted); }
-/* DE QUAL setup veio o estado, colado nele: peso menor e cor herdada, porque é
-   qualificador do mesmo fato — não um segundo fato competindo por atenção. */
-.act-setup .act-src { font-weight: var(--fw-med); opacity: .8; margin-left: 6px; }
-.act-setup .act-src::before { content: "· "; opacity: .7; }
-.act-fact { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text); }
-.act-fact .act-k { color: var(--muted); margin-right: 5px; white-space: nowrap; }
+.sc-state.sem_setup, .sc-state.sem_dado, .sc-state.intradiario_indisponivel { color: var(--muted); }
+.sc-hz { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+/* NÍVEIS: grade de duas colunas — nome à esquerda, número à direita — pra os
+   números alinharem entre si em vez de cada linha começar onde o texto acaba. A
+   BASE ocupa a linha inteira embaixo, colada no número que justifica. */
+.sc-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.sc-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline;
+  gap: 1px 10px; font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.sc-k { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.sc-v { font-family: var(--mono); font-weight: var(--fw-bold); color: var(--text); text-align: right; white-space: nowrap; }
+.sc-basis {
+  grid-column: 1 / -1; font-size: var(--fs-10); line-height: var(--lh-10); color: var(--dim);
+  overflow-wrap: anywhere;
+}
+/* nível que o padrão não produziu: diz que não existe, no lugar do número — nunca
+   um "—" que o leitor tem que adivinhar. */
+.sc-sem-v { font-family: var(--font); font-weight: var(--fw-med); color: var(--dim); white-space: normal; text-align: right; }
+.sc-sem-txt { display: block; color: var(--muted); }
+/* alvo recusado / faixa degenerada: âmbar de ATENÇÃO (o setup existe, o nível é que
+   não) — mesma semântica da linha do scan. */
+.sc-warn { display: block; color: var(--amber); }
+/* Rodapé compartilhado: o FRAME em que as duas leituras foram calculadas (chão
+   comum, não pertence a nenhuma) e o veredito ÓRFÃO, quando o backend não elege
+   nenhuma das duas. */
+.sc-foot {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted);
+}
+.sc-foot .sc-verdict { margin-top: 0; padding-top: 0; border-top: 0; }
 
 /* legenda: swatch quadrado das faixas do plano (vs. traço das médias) */
 .chart-legend .sw.band { width: 12px; height: 9px; border-radius: 2px; opacity: .85; }
@@ -1353,7 +1397,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .stage-rail { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 /* no palco o cartão do gráfico não precisa de margem própria — o gap cuida */
 .stage-main .chart-card { margin: 0; }
-.stage-rail .actionable { margin: 0; }
+.stage-rail .setup-cards { margin: 0; }
 .rail-theses .section-title { margin: 4px 0 8px; }
 
 /* Telas largas: gráfico protagonista à esquerda, contexto fixo à direita.
@@ -1670,7 +1714,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .cmp-col { width: 100% !important; margin-bottom: 16px; }
 
   /* superfícies e texto legíveis no branco */
-  details.section, .thesis, .chart-card, .actionable, .meta-judge, .cmp-col {
+  details.section, .thesis, .chart-card, .setup-card, .meta-judge, .cmp-col {
     background: #fff !important; border: 1px solid #c9ced8 !important;
   }
   .section-body { background: #fff !important; }
@@ -1692,7 +1736,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
   /* quebras de página sensatas: não parte o bloco no meio */
   details.section, .thesis, .chart-card, .mj-sec, .cmp-col, .meta-judge,
-  .actionable, .chart-wrap { break-inside: avoid; page-break-inside: avoid; }
+  .setup-card, .chart-wrap { break-inside: avoid; page-break-inside: avoid; }
   .result-head, .cmp-head, .section-title { break-after: avoid; page-break-after: avoid; }
 
   /* cinto+suspensório: garante o conteúdo dos <details> abertos visível na impressão */
