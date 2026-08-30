@@ -484,6 +484,31 @@ class ScanLog:
                       "fechado_em": fechado_em, "empate_na_barra": bool(empate_na_barra),
                       "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")})
 
+    def record_pass(self, alvos: int, lidos: int, sem_dado: int,
+                    gatilhos: int, origem: str = "agenda",
+                    sessao: str | None = None) -> None:
+        """Grava que uma PASSADA aconteceu — a linha que separa "não houve gatilho" de
+        "ninguém olhou".
+
+        Sem ela o ledger só sabe dizer o que ACONTECEU, e um período sem linhas fica
+        ambíguo: pode ter sido mercado parado ou serviço fora do ar. Metade do valor de
+        um track record está em saber que se olhou e não havia nada.
+
+        ``sem_dado`` é a parte que protege o número: fonte degradada não vira gatilho
+        inventado nem "não aconteceu" falso — vira contagem declarada nesta linha.
+
+        É inerte pro motor de vereditos: :meth:`entries` só devolve linha SEM ``tipo``, e
+        :meth:`fechamentos` só lê ``tipo == "fechamento"``.
+        """
+        self._append({"tipo": "passada", "origem": origem, "sessao": sessao,
+                      "alvos": int(alvos), "lidos": int(lidos),
+                      "sem_dado": int(sem_dado), "gatilhos": int(gatilhos),
+                      "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+
+    def passadas(self) -> list[dict[str, Any]]:
+        """As passadas registradas, da mais antiga pra mais nova."""
+        return [x for x in self._linhas() if x.get("tipo") == "passada"]
+
     def _append(self, obj: dict[str, Any]) -> None:
         with self._lock, open(self.path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(obj, default=str) + "\n")

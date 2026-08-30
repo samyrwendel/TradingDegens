@@ -54,6 +54,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from tradingagents.webui import (
+    agenda,
     oauth_codex,
     oauth_providers,
     server_login,
@@ -957,7 +958,13 @@ def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
     return httpd
 
 
-def _graceful_shutdown(httpd: ThreadingHTTPServer, runner: AnalysisRunner) -> None:
+# Valores que DESLIGAM uma chave de ambiente. Um lugar só: "0" ligando a agenda porque
+# alguém escreveu "false" seria a pior forma de descobrir a diferença.
+_DESLIGADO = ("0", "false", "nao", "não", "no", "off")
+
+
+def _graceful_shutdown(httpd: ThreadingHTTPServer, runner: AnalysisRunner,
+                       agendador=None) -> None:
     """Instala o handler de SIGTERM/SIGINT pra um deploy NÃO matar run no meio.
 
     No stop (``systemctl restart`` manda SIGTERM), em vez de o processo morrer
@@ -975,6 +982,10 @@ def _graceful_shutdown(httpd: ThreadingHTTPServer, runner: AnalysisRunner) -> No
         drain = float(os.getenv("TRADINGDEGENS_DRAIN_SECONDS", "8"))
         deadline = time.time() + max(0.0, drain)
         # Deixa as runs quase-prontas fecharem; as demais serão retomadas no boot.
+        # A agenda para PRIMEIRO: uma passada nova começando durante o dreno só
+        # atrasaria o restart e escreveria no ledger de um processo que já está saindo.
+        if agendador is not None:
+            agendador.stop()
         while time.time() < deadline and runner.active_run_ids():
             time.sleep(0.3)
         threading.Thread(target=httpd.shutdown, daemon=True).start()
@@ -1013,8 +1024,26 @@ def main() -> None:
                   flush=True)
     except Exception as exc:  # noqa: BLE001 — retomada nunca impede a subida
         print(f"Aviso: falha ao retomar runs interrompidas: {exc}", flush=True)
+    # AGENDA DO SCAN — o track record para de depender de alguém abrir a tela.
+    #
+    # Uma passada por CANDLE FECHADO do frame mais rápido que o scan lê (ver
+    # :mod:`tradingagents.webui.agenda`: a cadência sai da informação, não do limite da
+    # fonte). Vive DENTRO deste processo porque o ledger tem um dono só — o ``ScanLog``
+    # do runner, com o seu lock e a de-duplicação que lê o arquivo antes de gravar.
+    #
+    # Sobe no ENTRYPOINT, nunca no ``make_server``: a suíte levanta servidor em dezenas
+    # de testes, e nenhum deles pediu uma varredura de rede em segundo plano.
+    agendador = None
+    if os.getenv("TRADINGDEGENS_SCAN_AGENDA", "1").strip().lower() not in _DESLIGADO:
+        agendador = agenda.AgendaScan(runner.scan_agendado)
+        agendador.start()
+        print(f"Agenda do scan: uma passada a cada "
+              f"{agenda.cadencia_minutos()} min (+{agenda.ATRASO_POS_FECHAMENTO_S}s "
+              f"após o fechamento do candle).", flush=True)
+    else:
+        print("Agenda do scan DESLIGADA (TRADINGDEGENS_SCAN_AGENDA).", flush=True)
     httpd = make_server(host, port, runner=runner)
-    _graceful_shutdown(httpd, runner)
+    _graceful_shutdown(httpd, runner, agendador)
     shown = host if host != "0.0.0.0" else "0.0.0.0 (todas as interfaces — Tailscale incluído)"
     print(f"TradingDegens web em http://{shown}:{port}", flush=True)
     try:

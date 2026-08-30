@@ -26,7 +26,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
-from tradingagents.webui import ask as ask_module, execucao, timeutil
+from tradingagents.webui import agenda, ask as ask_module, execucao, timeutil
 from tradingagents.webui.compare import (
     build_column,
     confront_pair_valid,
@@ -2580,28 +2580,89 @@ class AnalysisRunner:
                 return memo[2]
             tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
             result = scan_watchlist(tickers, date)
-            # A chave de "já logado" carrega o SETUP: o mesmo ativo/frame pode estar
-            # em gatilho nos DOIS setups ao mesmo tempo, com gatilhos diferentes, e
-            # sem o setup na chave o segundo seria descartado como repetido do
-            # primeiro (ou pior: com gatilhos iguais por coincidência, um sumiria).
-            known = {(_setup_da_entrada(e), e.get("ticker"), e.get("frame"), e.get("trigger"))
-                     for e in self.scan_log.entries()}
-            for s in result.get("ativos", []):
-                for f in s.get("frames", []):
-                    if (f.get("estado") == "em_gatilho"
-                            and ("123", s["ticker"], f.get("frame"), f.get("trigger")) not in known):
-                        self.scan_log.record({**f, "ticker": s["ticker"], "setup": "123"})
-                    # O STORM loga o SEU gatilho, com a SUA identidade — e só quando o
-                    # Éden autoriza: gatilho que a regra proíbe operar não é trade, e
-                    # jogá-lo no ledger contaminaria a taxa de acerto com o que
-                    # ninguém teria operado.
-                    st = f.get("storm") or {}
-                    if (st.get("estado") == "em_gatilho" and st.get("opera")
-                            and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known):
-                        self.scan_log.record({**st, "ticker": s["ticker"],
-                                              "frame": f.get("frame"), "setup": "storm"})
+            self._registrar_gatilhos(result)
             self._scan_memo = (date, time.time(), result)
             return result
+
+    def _registrar_gatilhos(self, result: dict[str, Any]) -> dict[str, int]:
+        """Loga os gatilhos NOVOS de uma varredura. Devolve a contagem da passada.
+
+        UMA implementação pra os dois caminhos (a varredura da tela e a agendada): duas
+        cópias divergiriam na regra de de-duplicação, que é justamente o que impede o
+        ledger de inchar quando a mesma varredura roda de novo.
+
+        A chave de "já logado" carrega o SETUP: o mesmo ativo/frame pode estar em
+        gatilho nos DOIS setups ao mesmo tempo, com gatilhos diferentes, e sem o setup
+        na chave o segundo seria descartado como repetido do primeiro (ou pior: com
+        gatilhos iguais por coincidência, um sumiria).
+        """
+        known = {(_setup_da_entrada(e), e.get("ticker"), e.get("frame"), e.get("trigger"))
+                 for e in self.scan_log.entries()}
+        novos = 0
+        sem_dado = 0
+        for s in result.get("ativos", []):
+            for f in s.get("frames", []):
+                # FONTE DEGRADADA NÃO VIRA NADA no ledger — nem gatilho inventado, nem
+                # "não aconteceu" falso. Ela é CONTADA, e a contagem sai na linha da
+                # passada (:meth:`ScanLog.record_pass`).
+                if f.get("estado") == "sem_dado":
+                    sem_dado += 1
+                if (f.get("estado") == "em_gatilho"
+                        and ("123", s["ticker"], f.get("frame"), f.get("trigger")) not in known):
+                    self.scan_log.record({**f, "ticker": s["ticker"], "setup": "123"})
+                    known.add(("123", s["ticker"], f.get("frame"), f.get("trigger")))
+                    novos += 1
+                # O STORM loga o SEU gatilho, com a SUA identidade — e só quando o
+                # Éden autoriza: gatilho que a regra proíbe operar não é trade, e
+                # jogá-lo no ledger contaminaria a taxa de acerto com o que
+                # ninguém teria operado.
+                st = f.get("storm") or {}
+                if (st.get("estado") == "em_gatilho" and st.get("opera")
+                        and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known):
+                    self.scan_log.record({**st, "ticker": s["ticker"],
+                                          "frame": f.get("frame"), "setup": "storm"})
+                    known.add(("storm", s["ticker"], f.get("frame"), st.get("trigger")))
+                    novos += 1
+        return {"gatilhos": novos, "sem_dado": sem_dado,
+                "lidos": len(result.get("ativos", []))}
+
+    def scan_agendado(self) -> dict[str, Any]:
+        """UMA passada da agenda: varre o que o mercado justifica varrer AGORA e loga.
+
+        Cripto sempre; ação só com a sessão ativa (o ``marketState`` que o
+        :mod:`live_price` já lê — fora do pregão a ação repete o mesmo candle). A
+        passada é REGISTRADA mesmo quando não produz gatilho nenhum: é o que separa
+        "não houve" de "ninguém olhou".
+
+        Não passa pelo memo da tela nem pelo single-flight dela de propósito? Passa: usa
+        o MESMO lock, porque duas varreduras simultâneas contra o provedor foi o que a
+        DA do single-flight veio matar. O que ela não usa é o memo — uma passada
+        agendada existe pra ler dado NOVO, e devolver o resultado de 30s atrás seria
+        agendar para nada.
+        """
+        # Import local, como nos outros pontos que só precisam da cotação: o módulo
+        # puxa yfinance, e o runner é importado pela suíte centenas de vezes.
+        from tradingagents.dataflows.live_price import fetch_live_price
+
+        agora = timeutil.today()
+        watch = self.watchlist_store.get()
+        sessao, ref = agenda.sessao_de_mercado(watch, fetch_live_price)
+        alvos = agenda.alvos_da_passada(watch, sessao)
+        if not alvos:
+            self.scan_log.record_pass(alvos=0, lidos=0, sem_dado=0, gatilhos=0,
+                                      sessao=sessao)
+            logger.info("agenda: nada a varrer (sessão %s, referência %s)", sessao, ref)
+            return {"alvos": 0, "gatilhos": 0, "sessao": sessao}
+        with self._scan_lock:
+            result = scan_watchlist(alvos, agora)
+            contagem = self._registrar_gatilhos(result)
+        self.scan_log.record_pass(alvos=len(alvos), lidos=contagem["lidos"],
+                                  sem_dado=contagem["sem_dado"],
+                                  gatilhos=contagem["gatilhos"], sessao=sessao)
+        logger.info("agenda: %d ativos (sessão %s) → %d gatilho(s) novo(s), %d "
+                    "leitura(s) sem dado", len(alvos), sessao, contagem["gatilhos"],
+                    contagem["sem_dado"])
+        return {"alvos": len(alvos), "sessao": sessao, **contagem}
 
     def execution_card(self, ticker: str, date: str, timeframe: str,
                        method: str = "padrao") -> dict[str, Any]:
