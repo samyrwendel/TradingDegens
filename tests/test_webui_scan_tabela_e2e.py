@@ -139,9 +139,12 @@ def test_cada_informacao_tem_a_sua_coluna_e_a_coluna_e_a_mesma_em_toda_linha(bas
           nomes: [...document.querySelectorAll('.scan-line-head .scan-col')].map(e => e.innerText.trim()),
         })""")
         assert grade["linha"] == grade["cab"], grade
-        assert len(grade["linha"].split(" ")) == 9, grade
+        # DEZ colunas desde a task 023: a do STORM entrou no fim (setup diferente,
+        # célula própria — nunca somado às células do 1-2-3).
+        assert len(grade["linha"].split(" ")) == 10, grade
         assert [n.lower() for n in grade["nomes"]] == [
-            "tf", "ativo", "preço", "dist", "estado", "gatilho", "sl", "tp", "r:r"], grade
+            "tf", "ativo", "preço", "dist", "estado", "gatilho", "sl", "tp", "r:r",
+            "storm"], grade
         # altura igual em todas as linhas: chip que quebra em duas desmancha a
         # leitura em coluna tanto quanto o desalinhamento
         alturas = page.evaluate("""() => [...new Set([...document.querySelectorAll('.scan-line-row')]
@@ -258,7 +261,10 @@ def test_com_a_coluna_estreita_a_tabela_sai_de_cena_e_os_rotulos_voltam(base):
     """A largura útil muda com a lateral arrastada (foi por isso que a 012 usou
     container query e não media query). Abaixo do ponto em que as nove colunas cabem,
     a grade sai — e como os rótulos por célula tinham saído (quem nomeia é o
-    cabeçalho), eles VOLTAM junto: número solto sem cabeçalho em cima não diz nada."""
+    cabeçalho), eles VOLTAM junto: número solto sem cabeçalho em cima não diz nada.
+
+    O ponto de quebra subiu de 700 para 800px na task 023: a coluna do Storm (96px
+    de piso) empurrou a soma dos pisos, e o limiar é aritmético, não gosto."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -282,13 +288,13 @@ def test_com_a_coluna_estreita_a_tabela_sai_de_cena_e_os_rotulos_voltam(base):
         m = estado()
         assert m["display"] == "grid" and m["cabecalho"] != "none", m
         assert m["ck"] == "absolute", ("com cabeçalho, o rótulo por célula fica só pro leitor", m)
-        for px in (600, 750):
+        for px in (600, 640):
             lateral(px)
             m = estado()
             assert m["display"] == "grid", (px, m)
             assert not m["rola"] and not m["paginaRola"], (px, m)
             assert page.evaluate(_COLUNAS)["cols"][5] == page.evaluate(_COLUNAS)["cols"][5]
-        lateral(950)
+        lateral(900)
         m = estado()
         assert m["display"] == "flex", ("coluna estreita: a grade sai de cena", m)
         assert m["cabecalho"] == "none", ("cabeçalho sem colunas embaixo mente", m)

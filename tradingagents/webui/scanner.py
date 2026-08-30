@@ -36,6 +36,7 @@ from typing import Any
 from tradingagents.dataflows.price_structure import (
     build_actionable_plan_dict,
     build_price_chart,
+    build_storm_plan_dict,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,7 +162,10 @@ def _frame_row(ticker: str, date: str, frame: str,
         if setup in ("sem_dado", "intradiario_indisponivel"):
             return {"frame": frame, "estado": "sem_dado", "motivo": f"fonte: {setup}",
                     "price": price}
-        return {"frame": frame, "estado": "sem_setup", "price": price}
+        # Sem 1-2-3 não quer dizer sem STORM: são setups diferentes, e o Storm pode
+        # estar formado onde este não está (é metade da razão de ele existir aqui).
+        return {"frame": frame, "estado": "sem_setup", "price": price,
+                "storm": _storm_row(ticker, date, frame, price)}
 
     trigger = float(pat["trigger"])
     dist = abs(price / trigger - 1.0) if trigger else None
@@ -240,6 +244,83 @@ def _frame_row(ticker: str, date: str, frame: str,
         "rr_risco": rr.get("risk"),
         "rr_retorno": rr.get("reward"),
         "rr_residual": rr_residual,
+        # O STORM na MESMA linha, em célula própria — o objetivo declarado é comparar
+        # os dois setups no mesmo ativo de relance. Nunca no mesmo campo: misturar os
+        # dois numa coluna só faria a taxa de acerto descrever trade nenhum.
+        "storm": _storm_row(ticker, date, frame, price),
+    }
+
+
+def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[str, Any]:
+    """A leitura do STORM naquele frame, compacta pra caber numa linha do scan.
+
+    Setup DIFERENTE do 1-2-3 desta lista (DA-078): outro detector, outro ponto 2,
+    outro stop, outro alvo — e um filtro (o Éden) com poder de VETO. Por isso ele
+    ocupa a SUA célula, com o seu estado, e nunca se mistura ao 1-2-3 na mesma
+    coluna: acerto de um setup com R:R de outro não descreve trade nenhum (task 008).
+
+    Das DUAS entradas do padrão (ponto 2 e ponto 3), a linha carrega a mais PRÓXIMA
+    do preço — é a que decide agora. A outra continua inteira na análise; aqui o
+    espaço é de uma célula, e escolher a mais próxima é a escolha que responde
+    "isto está para acontecer?". O ``title`` da célula leva as duas.
+    """
+    try:
+        plano = build_storm_plan_dict(ticker, date, timeframe=frame) or {}
+    except Exception as exc:  # noqa: BLE001 — o Storm nunca derruba o scan do 1-2-3
+        logger.info("storm no scan falhou para %s %s: %s", ticker, frame, exc)
+        return {"estado": "sem_dado"}
+    pat = plano.get("pattern") or {}
+    leituras = plano.get("leituras") or []
+    if not pat or not leituras:
+        return {"estado": "sem_setup",
+                "eden": (plano.get("eden") or {}).get("direcao"),
+                "eden_ok": bool((plano.get("eden") or {}).get("alinhado")),
+                "opera": False, "motivo": plano.get("motivo")}
+    direction = pat.get("direction")
+    stop = (plano.get("stop") or {}).get("price")
+
+    def _dist(le):
+        t = le.get("trigger")
+        return abs(price / float(t) - 1.0) if (price and t) else 9.9
+    escolhida = min(leituras, key=_dist)
+    dist = _dist(escolhida) if price else None
+    estado = escolhida.get("state")
+    # VETO do Éden vem ANTES do estado do gatilho: um padrão acionado que a regra
+    # proíbe não é "em movimento", é um trade que não se faz.
+    if not plano.get("opera"):
+        linha_estado = "vetado"
+    elif dist is not None and dist <= _GATILHO_TOL:
+        linha_estado = "em_gatilho"
+    elif estado == "acionado":
+        linha_estado = "em_movimento"
+    else:
+        linha_estado = "formando"
+    rr = escolhida.get("risk_reward") or {}
+    return {
+        "estado": linha_estado,
+        "direction": direction,
+        "entrada": escolhida.get("entrada"),
+        "ordem": escolhida.get("ordem"),
+        "pattern_state": estado,
+        "trigger": escolhida.get("trigger"),
+        "dist_pct": dist,
+        "dist_txt": _fmt_pct(dist),
+        "sl": stop,
+        "tp": (escolhida.get("target") or {}).get("price"),
+        "rr": rr.get("rr"),
+        "rr_note": rr.get("note"),
+        "qualidade": plano.get("qualidade"),
+        "opera": bool(plano.get("opera")),
+        "veto": plano.get("veto"),
+        "eden": (plano.get("eden") or {}).get("direcao"),
+        "eden_ok": bool((plano.get("eden") or {}).get("alinhado")),
+        # As DUAS leituras viajam pro title da célula: a linha mostra a mais
+        # próxima, mas esconder a outra seria decidir pelo leitor.
+        "leituras": [{"entrada": L.get("entrada"), "ordem": L.get("ordem"),
+                      "trigger": L.get("trigger"),
+                      "tp": (L.get("target") or {}).get("price"),
+                      "rr": (L.get("risk_reward") or {}).get("rr")}
+                     for L in leituras],
     }
 
 
@@ -320,10 +401,22 @@ class ScanLog:
         self._lock = threading.Lock()
 
     def record(self, row: dict[str, Any]) -> None:
-        """Loga UM gatilho (chamado só quando estado == em_gatilho)."""
+        """Loga UM gatilho (chamado só quando estado == em_gatilho).
+
+        ``setup`` diz DE QUAL setup veio o gatilho — ``123`` (o desta lista) ou
+        ``storm`` (com a entrada usada em ``entrada``). Sem isso a taxa de acerto
+        mistura dois métodos com stops, alvos e R:R construídos por regras
+        diferentes, e o número resultante não descreve nenhum dos dois: é a mesma
+        lição da task 008 (acerto de um grupo com R:R de outro não descreve trade).
+        Linha antiga sem ``setup`` é do 1-2-3 — o ledger é append-only e não se
+        reescreve; quem lê é que assume o default (:func:`_setup_da_entrada`).
+        """
         entry = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                 "setup": row.get("setup") or "123",
                  **{k: row.get(k) for k in ("ticker", "frame", "direction",
                                             "pattern_state", "trigger", "sl", "tp", "rr")}}
+        if row.get("entrada"):
+            entry["entrada"] = row.get("entrada")
         self._append(entry)
 
     def record_close(self, chave: str, veredito: str, fechado_em: str,
@@ -378,8 +471,27 @@ def _dia(v: Any) -> str:
 
 
 def _chave(e: dict[str, Any]) -> str:
-    """Identidade de um gatilho logado — o que amarra o fechamento à entrada."""
+    """Identidade de um gatilho logado — o que amarra o fechamento à entrada.
+
+    O ``setup`` NÃO entra na chave: as chaves antigas (todas do 1-2-3, gravadas
+    antes da task 023) já existem no ledger amarradas aos seus fechamentos, e mudar
+    a forma da chave desamarraria todas de uma vez. O que distingue os setups é o
+    campo ``setup`` da entrada, não a identidade dela.
+    """
     return "|".join(str(e.get(k)) for k in ("ts", "ticker", "frame", "trigger"))
+
+
+# Setups que o track record sabe separar. ``123`` é o desta lista; ``storm`` é o
+# 1-2-3 do Stormer (DA-078) — outro detector, outro stop, outro alvo.
+SETUPS_DO_LEDGER = ("123", "storm")
+
+
+def _setup_da_entrada(e: dict[str, Any]) -> str:
+    """De qual setup veio um gatilho logado. Entrada sem carimbo é do 1-2-3: quando
+    o campo nasceu (task 023) o ledger só tinha gatilhos dele, e append-only quer
+    dizer que a linha velha não é reescrita — o default é que a lê."""
+    s = str(e.get("setup") or "123")
+    return s if s in SETUPS_DO_LEDGER else "123"
 
 
 # Barras por DIA de calendário, por frame — só pra DIMENSIONAR o pedido de série
@@ -580,10 +692,28 @@ def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
         log.record_close(chave, toque["veredito"], toque["fechado_em"],
                          toque.get("empate_na_barra", False))
 
+    for v in verdicts:
+        v["setup"] = _setup_da_entrada(v)
     n = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
     acerto = (sum(1 for v in n if v["veredito"] == "bateu_tp") / len(n)) if n else None
     out = {"verdicts": verdicts, "n_fechados": len(n), "taxa_acerto": acerto}
     out.update(_expectativa(n))
+    # POR SETUP, além do agregado. Dois setups com stops, alvos e R:R construídos por
+    # regras diferentes somados num número só não descrevem nenhum dos dois — é a
+    # mesma lição da task 008. O agregado fica (é a leitura do painel inteiro), mas
+    # agora ao lado da decomposição, e cada uma com a SUA base declarada.
+    out["por_setup"] = {}
+    for nome in SETUPS_DO_LEDGER:
+        do_setup = [v for v in verdicts if v.get("setup") == nome]
+        fech = [v for v in do_setup if v.get("veredito") in ("bateu_tp", "bateu_sl")]
+        bloco = {
+            "n": len(do_setup),
+            "n_fechados": len(fech),
+            "taxa_acerto": (sum(1 for v in fech if v["veredito"] == "bateu_tp") / len(fech))
+                           if fech else None,
+        }
+        bloco.update(_expectativa(fech))
+        out["por_setup"][nome] = bloco
     return out
 
 

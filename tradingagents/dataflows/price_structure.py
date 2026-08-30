@@ -30,6 +30,8 @@ level degrades to a point and says so, never a cosmetic percentage.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -296,8 +298,68 @@ def _load_frame(symbol: str, curr_date: str, timeframe: str) -> pd.DataFrame:
     return daily
 
 
+# Cache CURTO da série preparada (série + médias), em memória e por processo.
+#
+# ``_prep`` não é barato: ele roda seis janelas (três MMS + quatro EMAs) sobre a
+# série INTEIRA, em pandas. E ele já era chamado DUAS vezes por (ativo, frame) numa
+# única linha do scan — ``build_actionable_plan`` prepara a série e
+# ``detect_price_structure``, chamada logo abaixo, prepara de novo. Com o Storm
+# entrando na mesma linha seriam três.
+#
+# TTL de 60s, e o número não é gosto: é maior que uma varredura inteira da watchlist
+# (medida em 6–9s), então dentro de UMA passada todas as leituras do mesmo ativo
+# enxergam exatamente a mesma série — o que é mais correto que hoje, onde duas
+# preparações do mesmo frame podiam, em tese, cair em lados diferentes de uma
+# atualização. E é curto o bastante pra a próxima varredura do usuário já pegar
+# barra nova. É irmão do TTL de 30s do ``_live_price`` no scanner, pela mesma razão.
+#
+# O que ele NÃO faz: guardar dado entre datas (``curr_date`` está na chave, então o
+# date-guard continua inteiro) nem persistir nada em disco.
+_PREP_TTL = 60.0
+_PREP_MAX = 128
+_prep_cache: dict[tuple[str, str, str], tuple[float, pd.DataFrame]] = {}
+_prep_lock = threading.Lock()
+
+
 def _prep(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> pd.DataFrame:
-    """Load the date-guarded series and attach the simple + exponential averages."""
+    """Load the date-guarded series and attach the simple + exponential averages.
+
+    Cacheado por 60s em memória (ver :data:`_PREP_TTL`). Devolve sempre uma CÓPIA:
+    o custo de copiar um frame já pronto é ordens de grandeza menor que recalcular
+    as médias, e assim nenhum chamador consegue contaminar a série do vizinho.
+    """
+    chave = (str(symbol), str(curr_date), str(timeframe))
+    agora = time.monotonic()
+    with _prep_lock:
+        achado = _prep_cache.get(chave)
+        if achado is not None and agora - achado[0] < _PREP_TTL:
+            return achado[1].copy()
+    df = _prep_calc(symbol, curr_date, timeframe)
+    with _prep_lock:
+        if len(_prep_cache) >= _PREP_MAX:
+            # poda simples: o cache é pequeno e o TTL é curto — o mais VELHO sai
+            mais_velho = min(_prep_cache.items(), key=lambda kv: kv[1][0])[0]
+            _prep_cache.pop(mais_velho, None)
+        _prep_cache[chave] = (agora, df)
+    return df.copy()
+
+
+def clear_prep_cache() -> None:
+    """Esvazia o cache de :func:`_prep`.
+
+    Existe por causa de quem TROCA A FONTE por baixo — a suíte, que substitui
+    ``_load_frame`` por séries sintéticas: dois testes com o mesmo símbolo/data e
+    dados diferentes cairiam na mesma chave dentro do TTL, e o segundo leria a série
+    do primeiro. Em produção a fonte não muda por baixo, e o TTL de 60s é a resposta
+    pro dado que se atualiza — mas um cache de processo que ninguém consegue limpar
+    é um cache que a gente não controla.
+    """
+    with _prep_lock:
+        _prep_cache.clear()
+
+
+def _prep_calc(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> pd.DataFrame:
+    """A preparação de verdade (sem cache) — ver :func:`_prep`."""
     df = _load_frame(symbol, curr_date, timeframe).reset_index(drop=True)
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["Date"]).reset_index(drop=True)
@@ -1307,16 +1369,19 @@ class StormPattern:
     p2: dict[str, Any]
     p3: dict[str, Any]
     direction: str      # "compra" (fundo) | "venda" (topo)
-    trigger: float
-    state: str          # "formando" | "acionado" | "rompeu_retracou"
     amplitude: float    # maior máxima − menor mínima dos 3 candles
+    # As ENTRADAS do padrão, cada uma com o seu gatilho e o seu estado. A spec
+    # escreve "rompimento da máxima do ponto 2 (ou 3)": são DUAS LEITURAS DO MESMO
+    # padrão (mesmos p1/p2/p3, mesmo stop, mesma amplitude), não dois padrões. O
+    # gatilho deixou de ser campo do PADRÃO justamente por isso — guardá-lo aqui
+    # obrigaria a eleger uma das duas leituras como "a" verdadeira.
+    entradas: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "p1": self.p1, "p2": self.p2, "p3": self.p3,
-            "direction": self.direction, "trigger": self.trigger,
-            "state": self.state, "state_label": _STORM_ESTADO.get(self.state, self.state),
-            "amplitude": self.amplitude,
+            "direction": self.direction, "amplitude": self.amplitude,
+            "entradas": self.entradas,
         }
 
 
@@ -1388,6 +1453,40 @@ def _storm_ponto(df: pd.DataFrame, idx: int, kind: str, fmt: str) -> dict[str, A
     }
 
 
+# Rótulo pt-BR de cada ENTRADA e a ordem dela na fila do preço.
+_STORM_ENTRADA_LABEL = {
+    "ponto2": "rompimento da máxima do ponto 2",
+    "ponto3": "rompimento da máxima do ponto 3",
+}
+_STORM_ENTRADA_LABEL_VENDA = {
+    "ponto2": "perda da mínima do ponto 2",
+    "ponto3": "perda da mínima do ponto 3",
+}
+# ANTECIPADA = o gatilho que o preço alcança PRIMEIRO (o mais baixo na compra, o
+# mais alto na venda): entra antes da confirmação, com risco menor até o stop — e
+# mais sinal falso. CONFIRMADA é o outro. Quando os dois níveis coincidem não há
+# duas leituras: há uma, e a tela diz isso em vez de repetir o mesmo número.
+_STORM_ORDEM = {
+    "antecipada": "entra antes — gatilho mais próximo, risco menor, mais sinal falso",
+    "confirmada": "espera a confirmação — gatilho mais longe, risco maior, menos sinal falso",
+    "unica": "os pontos 2 e 3 têm o mesmo nível: as duas entradas coincidem",
+}
+
+
+def _storm_estado(h, lo, c, idx_p3: int, trigger: float, compra: bool) -> str:
+    """Estado de UM gatilho: nunca rompeu, rompeu e segue, ou rompeu e voltou."""
+    last_close = round(float(c[-1]), 2)
+    if compra:
+        broke = bool((h[idx_p3 + 1:] > trigger).any())
+        if not broke:
+            return "formando"
+        return "acionado" if last_close > trigger else "rompeu_retracou"
+    broke = bool((lo[idx_p3 + 1:] < trigger).any())
+    if not broke:
+        return "formando"
+    return "acionado" if last_close < trigger else "rompeu_retracou"
+
+
 def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
     """O 1-2-3 Storm mais RECENTE em qualquer direção, lido em 3 candles seguidos.
 
@@ -1401,9 +1500,10 @@ def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
     Venda é o espelho exato. Varre da esquerda pra direita sobrescrevendo, então o
     triplo válido MAIS RECENTE vence (mesma regra do 1-2-3 deste módulo).
 
-    Gatilho = a MAIOR das máximas do ponto 2 e do ponto 3 na compra (a menor das
-    mínimas na venda). A spec escreve "máxima do ponto 2 (ou 3)"; usar só a do 2
-    quando a do 3 está acima entregaria um gatilho já rompido no nascimento.
+    DUAS ENTRADAS, não uma. A spec escreve "rompimento da máxima do ponto 2 (ou 3)"
+    — são dois pontos de entrada do MESMO padrão, e cada um tem o seu gatilho e o
+    seu estado. A task 022 colapsava os dois no mais conservador (o máximo dos dois
+    na compra); colapsar escondia justamente a leitura que entra antes.
     """
     if len(df) < 3:
         return None
@@ -1427,55 +1527,71 @@ def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
     a, b, d, direction = best
     compra = direction != "venda"
     amplitude = round(float(max(h[a], h[b], h[d]) - min(lo[a], lo[b], lo[d])), 2)
-    last_close = round(float(c[-1]), 2)
-    if compra:
-        trigger = round(float(max(h[b], h[d])), 2)
-        broke = bool((h[d + 1:] > trigger).any())
-        kinds = ("H", "L", "H")   # p1 vale pela MÁXIMA (o teto que o 3 não rompe)
-        state = "formando" if not broke else (
-            "acionado" if last_close > trigger else "rompeu_retracou")
+    kinds = ("H", "L", "H") if compra else ("L", "H", "L")
+    rotulos = _STORM_ENTRADA_LABEL if compra else _STORM_ENTRADA_LABEL_VENDA
+    brutos = {"ponto2": float(h[b] if compra else lo[b]),
+              "ponto3": float(h[d] if compra else lo[d])}
+    entradas: list[dict[str, Any]] = []
+    for nome in ("ponto2", "ponto3"):
+        trigger = round(brutos[nome], 2)
+        entradas.append({
+            "entrada": nome,
+            "label": rotulos[nome],
+            "trigger": trigger,
+            "state": _storm_estado(h, lo, c, d, trigger, compra),
+        })
+    # ORDEM na fila do preço, na PRECISÃO PUBLICADA (DA-072): dois gatilhos que a
+    # tela mostra iguais são um só — comparar no valor cru inventaria uma segunda
+    # leitura que o leitor não consegue distinguir.
+    t2, t3 = entradas[0]["trigger"], entradas[1]["trigger"]
+    if t2 == t3:
+        entradas = [{**entradas[0], "entrada": "ponto2e3",
+                     "label": rotulos["ponto2"] + " (o ponto 3 está no mesmo nível)",
+                     "ordem": "unica"}]
     else:
-        trigger = round(float(min(lo[b], lo[d])), 2)
-        broke = bool((lo[d + 1:] < trigger).any())
-        kinds = ("L", "H", "L")
-        state = "formando" if not broke else (
-            "acionado" if last_close < trigger else "rompeu_retracou")
+        primeiro = 0 if ((t2 < t3) if compra else (t2 > t3)) else 1
+        for i, e in enumerate(entradas):
+            e["ordem"] = "antecipada" if i == primeiro else "confirmada"
+    for e in entradas:
+        e["ordem_label"] = _STORM_ORDEM[e["ordem"]]
+        e["state_label"] = _STORM_ESTADO.get(e["state"], e["state"])
     return StormPattern(
         p1=_storm_ponto(df, a, kinds[0], fmt),
         p2=_storm_ponto(df, b, kinds[1], fmt),
         p3=_storm_ponto(df, d, kinds[2], fmt),
-        direction=direction, trigger=trigger, state=state, amplitude=amplitude,
+        direction=direction, amplitude=amplitude, entradas=entradas,
     )
 
 
 def _storm_levels(
     pat: StormPattern, atr: float | None, price: float,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any] | None]:
-    """``(invalidação, stop, alvo, risco_retorno)`` do Storm — nenhum herdado do outro 1-2-3.
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """``(invalidação, stop, leituras)`` do Storm — nenhum nível herdado do outro 1-2-3.
+
+    **Invalidação e stop são COMUNS às duas leituras**: as duas entradas são do
+    MESMO padrão, e o que mata o padrão é o mesmo ponto 2 nas duas.
 
     * **invalidação** — o PONTO 2 (a mínima na compra, a máxima na venda). É o fundo
       que o padrão declara: perdê-lo é dizer que a reversão não aconteceu.
     * **stop** — o PONTO 2, exato. Sem a folga de meio ATR que o 1-2-3 de swings usa:
       medida na watchlist real, ela derruba a mediana de R:R de 1,13 para 0,80 porque
       meio ATR14 é enorme perto da amplitude de TRÊS candles. O quanto abaixo do ponto
-      2 se põe a ordem é decisão de quem opera — ver o comentário na função.
-    * **alvo** — PROJEÇÃO DA AMPLITUDE: (maior máxima − menor mínima dos 3 candles)
-      lançada a partir do GATILHO. Ancorar no gatilho, e não no preço de agora, é o
-      que mantém o alvo um nível ESTRUTURAL: projetado do preço corrente ele fugiria
-      junto com o preço e nunca seria atingido.
-    * **risco/retorno** — pela mesma função do resto do módulo (:func:`_risk_reward`),
-      com a entrada de referência degradando pro preço atual depois de acionado.
+      2 se põe a ordem é decisão de quem opera — ver o comentário abaixo.
+    * **alvo e R:R são POR LEITURA** — a amplitude é a mesma, mas ela é lançada a
+      partir do gatilho DAQUELA entrada, e o risco é medido daquele gatilho até o
+      mesmo stop. É aritmética, e é o ponto todo das duas leituras: gatilho mais
+      perto com stop igual ⇒ risco menor ⇒ R:R melhor, ao custo de entrar antes da
+      confirmação.
     """
     compra = pat.direction != "venda"
     inval_price = float(pat.p2["low"] if compra else pat.p2["high"])
-    lado = "perder" if compra else "voltar acima de"
     invalidation = {
         "label": f"perda do ponto 2 ({pat.p2['date']})" if compra
                  else f"retomada do ponto 2 ({pat.p2['date']})",
         "price": round(inval_price, 2),
-        "meaning": (f"o setup morre se {lado} o ponto 2 — é o fundo que a reversão "
+        "meaning": ("o setup morre se perder o ponto 2 — é o fundo que a reversão "
                     "declarou" if compra else
-                    f"o setup morre se {lado} o ponto 2 — é o topo que a reversão declarou"),
+                    "o setup morre se voltar acima do ponto 2 — é o topo que a reversão declarou"),
     }
     # STOP NO PONTO 2 — e no ponto 2 EXATO, sem folga inventada.
     #
@@ -1491,28 +1607,33 @@ def _storm_levels(
     # nível ESTRUTURAL é o ponto 2; o quanto abaixo dele cada um põe a ordem é
     # decisão de quem opera, e inventar um valor aqui seria publicar como estrutura
     # uma preferência. Fica o ponto 2 exato, com o motivo escrito na tela.
-    stop_price = inval_price
-    stop_basis = ("no ponto 2 — a spec põe o stop abaixo dele, e o quanto abaixo é "
-                  "decisão de quem opera (não se inventa folga aqui)")
-    stop = {"label": "stop (SL)", "price": round(stop_price, 2),
-            "anchor": round(inval_price, 2), "atr": atr, "basis": stop_basis,
-            "slack": 0.0}
+    stop = {"label": "stop (SL)", "price": round(inval_price, 2),
+            "anchor": round(inval_price, 2), "atr": atr, "slack": 0.0,
+            "basis": ("no ponto 2 — a spec põe o stop abaixo dele, e o quanto abaixo é "
+                      "decisão de quem opera (não se inventa folga aqui)")}
 
-    alvo_price = pat.trigger + pat.amplitude if compra else pat.trigger - pat.amplitude
-    target = {
-        "label": f"projeção da amplitude dos 3 candles ({pat.amplitude:,.2f}) a partir do gatilho",
-        "price": round(float(alvo_price), 2),
-        "amplitude": pat.amplitude,
-        "low": None, "high": None, "band_basis": None, "same_as_realize": False,
-    }
-    if pat.state == "acionado":
-        entry, entry_basis = float(price), "preço atual (padrão já acionado)"
-    else:
-        entry, entry_basis = float(pat.trigger), (
-            "gatilho — rompimento da máxima do ponto 2/3" if compra
-            else "gatilho — perda da mínima do ponto 2/3")
-    risk_reward = _risk_reward(entry, entry_basis, stop, target, compra)
-    return invalidation, stop, target, risk_reward
+    leituras: list[dict[str, Any]] = []
+    for e in pat.entradas:
+        trigger = float(e["trigger"])
+        # O alvo é ancorado no GATILHO daquela leitura, nunca no preço de agora:
+        # projetado do preço corrente ele fugiria junto com o preço e nunca seria
+        # atingido.
+        alvo = trigger + pat.amplitude if compra else trigger - pat.amplitude
+        target = {
+            "label": (f"projeção da amplitude dos 3 candles ({pat.amplitude:,.2f}) "
+                      f"a partir do gatilho do {e['entrada'].replace('ponto', 'ponto ')}"),
+            "price": round(float(alvo), 2), "amplitude": pat.amplitude,
+            "low": None, "high": None, "band_basis": None, "same_as_realize": False,
+        }
+        if e["state"] == "acionado":
+            entry, entry_basis = float(price), "preço atual (entrada já acionada)"
+        else:
+            entry, entry_basis = trigger, f"gatilho — {e['label']}"
+        leituras.append({
+            **e, "target": target,
+            "risk_reward": _risk_reward(entry, entry_basis, stop, target, compra),
+        })
+    return invalidation, stop, leituras
 
 
 def _storm_qualidade(
@@ -1597,13 +1718,14 @@ def build_storm_plan(
         "eden": eden,
         "pattern": pat.as_dict() if pat is not None else None,
         "ema_lenta_no_p3": ema_lenta_no_p3,
-        "invalidation": None, "stop": None, "target": None, "risk_reward": None,
+        # Invalidação e stop são COMUNS às duas entradas (mesmo padrão, mesmo ponto
+        # 2); alvo e R:R vivem DENTRO de cada leitura, porque mudam com o gatilho.
+        "invalidation": None, "stop": None, "leituras": [],
         **qual,
     }
     if pat is not None and price is not None:
-        inval, stop, target, rr = _storm_levels(pat, _atr(df), price)
-        out.update({"invalidation": inval, "stop": stop, "target": target,
-                    "risk_reward": rr})
+        inval, stop, leituras = _storm_levels(pat, _atr(df), price)
+        out.update({"invalidation": inval, "stop": stop, "leituras": leituras})
     return out
 
 
@@ -1622,7 +1744,7 @@ def build_storm_plan_dict(
                      "armadilha": False, "ema_rapida": None, "ema_lenta": None,
                      "preco": None, "motivo": "série indisponível para esta data/frame"},
             "pattern": None, "ema_lenta_no_p3": None,
-            "invalidation": None, "stop": None, "target": None, "risk_reward": None,
+            "invalidation": None, "stop": None, "leituras": [],
             "qualidade": None, "motivo": "sem dado para ler o Storm",
             "opera": False, "veto": None,
         }

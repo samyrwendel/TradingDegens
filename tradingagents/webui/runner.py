@@ -55,7 +55,12 @@ from tradingagents.webui.progress import (
 )
 from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.resume_store import ActiveRunStore
-from tradingagents.webui.scanner import ScanLog, scan_verdicts, scan_watchlist
+from tradingagents.webui.scanner import (
+    ScanLog,
+    _setup_da_entrada,
+    scan_verdicts,
+    scan_watchlist,
+)
 from tradingagents.webui.store import HistoryStore, WatchlistStore
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
@@ -2554,13 +2559,26 @@ class AnalysisRunner:
                 return memo[2]
             tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
             result = scan_watchlist(tickers, date)
-            known = {(e.get("ticker"), e.get("frame"), e.get("trigger"))
+            # A chave de "já logado" carrega o SETUP: o mesmo ativo/frame pode estar
+            # em gatilho nos DOIS setups ao mesmo tempo, com gatilhos diferentes, e
+            # sem o setup na chave o segundo seria descartado como repetido do
+            # primeiro (ou pior: com gatilhos iguais por coincidência, um sumiria).
+            known = {(_setup_da_entrada(e), e.get("ticker"), e.get("frame"), e.get("trigger"))
                      for e in self.scan_log.entries()}
             for s in result.get("ativos", []):
                 for f in s.get("frames", []):
                     if (f.get("estado") == "em_gatilho"
-                            and (s["ticker"], f.get("frame"), f.get("trigger")) not in known):
-                        self.scan_log.record({**f, "ticker": s["ticker"]})
+                            and ("123", s["ticker"], f.get("frame"), f.get("trigger")) not in known):
+                        self.scan_log.record({**f, "ticker": s["ticker"], "setup": "123"})
+                    # O STORM loga o SEU gatilho, com a SUA identidade — e só quando o
+                    # Éden autoriza: gatilho que a regra proíbe operar não é trade, e
+                    # jogá-lo no ledger contaminaria a taxa de acerto com o que
+                    # ninguém teria operado.
+                    st = f.get("storm") or {}
+                    if (st.get("estado") == "em_gatilho" and st.get("opera")
+                            and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known):
+                        self.scan_log.record({**st, "ticker": s["ticker"],
+                                              "frame": f.get("frame"), "setup": "storm"})
             self._scan_memo = (date, time.time(), result)
             return result
 

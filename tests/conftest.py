@@ -72,6 +72,23 @@ def _disable_datacache(monkeypatch):
     monkeypatch.setattr(_cache, "DISABLED", True)
 
 
+@pytest.fixture(autouse=True)
+def _limpa_cache_de_serie_preparada():
+    """Zera o cache de :func:`price_structure._prep` entre testes.
+
+    Ele é um cache de PROCESSO com TTL de 60s, keyado por (símbolo, data, frame) —
+    e a suíte troca a FONTE por baixo (``_load_frame`` monkeypatchado por séries
+    sintéticas). Dois testes com o mesmo símbolo/data e dados diferentes cairiam na
+    mesma chave, e o segundo leria a série do primeiro: cross-test pollution da
+    mesma família da que o ``_disable_datacache`` acima já evita.
+    """
+    from tradingagents.dataflows import price_structure as _ps
+
+    _ps.clear_prep_cache()
+    yield
+    _ps.clear_prep_cache()
+
+
 @pytest.fixture()
 def mock_llm_client():
     client = MagicMock()

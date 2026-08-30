@@ -14,6 +14,12 @@ existe: cada teste aqui é um DENTE contra a confusão entre os dois.
   filtro              nenhum                        ÉDEN (MME 8 × MME 80) — VETO
 
 A semântica do ponto 2 está literalmente INVERTIDA entre os dois.
+
+Task 023: o Storm tem DUAS ENTRADAS do MESMO padrão — a spec escreve "rompimento da
+máxima do ponto 2 (ou 3)". Mesmos p1/p2/p3, mesmo stop, mesma amplitude; muda só o
+GATILHO, e com ele o alvo (projetado dele) e o R:R (medido dele até o mesmo stop). A
+022 colapsava as duas na mais conservadora — e colapsar escondia justamente a que
+entra antes.
 """
 
 import pandas as pd
@@ -93,16 +99,51 @@ def test_venda_e_o_espelho_exato_com_o_ponto_2_no_TOPO():
     assert pat.p1["price"] == 100.0, "o ponto 1 vale pela MÍNIMA na venda"
 
 
-def test_gatilho_e_a_maior_maxima_entre_os_pontos_2_e_3():
-    """A spec escreve "máxima do ponto 2 (ou 3)". Usar só a do 2 quando a do 3 está
-    acima entregaria um gatilho JÁ ROMPIDO no nascimento."""
-    pat = ps._storm_123(_df(_COMPRA))
-    assert pat.trigger == max(_COMPRA[1]["High"], _COMPRA[2]["High"]) == 108.0
-    # com o ponto 3 fazendo máxima maior que a do 2, o gatilho sobe pra ela
+def _entradas(rows):
+    return {e["entrada"]: e for e in ps._storm_123(_df(rows)).entradas}
+
+
+def test_sao_DUAS_entradas_do_mesmo_padrao_nunca_um_gatilho_so():
+    """A spec escreve "máxima do ponto 2 (ou 3)": são dois PONTOS DE ENTRADA do
+    mesmo padrão. Colapsá-los num número (o que a 022 fazia, pegando o mais
+    conservador) esconde a leitura que entra antes — que é justamente a que muda a
+    conta do risco."""
+    e = _entradas(_COMPRA)
+    assert set(e) == {"ponto2", "ponto3"}, e
+    assert e["ponto2"]["trigger"] == _COMPRA[1]["High"] == 108.0
+    assert e["ponto3"]["trigger"] == _COMPRA[2]["High"] == 105.0
+    # na venda os gatilhos são as MÍNIMAS
+    ev = _entradas(_VENDA)
+    assert ev["ponto2"]["trigger"] == _VENDA[1]["Low"]
+    assert ev["ponto3"]["trigger"] == _VENDA[2]["Low"]
+
+
+def test_a_ANTECIPADA_e_a_que_o_preco_alcanca_primeiro():
+    """Qual é qual não é rótulo decorativo: numa compra é o gatilho mais BAIXO que
+    dispara antes (na venda, o mais alto). É o que sustenta a frase "entra antes da
+    confirmação"."""
+    e = _entradas(_COMPRA)               # p3=105 < p2=108
+    assert e["ponto3"]["ordem"] == "antecipada", e
+    assert e["ponto2"]["ordem"] == "confirmada", e
+    # invertendo os níveis, inverte quem é quem — sai do DADO, não do nome
     alto3 = [_COMPRA[0], _COMPRA[1], _c(3, 93, 109, 92, 108)]
-    assert ps._storm_123(_df(alto3)).trigger == 109.0
-    # na venda é a MENOR mínima entre 2 e 3
-    assert ps._storm_123(_df(_VENDA)).trigger == min(_VENDA[1]["Low"], _VENDA[2]["Low"])
+    e2 = _entradas(alto3)                # p3=109 > p2=108
+    assert e2["ponto2"]["ordem"] == "antecipada", e2
+    assert e2["ponto3"]["ordem"] == "confirmada", e2
+    # e na VENDA o mais alto é o que dispara antes
+    ev = _entradas(_VENDA)               # p2=101 > p3=104? não: p2=101, p3=104
+    assert ev["ponto3"]["ordem"] == "antecipada", ev
+
+
+def test_entradas_no_MESMO_nivel_viram_UMA_leitura_e_a_tela_diz_isso():
+    """Dois gatilhos que a tela mostra iguais não são duas leituras: repetir o mesmo
+    número com dois nomes é a duplicata que a DA-077 proíbe. Comparação na precisão
+    PUBLICADA (DA-072)."""
+    igual = [_COMPRA[0], _COMPRA[1], _c(3, 93, 108, 92, 104)]   # h3 == h2 == 108
+    ent = ps._storm_123(_df(igual)).entradas
+    assert len(ent) == 1, ent
+    assert ent[0]["entrada"] == "ponto2e3" and ent[0]["ordem"] == "unica", ent
+    assert "mesmo nível" in ent[0]["label"], ent
 
 
 def test_amplitude_e_a_maior_maxima_menos_a_menor_minima_dos_TRES():
@@ -123,7 +164,8 @@ def test_o_triplo_mais_recente_vence():
 # ------------------------------------------------------------------- níveis ----
 def _plano_compra(atr=4.0, price=104.0):
     pat = ps._storm_123(_df(_COMPRA))
-    return pat, ps._storm_levels(pat, atr, price)
+    inval, stop, leituras = ps._storm_levels(pat, atr, price)
+    return pat, inval, stop, {L["entrada"]: L for L in leituras}
 
 
 def test_stop_fica_no_PONTO_2_e_nunca_no_ponto_3():
@@ -131,11 +173,11 @@ def test_stop_fica_no_PONTO_2_e_nunca_no_ponto_3():
     e é o ponto 2 EXATO: a folga de meio ATR do outro setup derruba a mediana de
     R:R de 1,13 pra 0,80 medida na watchlist real, porque meio ATR14 é enorme perto
     da amplitude de TRÊS candles."""
-    pat, (inval, stop, _target, _rr) = _plano_compra()
+    pat, inval, stop, _leituras = _plano_compra()
     assert stop["anchor"] == pat.p2["low"] == 90.0
     assert stop["anchor"] != pat.p3["low"], "ancorar no ponto 3 é o OUTRO setup"
     assert stop["price"] == 90.0
-    assert stop["price"] < pat.trigger
+    assert all(stop["price"] < e["trigger"] for e in pat.entradas)
     assert stop["slack"] == 0.0
     assert "ponto 2" in stop["basis"]
     # a invalidação é o mesmo nível estrutural, com a frase que diz o que ele é
@@ -146,30 +188,52 @@ def test_alvo_e_a_projecao_da_amplitude_a_partir_do_gatilho():
     """Não é o swing anterior mais próximo (o alvo do outro setup): é a amplitude
     dos 3 candles LANÇADA do gatilho. Ancorar no gatilho e não no preço de agora é
     o que mantém o alvo um nível estrutural em vez de fugir junto com o preço."""
-    pat, (_i, _s, target, _rr) = _plano_compra()
-    assert target["price"] == round(pat.trigger + pat.amplitude, 2) == 128.0
-    assert target["amplitude"] == 20.0
-    assert "amplitude" in target["label"]
+    pat, _i, _s, L = _plano_compra()
+    # CADA leitura projeta do SEU gatilho — é isso que faz o alvo do ponto 3 ficar
+    # mais perto, com o mesmo stop, e portanto o R:R melhor.
+    assert L["ponto2"]["target"]["price"] == round(108.0 + pat.amplitude, 2) == 128.0
+    assert L["ponto3"]["target"]["price"] == round(105.0 + pat.amplitude, 2) == 125.0
+    assert L["ponto2"]["target"]["amplitude"] == 20.0
+    assert "amplitude" in L["ponto2"]["target"]["label"]
     # venda: espelhado para baixo
     pv = ps._storm_123(_df(_VENDA))
-    _i2, _s2, tv, _rr2 = ps._storm_levels(pv, 4.0, 106.0)
-    assert tv["price"] == round(pv.trigger - pv.amplitude, 2)
+    _i2, _s2, lv = ps._storm_levels(pv, 4.0, 106.0)
+    for le in lv:
+        assert le["target"]["price"] == round(le["trigger"] - pv.amplitude, 2)
 
 
 def test_alvo_nao_se_move_com_o_preco_depois_de_acionado():
     """Projetar do preço corrente faria o alvo fugir e nunca ser atingido."""
     pat = ps._storm_123(_df(_COMPRA))
-    a = ps._storm_levels(pat, 4.0, 104.0)[2]["price"]
-    b = ps._storm_levels(pat, 4.0, 999.0)[2]["price"]
+    a = [L["target"]["price"] for L in ps._storm_levels(pat, 4.0, 104.0)[2]]
+    b = [L["target"]["price"] for L in ps._storm_levels(pat, 4.0, 999.0)[2]]
     assert a == b
 
 
 def test_risco_retorno_sai_dos_niveis_reais():
-    pat, (_i, stop, target, rr) = _plano_compra()
-    assert rr["entry"] == pat.trigger
-    assert rr["risk"] == round(pat.trigger - stop["price"], 2)
-    assert rr["reward"] == round(target["price"] - pat.trigger, 2)
-    assert rr["rr"] == round(rr["reward"] / rr["risk"], 2)
+    _pat, _i, stop, L = _plano_compra()
+    for le in L.values():
+        rr = le["risk_reward"]
+        assert rr["entry"] == le["trigger"]
+        assert rr["risk"] == round(le["trigger"] - stop["price"], 2)
+        assert rr["reward"] == round(le["target"]["price"] - le["trigger"], 2)
+        assert rr["rr"] == round(rr["reward"] / rr["risk"], 2)
+
+
+def test_gatilho_mais_perto_com_o_MESMO_stop_da_R_R_melhor():
+    """A consequência ARITMÉTICA das duas entradas, que é o ponto todo delas: o
+    stop é o mesmo (o ponto 2), então o gatilho mais próximo tem risco menor — e
+    como o alvo é a MESMA amplitude lançada de um ponto mais baixo, o retorno é
+    igual. Risco menor com retorno igual = R:R melhor, ao custo de entrar antes da
+    confirmação. Medido na watchlist real: mediana 1,44 (ponto 3) × 1,14 (ponto 2)."""
+    _pat, _i, stop, L = _plano_compra()
+    p2, p3 = L["ponto2"], L["ponto3"]
+    assert p3["trigger"] < p2["trigger"], "no fixture o ponto 3 é o antecipado"
+    assert p3["risk_reward"]["risk"] < p2["risk_reward"]["risk"], "mesmo stop, gatilho mais perto"
+    assert p3["risk_reward"]["reward"] == p2["risk_reward"]["reward"], "mesma amplitude"
+    assert p3["risk_reward"]["rr"] > p2["risk_reward"]["rr"]
+    # e o stop é UM só: as duas entradas são do MESMO padrão
+    assert stop["price"] == 90.0
 
 
 # -------------------------------------------------------------------- Éden -----

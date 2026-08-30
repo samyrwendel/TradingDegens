@@ -138,6 +138,10 @@ def test_preco_dentro_da_faixa_continua_dizendo_que_esta_na_media(zec, monkeypat
     alvo = plano_ref["buy_zone"]["price"]
     df.loc[df.index[-1], "Close"] = alvo
     monkeypatch.setattr(ps, "_load_frame", lambda symbol, curr_date, timeframe: df.copy())
+    # A série preparada é cacheada por 60s (task 023) e este teste TROCA A FONTE no
+    # meio — a chamada de referência acima já povoou a chave. Quem muda a fonte por
+    # baixo limpa o cache; é o contrato declarado em ``clear_prep_cache``.
+    ps.clear_prep_cache()
     p = ps.build_actionable_plan_dict("ZEC-USD", "2026-08-29", timeframe="4h")
     bz = p["buy_zone"]
     assert bz["active_now"] is True, bz

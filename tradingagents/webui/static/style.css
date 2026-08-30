@@ -1193,6 +1193,21 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .sc-storm.sc-vetado { border-left-color: var(--amber); }
 .sc-storm .sc-dir { color: #7cb0ff; }
 .sc-storm.sc-venda .sc-dir { color: #ff9f43; }
+/* Cabeçalho de LEITURA dentro do card do Storm: são DUAS entradas do MESMO padrão
+   (mesmos pontos, mesmo stop), e sem uma régua entre elas os dois gatilhos e os dois
+   R:R viram uma lista de seis números sem dono. A régua é sólida de 1px (DA-070). */
+.sc-leitura {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px;
+  margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border);
+}
+.sc-lk { font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); color: var(--text); }
+/* ANTECIPADA × CONFIRMADA é o que distingue as duas: fica em caixa alta miúda, do
+   mesmo peso do rótulo "veredito do plano" — é qualificador, não um segundo dado. */
+.sc-lo {
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-med);
+  color: var(--accent); text-transform: uppercase; letter-spacing: .5px;
+}
+.sc-lstate { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--muted); }
 /* o VETO é manchete, não rodapé: âmbar de atenção e linha própria */
 .sc-veto {
   margin-top: 6px; font-size: var(--fs-12); line-height: var(--lh-12);
@@ -1956,7 +1971,8 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
     minmax(64px, 1fr)        /* gatilho */
     minmax(64px, 1fr)        /* SL      */
     minmax(72px, 1.4fr)      /* TP / motivo */
-    minmax(56px, 1fr);       /* R:R     */
+    minmax(56px, 1fr)        /* R:R     */
+    minmax(96px, 1.2fr);     /* Storm   */
 }
 .scan-line-row {
   cursor: pointer;
@@ -1992,6 +2008,28 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-cell.scan-motivo b { color: var(--text); font-variant-numeric: tabular-nums; margin-left: 4px; }
 .scan-cell.scan-motivo .scan-ck { position: static; width: auto; height: auto; margin: 0;
   clip-path: none; font-size: .74rem; }
+/* Linha do STORM no modo CARDS: sub-linha própria com a etiqueta do setup na
+   frente — no card não há cabeçalho de coluna, então o nome tem que estar ali. */
+.scan-storm-linha { border-top: 1px dashed var(--border); margin-top: 3px; padding-top: 3px; }
+.scan-storm-linha .ss-tag {
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-bold);
+  color: #7cb0ff; text-transform: uppercase; letter-spacing: .4px;
+}
+.scan-storm-linha .ss-ent { color: var(--muted); }
+.scan-storm-linha.vetado .ss-tag { color: var(--amber); }
+/* Célula do STORM: outro SETUP na mesma linha (DA-078). Três peças numa célula —
+   estado, qual entrada (p2/p3) e o R:R —, com as duas leituras inteiras no title.
+   A cor é o ESTADO (DA-076: cor + palavra), e "vetado" tem cor própria porque o
+   Éden proibindo não é o mesmo que "ainda não formou". */
+.scan-cell.scan-storm { display: flex; align-items: baseline; gap: 5px; justify-content: flex-end; }
+.scan-storm .ss-e { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .3px; overflow: hidden; text-overflow: ellipsis; }
+.scan-storm .ss-p { font-size: var(--fs-10); line-height: var(--lh-10); color: #7cb0ff; font-weight: var(--fw-bold); }
+.scan-storm .ss-rr { font-variant-numeric: tabular-nums; }
+.scan-storm.em_gatilho .ss-e { color: var(--green); font-weight: var(--fw-bold); }
+.scan-storm.em_movimento .ss-e { color: var(--accent); }
+.scan-storm.vetado .ss-e { color: var(--amber); }
+.scan-storm.vetado .ss-rr, .scan-storm.vetado .ss-p { opacity: .55; }
 /* marcador do R:R medido do preço atual — o texto inteiro fica no title e na legenda */
 .scan-mark { color: var(--amber); font-weight: var(--fw-bold); margin-left: 2px; }
 .scan-legenda { margin: 8px 0 0; font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
@@ -2009,7 +2047,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    jeito). O cabeçalho some junto — cabeçalho de coluna que não tem coluna embaixo
    mente — e o nome de cada célula reaparece no lugar dele. Medido: abaixo de 700px
    as colunas fixas não cabem. */
-@container (max-width: 700px) {
+/* Abaixo desta largura as DEZ colunas não cabem e a grade sai de cena (os rótulos
+   por célula voltam junto — número solto sem cabeçalho em cima não diz nada).
+   O limiar é ARITMÉTICO, não gosto: soma dos pisos (38+72+64+48+108+64+64+72+56+96
+   = 682) + nove gaps de 10 + 16 de padding = 788. Era 700 com nove colunas; a do
+   Storm (96px de piso) empurrou o ponto de quebra pra cá. */
+@container (max-width: 800px) {
   .scan-line-row { display: flex; flex-wrap: wrap; gap: 4px 8px; }
   .scan-line-head { display: none; }
   .scan-cell { overflow: visible; text-align: left; }

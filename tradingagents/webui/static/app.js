@@ -2079,11 +2079,21 @@ function scSemNivel(nome) {
 const STORM_QUALIDADE = {
   perfeita: "perfeita", boa: "boa", ruim: "ruim",
 };
+// Nome curto de cada ENTRADA do Storm. São DUAS leituras do MESMO padrão (mesmos
+// pontos, mesmo stop, mesma amplitude), com gatilhos diferentes — a spec escreve
+// "rompimento da máxima do ponto 2 (ou 3)". Colapsar as duas num número só é
+// esconder justamente a que entra antes.
+const STORM_ENTRADA = {
+  ponto2: "entrada no ponto 2", ponto3: "entrada no ponto 3",
+  ponto2e3: "entrada nos pontos 2 e 3 (mesmo nível)",
+};
+const STORM_ORDEM_CURTO = { antecipada: "antecipada", confirmada: "confirmada", unica: "única" };
 
-// O card do 1-2-3 STORM. Separado numa função porque ele carrega uma coisa que
-// nenhuma das outras leituras tem: um FILTRO COM PODER DE VETO (o Éden). O veto é
-// a manchete do card, não uma nota de rodapé — e a borda muda de cor com ele, que
-// é a gramática que a DA-076 pede (estado é cor + palavra).
+// O card do 1-2-3 STORM. Separado numa função porque ele carrega duas coisas que
+// nenhuma das outras leituras tem: um FILTRO COM PODER DE VETO (o Éden) e DUAS
+// ENTRADAS do mesmo padrão. O veto é a manchete do card, não uma nota de rodapé —
+// e a borda muda de cor com ele, que é a gramática que a DA-076 pede (estado é cor
+// + palavra).
 function stormCardHtml(st) {
   const pat = st.pattern;
   const eden = st.eden || {};
@@ -2103,17 +2113,11 @@ function stormCardHtml(st) {
   }
 
   if (pat) {
-    const compra = pat.direction !== "venda";
-    if (pat.trigger != null) {
-      rows.push(scRow("gatilho", fmtNum(pat.trigger),
-        compra ? "rompimento da maior máxima entre os pontos 2 e 3"
-               : "perda da menor mínima entre os pontos 2 e 3"));
-    }
+    // Invalidação e stop são COMUNS às duas entradas — mesmo padrão, mesmo ponto 2 —,
+    // então ficam FORA das leituras, uma vez só. E no Storm eles são o MESMO nível
+    // (stop sem folga), o que rende uma linha, não duas com o mesmo número.
     const inv = st.invalidation || {};
     const sl = st.stop || {};
-    // No Storm o stop É a invalidação: sem folga inventada, os dois são o PONTO 2.
-    // Duas linhas com o mesmo número seria a duplicata que a DA-077 proíbe — sai
-    // UMA, dizendo que os dois papéis coincidem e por quê.
     const mesmoNivel = inv.price != null && sl.price != null && inv.price === sl.price;
     if (mesmoNivel) {
       rows.push(scRow("stop (SL) = invalidação (ponto 2)", fmtNum(sl.price),
@@ -2124,16 +2128,31 @@ function stormCardHtml(st) {
       }
       if (sl.price != null) rows.push(scRow("stop (SL)", fmtNum(sl.price), sl.basis || ""));
     }
-    const tp = st.target || {};
-    if (tp.price != null) rows.push(scRow("alvo (TP)", fmtNum(tp.price), tp.label || ""));
-    const rr = st.risk_reward || {};
-    if (rr.rr != null) {
-      rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
-        `${rr.entry_basis || ""} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
-        rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
-    } else if (rr.note) {
-      rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
-    }
+    // AS DUAS LEITURAS, lado a lado e nomeadas. A ANTECIPADA vem primeiro porque é
+    // o gatilho que o preço alcança antes — é a ordem em que os eventos acontecem,
+    // não uma preferência. Cada uma leva o SEU gatilho, o SEU alvo e o SEU R:R; o
+    // stop é o mesmo lá em cima, e é por isso que o R:R difere.
+    const leituras = (st.leituras || []).slice().sort(
+      (x, y) => (x.ordem === "confirmada" ? 1 : 0) - (y.ordem === "confirmada" ? 1 : 0));
+    leituras.forEach((L) => {
+      const nome = STORM_ENTRADA[L.entrada] || L.entrada;
+      const ordem = STORM_ORDEM_CURTO[L.ordem] || L.ordem || "";
+      rows.push(`<div class="sc-leitura" title="${escapeHtml(L.ordem_label || "")}">` +
+        `<span class="sc-lk">${escapeHtml(nome)}</span>` +
+        (ordem ? `<span class="sc-lo">${escapeHtml(ordem)}</span>` : "") +
+        `<span class="sc-lstate">${escapeHtml(L.state_label || L.state || "")}</span></div>`);
+      if (L.trigger != null) rows.push(scRow("gatilho", fmtNum(L.trigger), L.label || ""));
+      const tp = L.target || {};
+      if (tp.price != null) rows.push(scRow("alvo (TP)", fmtNum(tp.price), tp.label || ""));
+      const rr = L.risk_reward || {};
+      if (rr.rr != null) {
+        rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
+          `${rr.entry_basis || ""} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
+          rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
+      } else if (rr.note) {
+        rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
+      }
+    });
   } else {
     rows.push(`<div class="sc-row sc-sem-txt">Nenhum 1-2-3 Storm na janela lida ` +
       `(três candles: alta/lateral, fundo, recuperação que falha em romper o ponto 1).</div>`);
@@ -2148,12 +2167,10 @@ function stormCardHtml(st) {
       (st.veto ? `<div class="sc-veto">${escapeHtml(st.veto)}</div>`
                : (st.motivo ? `<div class="sc-hz">${escapeHtml(st.motivo)}</div>` : ""))
     : "";
-  const estado = pat ? (pat.state_label || pat.state || "") : "";
   return `<section class="setup-card sc-storm${opera ? "" : " sc-vetado"}` +
     `${pat && pat.direction === "venda" ? " sc-venda" : ""}">` +
     `<div class="sc-head"><span class="sc-title">1-2-3 Storm` +
     (dir ? ` <span class="sc-dir">${escapeHtml(dir)}</span>` : "") + "</span>" +
-    (estado ? `<span class="sc-now">${escapeHtml(estado)}</span>` : "") +
     "</div>" + selo +
     `<div class="sc-rows">${rows.join("")}</div></section>`;
 }
@@ -2786,15 +2803,20 @@ function planZones(a) {
   // motivo do veto escrito.
   const storm = a.storm;
   if (storm && storm.opera === true && storm.pattern) {
-    const stPat = storm.pattern;
     const stLinha = (price, tag, curto, dash) => {
       if (price == null) return;
       out.push({ label: tag, price, low: null, high: null,
                  color: ZONE_COLORS.storm, tag, tagCurto: curto, dash });
     };
-    stLinha(stPat.trigger, "Storm · gatilho", "Storm gat.", [5, 3]);
+    // O stop é UM (comum às duas entradas); gatilho e alvo são de CADA leitura, e
+    // por isso o rótulo diz de qual — dois "Storm · gatilho" no mesmo gráfico seriam
+    // dois níveis com o mesmo nome, que é o defeito da DA-075.
     stLinha((storm.stop || {}).price, "Storm · stop (SL)", "Storm SL", [6, 4]);
-    stLinha((storm.target || {}).price, "Storm · alvo (TP)", "Storm TP", [2, 3]);
+    (storm.leituras || []).forEach((L) => {
+      const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
+      stLinha(L.trigger, `Storm ${n} · gatilho`, `Storm ${n} gat.`, [5, 3]);
+      stLinha((L.target || {}).price, `Storm ${n} · alvo (TP)`, `Storm ${n} TP`, [2, 3]);
+    });
   }
   const pb = a.pullback_zone;
   const buyPrice = buy && buy.price;
@@ -5309,12 +5331,37 @@ function scanTfBadge(frame) {
 
 // Níveis de uma linha do scan (gatilho · SL · TP · R:R), ou o MOTIVO quando o
 // servidor recusou o alvo. Compartilhado pelos dois modos de apresentação.
+// Linha do STORM no modo CARDS. Aqui há espaço pra nomear as coisas (não há
+// cabeçalho de coluna), então ela diz o SETUP, a entrada usada e os níveis dela —
+// e, quando o Éden veta, diz "não opera" com o motivo em vez de um nível que a
+// regra proíbe operar.
+function scanStormLinhaHtml(f) {
+  const st = f.storm || {};
+  const e = st.estado;
+  if (!e || e === "sem_setup" || e === "sem_dado") return "";
+  if (!st.opera) {
+    return `<div class="scan-levels scan-storm-linha vetado">` +
+      `<span class="ss-tag">Storm</span>` +
+      `<span class="scan-note" title="${escapeHtml(st.veto || "")}">não opera — Éden desalinhado</span>` +
+      `</div>`;
+  }
+  const n = st.entrada === "ponto3" ? "ponto 3" : st.entrada === "ponto2" ? "ponto 2" : "pontos 2 e 3";
+  return `<div class="scan-levels scan-storm-linha">` +
+    `<span class="ss-tag">Storm</span>` +
+    `<span class="ss-ent">entrada no ${escapeHtml(n)}${st.ordem ? ` · ${escapeHtml(st.ordem)}` : ""}</span>` +
+    `<span>gatilho <b>${scanFmt(st.trigger)}</b></span>` +
+    `<span>SL <b>${scanFmt(st.sl)}</b></span>` +
+    (st.tp != null ? `<span>TP <b>${scanFmt(st.tp)}</b></span>` : "") +
+    (st.rr != null ? `<span>R:R <b>${scanFmt(st.rr)}</b></span>` : "") +
+    `</div>`;
+}
+
 function scanLevelsHtml(f) {
   const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
   if (!hasLevels) {
-    return (f.estado === "invalidou" && f.invalidacao != null)
+    return ((f.estado === "invalidou" && f.invalidacao != null)
       ? `<div class="scan-levels"><span>⚫ invalidação <b>${scanFmt(f.invalidacao)}</b> — premissa rompida</span></div>`
-      : "";
+      : "") + scanStormLinhaHtml(f);
   }
   return `<div class="scan-levels">` +
     `<span>🎯 gatilho <b>${scanFmt(f.trigger)}</b></span>` +
@@ -5325,7 +5372,7 @@ function scanLevelsHtml(f) {
     (f.tp != null
       ? `<span>🎯 TP <b>${scanFmt(f.tp)}</b></span>` + scanRrHtml(f)
       : `<span class="scan-note">⚠️ sem alvo — ${escapeHtml(f.rr_note || "nível de alvo indefinido")}</span>`) +
-    `</div>`;
+    `</div>` + scanStormLinhaHtml(f);
 }
 
 // ---- modo LISTA: uma TABELA de verdade ------------------------------------
@@ -5348,6 +5395,11 @@ const SCAN_COLUNAS = [
   ["SL", "Stop loss"],
   ["TP", "Alvo publicável — ou o motivo de não haver"],
   ["R:R", "Risco/retorno"],
+  // O STORM é outro SETUP (DA-078), não outra leitura deste: outro detector, outro
+  // ponto 2, outro stop, outro alvo, e um filtro com poder de VETO. Por isso ele
+  // ganha COLUNA — some-lo às células do 1-2-3 misturaria dois métodos no mesmo
+  // número, que é exatamente o que a task 008 provou não descrever trade nenhum.
+  ["Storm", "1-2-3 Storm (Stormer) + filtro Éden — setup DIFERENTE do 1-2-3 desta lista"],
 ];
 
 function scanCabecalhoHtml() {
@@ -5385,13 +5437,52 @@ function scanLineCellsHtml(f) {
       ? `<span class="scan-cell scan-motivo" title="premissa rompida — o preço perdeu o nível de invalidação">` +
         scanCk("invalidação") + `<b>${scanFmt(f.invalidacao)}</b></span>`
       : vazia;
-    return vazia + vazia + motivo + vazia;
+    return vazia + vazia + motivo + vazia + scanStormCellHtml(f);
   }
   const tp = f.tp != null
     ? `<span class="scan-cell num">${scanCk("TP")}<b>${scanFmt(f.tp)}</b></span>`
     : `<span class="scan-cell scan-note" title="${escapeHtml("sem alvo — " + (f.rr_note || "nível de alvo indefinido"))}">⚠️ sem alvo</span>`;
   return `<span class="scan-cell num">${scanCk("gatilho")}<b>${scanFmt(f.trigger)}</b></span>` +
-    `<span class="scan-cell num">${scanCk("SL")}<b>${scanFmt(f.sl)}</b></span>` + tp + scanRrCellHtml(f);
+    `<span class="scan-cell num">${scanCk("SL")}<b>${scanFmt(f.sl)}</b></span>` + tp +
+    scanRrCellHtml(f) + scanStormCellHtml(f);
+}
+
+// Rótulo curto do estado do Storm na célula da tabela. "vetado" é o estado que só
+// ele tem: o Éden proíbe operar, e isso não é "formando" nem "sem setup".
+// Forma CURTA de propósito: a célula divide 96px com a entrada (p2/p3) e o R:R, e
+// rótulo que só cabe truncado ("EM MOVIMEN…") não informa. O cabeçalho da coluna diz
+// que aquilo é o Storm, e o `title` da célula leva o estado por extenso.
+const SCAN_STORM_ESTADO = {
+  em_gatilho: "gatilho", em_movimento: "movimento",
+  formando: "formando", vetado: "vetado", sem_setup: "sem setup", sem_dado: "sem dado",
+};
+
+function scanStormCellHtml(f) {
+  const st = f.storm || {};
+  const e = st.estado || "sem_dado";
+  if (e === "sem_setup" || e === "sem_dado") {
+    return `<span class="scan-cell scan-storm vazio" title="${escapeHtml(st.motivo || "sem 1-2-3 Storm neste frame")}">—</span>`;
+  }
+  // O que cabe numa célula: o estado, QUAL entrada (p2/p3 — são duas leituras do
+  // mesmo padrão) e o R:R. Os dois gatilhos, o stop e os dois alvos vão no title:
+  // a coluna responde "está para acontecer e paga?", o resto é a análise.
+  const ent = st.entrada === "ponto3" ? "p3" : st.entrada === "ponto2" ? "p2" : "p2/3";
+  const rr = st.rr != null ? `${scanFmt(st.rr)}` : "—";
+  const detalhe = [
+    `Éden: ${st.eden_ok ? st.eden || "alinhado" : "desalinhado — não opera"}`,
+    st.qualidade ? `qualidade ${st.qualidade}` : "",
+    st.veto || "",
+    ...(st.leituras || []).map((L) => {
+      const n = L.entrada === "ponto3" ? "ponto 3" : L.entrada === "ponto2" ? "ponto 2" : "pontos 2 e 3";
+      return `entrada no ${n} (${L.ordem || ""}): gatilho ${scanFmt(L.trigger)} · alvo ${scanFmt(L.tp)} · R:R ${L.rr != null ? scanFmt(L.rr) : "—"}`;
+    }),
+    st.sl != null ? `stop ${scanFmt(st.sl)} (ponto 2, comum às duas)` : "",
+  ].filter(Boolean).join("\n");
+  const cls = ["scan-cell", "scan-storm", e, st.direction || ""].filter(Boolean).join(" ");
+  return `<span class="${cls}" title="${escapeHtml(detalhe)}">` +
+    `<span class="ss-e">${escapeHtml(SCAN_STORM_ESTADO[e] || e)}</span>` +
+    `<span class="ss-p">${escapeHtml(ent)}</span>` +
+    `<b class="ss-rr">${rr}</b></span>`;
 }
 
 function scanRrCellHtml(f) {

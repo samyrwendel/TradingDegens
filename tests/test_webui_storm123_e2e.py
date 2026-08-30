@@ -101,6 +101,16 @@ def test_o_resultado_do_storm_se_identifica_pelo_SEU_marcador():
 
 
 # ------------------------------------------------------------------- a tela ---
+_ENTRADAS = [
+    {"entrada": "ponto2", "label": "rompimento da máxima do ponto 2", "trigger": 108.0,
+     "state": "formando", "ordem": "confirmada",
+     "ordem_label": "espera a confirmação — gatilho mais longe, risco maior, menos sinal falso",
+     "state_label": "em formação — o gatilho ainda não foi rompido"},
+    {"entrada": "ponto3", "label": "rompimento da máxima do ponto 3", "trigger": 105.0,
+     "state": "formando", "ordem": "antecipada",
+     "ordem_label": "entra antes — gatilho mais próximo, risco menor, mais sinal falso",
+     "state_label": "em formação — o gatilho ainda não foi rompido"},
+]
 _PAT = {
     "p1": {"date": "2026-08-20", "price": 110.0, "open": 100.0, "high": 110.0,
            "low": 99.0, "close": 108.0},
@@ -108,9 +118,22 @@ _PAT = {
            "low": 90.0, "close": 92.0},
     "p3": {"date": "2026-08-22", "price": 105.0, "open": 93.0, "high": 105.0,
            "low": 92.0, "close": 104.0},
-    "direction": "compra", "trigger": 108.0, "state": "formando",
-    "state_label": "em formação — o gatilho ainda não foi rompido", "amplitude": 20.0,
+    "direction": "compra", "amplitude": 20.0, "entradas": _ENTRADAS,
 }
+
+
+def _leitura(entrada, trigger, alvo, rr):
+    base = next(e for e in _ENTRADAS if e["entrada"] == entrada)
+    return {
+        **base,
+        "target": {"label": ("projeção da amplitude dos 3 candles (20,00) a partir do "
+                             f"gatilho do {entrada.replace('ponto', 'ponto ')}"),
+                   "price": alvo, "amplitude": 20.0, "low": None, "high": None,
+                   "band_basis": None, "same_as_realize": False},
+        "risk_reward": {"entry": trigger, "entry_basis": f"gatilho — {base['label']}",
+                        "risk": round(trigger - 90.0, 2), "reward": round(alvo - trigger, 2),
+                        "rr": rr, "note": None},
+    }
 
 
 def _storm(opera=True, **over):
@@ -126,11 +149,8 @@ def _storm(opera=True, **over):
                          "meaning": "o setup morre se perder o ponto 2 — é o fundo que a reversão declarou"},
         "stop": {"label": "stop (SL)", "price": 90.0, "anchor": 90.0, "atr": 4.0,
                  "slack": 0.0, "basis": "no ponto 2 — a spec põe o stop abaixo dele"},
-        "target": {"label": "projeção da amplitude dos 3 candles (20,00) a partir do gatilho",
-                   "price": 128.0, "amplitude": 20.0, "low": None, "high": None,
-                   "band_basis": None, "same_as_realize": False},
-        "risk_reward": {"entry": 108.0, "entry_basis": "gatilho — rompimento da máxima do ponto 2/3",
-                        "risk": 18.0, "reward": 20.0, "rr": 1.11, "note": None},
+        "leituras": [_leitura("ponto2", 108.0, 128.0, 1.11),
+                     _leitura("ponto3", 105.0, 125.0, 1.33)],
         "qualidade": "perfeita", "opera": True, "veto": None,
         "motivo": "ponto 3 inteiro acima da MME 80 — a tendência principal sustenta a reversão",
     }
@@ -227,6 +247,7 @@ def test_o_card_do_storm_traz_os_niveis_DELE(base):
           txt: document.querySelector('#setupCards .sc-storm').innerText,
           chaves: [...document.querySelectorAll('#setupCards .sc-storm .sc-k')]
             .map(e => e.innerText.trim()),
+          leituras: document.querySelectorAll('#setupCards .sc-storm .sc-leitura').length,
           badge: document.querySelector('#verdictBadge').innerText.trim(),
         })""")
         assert "Storm" in m["titulo"] and "de compra" in m["titulo"], m
@@ -237,9 +258,17 @@ def test_o_card_do_storm_traz_os_niveis_DELE(base):
         # a DA-077 proíbe.
         assert "stop (SL) = invalidação (ponto 2)" in m["chaves"], m
         assert m["txt"].count("90,00") == 1, ("o ponto 2 aparece UMA vez", m["txt"])
+        # AS DUAS ENTRADAS, cada uma com o seu gatilho, o seu alvo e o seu R:R —
+        # colapsá-las num número esconderia justamente a que entra antes (023).
         assert "108,00" in m["txt"] and "128,00" in m["txt"], m
+        assert "105,00" in m["txt"] and "125,00" in m["txt"], m
+        assert "entrada no ponto 2" in m["txt"] and "entrada no ponto 3" in m["txt"], m
+        # `innerText` aplica o `text-transform` do CSS — o qualificador sai em caixa alta
+        assert "ANTECIPADA" in m["txt"].upper() and "CONFIRMADA" in m["txt"].upper(), m
+        assert m["chaves"].count("gatilho") == 2, ("um gatilho por leitura", m["chaves"])
+        assert m["leituras"] == 2, ("duas leituras, com régua entre elas", m)
         assert "amplitude" in m["txt"], m
-        assert "1,11:1" in m["txt"], m
+        assert "1,11:1" in m["txt"] and "1,33:1" in m["txt"], m
         # o Éden com as DUAS médias — veto que não se confere é palpite
         assert "101,20" in m["txt"] and "88,40" in m["txt"], m
         # opera + qualidade
@@ -279,11 +308,14 @@ def test_setup_vetado_nao_ganha_traco_no_grafico(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1100})
         _abre(page, base, _storm())
-        opera = page.evaluate("""() => planZones(
-          {storm: JSON.parse(document.body.dataset.st || 'null')}).map(z => z.tag)""",
-        ) if False else page.evaluate(
+        opera = page.evaluate(
             """(st) => planZones({storm: st}).map(z => z.tag)""", _storm())
-        assert "Storm · gatilho" in opera and "Storm · alvo (TP)" in opera, opera
+        # Cada LEITURA desenha o seu gatilho e o seu alvo, com o nome dela no rótulo
+        # — dois "Storm · gatilho" no mesmo gráfico seriam dois níveis com o mesmo
+        # nome, que é o defeito da DA-075. O stop é UM (comum às duas entradas).
+        assert opera == ["Storm · stop (SL)",
+                         "Storm p2 · gatilho", "Storm p2 · alvo (TP)",
+                         "Storm p3 · gatilho", "Storm p3 · alvo (TP)"], opera
         vetado = page.evaluate(
             """(st) => planZones({storm: st}).map(z => z.tag)""", _storm(opera=False))
         assert vetado == [], vetado
