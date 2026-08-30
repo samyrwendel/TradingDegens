@@ -2826,6 +2826,16 @@ function stormEstadoTexto(estado, storm) {
 // outro. A FORMA separa antes da cor — círculo é Setup123, losango é Storm123 — e a
 // legenda carrega a mesma forma, então o vínculo se lê sem decorar nada.
 const FORMA_DA_FAMILIA = { plano: "circulo", storm: "losango" };
+// TRAÇO = FAMÍLIA nos NÍVEIS, pelo mesmo motivo que a forma separa os marcadores.
+// Os níveis do Storm eram TODOS azuis (a cor dizia de quem era a linha) e o traço
+// dizia o papel — com o stop do Storm em [6,4], EXATAMENTE o traço do stop do plano.
+// Ou seja: o traço já não separava família nenhuma, e a cor pintava por
+// PERTENCIMENTO em cima da regra de que cor é significado (DA-078 regra 3). Os dois
+// papéis foram trocados: a COR volta a dizer o que o nível SIGNIFICA (vermelho =
+// onde se perde, verde = onde se ganha) e o TRAÇO passa a dizer de QUEM é.
+// Ponto-traço porque nenhum nível do plano usa ritmo composto — é reconhecível de
+// relance e não colide com [6,4], [5,4], [2,3] nem [5,3].
+const TRACO_STORM = [7, 3, 2, 3];
 // Faixas do plano acionável desenhadas no gráfico: compra (verde), realização /
 // alvo (dourado), recuo a aguardar (púrpura, só quando difere da compra) e os
 // níveis que tornam o setup operável — invalidação (vermelho claro, pontilhado:
@@ -2945,7 +2955,14 @@ function chartLegendHtml(chart, actionable) {
   ewins.forEach((w) => {
     if (EMA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${EMA_COLORS[w]}"></span>EMA${w}</span>`);
   });
-  zones.forEach((z) => legend.push(`<span class="lg"><span class="sw band" style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
+  // A AMOSTRA DA LEGENDA CARREGA O TRAÇO, não só a cor — mesma razão de ela carregar
+  // a FORMA do marcador logo abaixo. Com stop e alvo do Storm agora em vermelho e
+  // verde (cor = significado), duas linhas da legenda passam a ter a mesma cor de
+  // duas do plano; é o ponto-traço que diz de quem é cada uma, e ele precisa estar
+  // AQUI, onde se decodifica o gráfico, e não só no gráfico.
+  zones.forEach((z) => legend.push(
+    `<span class="lg"><span class="sw band${z.familia === "storm" ? " storm" : ""}" ` +
+    `style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
   // A legenda carrega a FORMA do marcador, não só a cor: é ela que separa as duas
   // numerações no candle, e uma legenda que só mostra cor deixaria o leitor sem a
   // chave da desambiguação. "invalidado" entra no texto porque o cinza sozinho
@@ -3736,19 +3753,26 @@ function planZonesStorm(a, out, marcar) {
   // curta de sempre quando o Storm está sozinho — prefixo repetido em cada linha de
   // um gráfico que só tem Storm é ruído, não informação.
   const pre = marcar ? "Storm123" : "Storm";
-  const stLinha = (price, tag, curto, dash) => {
+  // COR POR PAPEL, IGUAL AO PLANO. O stop do Storm saía azul ao lado do stop do
+  // plano em vermelho, na MESMA tela: o nível onde se perde dinheiro pintado com a
+  // cor de "pertence ao Storm". O alvo tinha o mesmo defeito ao lado do alvo verde
+  // do plano. O gatilho continua na cor do Storm porque ele não é ganho nem perda —
+  // é a ENTRADA, e é o nível que o losango desenhado na vela representa; deixá-lo
+  // azul mantém o vínculo visível entre o padrão e o preço que o aciona.
+  const stLinha = (price, tag, curto, color) => {
     if (price == null) return;
     out.push({ label: tag, price, low: null, high: null, familia: "storm",
-               color: ZONE_COLORS.storm, tag, tagCurto: curto, dash });
+               color, tag, tagCurto: curto, dash: TRACO_STORM });
   };
   // O stop é UM (comum às duas entradas); gatilho e alvo são de CADA leitura, e por
   // isso o rótulo diz de qual — dois "Storm · gatilho" no mesmo gráfico seriam dois
   // níveis com o mesmo nome, que é o defeito da DA-075.
-  stLinha((storm.stop || {}).price, `${pre} · stop (SL)`, `${pre} SL`, [6, 4]);
+  stLinha((storm.stop || {}).price, `${pre} · stop (SL)`, `${pre} SL`, ZONE_COLORS.stop);
   (storm.leituras || []).forEach((L) => {
     const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
-    stLinha(L.trigger, `${pre} ${n} · gatilho`, `${pre} ${n} gat.`, [5, 3]);
-    stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `${pre} ${n} TP`, [2, 3]);
+    stLinha(L.trigger, `${pre} ${n} · gatilho`, `${pre} ${n} gat.`, ZONE_COLORS.storm);
+    stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `${pre} ${n} TP`,
+            ZONE_COLORS.target);
   });
   return out;
 }

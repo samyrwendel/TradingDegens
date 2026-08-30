@@ -756,6 +756,15 @@ details.section[open] > summary::before { content: "▾"; }
    é ela que separa as duas numerações 1-2-3 quando as duas camadas estão
    ligadas, e uma legenda só com cor deixaria o leitor sem essa chave. */
 .chart-legend .sw.dia { width: 9px; height: 9px; border-radius: 1px; transform: rotate(45deg); }
+/* PONTO-TRAÇO = STORM123 nos níveis. Depois que stop e alvo do Storm passaram a ser
+   vermelho e verde (cor = significado, DA-078 regra 3), a cor deixou de dizer de quem
+   é a linha — quem diz é o ritmo do traço, e a legenda tem de mostrá-lo, senão ela
+   fica com dois "stop (SL)" vermelhos e nenhuma chave visual pra separá-los. Mesma
+   técnica da amostra da EMA: a máscara abre os vãos e a cor inline atravessa. */
+.chart-legend .sw.band.storm {
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 10px, #000 10px 12px, transparent 12px 15px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 10px, #000 10px 12px, transparent 12px 15px);
+}
 /* EMA legend swatch reads as a DASHED line (matches the dashed EMA polyline);
    a mask punches the gaps so the inline swatch colour still shows through. */
 .chart-legend .sw.ema {

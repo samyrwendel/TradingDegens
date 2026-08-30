@@ -5,10 +5,17 @@ mas a instrução do Samyr foi "NÃO USAR DEGRADÊ", sem qualificar. Sobravam ci
 quatro botões primários repetindo `180deg, #3b82f6 → #2563eb` copiado e colado
 (#runBtn, .cfg-save, .err-action, .btn-primary) e a .bar-fill em azul→ciano.
 
-Fica de fora, de propósito, a máscara da legenda EMA: aquele
+Fica de fora, de propósito, a máscara das amostras da legenda: aquele
 `repeating-linear-gradient` não é cor de fundo, é o PADRÃO TRACEJADO que
-distingue a EMA da linha cheia. Chapar apagaria informação — por isso o teste
-não só permite a máscara como EXIGE que ela continue lá.
+distingue a EMA da linha cheia — e, desde a DA-108, o ponto-traço que diz que um
+nível é do Storm123 depois que a cor dele passou a significar ganho/perda.
+Chapar apagaria informação — por isso o teste não só permite a máscara como
+EXIGE que ela continue lá.
+
+A regra do portão estático é a INTENÇÃO, não uma contagem: toda ocorrência de
+`gradient` tem de ser máscara de amostra de legenda (`.sw`), em par
+`-webkit-mask-image` + `mask-image`. Contar linhas fazia a próxima amostra
+legítima parecer violação e convidava a afrouxar o teste em vez de conferi-lo.
 
 Dois portões porque falham por motivos diferentes: o estático pega o degradê
 novo que alguém escreveu no CSS (mesmo em regra morta), e o de runtime prova o
@@ -34,13 +41,34 @@ except Exception:  # noqa: BLE001
 _CSS = pathlib.Path(__file__).resolve().parents[1] / "tradingagents" / "webui" / "static" / "style.css"
 
 
-def test_style_css_so_tem_degrade_na_mascara_da_legenda_ema():
-    """Portão estático: as ÚNICAS ocorrências são as duas linhas da máscara."""
-    linhas = [(n, ln) for n, ln in enumerate(_CSS.read_text().splitlines(), 1)
+def test_style_css_so_tem_degrade_em_mascara_de_amostra_da_legenda():
+    """Portão estático: TODA ocorrência de degradê é máscara de amostra de legenda.
+
+    Nenhuma pode ser `background`, `background-image` ou `border-image` — é aí que
+    o degradê volta como superfície. E cada máscara vem em par (com e sem prefixo),
+    senão ela só funciona em metade dos navegadores e o traço some justamente onde
+    ninguém testa.
+    """
+    texto = _CSS.read_text()
+    linhas = [(n, ln.strip()) for n, ln in enumerate(texto.splitlines(), 1)
               if "gradient" in ln]
-    assert len(linhas) == 2, linhas
+    assert linhas, "a máscara da legenda sumiu — o traço é informação, não enfeite"
     assert all("mask-image" in ln and "repeating-linear-gradient" in ln
-               for _, ln in linhas), linhas
+               for _, ln in linhas), ("degradê fora de máscara é superfície", linhas)
+    padrao = [ln for _, ln in linhas if ln.startswith("mask-image")]
+    webkit = [ln for _, ln in linhas if ln.startswith("-webkit-mask-image")]
+    assert len(padrao) == len(webkit) == len(linhas) / 2, ("cada máscara em par", linhas)
+    # e cada uma pertence a uma amostra da legenda (`.sw`), nunca a uma superfície:
+    # o seletor é a última linha aberta com `{` antes da declaração
+    dono, abertos = {}, ""
+    for n, ln in enumerate(texto.splitlines(), 1):
+        crua = ln.strip()
+        if crua.endswith("{"):
+            abertos = crua[:-1].strip()
+        elif "gradient" in crua:
+            dono[n] = abertos
+    fora = {n: s for n, s in dono.items() if ".sw" not in s}
+    assert not fora, ("degradê fora de amostra da legenda", fora)
 
 
 @pytest.fixture
