@@ -783,3 +783,26 @@ base do seu preço · **invalidação** · **realizar** (grosso em T1, resíduo 
 Backend em `tradingagents/webui/execucao.py` + `/api/execucao`. Provado em
 `tests/test_execucao.py` (22) e `tests/test_webui_exec_card_e2e.py` (11).
 Governança: **DA-090**.
+
+---
+
+## 19. Fantasma + preparação do ponto 3 (task 20260830-013)
+
+Um 1-2-3 que MORREU continuava desenhado igual a um vivo — mesma cor, mesmo peso,
+gatilho e pílula no eixo intactos. `state` não servia pra isso: ele descreve a relação
+com o GATILHO, e um padrão pode ter acionado e depois perdido o ponto 3.
+
+- **A morte é medida e datada:** a primeira barra que FECHA além do ponto 3 (não pavio).
+  Uma vez morto, morto — quem volta forma OUTRO padrão.
+- **Uma definição só:** o scanner passou a ler o campo do detector em vez de recalcular
+  do último preço.
+- **Fantasma:** cinza, fora do vocabulário dos vivos, sem linha de gatilho e sem pílula
+  no eixo. Não some — a história explica onde o preço está.
+- **O card diz com detalhe:** qual nível, quando, e o que significa pra quem estava
+  posicionado.
+- **A faixa do ponto 3** sai da regra do método aberto: `(p1.low, p2.high)` no 1-2-3 de
+  swings; no Storm é o **próximo candle**, `(p2.close, p1.high)`. Onde a regra não
+  delimita, declara ausente.
+
+Provado em `tests/test_invalidado_e_projecao.py` (15) e `tests/test_webui_fantasma_e2e.py`
+(11). Governança: **DA-091**.

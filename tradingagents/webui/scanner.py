@@ -190,11 +190,20 @@ def _frame_row(ticker: str, date: str, frame: str,
     # Invalidação: preço além do ponto 3 (onde o padrão deixa de existir). Na
     # compra o setup morre ao PERDER o ponto 3; na venda ao VOLTAR acima dele.
     # (antes o scan não tinha esse estado: mostrava um setup morto como vivo.)
+    # A MORTE VEM DO DETECTOR, não de uma segunda conta aqui. O padrão carrega
+    # `invalidado` medido na barra que FECHOU além do ponto 3 (task 013): um setup que
+    # morreu e voltou continua morto, e a conta local — que só olhava o ÚLTIMO preço —
+    # o ressuscitava. Duas definições de "invalidado" fariam a lista dizer "em
+    # movimento" sobre o mesmo padrão que a análise desenha como fantasma.
+    # O fallback local fica pro plano ANTIGO (cache sem o campo), não como regra.
     inval_price = (plan.get("invalidation") or {}).get("price")
-    invalidated = False
-    if inval_price is not None:
+    if "invalidado" in pat:
+        invalidated = bool(pat.get("invalidado"))
+    elif inval_price is not None:
         inval = float(inval_price)
         invalidated = (price > inval) if direction == "venda" else (price < inval)
+    else:
+        invalidated = False
     # EM GATILHO = preço no ponto de entrada AGORA (≤ tol), independente de o
     # padrão já ter acionado (recém-rompido ainda no ponto ainda entra). Acionado
     # e preço além da entrada → em_movimento (buscando alvo, não é entrada).

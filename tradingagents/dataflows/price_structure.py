@@ -222,12 +222,20 @@ class Pattern123:
     trigger: float
     state: str  # "acionado" | "rompeu_retracou" | "formando"
     direction: str  # "compra" (bottom) | "venda" (top)
+    # MORTE do padrão, MEDIDA e datada. O nível de invalidação já era calculado e
+    # desenhado, mas ninguém comparava o preço contra ele: um 1-2-3 que morreu
+    # continuava na tela com a mesma cor e o mesmo peso de um vivo. `state` não
+    # servia pra isso — ele descreve a relação com o GATILHO, e um padrão pode ter
+    # acionado e depois perdido o ponto 3, que são fatos independentes.
+    invalidado: bool = False
+    invalidado_em: str | None = None   # a data da barra que fechou além do ponto 3
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "p1": self.p1, "p2": self.p2, "p3": self.p3,
             "trigger": self.trigger, "state": self.state,
             "direction": self.direction,
+            "invalidado": self.invalidado, "invalidado_em": self.invalidado_em,
         }
 
 
@@ -538,10 +546,169 @@ def _pattern_123(
         price = df["Low"].iloc[idx] if kind == "L" else df["High"].iloc[idx]
         return {"date": df["Date"].iloc[idx].strftime(fmt), "price": round(float(price), 2)}
 
+    # INVALIDAÇÃO MEDIDA: a primeira barra APÓS o ponto 3 que FECHA além dele. Por
+    # fechamento e não por pavio — é a mesma régua que o stop usa ao levar folga de
+    # ATR pra não ser tirado por sombra, e a estrutura se julga no fechamento.
+    # Uma vez perdido, o ponto 3 não "desperde": o padrão morreu naquela barra,
+    # mesmo que o preço volte depois. Quem volta forma OUTRO padrão.
+    p3_price = round(float(lo.iloc[p3] if pt_kinds[2] == "L" else hi.iloc[p3]), 2)
+    invalidado_em = _primeira_barra_alem(df, p3, p3_price, direction == "compra", fmt)
+
     return Pattern123(
         pt(p1, pt_kinds[0]), pt(p2, pt_kinds[1]), pt(p3, pt_kinds[2]),
         trigger, state, direction,
+        invalidado=invalidado_em is not None, invalidado_em=invalidado_em,
     )
+
+
+def _primeira_barra_alem(df: pd.DataFrame, desde: int, nivel: float,
+                         compra: bool, fmt: str) -> str | None:
+    """Data da primeira barra após ``desde`` cujo FECHAMENTO passou de ``nivel``.
+
+    ``None`` quando nunca passou. É o "quando" que o card precisa dizer: um selo de
+    "invalidado" sem data não deixa o leitor conferir nada.
+    """
+    fech = df["Close"].astype(float)
+    for i in range(desde + 1, len(df)):
+        v = float(fech.iloc[i])
+        if (v < nivel) if compra else (v > nivel):
+            return df["Date"].iloc[i].strftime(fmt)
+    return None
+
+
+# ── PROJEÇÃO DO PONTO 3: onde ele precisa nascer pra o padrão validar ─────────
+#
+# "Se tiver em formação de 123, marcar onde deve ser a nova formação do 3, tipo uma
+# preparação para acompanhar a hora de entrar."
+#
+# A faixa NÃO é chutada: ela sai da própria definição do padrão, que já está escrita
+# no detector. Num 1-2-3 de compra deste módulo o ponto 3 é um fundo ASCENDENTE —
+# acima da mínima do ponto 1 (perdê-la mata a formação) e abaixo da máxima do ponto 2
+# (acima dela o preço já rompeu o gatilho e não há mais recuo a esperar). Na venda é
+# o espelho: um topo DESCENDENTE, abaixo da máxima do ponto 1 e acima da mínima do 2.
+#
+# E a regra é do MÉTODO ABERTO, nunca a do outro: no Storm a semântica dos pontos é
+# invertida (o ponto 2 é o extremo, não o swing intermediário) e o ponto 3 é o
+# PRÓXIMO candle, não um swing futuro qualquer. Misturar as duas projeções poria na
+# tela uma faixa que a regra daquele método não sustenta — ver :func:`_projecao_storm`.
+def _projecao_p3(
+    df: pd.DataFrame, lows: list[int], highs: list[int], price: float,
+    pattern: Pattern123 | None, fmt: str = "%Y-%m-%d",
+) -> dict[str, Any] | None:
+    """A faixa do ponto 3 do 1-2-3 de SWINGS, quando ela existe.
+
+    Dois casos, e só dois:
+
+    * **gestação** — há um par de swings (fundo→topo, ou topo→fundo) e nenhum triplo
+      válido ainda: o próximo swing pode ser o ponto 3;
+    * **novo após invalidação** — o padrão morreu, e o par 1-2 que sobrou ainda pode
+      parir OUTRO ponto 3.
+
+    Devolve ``None`` com padrão VIVO (ali o ponto 3 já existe — o que falta é o
+    gatilho, que a tela já marca) e quando a regra não delimita a faixa. Declarar
+    ausente é o certo: desenhar uma faixa de espera que a regra não sustenta seria
+    inventar o nível mais perigoso da tela, o que diz "compre aqui".
+    """
+    if pattern is not None and not pattern.invalidado:
+        return None
+    if pattern is not None:
+        # o par que sobrou do padrão morto
+        compra = pattern.direction == "compra"
+        piso = float(pattern.p1["price"]) if compra else float(pattern.p2["price"])
+        teto = float(pattern.p2["price"]) if compra else float(pattern.p1["price"])
+        caso = "novo_apos_invalidacao"
+    else:
+        seq = _alternating(df, lows, highs)
+        if len(seq) < 2:
+            return None
+        (i1, k1), (i2, k2) = seq[-2], seq[-1]
+        lo, hi = df["Low"].astype(float), df["High"].astype(float)
+        if (k1, k2) == ("L", "H"):
+            compra, caso = True, "gestacao"
+            piso, teto = round(float(lo.iloc[i1]), 2), round(float(hi.iloc[i2]), 2)
+        elif (k1, k2) == ("H", "L"):
+            compra, caso = False, "gestacao"
+            piso, teto = round(float(lo.iloc[i2]), 2), round(float(hi.iloc[i1]), 2)
+        else:
+            return None
+    if teto <= piso:
+        return None
+    # O PISO já foi perdido: não há 1-2-3 em gestação, há outra estrutura. Dizer
+    # isso é informação; desenhar a faixa mesmo assim seria afirmar o contrário.
+    p = float(price)
+    if (p < piso) if compra else (p > teto):
+        return {"direcao": "compra" if compra else "venda", "caso": caso,
+                "low": None, "high": None,
+                "motivo": (f"o ponto 1 ({piso:,.2f}) foi perdido — não há 1-2-3 de "
+                           f"{'compra' if compra else 'venda'} em gestação nesta série."
+                           if compra else
+                           f"o ponto 1 ({teto:,.2f}) foi rompido — não há 1-2-3 de "
+                           f"venda em gestação nesta série.")}
+    return {
+        "direcao": "compra" if compra else "venda",
+        "caso": caso,
+        "low": round(piso, 2), "high": round(teto, 2),
+        "price": round((piso + teto) / 2, 2),
+        "condicao": (
+            f"vira um 1-2-3 de compra se fizer um FUNDO acima de {piso:,.2f} "
+            f"(perder esse nível mata a formação) e depois romper {teto:,.2f}"
+            if compra else
+            f"vira um 1-2-3 de venda se fizer um TOPO abaixo de {teto:,.2f} "
+            f"(romper esse nível mata a formação) e depois perder {piso:,.2f}"),
+        "gatilho_futuro": round(teto if compra else piso, 2),
+    }
+
+
+def _projecao_storm(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> dict[str, Any] | None:
+    """A faixa do ponto 3 do STORM — e ela é de OUTRA natureza.
+
+    O Storm lê TRÊS CANDLES CONSECUTIVOS, então o ponto 3 não é "um swing futuro
+    qualquer": é **o próximo candle**, e a faixa é do que ele precisa fazer. Numa
+    compra, dados o candle 1 (alta/lateral) e o candle 2 (o fundo), o próximo valida
+    se FECHAR acima do fechamento do ponto 2 e a máxima dele FALHAR em romper a do
+    ponto 1 — a falha é o coração do padrão.
+
+    Por isso a faixa é ``(fechamento do p2, máxima do p1)`` e não a mesma do módulo:
+    a semântica do ponto 2 é invertida entre os dois métodos, e usar a régua do outro
+    poria na tela uma preparação que a regra daquele setup não sustenta.
+
+    ``None`` quando os dois últimos candles não formam o começo do padrão — que é o
+    caso comum, e dizer nada é melhor que desenhar espera pra um setup que não está
+    nascendo.
+    """
+    if len(df) < 2:
+        return None
+    o = df["Open"].astype(float).values
+    h = df["High"].astype(float).values
+    lo = df["Low"].astype(float).values
+    c = df["Close"].astype(float).values
+    a, b = len(df) - 2, len(df) - 1
+    quando = "o PRÓXIMO candle (o ponto 3 do Storm é o candle seguinte ao fundo)"
+    if c[a] >= o[a] and lo[b] < lo[a]:            # 1 alta/lateral + 2 é o fundo
+        piso, teto = round(float(c[b]), 2), round(float(h[a]), 2)
+        if teto <= piso:
+            return None
+        return {"direcao": "compra", "caso": "gestacao_storm", "quando": quando,
+                "low": piso, "high": teto,
+                "price": round((piso + teto) / 2, 2),
+                "condicao": (
+                    f"vira um 1-2-3 Storm de compra se {quando} FECHAR acima de "
+                    f"{piso:,.2f} e a máxima dele NÃO romper {teto:,.2f} — a falha "
+                    f"em romper o ponto 1 é o coração do padrão"),
+                "gatilho_futuro": None}
+    if c[a] <= o[a] and h[b] > h[a]:              # 1 baixa/lateral + 2 é o topo
+        piso, teto = round(float(lo[a]), 2), round(float(c[b]), 2)
+        if teto <= piso:
+            return None
+        return {"direcao": "venda", "caso": "gestacao_storm", "quando": quando,
+                "low": piso, "high": teto,
+                "price": round((piso + teto) / 2, 2),
+                "condicao": (
+                    f"vira um 1-2-3 Storm de venda se {quando} FECHAR abaixo de "
+                    f"{teto:,.2f} e a mínima dele NÃO perder {piso:,.2f} — a falha "
+                    f"em romper o ponto 1 é o coração do padrão"),
+                "gatilho_futuro": None}
+    return None
 
 
 def detect_price_structure(
@@ -900,6 +1067,10 @@ class ActionablePlan:
     # verde do gráfico) e ``123`` (rompimento da máxima do ponto 2). Podem coexistir
     # e até discordar — sem este campo o veredito não dizia de quem estava falando.
     setup_source: str | None = None              # recuo_media | 123 | None
+    # A FAIXA onde o ponto 3 precisa nascer, quando o padrão está em gestação ou
+    # morreu. É a "preparação para acompanhar a hora de entrar" — derivada da regra
+    # do detector, nunca chutada. ``None`` com padrão vivo: ali o ponto 3 já existe.
+    projecao_p3: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -918,6 +1089,7 @@ class ActionablePlan:
             "target": self.target,
             "risk_reward": self.risk_reward,
             "setup_source": self.setup_source,
+            "projecao_p3": self.projecao_p3,
         }
 
 
@@ -1419,6 +1591,7 @@ def build_actionable_plan(
         pattern=struct.pattern.as_dict() if struct.pattern is not None else None,
         invalidation=invalidation, stop=stop, target=target, risk_reward=risk_reward,
         setup_source=setup_source,
+        projecao_p3=_projecao_p3(df, lows, highs, price, struct.pattern, fmt),
     )
 
 
@@ -1846,6 +2019,20 @@ def build_storm_plan(
     if pat is not None and price is not None:
         inval, stop, leituras = _storm_levels(pat, _atr(df), price)
         out.update({"invalidation": inval, "stop": stop, "leituras": leituras})
+        # MORTE do Storm, medida na mesma régua do outro detector: a primeira barra
+        # após o ponto 3 que FECHA além do ponto 2 (o fundo que a reversão declarou).
+        # Sem isto, um Storm morto continuava desenhado com a cor de um vivo.
+        compra = pat.direction != "venda"
+        nivel = float((inval or {}).get("price") or 0.0)
+        idx3 = df.index[df["Date"].dt.strftime(fmt) == pat.p3["date"]]
+        em = (_primeira_barra_alem(df, int(idx3[-1]), nivel, compra, fmt)
+              if len(idx3) and nivel else None)
+        out["pattern"] = {**out["pattern"], "invalidado": em is not None,
+                          "invalidado_em": em}
+    # A faixa do ponto 3 do STORM é de outra natureza (o PRÓXIMO candle, não um swing
+    # futuro): sai da sua própria regra, nunca da do outro método.
+    nasce = pat is None or (out["pattern"] or {}).get("invalidado")
+    out["projecao_p3"] = _projecao_storm(df, fmt) if nasce else None
     return out
 
 
@@ -1863,7 +2050,7 @@ def build_storm_plan_dict(
             "eden": {"disponivel": False, "alinhado": False, "direcao": None,
                      "armadilha": False, "ema_rapida": None, "ema_lenta": None,
                      "preco": None, "motivo": "série indisponível para esta data/frame"},
-            "pattern": None, "ema_lenta_no_p3": None,
+            "pattern": None, "ema_lenta_no_p3": None, "projecao_p3": None,
             "invalidation": None, "stop": None, "leituras": [],
             "qualidade": None, "motivo": "sem dado para ler o Storm",
             "opera": False, "veto": None,

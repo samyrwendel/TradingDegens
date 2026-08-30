@@ -139,6 +139,11 @@ def test_dict_is_json_serializable(synth):
         "setup_state", "setup_source",
         "buy_zone", "realize_zone", "pullback_zone", "pattern",
         "invalidation", "stop", "target", "risk_reward",
+        # projecao_p3 é a FAIXA onde o ponto 3 precisa nascer quando o padrão está em
+        # gestação ou morreu (task 20260830-013). Vazia com padrão vivo — ali o ponto
+        # 3 já existe —, mas a CHAVE existe sempre: a tela não pode ter que adivinhar
+        # se o campo sumiu porque não se aplica ou porque o plano esqueceu.
+        "projecao_p3",
     }
 
 

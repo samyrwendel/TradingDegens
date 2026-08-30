@@ -1406,6 +1406,22 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .ex-ordem, .ex-row, .ex-prot, .ex-conf { grid-template-columns: auto auto 1fr; }
   .ex-preco, .ex-v { grid-column: 1 / -1; text-align: left; }
 }
+/* FANTASMA (task 20260830-013): o card de um padrão que MORREU. Ele não some — a
+   história explica onde o preço está —, mas para de competir com o que está vivo:
+   a borda de identidade perde a cor do método e o card inteiro esmaece um pouco.
+   O texto NÃO esmaece junto: a explicação da morte é justamente o que se precisa
+   ler, e apagá-la seria trocar um defeito por outro. */
+.setup-card.sc-fantasma { border-left-color: #6b7280; opacity: .82; }
+.setup-card.sc-fantasma .sc-title { color: var(--muted); }
+/* a LINHA DA MORTE é a manchete do card fantasma: rótulo em caixa alta e o texto
+   inteiro legível, porque "invalidou" sem o detalhe não deixa conferir nada */
+.sc-row.sc-morto .sc-k { color: var(--red); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .4px; }
+.sc-row.sc-morto .sc-v { color: var(--text); }
+.sc-row.sc-morto .sc-basis { color: var(--text); }
+/* a PREPARAÇÃO é espera, não ação: peso menor que os níveis operáveis, pra não ser
+   lida como "entre nesta faixa" antes de o setup existir */
+.sc-row.sc-prep .sc-k { color: var(--muted); }
+.sc-row.sc-prep .sc-v { color: var(--muted); font-weight: var(--fw-med); }
 .sc-nenhum { border-left: 3px solid var(--border); }
 /* LEITURA EXPLORATÓRIA — o frame na tela não é o que produziu o veredito.
    Trocar o chip de tempo recalcula o PLANO INTEIRO: a mesma ação em 29/08 saía com

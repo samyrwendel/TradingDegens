@@ -2205,6 +2205,16 @@ function stormCardHtml(st) {
       `<span class="sc-basis">${escapeHtml(eden.motivo || "")}</span></div>`);
   }
 
+  if (pat && ehFantasma(pat)) {
+    const inv0 = st.invalidation || {};
+    const quando = pat.invalidado_em ? ` em ${fmtDate(pat.invalidado_em)}` : "";
+    rows.push(scRow("INVALIDADO", `perdeu ${fmtNum(inv0.price != null ? inv0.price : pat.p2.price)}${quando}`,
+      (pat.direction === "venda"
+        ? "o preço FECHOU acima do ponto 2: o topo que a reversão declarou foi desfeito e este Storm não existe mais."
+        : "o preço FECHOU abaixo do ponto 2: o fundo que a reversão declarou foi desfeito e este Storm não existe mais.")
+      + " Os gatilhos abaixo são história — uma nova entrada exige um novo padrão de três candles.",
+      "sc-morto"));
+  }
   if (pat) {
     // Invalidação e stop são COMUNS às duas entradas — mesmo padrão, mesmo ponto 2 —,
     // então ficam FORA das leituras, uma vez só. E no Storm eles são o MESMO nível
@@ -2243,6 +2253,13 @@ function stormCardHtml(st) {
     rows.push(`<div class="sc-row sc-sem-txt">Nenhum 1-2-3 Storm na janela lida ` +
       `(três candles: alta/lateral, fundo, recuperação que falha em romper o ponto 1).</div>`);
   }
+  // A preparação do Storm é de OUTRA natureza: o ponto 3 é o PRÓXIMO candle, não um
+  // swing futuro qualquer. A condição vem escrita do backend, com a regra dele.
+  const pjSt = st.projecao_p3;
+  if (pjSt && pjSt.low != null) {
+    rows.push(scRow("preparação — ponto 3", `${fmtNum(pjSt.low)}–${fmtNum(pjSt.high)}`,
+                    pjSt.condicao || "", "sc-prep"));
+  }
 
   // A manchete: OPERA / NÃO OPERA + a qualidade, e o motivo escrito embaixo.
   const q = STORM_QUALIDADE[st.qualidade] || st.qualidade || "";
@@ -2253,7 +2270,8 @@ function stormCardHtml(st) {
       (st.veto ? `<div class="sc-veto">${escapeHtml(st.veto)}</div>`
                : (st.motivo ? `<div class="sc-hz">${escapeHtml(st.motivo)}</div>` : ""))
     : "";
-  return `<section class="setup-card sc-storm${opera ? "" : " sc-vetado"}` +
+  const mortoSt = ehFantasma(pat);
+  return `<section class="setup-card sc-storm${mortoSt ? " sc-fantasma" : ""}${opera ? "" : " sc-vetado"}` +
     `${pat && pat.direction === "venda" ? " sc-venda" : ""}">` +
     `<div class="sc-head"><span class="sc-title">Storm123` +
     (dir ? ` <span class="sc-dir">${escapeHtml(dir)}</span>` : "") + "</span>" +
@@ -2294,8 +2312,25 @@ function renderSetupCards(a) {
   const pat = a.pattern;
   if (pat) {
     const pdir = (PAT_DIR[pat.direction] || [])[1] || "";
+    // declarado AQUI, no topo do bloco: o detalhe da morte é a primeira linha do
+    // card, e uma const usada antes da declaração é ReferenceError em tempo de
+    // execução — o card inteiro sumiria em vez de sair sem uma linha
+    const morto = ehFantasma(pat);
     const rr = a.risk_reward || {};
     const rows = [];
+    // O DETALHE DA MORTE vem PRIMEIRO — antes dos níveis, porque muda o sentido de
+    // todos eles. Qual nível foi perdido, QUANDO, e o que significa pra quem estava
+    // posicionado: um selo "invalidado" sozinho não deixa conferir nada.
+    if (morto) {
+      const inv0 = a.invalidation || {};
+      const quando = pat.invalidado_em ? ` em ${fmtDate(pat.invalidado_em)}` : "";
+      rows.push(scRow("INVALIDADO", `perdeu ${fmtNum(inv0.price != null ? inv0.price : pat.p3.price)}${quando}`,
+        (pat.direction === "venda"
+          ? "o preço FECHOU acima do ponto 3: os topos deixaram de ser descendentes e este 1-2-3 de venda não existe mais."
+          : "o preço FECHOU abaixo do ponto 3: os fundos deixaram de ser ascendentes e este 1-2-3 de compra não existe mais.")
+        + " Quem estava posicionado por ele perdeu a premissa — o gatilho deste padrão não vale mais, e uma nova entrada exige um novo ponto 3.",
+        "sc-morto"));
+    }
     if (pat.trigger != null) {
       rows.push(scRow("gatilho", fmtNum(pat.trigger),
         pat.direction === "venda" ? "perda da mínima do ponto 2"
@@ -2338,10 +2373,26 @@ function renderSetupCards(a) {
     // distingue um rompimento de ontem de um trade que já andou 91% do caminho, e
     // são coisas diferentes pra quem vai entrar agora.
     const andado = rr.andado_pct;
-    const pstate = (PAT_STATE[pat.state] || pat.state || "")
-      + (andado != null ? ` · andou ${fmtPct0(andado)} do caminho` : "");
+    // INVALIDADO manda no rótulo de estado: "em formação" num padrão morto é a tela
+    // descrevendo um setup que não existe mais. O estado nativo continua ao lado —
+    // ele é a história, e é ela que explica onde o preço está.
+    const pstate = morto
+      ? `invalidado · era ${PAT_STATE[pat.state] || pat.state || ""}`
+      : (PAT_STATE[pat.state] || pat.state || "")
+        + (andado != null ? ` · andou ${fmtPct0(andado)} do caminho` : "");
+    // A PREPARAÇÃO: onde o ponto 3 precisa nascer pra existir setup. A condição vem
+    // escrita do backend — é a regra do detector, não uma frase que a tela inventa.
+    const pj0 = a.projecao_p3;
+    if (pj0) {
+      rows.push(pj0.low != null
+        ? scRow("preparação — ponto 3", `${fmtNum(pj0.low)}–${fmtNum(pj0.high)}`,
+                pj0.condicao || "", "sc-prep")
+        : `<div class="sc-row sc-sem"><span class="sc-k">preparação — ponto 3</span>` +
+          `<span class="sc-v sc-sem-v">sem faixa a marcar</span>` +
+          `<span class="sc-basis">${escapeHtml(pj0.motivo || "")}</span></div>`);
+    }
     cards.push(
-      `<section class="setup-card sc-123${pat.direction === "venda" ? " sc-venda" : ""}">` +
+      `<section class="setup-card sc-123${morto ? " sc-fantasma" : ""}${pat.direction === "venda" ? " sc-venda" : ""}">` +
       `<div class="sc-head"><span class="sc-title">Setup123` +
       (pdir ? ` <span class="sc-dir">${escapeHtml(pdir)}</span>` : "") + "</span>" +
       (pstate ? `<span class="sc-now">${escapeHtml(pstate)}</span>` : "") +
@@ -2635,7 +2686,19 @@ const EMA_COLORS = { "8": "#4be3a0", "21": "#e3894b", "50": "#e34bd0", "80": "#7
 // never read the same on the chart. Blue for compra, orange for venda; both stay
 // clear of the green/red candle bodies.
 const PAT_COLORS = { compra: "#6ea8fe", venda: "#ff9f43" };
+// PADRÃO MORTO É FANTASMA. Um 1-2-3 que perdeu o ponto 3 continuava desenhado com a
+// MESMA cor e o mesmo peso de um vivo — e a cor é a primeira coisa que se lê. O morto
+// sai do vocabulário de cor dos vivos (azul de compra / laranja de venda) e vira
+// cinza apagado: continua na tela, porque a história explica onde o preço está, mas
+// para de competir com o que ainda vale.
+const COR_FANTASMA = "#6b7280";
+
+function ehFantasma(pat) {
+  return !!(pat && pat.invalidado);
+}
+
 function patColor(pat) {
+  if (ehFantasma(pat)) return COR_FANTASMA;
   return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
 }
 // Faixas do plano acionável desenhadas no gráfico: compra (verde), realização /
@@ -2646,7 +2709,8 @@ function patColor(pat) {
 // função (onde se realiza), e quando os dois são o mesmo nível vira UMA faixa só.
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc",
                       stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad",
-                      target: "#26de81", storm: "#7cb0ff", inativa: "#8b97ad" };
+                      target: "#26de81", storm: "#7cb0ff", inativa: "#8b97ad",
+                      projecao: "#9aa4b8" };
 // ``inativa`` é o cinza de quem NÃO é entrada agora. A faixa da média saía verde
 // com o rótulo "não ativa agora" escrito nela — a cor afirmando o contrário do
 // texto, e verde é "pode ir" na tela inteira. Tracejado e apagado não bastavam:
@@ -3372,6 +3436,17 @@ function planZones(a) {
   // operá-lo. Nada se perde — o card do Storm continua com cada número e com o
   // motivo do veto escrito.
   if (camadaVisivel("storm")) planZonesStorm(a, out, marcar);
+  // A FAIXA DO PONTO 3 — a "preparação para acompanhar a hora de entrar". Ela só
+  // existe quando o padrão está em gestação ou morreu; com padrão vivo o ponto 3 já
+  // está desenhado, e repetir a espera seria dizer que falta o que já existe.
+  // Cor NEUTRA de propósito: é uma faixa de ESPERA, não um nível operável — pintá-la
+  // com o verde de compra faria dela um convite a entrar antes do setup existir.
+  const pj = a.projecao_p3;
+  if (pj && pj.low != null && pj.high != null) {
+    out.push({ ...pj, color: ZONE_COLORS.projecao, familia: "plano", inactive: true,
+               tag: nomeiaTag(`onde o ponto 3 precisa nascer (${pj.direcao})`, "plano", marcar),
+               tagCurto: nomeiaTag("ponto 3 a formar", "plano", marcar) });
+  }
   const pb = a.pullback_zone;
   const buyPrice = buy && buy.price;
   const isBand = pb && pb.low != null && pb.high != null;
@@ -3557,9 +3632,17 @@ function drawPriceChart(canvas, chart, a) {
     }
   });
   if (pat) {
-    axisPills.push({ y: y(pat.trigger), text: fmtAxis(pat.trigger), bg: patColor(pat), fg: "#000000" });
+    // sem pílula de gatilho num padrão morto: o eixo é onde o olho procura preço
+    // operável, e pôr ali o gatilho de um setup extinto é convidar a operá-lo
+    if (!ehFantasma(pat)) {
+      axisPills.push({ y: y(pat.trigger), text: fmtAxis(pat.trigger), bg: patColor(pat), fg: "#000000" });
+    }
   }
   layoutAxisPills(axisPills, padT + pillH / 2 + 1, padT + plotH - pillH / 2 - 1, pillH + 2);
+  // As pílulas do eixo ficam OBSERVÁVEIS (mesmo padrão do dataset.levelLabels): é o
+  // lugar onde o olho procura preço operável, e "o gatilho de um padrão morto não
+  // aparece aqui" é regra de tela — regra que não se mede volta sozinha.
+  canvas.dataset.axisPills = JSON.stringify(axisPills.map((p) => p.text));
   const pillCovers = (yy) => axisPills.some((p) => Math.abs(p.ry - yy) < pillH);
 
   // gridlines + price labels (y axis, right) — o número de grade some onde uma
@@ -3781,6 +3864,11 @@ function drawPriceChart(canvas, chart, a) {
   // colisão que o módulo já declarava e a tela cometia.
   if (pat && camadaVisivel("plano")) {
     const col = patColor(pat);
+    // Além da cor, o PESO: o morto perde opacidade e a linha do gatilho, que é o
+    // convite a operar. Um gatilho desenhado num padrão que já morreu é o pior
+    // nível da tela — diz "compre aqui" sobre um setup que não existe mais.
+    const fantasma = ehFantasma(pat);
+    if (fantasma) ctx.globalAlpha = 0.45;
     const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
     const pts = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
       .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
@@ -3791,9 +3879,11 @@ function drawPriceChart(canvas, chart, a) {
       pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
       ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
       // trigger horizontal line (translucent version of the direction colour)
-      const ty = y(pat.trigger);
-      ctx.strokeStyle = col + "80"; ctx.setLineDash([2, 3]);
-      ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke(); ctx.setLineDash([]);
+      if (!fantasma) {
+        const ty = y(pat.trigger);
+        ctx.strokeStyle = col + "80"; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke(); ctx.setLineDash([]);
+      }
       // point circles with number + price beside them
       pts.forEach((p) => {
         const px = x(p.i), cy = y(p.price), off = p.kind === "L" ? 14 : -14;
@@ -3814,6 +3904,14 @@ function drawPriceChart(canvas, chart, a) {
       }
       // o número do gatilho vai pra pílula no eixo direito (junto com preço/zonas);
       // aqui fica só a linha do 1-2-3 e os pontos numerados na vela.
+      if (fantasma) {
+        const p0 = pts[0];
+        ctx.font = "bold 10px ui-monospace, Menlo, monospace";
+        ctx.textAlign = "left"; ctx.fillStyle = col;
+        ctx.fillText("invalidado", x(p0.i) + 11,
+                     y(p0.price) + (p0.kind === "L" ? 26 : -26));
+      }
+      ctx.globalAlpha = 1;
     }
   }
 
