@@ -231,7 +231,11 @@ def test_na_run_do_setup123_o_storm_nao_aparece_no_grafico(base):
         m = page.evaluate(_LE)
         assert m["camada"] == "plano", m
         assert not any("Storm" in z for z in m["zonas"]), m["zonas"]
-        assert m["camadasVisivel"] is False, ("controle que não faz nada é ruído", m)
+        # O seletor existe (é o controle da tela — task 010), mas NÃO oferece uma
+        # leitura que este plano não tem: botão que liga o nada é promessa falsa.
+        assert m["camadasVisivel"] is True, m
+        assert "Storm123" not in m["camadasBtn"], m["camadasBtn"]
+        assert "Setup123" in m["camadasBtn"], m["camadasBtn"]
         browser.close()
 
 
@@ -248,7 +252,9 @@ def test_ligar_a_outra_camada_nomeia_TODOS_os_rotulos(base, viewport):
         _abre(page, base, "storm123")
         antes = page.evaluate(_LE)
         assert antes["camadasVisivel"] is True, antes
-        assert antes["camadasBtn"] == ["Setup123"], antes
+        # leituras que existem + as duas famílias de média (task 010)
+        assert antes["camadasBtn"] == ["Setup123", "Storm123",
+                                       "MMS (Padrão)", "EMA (Erick)"], antes
 
         page.click('.camada-btn[data-camada="plano"]')
         page.wait_for_timeout(250)
@@ -258,10 +264,16 @@ def test_ligar_a_outra_camada_nomeia_TODOS_os_rotulos(base, viewport):
         for z in m["zonas"]:
             assert z.startswith("Setup123 · ") or z.startswith("Storm123 "), (
                 "rótulo anônimo com duas famílias na tela", z, m["zonas"])
-        # e as médias das DUAS leituras entram junto: a faixa do recuo sem a linha
-        # da média que ela nomeia seria uma faixa flutuando
-        assert "50" in m["medias"]["ma"], m["medias"]
+        # A EMA 80 acompanha a leitura do Storm — ela é METADE do filtro Éden, e um
+        # veto que não se confere na tela não é veto.
         assert "80" in m["medias"]["ema"], m["medias"]
+        # As MÉDIAS têm controle PRÓPRIO (task 010): ligar uma leitura não acende
+        # família de média por conta própria. Ligar a MMS acende.
+        assert m["medias"]["ma"] == [], ("média é escolha separada", m["medias"])
+        page.click('.camada-btn[data-camada="mms"]')
+        page.wait_for_timeout(200)
+        com = page.evaluate(_LE)
+        assert "50" in com["medias"]["ma"], com["medias"]
         browser.close()
 
 
@@ -284,18 +296,20 @@ def test_desligar_a_camada_volta_ao_rotulo_limpo(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_a_camada_extra_nao_vaza_pra_outra_analise(base):
-    """Camada extra é escolha DAQUELA tela. Carregá-la pra outra análise mostraria
-    níveis de um método que talvez nem exista ali, nomeados sem ninguém ter pedido."""
+def test_sem_toque_no_seletor_cada_analise_abre_na_camada_do_seu_metodo(base):
+    """DECISÃO REVISADA pelo Samyr (task 010): a 009 zerava as camadas a cada análise,
+    e ele pediu o contrário — "eu deveria poder selecionar a camada do que eu quero
+    ver". Enquanto ele NÃO tocou no seletor, cada análise abre na camada do seu
+    método, que é o certo pra quem só quer ver o resultado. O que persiste, e o que
+    acontece depois do primeiro toque, está em test_webui_camadas_e2e.py."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, "storm123")
-        page.click('.camada-btn[data-camada="plano"]')
-        page.wait_for_timeout(200)
-        assert page.evaluate("() => _camadas.size") == 1
-        _abre(page, base, "storm123")          # reabre: estado zerado
-        assert page.evaluate("() => _camadas.size") == 0
+        assert page.evaluate("() => [..._camadas].sort()") == ["storm"], "abre no Storm"
+        _abre(page, base, "setup123")
+        assert page.evaluate("() => [..._camadas].sort()") == ["mms", "plano"], (
+            "e o Setup123 abre no plano, com a família de média dele")
         browser.close()
 
 

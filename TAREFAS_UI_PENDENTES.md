@@ -737,3 +737,24 @@ Por método: padrão e Setup123 → MMS 20/50/200 · Erick → EMA 8/21/50 · St
 EMA 8/80 (o par do Éden). A camada extra não vaza pra outra análise.
 
 Provado em `tests/test_webui_um_grafico_um_metodo_e2e.py` (13). Governança: **DA-088**.
+
+---
+
+## 17. As camadas são do usuário (task 20260830-010)
+
+"Eu deveria poder selecionar a camada do que eu quero ver" + "no time frame que eu
+quiser". Revisa a 009 num ponto: lá a camada extra era zerada a cada análise; agora
+ela **persiste na sessão**.
+
+- **Abre** na camada do método — ninguém configura nada pra ver o próprio resultado.
+- **Depois do primeiro toque** a escolha é dele e vale nas análises seguintes, em
+  qualquer timeframe (`sessionStorage`, morre ao fechar a aba).
+- **Dois grupos:** LEITURAS (Setup123 × Storm123, só as que existem no plano) e
+  MÉDIAS (MMS do Padrão × EMA do Erick). A EMA 80 acompanha o Storm — é metade do
+  filtro Éden.
+- **As duas leituras juntas** é o valor (comparação), e nada fica anônimo: faixa,
+  ponto numerado, legenda, chip de R:R e a etiqueta CURTA (a que o telefone desenha).
+- **Dois chãos:** a preferência nunca deixa o gráfico VAZIO ao abrir uma análise, e a
+  liberdade de frame não apaga qual é o frame do veredito (DA-085).
+
+Provado em `tests/test_webui_camadas_e2e.py` (13). Governança: **DA-089**.

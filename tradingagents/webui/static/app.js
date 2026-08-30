@@ -1182,10 +1182,10 @@ function renderResult(snap) {
   renderDegraded(r.degraded);
   hideDegrade();
 
-  // Camada extra é escolha da tela que se está lendo, não preferência global:
-  // carregá-la pra outra análise mostraria níveis de um método que talvez nem exista
-  // ali, com o rótulo nomeado sem que ninguém tenha pedido.
-  _camadas = new Set();
+  // As camadas: padrão do método enquanto ele não tocou no seletor; a escolha DELE
+  // daí em diante (a 009 zerava a cada análise — o Samyr pediu o contrário, e ele
+  // está certo: reconfigurar a cada tela é transformar preferência em tarefa).
+  iniciaCamadas(r.actionable);
   _openLive = r.live_price || null;
   renderHeadPrice(r.actionable, _openLive);
   renderSetupCards(r.actionable);
@@ -2815,25 +2815,39 @@ function reevaluate(tf) {
     .catch(() => { $("formError").textContent = "falha ao reavaliar"; });
 }
 
-// O seletor de CAMADAS. Aparece só quando o plano tem uma segunda leitura pra
-// oferecer — controle que nunca faz nada é ruído. É seleção, então é TEXTO (DA-078
-// regra 9), e diz no title o que acontece ao ligar: os rótulos passam a se nomear.
+// O SELETOR DE CAMADAS. Dois grupos, porque são duas perguntas: quais LEITURAS
+// estão traçadas e quais famílias de MÉDIA. Seleção é texto (DA-078 regra 9), e o
+// ativo se distingue por cor e peso — mesma gramática do seletor de timeframe.
+//
+// Fica sempre visível: não é mais "um extra que aparece quando há outra família", é
+// o controle do que a tela mostra. As leituras listadas são as que EXISTEM neste
+// plano — botão que liga o nada seria promessa falsa.
 function renderCamadasSelector(a) {
   const el = $("camadasSelector");
   if (!el) return;
-  const outras = camadasDisponiveis(a).filter((f) => f !== camadaDoMetodo());
-  if (!outras.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
-  el.innerHTML = `<span class="camadas-k">camadas</span>` + outras.map((f) => {
-    const on = _camadas.has(f);
-    const tit = on
-      ? `Esconder os níveis do ${CAMADA_NOME[f]} — eles continuam inteiros no card dele`
-      : `Mostrar também os níveis do ${CAMADA_NOME[f]} neste gráfico; com as duas ` +
-        `famílias na tela cada rótulo passa a dizer de qual método é`;
-    return `<button type="button" class="camada-btn${on ? " is-active" : ""}" ` +
-      `data-camada="${f}" aria-pressed="${on}" title="${escapeHtml(tit)}">` +
-      `${escapeHtml(CAMADA_NOME[f])}</button>`;
-  }).join("");
-  el.classList.remove("hidden");
+  const leituras = leiturasDisponiveis(a);
+  const grupo = (rotulo, itens, ajuda) => itens.length
+    ? `<span class="camadas-k" title="${escapeHtml(ajuda)}">${rotulo}</span>` +
+      itens.map((f) => {
+        const on = camadasAtivas().has(f);
+        const nome = CAMADA_NOME_TODAS[f];
+        const tit = on
+          ? `Esconder ${nome} no gráfico` +
+            (CAMADAS_LEITURA.includes(f) ? " — os níveis continuam inteiros no card dele" : "")
+          : `Mostrar ${nome} no gráfico` +
+            (CAMADAS_LEITURA.includes(f)
+              ? "; com duas leituras na tela cada rótulo passa a dizer de qual método é" : "");
+        return `<button type="button" class="camada-btn${on ? " is-active" : ""}" ` +
+          `data-camada="${f}" aria-pressed="${on}" title="${escapeHtml(tit)}">` +
+          `${escapeHtml(nome)}</button>`;
+      }).join("")
+    : "";
+  el.innerHTML =
+    grupo("leituras", leituras, "Quais níveis e pontos o gráfico traça") +
+    grupo("médias", CAMADAS_MEDIA,
+          "Famílias de média: MMS é a do Padrão, EMA 8/21/50 é a do Erick. " +
+          "A EMA 80 do Éden acompanha a leitura do Storm.");
+  el.classList.toggle("hidden", !el.innerHTML);
   bindCamadasSelector();
 }
 
@@ -2845,7 +2859,11 @@ function bindCamadasSelector() {
     const btn = e.target.closest("button.camada-btn");
     if (!btn) return;
     const f = btn.dataset.camada;
-    if (_camadas.has(f)) _camadas.delete(f); else _camadas.add(f);
+    const ativas = camadasAtivas();
+    if (ativas.has(f)) ativas.delete(f); else ativas.add(f);
+    // A partir do primeiro toque a escolha é DELE, e vale nas próximas análises.
+    _camadasTocado = true;
+    salvaCamadas();
     // redesenha com o estado do canvas (o plano e o chart moram nele)
     const cv = $("priceChart");
     if (cv && cv._chart) renderChartCard(cv._chart, _openTicker, cv._actionable);
@@ -2959,16 +2977,89 @@ const MEDIAS_DA_CAMADA = {
   plano: { padrao: ["20", "50", "200"], erick: [], setup123: ["20", "50", "200"] },
   storm: { ema: ["8", "80"] },
 };
-// Camadas EXTRA que o usuário pediu (fora a do método aberto). Some ao trocar de
-// análise: é escolha de leitura daquela tela, não preferência global.
-let _camadas = new Set();
+// AS CAMADAS SÃO DO USUÁRIO. "Eu deveria poder selecionar a camada do que eu quero
+// ver, no time frame que eu quiser" — então o gráfico abre na leitura do método
+// (ninguém deve precisar configurar nada pra ver o próprio resultado) e a partir
+// dali quem manda é ele, em qualquer frame.
+//
+// Duas famílias de camada, porque são duas perguntas diferentes:
+//   • LEITURAS — quais níveis/pontos estão traçados (plano × Storm);
+//   • MÉDIAS   — quais famílias de média (MMS do Padrão × EMA do Erick). Elas vêm
+//     no payload sempre, então ligar/desligar é decisão de tela, não de backend.
+// A EMA 80 acompanha a leitura do Storm: ela é METADE do filtro Éden, e um Éden sem
+// a lenta na tela é um veto que não se confere.
+//
+// PERSISTÊNCIA POR SESSÃO: enquanto ele NÃO tocou no seletor, cada análise abre na
+// camada do seu método — que é o comportamento certo pra quem só quer ver o
+// resultado. Depois do primeiro toque a escolha DELE passa a valer nas análises
+// seguintes; obrigar a reconfigurar a cada uma seria transformar preferência em
+// tarefa repetida. Some ao fechar a aba (sessionStorage), não vira config global.
+const CAMADAS_LEITURA = ["plano", "storm"];
+const CAMADAS_MEDIA = ["mms", "emas"];
+const CAMADA_NOME_TODAS = {
+  plano: "Setup123", storm: "Storm123", mms: "MMS (Padrão)", emas: "EMA (Erick)",
+};
+// Médias que cada família de média traça, e a do Éden que anda com o Storm.
+const JANELAS_DA_MEDIA = { mms: { ma: ["20", "50", "200"] }, emas: { ema: ["8", "21", "50"] } };
+const _CHAVE_CAMADAS = "td.camadas.v1";
+
+// `null` = ainda não inicializado. É diferente de um conjunto VAZIO, que significa
+// "ele desligou tudo" e tem de ser respeitado. Sem a distinção, um gráfico desenhado
+// fora do fluxo de abrir análise (o CONFRONTO, por exemplo) sairia sem faixa nenhuma
+// e sem legenda — o estado nasceria vazio e ninguém o teria inicializado.
+let _camadas = null;
+let _camadasTocado = false;
+
+// O padrão de ABERTURA de um método: a leitura dele e a família de média dele.
+function camadasPadrao(metodo) {
+  const leitura = CAMADA_DO_METODO[metodo] || "plano";
+  const medias = metodo === "erick" ? ["emas"] : metodo === "storm123" ? [] : ["mms"];
+  return new Set([leitura, ...medias]);
+}
 
 function camadaDoMetodo() {
   return CAMADA_DO_METODO[_openMethod] || "plano";
 }
 
+// O conjunto ATIVO, com inicialização preguiçosa: qualquer desenho fora do fluxo de
+// abrir análise cai no padrão do método em vez de num gráfico em branco.
+function camadasAtivas() {
+  if (_camadas === null) _camadas = camadasPadrao(_openMethod);
+  return _camadas;
+}
+
 function camadaVisivel(familia) {
-  return familia === camadaDoMetodo() || _camadas.has(familia);
+  return camadasAtivas().has(familia);
+}
+
+function salvaCamadas() {
+  try {
+    sessionStorage.setItem(_CHAVE_CAMADAS,
+      JSON.stringify({ tocado: _camadasTocado, camadas: [...camadasAtivas()] }));
+  } catch (e) { /* aba privada / storage bloqueado: a sessão só não lembra */ }
+}
+
+function carregaCamadas() {
+  try {
+    const raw = sessionStorage.getItem(_CHAVE_CAMADAS);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !Array.isArray(o.camadas)) return null;
+    return { tocado: !!o.tocado, camadas: new Set(o.camadas) };
+  } catch (e) { return null; }
+}
+
+// Chamado ao ABRIR uma análise. Sem toque do usuário, segue o método. Com toque,
+// mantém a escolha dele — mas nunca deixa o gráfico VAZIO: se a preferência não
+// acender nenhuma leitura que exista neste plano, a do método volta como chão.
+// Gráfico em branco não é liberdade, é defeito.
+function iniciaCamadas(a) {
+  const salvo = carregaCamadas();
+  _camadasTocado = !!(salvo && salvo.tocado);
+  _camadas = _camadasTocado ? new Set(salvo.camadas) : camadasPadrao(_openMethod);
+  const existem = camadasDisponiveis(a);
+  if (!existem.some((f) => _camadas.has(f))) _camadas.add(camadaDoMetodo());
+  salvaCamadas();
 }
 
 // O R:R QUE O GRÁFICO CARIMBA É O DA LEITURA DESENHADA. Ele saía sempre de
@@ -3012,22 +3103,37 @@ function familiasNaTela(a) {
   return camadasDisponiveis(a).filter(camadaVisivel);
 }
 
+// As camadas de LEITURA que este plano tem pra oferecer (as de média existem sempre).
+function leiturasDisponiveis(a) {
+  return camadasDisponiveis(a).filter((f) => CAMADAS_LEITURA.includes(f));
+}
+
 function nomeiaTag(tag, familia, precisa) {
   return precisa ? `${CAMADA_NOME[familia]} · ${tag}` : tag;
 }
 
-// Médias que o gráfico desenha: as do método aberto + as das camadas ligadas.
+// Médias que o gráfico desenha: as famílias LIGADAS, mais a lenta do Éden quando a
+// leitura do Storm está na tela (ela é metade do filtro — sem ela o veto não se
+// confere). Ligar e desligar é decisão de tela: as duas famílias vêm no payload.
 function mediasVisiveis(a) {
-  const fams = familiasNaTela(a);
   const ma = new Set(), ema = new Set();
-  fams.forEach((f) => {
-    if (f === "storm") { (MEDIAS_DA_CAMADA.storm.ema || []).forEach((w) => ema.add(w)); return; }
-    const doMetodo = MEDIAS_DA_CAMADA.plano[_openMethod];
-    // Método do plano desconhecido (ou o plano ligado como camada extra numa run do
-    // Storm): cai na família Padrão, que é a que o plano estrutural usa de fato.
-    (doMetodo || MEDIAS_DA_CAMADA.plano.padrao).forEach((w) => ma.add(w));
-    if (_openMethod === "erick") ["8", "21", "50"].forEach((w) => ema.add(w));
+  // No CONFRONTO as duas famílias aparecem sempre: comparar Padrão × Erick é o
+  // objetivo declarado daquela tela, e esconder a média de uma das colunas seria
+  // tirar do confronto justamente o que ele confronta.
+  if (_openView === "compare") {
+    ["20", "50", "200"].forEach((w) => ma.add(w));
+    ["8", "21", "50"].forEach((w) => ema.add(w));
+    return { ma, ema };
+  }
+  const ativas = camadasAtivas();
+  CAMADAS_MEDIA.forEach((f) => {
+    if (!ativas.has(f)) return;
+    (JANELAS_DA_MEDIA[f].ma || []).forEach((w) => ma.add(w));
+    (JANELAS_DA_MEDIA[f].ema || []).forEach((w) => ema.add(w));
   });
+  if (camadaVisivel("storm") && a && a.storm) {
+    (MEDIAS_DA_CAMADA.storm.ema || []).forEach((w) => ema.add(w));
+  }
   return { ma, ema };
 }
 
@@ -3057,7 +3163,10 @@ function planZones(a) {
   // o caso normal e não merece prefixo repetido em cada linha.
   const marcar = familiasNaTela(a).length > 1;
   const vePlano = camadaVisivel("plano");
-  if (!vePlano) return planZonesStorm(a, out, marcar);
+  // Sem a camada do plano, o gráfico é o do Storm — se ELA estiver ligada. Com as
+  // duas desligadas o gráfico fica só com as velas, e é isso mesmo: ele pediu pra
+  // não ver nível nenhum. (O chão que impede a ABERTURA vazia é o `iniciaCamadas`.)
+  if (!vePlano) return camadaVisivel("storm") ? planZonesStorm(a, out, marcar) : out;
   // A zona da média é o setup do RECUO — NUNCA sai rotulada só "compra", porque
   // o 1-2-3 de compra é OUTRO setup, com outro gatilho, desenhado no mesmo gráfico.
   // Era essa colisão de nome que fazia o ZEC-USD 4h parecer contradição: a faixa
@@ -3077,7 +3186,9 @@ function planZones(a) {
     out.push({ ...buy, color: fora ? ZONE_COLORS.inativa : ZONE_COLORS.buy,
                inactive: fora, familia: "plano",
                tag: nomeiaTag(fora ? `${nome} — não ativa agora` : nome, "plano", marcar),
-               tagCurto: fora ? `${curto} (inativa)` : curto });
+               // a etiqueta CURTA é a que o gráfico estreito desenha: se ela não se
+               // nomeia, o telefone volta a ter faixa anônima com duas famílias
+               tagCurto: nomeiaTag(fora ? `${curto} (inativa)` : curto, "plano", marcar) });
   }
   // A região de realização só se chama "alvo" quando de fato é: num setup de VENDA
   // ela é o topo acima (resistência, nunca o alvo de um short) e, quando coincide
@@ -3088,7 +3199,8 @@ function planZones(a) {
     const rzColor = rz.role === "resistencia" ? ZONE_COLORS.resist : ZONE_COLORS.realize;
     out.push({ ...rz, color: rzColor, familia: "plano",
                tag: nomeiaTag(rz.role_label || "realização (alvo)", "plano", marcar),
-               tagCurto: rz.role === "resistencia" ? "resistência" : "realização" });
+               tagCurto: nomeiaTag(rz.role === "resistencia" ? "resistência" : "realização",
+                                   "plano", marcar) });
   }
   // Alvo (TP) do padrão. Mesmo nível da realização → NÃO desenha um segundo: a
   // faixa que já está lá passa a dizer que ela é o alvo.
@@ -3097,10 +3209,11 @@ function planZones(a) {
     const twin = tg.same_as_realize && out.find((z) => z.color === ZONE_COLORS.realize && z.price === tg.price);
     if (twin) {
       twin.tag = nomeiaTag("realização = alvo (TP)", "plano", marcar);
-      twin.tagCurto = "alvo"; twin.color = ZONE_COLORS.target;
+      twin.tagCurto = nomeiaTag("alvo", "plano", marcar); twin.color = ZONE_COLORS.target;
     } else {
       out.push({ ...tg, color: ZONE_COLORS.target, familia: "plano",
-                 tag: nomeiaTag("alvo (TP)", "plano", marcar), tagCurto: "alvo" });
+                 tag: nomeiaTag("alvo (TP)", "plano", marcar),
+                 tagCurto: nomeiaTag("alvo", "plano", marcar) });
     }
   }
   // Invalidação e stop são LINHAS (nível exato), não faixas: a invalidação é o
@@ -3115,7 +3228,8 @@ function planZones(a) {
   if (st && st.price != null) {
     out.push({ label: st.label, price: st.price, low: null, high: null,
                color: ZONE_COLORS.stop, familia: "plano",
-               tag: nomeiaTag("stop (SL)", "plano", marcar), tagCurto: "stop", dash: [6, 4] });
+               tag: nomeiaTag("stop (SL)", "plano", marcar),
+               tagCurto: nomeiaTag("stop", "plano", marcar), dash: [6, 4] });
   }
   // NÍVEIS DO STORM — outra leitura, outra cor, e o nome dela no rótulo: nunca se
   // confundem com os do 1-2-3 deste módulo, que estão no mesmo gráfico com números
@@ -3158,11 +3272,11 @@ function planZonesStorm(a, out, marcar) {
   // O stop é UM (comum às duas entradas); gatilho e alvo são de CADA leitura, e por
   // isso o rótulo diz de qual — dois "Storm · gatilho" no mesmo gráfico seriam dois
   // níveis com o mesmo nome, que é o defeito da DA-075.
-  stLinha((storm.stop || {}).price, `${pre} · stop (SL)`, "Storm SL", [6, 4]);
+  stLinha((storm.stop || {}).price, `${pre} · stop (SL)`, `${pre} SL`, [6, 4]);
   (storm.leituras || []).forEach((L) => {
     const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
-    stLinha(L.trigger, `${pre} ${n} · gatilho`, `Storm ${n} gat.`, [5, 3]);
-    stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `Storm ${n} TP`, [2, 3]);
+    stLinha(L.trigger, `${pre} ${n} · gatilho`, `${pre} ${n} gat.`, [5, 3]);
+    stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `${pre} ${n} TP`, [2, 3]);
   });
   return out;
 }
