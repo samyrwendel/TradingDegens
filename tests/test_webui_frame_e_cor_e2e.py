@@ -538,3 +538,61 @@ def test_na_comparacao_ninguem_e_exploratorio(base):
         assert m["antes"] is True and m["depois"] is True, m
         assert m["durante"] is False, ("o confronto não carimba coluna de exploratória", m)
         browser.close()
+
+
+# ────────── invariante 6 da spec: UM vocabulário de timeframe na tela ─────────
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_todas_as_superficies_escrevem_o_frame_do_MESMO_jeito(base):
+    """A tela tinha TRÊS formas concorrentes: o carimbo do cabeçalho e o selo do
+    gráfico liam `TF_LABEL` ("Diário"), enquanto o bloco de cards ecoava a prosa do
+    backend ("diário (referência) · semanal (tendência de fundo)"). Três nomes pro
+    mesmo frame na mesma tela é como o bug do frame nasceu — cada correção inventava
+    o seu jeito, e ninguém conseguia comparar duas superfícies.
+
+    Agora há UM lugar canônico (`tfNome`), e este teste prova que todas consomem
+    dele: o nome que cada superfície mostra é IDÊNTICO ao canônico."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        m = page.evaluate("""() => {
+          const canonico = tfNome(_tf);
+          const bloco = document.querySelector('#setupCards .sc-frame-topo .sc-frame-v');
+          return {
+            canonico,
+            grafico: document.getElementById('priceChart').dataset.tf || '',
+            bloco: bloco ? bloco.innerText.trim() : '',
+            veredito: (document.getElementById('verdictTf') || {}).innerText || '',
+            candle: (document.querySelector('#headPrice .hp-ref .hp-tag') || {}).innerText || '',
+            // e o vocabulário cobre TODOS os frames declarados, sem buraco
+            todos: ALL_TFS.map(([tf]) => [tf, tfNome(tf), tfCurto(tf)]),
+          };
+        }""")
+        assert m["canonico"] == "4h", m
+        assert m["bloco"] == m["canonico"], ("o bloco de cards fala outro idioma", m)
+        assert m["canonico"] in m["grafico"], ("o selo do gráfico", m)
+        assert m["canonico"].lower() in m["veredito"].lower(), ("o carimbo do veredito", m)
+        assert m["canonico"].lower() in m["candle"].lower(), ("o carimbo do candle", m)
+        # nenhum frame sem nome: o vocabulário não pode ter buraco que caia no código
+        for tf, nome, curto in m["todos"]:
+            assert nome and curto, (tf, nome, curto)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_a_prosa_do_backend_nao_some_vira_title(base):
+    """O que o backend escreve ("diário (referência) · semanal (tendência de fundo)")
+    é CONTEÚDO — diz que o diário lê o semanal como fundo —, não o nome do frame.
+    Some do rótulo, fica no title: nada de informação se perde na unificação."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        m = page.evaluate("""() => {
+          const c = document.querySelector('#setupCards .sc-frame-topo');
+          return {title: c ? (c.getAttribute('title') || '') : '',
+                  texto: c ? c.innerText : ''};
+        }""")
+        assert "intradiário" in m["title"], ("a prosa do backend continua acessível", m)
+        assert "intradiário" not in m["texto"], ("mas não é o rótulo", m)
+        browser.close()

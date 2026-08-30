@@ -1539,7 +1539,7 @@ function renderConfrontControl(snap) {
 }
 function confrontOptionLabel(r) {
   const m = r.method === "erick" ? "Erick" : (r.method === "padrao" ? "Padrão" : "");
-  const tf = TF_LABEL[r.verdict_timeframe || "1d"] || (r.verdict_timeframe || "1d");
+  const tf = tfNome(r.verdict_timeframe || "1d");
   const when = r.finished_at ? fmtStamp(r.finished_at) : (r.date || "");
   const v = VERDICT_PT[verdictKey(r.verdict || "")] || (r.verdict ? String(r.verdict).toUpperCase() : "");
   return [m, tf, v, when].filter(Boolean).join(" · ");
@@ -2020,7 +2020,7 @@ function renderHeadPrice(a, live) {
   // sentido e, sem rótulo, parecia dado inconsistente. Agora a unidade diz o que o
   // horário é, no mesmo molde da cotação (número · o que ele é · de quando).
   const candle = a && a.timeframe
-    ? `último candle ${TF_LABEL[_tf] || _tf}` : "último candle";
+    ? `último candle ${tfNome(_tf)}` : "último candle";
   const analise = a && a.price != null
     ? `<span class="hp-unit hp-ref"><span class="hp-k">análise</span>` +
       `<b>${fmtNum(a.price)}</b>` +
@@ -2484,10 +2484,14 @@ function renderSetupCards(a) {
   // "as leituras", sem contar: um card pode carregar MAIS de uma leitura dentro (o
   // Storm tem duas entradas), então contar cards diria um número que não é o de
   // leituras — e um número errado é pior que nenhum.
-  const frameTopo = a.timeframe
-    ? `<div class="sc-frame-topo"><span class="sc-frame-k">` +
-      `${cards.length > 1 ? "as leituras" : "leitura"} no</span>` +
-      `<b class="sc-frame-v">${escapeHtml(a.timeframe)}</b></div>`
+  // O NOME sai do vocabulário único (`tfNome`), não da prosa do backend: o bloco
+  // dizia "diário (referência) · semanal (tendência de fundo)" enquanto o gráfico
+  // ao lado dizia "Diário". A prosa não se perde — ela é CONTEÚDO (o diário lê o
+  // semanal como fundo), não o nome do frame, e vai pro title.
+  const frameTopo = _tf
+    ? `<div class="sc-frame-topo"${a.timeframe ? ` title="${escapeHtml(a.timeframe)}"` : ""}>` +
+      `<span class="sc-frame-k">${cards.length > 1 ? "as leituras" : "leitura"} no</span>` +
+      `<b class="sc-frame-v">${escapeHtml(tfNome(_tf))}</b></div>`
     : "";
   const rodape = (!semCard && !donoNaTela) ? carimbo : "";
 
@@ -2500,9 +2504,9 @@ function renderSetupCards(a) {
   const explor = ehExploratorio(_tf);
   const aviso = explor
     ? `<div class="sc-explor"><span class="sc-explor-k">exploratório</span>` +
-      `<span>estes níveis são recalculados no ${escapeHtml(TF_LABEL[_tf] || _tf)} e ` +
+      `<span>estes níveis são recalculados no ${escapeHtml(tfNome(_tf))} e ` +
       `NÃO são o plano da decisão — o veredito desta análise é no ` +
-      `${escapeHtml(TF_LABEL[_verdictTf] || _verdictTf)}.</span></div>`
+      `${escapeHtml(tfNome(_verdictTf))}.</span></div>`
     : "";
   el.classList.toggle("is-exploratorio", explor);
   el.innerHTML = frameTopo + aviso + cards.join("") +
@@ -2790,6 +2794,27 @@ const ALL_TFS = [
 const TF_LABEL = Object.fromEntries(ALL_TFS.map(([tf, , completo]) => [tf, completo]));
 const TF_SHORT = Object.fromEntries(ALL_TFS.map(([tf, curto]) => [tf, curto]));
 
+// ─────────────── O VOCABULÁRIO ÚNICO DE TIMEFRAME (invariante 6) ─────────────
+//
+// A tela tinha TRÊS formas concorrentes de escrever o mesmo frame: o carimbo do
+// cabeçalho e o selo do gráfico liam `TF_LABEL` ("Diário"), enquanto o bloco de
+// cards ecoava a prosa do backend ("diário (referência) · semanal (tendência de
+// fundo)"). Três nomes pro mesmo frame na mesma tela é como o bug do frame nasceu:
+// cada correção inventava o seu jeito de dizer timeframe, e ninguém conseguia
+// comparar duas superfícies.
+//
+// A partir daqui há UM lugar canônico. `tfNome` é o nome de exibição e `tfCurto` a
+// forma de botão; TODA superfície consome deles, nunca de uma string do payload.
+// A prosa do backend não se perde — ela é CONTEÚDO (o diário lê o semanal como
+// tendência de fundo), não o nome do frame, e vai pro `title` de quem a exibia.
+function tfNome(tf) {
+  return TF_LABEL[tf] || tf || "";
+}
+
+function tfCurto(tf) {
+  return TF_SHORT[tf] || tf || "";
+}
+
 // As linhas do bloco TEMPO saem da faixa declarada em ALL_TFS, na ordem em que
 // cada faixa aparece — quem acrescentar um frame não precisa lembrar de mexer aqui.
 function tfFaixas() {
@@ -2980,7 +3005,7 @@ function renderDegraded(list) {
 function renderVerdictTf() {
   const el = $("verdictTf");
   if (!el) return;
-  el.textContent = "veredito no " + (TF_LABEL[_verdictTf] || _verdictTf);
+  el.textContent = "veredito no " + tfNome(_verdictTf);
   el.classList.remove("hidden");
 }
 
@@ -2990,7 +3015,7 @@ function renderReevalBtn() {
   const btn = $("reevalBtn");
   if (!btn) return;
   if (!_openTicker) { btn.classList.add("hidden"); return; }
-  const label = TF_LABEL[_tf] || _tf;
+  const label = tfNome(_tf);
   const same = _tf === _verdictTf;
   btn.textContent = same ? `✓ veredito já é no ${label}` : `⟳ Reavaliar veredito no ${label}`;
   btn.disabled = same;
@@ -3018,7 +3043,7 @@ function reevaluate(tf) {
   $("steps").innerHTML = "";
   renderProgress({
     status: "running", ticker: _openTicker, elapsed: 0, cost: null,
-    progress: { phase: "Inicializando", label: `Reavaliando no ${TF_LABEL[tf] || tf}…`, percent: 2, plan: [], reached: [] },
+    progress: { phase: "Inicializando", label: `Reavaliando no ${tfNome(tf)}…`, percent: 2, plan: [], reached: [] },
   });
   apiPost("/api/analyze", { ticker: _openTicker, date: _openDate || "", method, timeframe: tf })
     .then((r) => r.json())
@@ -3130,7 +3155,7 @@ async function switchTimeframe(tf) {
   renderTfSelector();                       // marca o clicado como pendente
   hideDegrade();
   const note = $("chartNote");
-  if (note) note.textContent = `Recalculando no ${TF_LABEL[tf] || tf}…`;
+  if (note) note.textContent = `Recalculando no ${tfNome(tf)}…`;
   const encerra = () => { if (selo === _tfSeq) { _tfPendente = null; renderTfSelector(); } };
   try {
     const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf, method: _openMethod || "padrao" });
@@ -3697,7 +3722,7 @@ function drawPriceChart(canvas, chart, a) {
     // decidiu nada é EXPLORATÓRIO, e agora está escrito em cima do gráfico, não só
     // num carimbo lá no topo da página que sai da tela quando se rola até aqui.
     const exploratorio = ehExploratorio(chart.timeframe);
-    const tfText = (TF_LABEL[chart.timeframe] || chart.timeframe || "Diário")
+    const tfText = (tfNome(chart.timeframe) || "Diário")
       + (exploratorio ? "  ·  exploratório" : "");
     ctx.font = "bold 11px ui-monospace, Menlo, monospace";
     const tfW = ctx.measureText(tfText).width + 14;
@@ -6167,7 +6192,7 @@ let _scanView = (() => {
 // deixou a barra de controle pra trás quando a task 012 encurtou só o scan.
 // Frame que a fonte não conhece cai no próprio código, que já é curto.
 function scanTfBadge(frame) {
-  const curto = TF_SHORT[frame] || frame || "—";
+  const curto = tfCurto(frame) || "—";
   return `<span class="scan-tf" title="${escapeHtml(frame || "")}">${escapeHtml(curto)}</span>`;
 }
 
