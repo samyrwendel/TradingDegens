@@ -53,7 +53,8 @@ def detect_method(record: dict) -> str:
     """Infer a run's method from its stored result (Erick if it wrote an Erick
     report). Compare records report ``"compare"`` and are not single readings.
 
-    O atalho 1-2-3 (``setup123``) tem que se identificar TAMBÉM: ele grava
+    Os atalhos ESTRUTURAIS (``setup123`` e ``storm123``) têm que se identificar
+    TAMBÉM — e cada um pelo SEU marcador, porque são setups diferentes: o 1-2-3 grava
     ``erick_report`` vazio, e a inferência por ausência o classificava como
     "padrao". Um registro estrutural (sem relatório nenhum, sem veredito) virava a
     coluna Padrão de um confronto e o meta-juiz julgava texto EM BRANCO contra um
@@ -62,6 +63,8 @@ def detect_method(record: dict) -> str:
     res = record.get("result") or {}
     if res.get("compare"):
         return "compare"
+    if res.get("storm123"):
+        return "storm123"
     if res.get("setup123"):
         return "setup123"
     return "erick" if (res.get("erick_report") or "").strip() else "padrao"

@@ -80,7 +80,12 @@ def test_barra_cabe_numa_linha_na_tela_larga(base):
         # de fileiras. Empilhar de propósito, dentro da altura que já existia, passa;
         # TEMPO passar de MODELOS (foi o que a pill de 30px fazia) cresce a barra e cai.
         assert m["tfsH"] == m["modelsH"], ("TEMPO tem de caber na forma de MODELOS", m)
-        assert m["methodsH"] <= 36, m
+        # MÉTODO virou DUAS fileiras na task 022 (o Storm é o quinto método): em cima
+        # os que rodam modelo, embaixo os estruturais ($0). A linha aqui era
+        # `methodsH <= 36` ("os métodos numa fileira só") — o que ela defendia era a
+        # ALTURA DA BARRA, e é isso que continua travado: empilhar DENTRO da forma do
+        # bloco de modelos passa; crescer além dela cai.
+        assert m["methodsH"] == m["modelsH"], ("MÉTODO tem de caber na forma de MODELOS", m)
         assert m["barH"] - m["modelsH"] <= 20, ("a barra é o bloco mais alto + o rótulo", m)
         # e continua sendo UM elemento da MESMA linha: os três começam juntos
         # (o topo do bloco de modelos é o mais alto; ninguém foi empurrado pra baixo)
@@ -91,16 +96,22 @@ def test_barra_cabe_numa_linha_na_tela_larga(base):
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_coluna_estreita_quebra_a_barra_em_vez_de_estourar_a_pagina(base):
-    """DENTE do bug que a primeira tentativa introduziu: com a lateral arrastada pra
-    400px o conteúdo encolhe SEM o viewport mudar. Uma linha só ali seria scroll
-    horizontal na página inteira — a barra tem que quebrar, e a página não rolar."""
+    """DENTE do bug que a primeira tentativa introduziu: com a lateral arrastada o
+    conteúdo encolhe SEM o viewport mudar. Uma linha só ali seria scroll horizontal
+    na página inteira — a barra tem que quebrar, e a página não rolar.
+
+    A lateral foi de 400px para 700px na task 022: com o MÉTODO em duas fileiras a
+    barra ficou mais ESTREITA (a largura do grupo passou a ser a da fileira mais
+    larga, não a soma dos cinco), então 400px já não a apertava o bastante pra
+    forçar a quebra. O que se mede continua sendo o mesmo: apertada, ela QUEBRA; a
+    página nunca rola."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         page.goto(base, wait_until="networkidle")
         page.wait_for_selector(".lb-methods button")
         page.evaluate("""() => {
-          document.querySelector('main.layout').style.setProperty('--sidebar-w', '400px');
+          document.querySelector('main.layout').style.setProperty('--sidebar-w', '700px');
         }""")
         page.wait_for_timeout(150)
         m = _medidas(page)

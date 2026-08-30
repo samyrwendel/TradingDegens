@@ -1132,17 +1132,21 @@ function renderResult(snap) {
   // Padrão. Trocar de TF precisa recalcular na mesma família — daí guardar o método.
   // setup123 (atalho estrutural $0) é método próprio — o ↻ re-roda o atalho, não a
   // análise completa.
-  _openMethod = r.setup123 ? "setup123"
+  _openMethod = r.storm123 ? "storm123"
+    : r.setup123 ? "setup123"
     : ((r.erick_report && r.erick_report.trim()) ? "erick" : "padrao");
-  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick/1-2-3)
-  $("verdictBadge").className = r.setup123 ? "verdict setup123" : verdictClass(r.verdict);
-  $("verdictBadge").innerHTML = r.setup123 ? "1-2-3" : verdictHtml(r.verdict);
+  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick/1-2-3/Storm)
+  const estrutural = _METODOS_ESTRUTURAIS.has(_openMethod);
+  $("verdictBadge").className = estrutural ? `verdict ${_openMethod}` : verdictClass(r.verdict);
+  $("verdictBadge").innerHTML = estrutural
+    ? escapeHtml(methodLabel(_openMethod)) : verdictHtml(r.verdict);
   renderVerdictCaveat(r.verdict_caveat, r.pre_judge_findings);
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
 
     `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
     `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
+    (r.storm123 ? `<span>Método <b>1-2-3 Storm + Éden — leitura estrutural, sem LLM</b></span>` : "") +
     (r.setup123 ? `<span>Método <b>1-2-3 — leitura estrutural, sem LLM</b></span>` : "") +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
     `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
@@ -1566,18 +1570,24 @@ let _barMethod = "padrao"; // método escolhido na barra: "padrao" | "erick" | "
 // sem método) e qualquer desconhecido caem em padrão — nunca inventa método.
 // Métodos que o backend conhece — usado pra preservar o método de um run que
 // falhou sem inventar nada (desconhecido/ausente = "", cai no padrão).
-const _METODOS_CONHECIDOS = new Set(["padrao", "erick", "setup123", "compare"]);
+const _METODOS_CONHECIDOS = new Set(["padrao", "erick", "setup123", "storm123", "compare"]);
+
+// Métodos ESTRUTURAIS ($0 de LLM). São SEPARADOS, não flags um do outro: o 1-2-3
+// deste projeto e o 1-2-3 Storm usam a mesma numeração pra pontos DIFERENTES
+// (ver DA-078) — o que eles compartilham é só não custar nada.
+const _METODOS_ESTRUTURAIS = new Set(["setup123", "storm123"]);
 
 function normMethod(v) {
   if (v === "compare") return "compare";
   if (v === "erick") return "erick";
-  if (v === "setup123") return "setup123";
+  if (_METODOS_ESTRUTURAIS.has(v)) return v;
   return "padrao";
 }
 function methodLabel(v) {
   if (v === "compare") return "Comparar";
   if (v === "erick") return "Erick";
   if (v === "setup123") return "1-2-3";
+  if (v === "storm123") return "Storm";
   return "Padrão";
 }
 
@@ -1615,17 +1625,30 @@ function renderLaunchBar() {
   // o macro (S · D), embaixo o intradiário (4h · 1h · 15m).
   tfsEl.innerHTML = tfFaixas().map(({ faixa, itens }) =>
     `<div class="lb-tf-row is-${faixa}">${itens.map(pill).join("")}</div>`).join("");
-  const methods = [
-    ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
-    ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
-    ["setup123", "1-2-3", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
-    ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+  // MÉTODO em DUAS fileiras contando como UM elemento da barra — a mesma gramática
+  // do TEMPO e do bloco MODELOS. Com o Storm são CINCO métodos, e cinco numa fila só
+  // empurravam a barra além dos 1440 (o ATIVO encolhia pra pagar a conta).
+  //
+  // A divisão não é só de espaço: em cima os que rodam MODELO (custam), embaixo os
+  // ESTRUTURAIS (leem a série, $0). A largura do grupo passa a ser a da fileira mais
+  // larga em vez da soma das cinco.
+  const methodRows = [
+    ["llm", [
+      ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
+      ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
+      ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+    ]],
+    ["estrutural", [
+      ["setup123", "1-2-3", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
+      ["storm123", "Storm", "1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
+    ]],
   ];
-  mEl.innerHTML = methods.map(([m, label, title]) => {
-    const active = m === _barMethod;
-    const cls = ["lb-method", m, active ? "is-active" : ""].filter(Boolean).join(" ");
-    return `<button type="button" class="${cls}" data-method="${m}" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
-  }).join("");
+  mEl.innerHTML = methodRows.map(([faixa, itens]) =>
+    `<div class="lb-method-row is-${faixa}">` + itens.map(([m, label, title]) => {
+      const active = m === _barMethod;
+      const cls = ["lb-method", m, active ? "is-active" : ""].filter(Boolean).join(" ");
+      return `<button type="button" class="${cls}" data-method="${m}" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+    }).join("") + "</div>").join("");
   updateDateChip();
   renderLaunchModels();
   const rerun = $("rerunBtn");
@@ -2052,6 +2075,89 @@ function scSemNivel(nome) {
     `<span class="sc-v sc-sem-v">sem nível definido</span></div>`;
 }
 
+// Rótulo pt-BR da qualidade do Storm — a spec só opera "perfeita" e "boa".
+const STORM_QUALIDADE = {
+  perfeita: "perfeita", boa: "boa", ruim: "ruim",
+};
+
+// O card do 1-2-3 STORM. Separado numa função porque ele carrega uma coisa que
+// nenhuma das outras leituras tem: um FILTRO COM PODER DE VETO (o Éden). O veto é
+// a manchete do card, não uma nota de rodapé — e a borda muda de cor com ele, que
+// é a gramática que a DA-076 pede (estado é cor + palavra).
+function stormCardHtml(st) {
+  const pat = st.pattern;
+  const eden = st.eden || {};
+  const opera = st.opera === true;
+  const dir = pat ? ((PAT_DIR[pat.direction] || [])[1] || "") : "";
+  const rows = [];
+
+  // ÉDEN primeiro: é ele que autoriza ou proíbe. Sem as duas médias na linha, o
+  // leitor não tem como conferir o veto — e um veto que não se confere é palpite.
+  if (eden.disponivel) {
+    rows.push(scRow(`MME ${8} × MME ${80}`,
+      `${fmtNum(eden.ema_rapida)} × ${fmtNum(eden.ema_lenta)}`, eden.motivo || ""));
+  } else {
+    rows.push(`<div class="sc-row sc-sem"><span class="sc-k">Éden (MME 8 × MME 80)</span>` +
+      `<span class="sc-v sc-sem-v">indisponível</span>` +
+      `<span class="sc-basis">${escapeHtml(eden.motivo || "")}</span></div>`);
+  }
+
+  if (pat) {
+    const compra = pat.direction !== "venda";
+    if (pat.trigger != null) {
+      rows.push(scRow("gatilho", fmtNum(pat.trigger),
+        compra ? "rompimento da maior máxima entre os pontos 2 e 3"
+               : "perda da menor mínima entre os pontos 2 e 3"));
+    }
+    const inv = st.invalidation || {};
+    const sl = st.stop || {};
+    // No Storm o stop É a invalidação: sem folga inventada, os dois são o PONTO 2.
+    // Duas linhas com o mesmo número seria a duplicata que a DA-077 proíbe — sai
+    // UMA, dizendo que os dois papéis coincidem e por quê.
+    const mesmoNivel = inv.price != null && sl.price != null && inv.price === sl.price;
+    if (mesmoNivel) {
+      rows.push(scRow("stop (SL) = invalidação (ponto 2)", fmtNum(sl.price),
+        `${inv.meaning || ""} · ${sl.basis || ""}`));
+    } else {
+      if (inv.price != null) {
+        rows.push(scRow("invalidação (ponto 2)", fmtNum(inv.price), inv.meaning || ""));
+      }
+      if (sl.price != null) rows.push(scRow("stop (SL)", fmtNum(sl.price), sl.basis || ""));
+    }
+    const tp = st.target || {};
+    if (tp.price != null) rows.push(scRow("alvo (TP)", fmtNum(tp.price), tp.label || ""));
+    const rr = st.risk_reward || {};
+    if (rr.rr != null) {
+      rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
+        `${rr.entry_basis || ""} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
+        rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
+    } else if (rr.note) {
+      rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
+    }
+  } else {
+    rows.push(`<div class="sc-row sc-sem-txt">Nenhum 1-2-3 Storm na janela lida ` +
+      `(três candles: alta/lateral, fundo, recuperação que falha em romper o ponto 1).</div>`);
+  }
+
+  // A manchete: OPERA / NÃO OPERA + a qualidade, e o motivo escrito embaixo.
+  const q = STORM_QUALIDADE[st.qualidade] || st.qualidade || "";
+  const selo = pat
+    ? `<div class="sc-verdict"><span class="sc-vk">filtro Éden</span>` +
+      `<span class="sc-state ${opera ? "ativo" : "sem_setup"}">` +
+      `${opera ? "opera" : "NÃO OPERA"}${q ? ` · qualidade ${escapeHtml(q)}` : ""}</span></div>` +
+      (st.veto ? `<div class="sc-veto">${escapeHtml(st.veto)}</div>`
+               : (st.motivo ? `<div class="sc-hz">${escapeHtml(st.motivo)}</div>` : ""))
+    : "";
+  const estado = pat ? (pat.state_label || pat.state || "") : "";
+  return `<section class="setup-card sc-storm${opera ? "" : " sc-vetado"}` +
+    `${pat && pat.direction === "venda" ? " sc-venda" : ""}">` +
+    `<div class="sc-head"><span class="sc-title">1-2-3 Storm` +
+    (dir ? ` <span class="sc-dir">${escapeHtml(dir)}</span>` : "") + "</span>" +
+    (estado ? `<span class="sc-now">${escapeHtml(estado)}</span>` : "") +
+    "</div>" + selo +
+    `<div class="sc-rows">${rows.join("")}</div></section>`;
+}
+
 function renderSetupCards(a) {
   const el = $("setupCards");
   if (!el) return;
@@ -2067,6 +2173,16 @@ function renderSetupCards(a) {
     (a.horizon ? `<span class="sc-hz">horizonte: ${escapeHtml(a.horizon)}</span>` : "") + "</div>";
   const dono = a.setup_source ? String(a.setup_source) : "";
   const cards = [];
+
+  // ---- card do 1-2-3 STORM (existe quando a run é do método Storm) ----------
+  // Terceira leitura independente, e a única com VETO: o Éden dos Traders (MME 8 ×
+  // MME 80) decide se o setup opera. Vetado, o card DIZ que não opera e por quê —
+  // nunca um setup silenciosamente rebaixado. Os níveis continuam à vista porque
+  // "por que não opera" precisa do que ele seria.
+  const st = a.storm;
+  if (st) {
+    cards.push(stormCardHtml(st));
+  }
 
   // ---- card do PADRÃO 1-2-3 (existe quando existe padrão) -------------------
   // Leva o conjunto COMPLETO dos níveis DELE: gatilho (e a entrada, quando ela não
@@ -2194,7 +2310,8 @@ function renderSetupCards(a) {
   // O FRAME é o chão comum: as duas leituras foram calculadas nele, então ele não
   // se repete dentro de card nenhum — fica uma vez, embaixo das duas.
   const frame = a.timeframe
-    ? `<span class="sc-frame">${cards.length > 1 ? "as duas leituras" : "leitura"} no ${escapeHtml(a.timeframe)}</span>`
+    ? `<span class="sc-frame">${cards.length > 1 ? `as ${cards.length} leituras` : "leitura"}` +
+      ` no ${escapeHtml(a.timeframe)}</span>`
     : "";
   const rodape = ((!semCard && !donoNaTela) ? carimbo : "") + frame;
   el.innerHTML = cards.join("") + (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
@@ -2260,7 +2377,10 @@ function renderThesis(which, md) {
 // Moving-average colours, keyed by window. Chosen to stay legible on the dark
 // panel and distinct from the green/red candles.
 const MA_COLORS = { "20": "#f5b445", "50": "#6ea8fe", "200": "#b48ef5" };
-const EMA_COLORS = { "8": "#4be3a0", "21": "#e3894b", "50": "#e34bd0" };
+// A EMA 80 é a LENTA do Éden (setup Storm) — só é desenhada nas runs Storm
+// (ver _chart_emas no backend), e ganha cor própria pra não se confundir com as
+// de timing (8/21/50).
+const EMA_COLORS = { "8": "#4be3a0", "21": "#e3894b", "50": "#e34bd0", "80": "#7cb0ff" };
 // 1-2-3 marker colour by direction — distinct so compra (fundo) and venda (topo)
 // never read the same on the chart. Blue for compra, orange for venda; both stay
 // clear of the green/red candle bodies.
@@ -2276,7 +2396,7 @@ function patColor(pat) {
 // função (onde se realiza), e quando os dois são o mesmo nível vira UMA faixa só.
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc",
                       stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad",
-                      target: "#26de81" };
+                      target: "#26de81", storm: "#7cb0ff" };
 // Cor POR PAPEL: vermelho para o que tira do trade (invalidação clara, stop
 // forte), verde-alvo para o TP, dourado para a realização quando não há padrão,
 // cinza-neutro para o topo overhead que NÃO é alvo (setup de venda) — ali ele é
@@ -2655,6 +2775,26 @@ function planZones(a) {
   if (st && st.price != null) {
     out.push({ label: st.label, price: st.price, low: null, high: null,
                color: ZONE_COLORS.stop, tag: "stop (SL)", tagCurto: "stop", dash: [6, 4] });
+  }
+  // NÍVEIS DO STORM — outra leitura, outra cor, e o nome dela no rótulo: nunca se
+  // confundem com os do 1-2-3 deste módulo, que estão no mesmo gráfico com números
+  // diferentes por construção.
+  //
+  // Só quando o Éden AUTORIZA. Setup vetado não ganha traço no gráfico: o gráfico é
+  // a figura operável, e desenhar níveis de um trade que a regra proíbe é convidar a
+  // operá-lo. Nada se perde — o card do Storm continua com cada número e com o
+  // motivo do veto escrito.
+  const storm = a.storm;
+  if (storm && storm.opera === true && storm.pattern) {
+    const stPat = storm.pattern;
+    const stLinha = (price, tag, curto, dash) => {
+      if (price == null) return;
+      out.push({ label: tag, price, low: null, high: null,
+                 color: ZONE_COLORS.storm, tag, tagCurto: curto, dash });
+    };
+    stLinha(stPat.trigger, "Storm · gatilho", "Storm gat.", [5, 3]);
+    stLinha((storm.stop || {}).price, "Storm · stop (SL)", "Storm SL", [6, 4]);
+    stLinha((storm.target || {}).price, "Storm · alvo (TP)", "Storm TP", [2, 3]);
   }
   const pb = a.pullback_zone;
   const buyPrice = buy && buy.price;
@@ -3322,7 +3462,8 @@ async function startAnalysis(ev) {
   // Comparar dispara as DUAS (Padrão × Erick, compare=true); 1-2-3 é o atalho estrutural
   // ($0 de LLM); Erick/Padrão vão no method.
   const compare = _barMethod === "compare";
-  const method = (_barMethod === "erick" || _barMethod === "setup123") ? _barMethod : "padrao";
+  const method = (_barMethod === "erick" || _METODOS_ESTRUTURAIS.has(_barMethod))
+    ? _barMethod : "padrao";
   const timeframe = _barTf || "1d";
   $("runBtn").disabled = true;
   $("resultPanel").classList.add("hidden");
@@ -3619,7 +3760,7 @@ function paintHistory() {
     // 1-2-3 (setup123): sem verdict Buy/Hold — o resultado é o estado do setup.
     // Hoje caía em r.status "done" → "CONCLUÍDO" no lugar do veredito. Agora surfamos
     // o setup_state (mesmo campo que a view aberta já mostra no card de setup).
-    const isSetup123 = r.method === "setup123";
+    const isSetup123 = _METODOS_ESTRUTURAIS.has(r.method);
     const setupState = isSetup123 ? (r.setup_state || "sem_dado") : "";
     const v = isSetup123 ? setupState : (r.verdict || r.status || "").toString();
     // title do chip: frase legível do setup (1-2-3) ou o veredito cru nos demais.

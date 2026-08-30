@@ -245,10 +245,21 @@ button.lb-tf:hover:not(.is-off):not(.is-active) { color: var(--text); border-col
 button.lb-tf.is-active { color: #fff; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 button.lb-tf.is-off { color: #55607a; cursor: not-allowed; opacity: .6; text-decoration: line-through; text-decoration-color: #55607a55; }
 
-.lb-methods { display: inline-flex; gap: 6px; flex-wrap: nowrap; }
+/* MÉTODO em DUAS fileiras contando como UM elemento (mesma gramática do TEMPO e do
+   bloco MODELOS): em cima os que rodam MODELO, embaixo os ESTRUTURAIS ($0). Com o
+   quinto método (Storm) uma fila só empurrava a barra além dos 1440 e o ATIVO
+   encolhia pra pagar; assim a largura do grupo é a da fileira MAIS LARGA. */
+.lb-methods { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.lb-method-row { display: flex; gap: 6px; flex-wrap: nowrap; }
+/* a fileira de baixo tem menos botões: esticá-los fecha o retângulo em vez de
+   deixar um degrau à direita — e não custa largura, a do grupo já é a da de cima */
+.lb-method-row.is-estrutural button.lb-method { flex: 1; }
 button.lb-method {
   font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold); cursor: pointer;
-  border-radius: var(--radius); padding: 8px 11px; white-space: nowrap;
+  /* 6px/8px = a mesma altura das pills de TEMPO: duas fileiras de 26px + 4 de gap
+     dão os 56px que o bloco MODELOS já ocupa, então a segunda linha NÃO cresce a
+     altura da barra (ela é definida pelo bloco mais alto, que não mudou). */
+  border-radius: var(--radius); padding: 5px 10px; white-space: nowrap;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
   transition: color .12s, border-color .12s, background .12s, box-shadow .12s;
 }
@@ -1076,7 +1087,14 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .lb-tfs { flex-direction: row; }
   .lb-tf-row { display: contents; }
   button.lb-tf { flex: 1; text-align: center; }
-  .lb-method { flex: 1; text-align: center; padding: 10px 8px; }
+  /* CINCO métodos (o Storm é o quinto) não cabem numa fileira só de 390px, e com
+     `nowrap` eles estouravam a barra pro lado — o defeito que a 020 tinha matado.
+     A fileira passa a QUEBRAR: falta de largura vira ALTURA, nunca informação
+     saindo da tela. `flex: 1 1 auto` deixa cada botão pedir o tamanho do próprio
+     texto (que é `nowrap` e não encolhe) e esticar só o que sobra na última linha. */
+  .lb-methods { flex-direction: row; flex-wrap: wrap; }
+  .lb-method-row { display: contents; }
+  .lb-method { flex: 1 1 auto; min-width: 84px; text-align: center; padding: 10px 8px; }
   .lb-model-pick { flex: 1; justify-content: center; }
   /* popover ocupa a largura da barra no mobile (não estoura os 390) */
   .lb-model-pop { left: 0; right: 0; min-width: 0; max-width: none; }
@@ -1167,6 +1185,19 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .sc-123 .sc-dir { color: #6ea8fe; }
 .sc-123.sc-venda .sc-dir { color: #ff9f43; }
 .sc-recuo { border-left: 3px solid #2ecc71; }
+/* STORM: a lenta do Éden (MME 80) é desenhada no gráfico nesta cor, então o card
+   da leitura sai na mesma — o olho liga um ao outro sem legenda. Vetado pelo Éden,
+   ele vira ÂMBAR: a cor é o estado (DA-076), e "não opera" não pode se parecer com
+   "opera". Chapado, sem degradê (DA-070). */
+.sc-storm { border-left: 3px solid #7cb0ff; }
+.sc-storm.sc-vetado { border-left-color: var(--amber); }
+.sc-storm .sc-dir { color: #7cb0ff; }
+.sc-storm.sc-venda .sc-dir { color: #ff9f43; }
+/* o VETO é manchete, não rodapé: âmbar de atenção e linha própria */
+.sc-veto {
+  margin-top: 6px; font-size: var(--fs-12); line-height: var(--lh-12);
+  color: var(--amber); overflow-wrap: anywhere;
+}
 .sc-nenhum { border-left: 3px solid var(--border); }
 .sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
 .sc-title {

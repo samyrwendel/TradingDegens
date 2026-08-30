@@ -532,6 +532,29 @@ def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIME
         return {}
 
 
+# MÉTODOS ESTRUTURAIS ($0 de LLM): leem a série e devolvem níveis, sem agente
+# nenhum. São métodos SEPARADOS, não flags um do outro — o 1-2-3 deste projeto e o
+# 1-2-3 Storm usam a mesma numeração para pontos DIFERENTES (ver DA-078), e a única
+# coisa que eles de fato compartilham é não custar nada.
+_METODOS_ESTRUTURAIS = ("setup123", "storm123")
+
+
+def fetch_storm_plan(ticker: str, date: str,
+                     timeframe: str = _DEFAULT_TIMEFRAME) -> dict[str, Any]:
+    """Plano do 1-2-3 STORM (Stormer) + filtro Éden — leitura estrutural, $0 de LLM.
+
+    Setup PRÓPRIO, não uma variação do 1-2-3 deste módulo: o ponto 2 é o fundo (não
+    o topo do repique), o stop fica abaixo dele e o alvo é a PROJEÇÃO DA AMPLITUDE
+    dos 3 candles. Lê a mesma série cacheada e date-guarded, então é grátis e não
+    enxerga candle futuro. Fail-open: ``{}`` em qualquer erro.
+    """
+    try:
+        from tradingagents.dataflows.price_structure import build_storm_plan_dict
+        return build_storm_plan_dict(ticker, date, timeframe=timeframe)
+    except Exception:
+        return {}
+
+
 def fetch_symbol_search(term: str, limit: int = 8) -> list[dict[str, Any]]:
     """Autocomplete candidates for a name-or-ticker term (fail-open -> [])."""
     try:
@@ -885,9 +908,9 @@ class AnalysisRunner:
         # R:R do plano determinístico, $0 de LLM, sem agentes. Vive no mesmo fluxo
         # de run (histórico, reúso DA-058, status) pra o resultado abrir como qualquer
         # análise e o botão de análise completa ficar a um clique.
-        if method == "setup123":
-            return self._start_setup123(ticker, date, asset_type, timeframe,
-                                        overrides, reuse)
+        if method in _METODOS_ESTRUTURAIS:
+            return self._start_estrutural(method, ticker, date, asset_type, timeframe,
+                                          overrides, reuse)
         selected = select_analysts_for_asset(
             asset_type, include_erick=(method == "erick")
         )
@@ -912,16 +935,17 @@ class AnalysisRunner:
         threading.Thread(target=self._worker, args=(run,), daemon=True).start()
         return run_id
 
-    def _start_setup123(self, ticker: str, date: str, asset_type: str,
-                         timeframe: str, overrides: dict[str, Any] | None,
-                         reuse: bool) -> str:
-        """A run instantânea do 1-2-3: só o plano estrutural, sem LLM ($0).
+    def _start_estrutural(self, method: str, ticker: str, date: str, asset_type: str,
+                          timeframe: str, overrides: dict[str, Any] | None,
+                          reuse: bool) -> str:
+        """A run instantânea de um método ESTRUTURAL: só plano, sem LLM ($0).
 
-        Reusa uma run setup123 idêntica (DA-058) como qualquer método; a chave de
-        reúso é ``setup123``, então nunca colide com runs Padrão/Erick do mesmo dia.
+        Reusa uma run idêntica DO MESMO MÉTODO (DA-058) como qualquer outro; a chave
+        de reúso é o próprio método, então uma run Storm nunca volta no lugar de uma
+        1-2-3 (nem de uma Padrão/Erick) do mesmo dia.
         """
         if reuse:
-            prior = self._find_reusable_completed(ticker, date, timeframe, "setup123")
+            prior = self._find_reusable_completed(ticker, date, timeframe, method)
             if prior is not None:
                 return self._register_reused_run(
                     prior, ticker, date, asset_type, [], timeframe, overrides
@@ -929,11 +953,11 @@ class AnalysisRunner:
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         run = _Run(run_id, ticker, date, asset_type, [], timeframe=timeframe,
                    overrides=overrides)
-        run.method = "setup123"
+        run.method = method
         with self._lock:
             self._runs[run_id] = run
         self._write_descriptor(run, overrides)
-        threading.Thread(target=self._worker_setup123, args=(run,), daemon=True).start()
+        threading.Thread(target=self._worker_estrutural, args=(run,), daemon=True).start()
         return run_id
 
     def _cotacao_da_run(self, run: _Run) -> dict[str, Any] | None:
@@ -967,12 +991,24 @@ class AnalysisRunner:
             logger.info("cotação do cabeçalho indisponível para %s: %s", run.ticker, exc)
             return None
 
-    def _worker_setup123(self, run: _Run) -> None:
-        """Worker da run 1-2-3: computa chart+plano (cacheado, ~1-2s) e encerra."""
+    def _worker_estrutural(self, run: _Run) -> None:
+        """Worker das runs estruturais (1-2-3 e Storm): chart+plano e encerra.
+
+        O STORM lê a MESMA série e acrescenta a SUA leitura — o plano do Storm entra
+        em ``actionable["storm"]``, ao lado (nunca no lugar) do 1-2-3 e do recuo à
+        média, porque as três são leituras INDEPENDENTES do mesmo candle e a tela
+        mostra uma por card (DA-077). O gráfico da run Storm desenha a MME 80 do
+        Éden, que é o filtro que decide se o setup opera.
+        """
         data_notices.reset()   # avisos de qualidade de dado desta run começam do zero
+        storm = run.method == "storm123"
         try:
-            chart = fetch_price_chart(run.ticker, run.date, run.timeframe, "padrao")
+            chart = fetch_price_chart(run.ticker, run.date, run.timeframe,
+                                      "storm" if storm else "padrao")
             plan = fetch_actionable_plan(run.ticker, run.date, run.timeframe, "padrao")
+            if storm:
+                plan = dict(plan or {})
+                plan["storm"] = fetch_storm_plan(run.ticker, run.date, run.timeframe)
             run.result = {
                 "verdict": None,
                 "final_decision": "",
@@ -990,12 +1026,16 @@ class AnalysisRunner:
                 # Cotação ATUAL + a sessão dela (só em run de hoje) — ver
                 # :meth:`_cotacao_da_run`.
                 "live_price": self._cotacao_da_run(run),
-                "setup123": True,
+                # Marcas de MÉTODO no resultado persistido: o front e o
+                # ``compare._method_of_result`` leem daqui qual leitura é esta. São
+                # excludentes — nunca uma run com as duas ligadas.
+                "setup123": not storm,
+                "storm123": storm,
                 "timeframes": timeframes_for_asset(run.asset_type),
             }
             run.status = "done"
         except Exception as exc:  # noqa: BLE001 — erro vira run errada honesta
-            logger.exception("setup123 run failed for %s", run.ticker)
+            logger.exception("%s run failed for %s", run.method, run.ticker)
             run.error = f"{type(exc).__name__}: {exc}"
             run.error_code = "unavailable"
             run.status = "error"
@@ -1938,8 +1978,8 @@ class AnalysisRunner:
             # detecção por ausência de ``erick_report`` o dava como "padrao" — e o
             # confronto reusava um registro EM BRANCO como o lado Padrão, mandando o
             # meta-juiz comparar nada com um Erick real. Uma leitura estrutural não é
-            # uma leitura de método.
-            if res.get("setup123"):
+            # uma leitura de método — vale para o 1-2-3 e para o Storm.
+            if res.get("setup123") or res.get("storm123"):
                 continue
             has_erick = bool((res.get("erick_report") or "").strip())
             # Invalidação de 1º deploy (task 005): registro erick pré-coerência (sem

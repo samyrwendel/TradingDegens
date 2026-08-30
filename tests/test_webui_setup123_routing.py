@@ -3,7 +3,9 @@
 Requisito do Samyr (28/08), em cima do fix do achatamento em ``runReanalyze()``:
 
 1. **O atalho não escala.** ``method="setup123"`` sobe SÓ a run estrutural
-   (``_start_setup123``): zero analista selecionado, nenhum agente, $0 de LLM.
+   (``_start_estrutural``): zero analista selecionado, nenhum agente, $0 de LLM. O
+   mesmo vale pro ``storm123``, que entrou pela mesma rota na task 022 — método
+   NOVO, nunca uma flag deste.
 2. **Os métodos completos não encolhem.** ``padrao`` e ``erick`` continuam
    escolhendo analistas e rodando o pipeline — o 1-2-3 segue DENTRO deles
    (o rótulo do botão Padrão é literalmente "MMS · 1-2-3"), nunca extraído
@@ -41,7 +43,7 @@ def runner(tmp_path, monkeypatch):
     # Nenhum worker roda: nem o pipeline multi-agente, nem o do atalho. O que
     # importa aqui é a rota escolhida, não o resultado.
     monkeypatch.setattr(AnalysisRunner, "_worker", lambda self, run: None)
-    monkeypatch.setattr(AnalysisRunner, "_worker_setup123", lambda self, run: None)
+    monkeypatch.setattr(AnalysisRunner, "_worker_estrutural", lambda self, run: None)
     # Sem rede na classificação do ativo.
     monkeypatch.setattr(AnalysisRunner, "detect_asset_type", lambda self, t: "stock")
     return r
@@ -53,13 +55,15 @@ def _run_of(runner, run_id):
     return run
 
 
-def test_setup123_nao_seleciona_nenhum_analista(runner):
-    """O atalho é estrutural: lista de analistas VAZIA — nenhum agente pra pagar."""
-    run_id = runner.start(TICKER, DATE, method="setup123", reuse=False)
+@pytest.mark.parametrize("metodo", ["setup123", "storm123"])
+def test_metodo_estrutural_nao_seleciona_nenhum_analista(runner, metodo):
+    """O atalho é estrutural: lista de analistas VAZIA — nenhum agente pra pagar.
+    Vale pros DOIS: o Storm entrou como método próprio pela mesma rota (DA-078)."""
+    run_id = runner.start(TICKER, DATE, method=metodo, reuse=False)
     run = _run_of(runner, run_id)
-    assert run.method == "setup123", ("método da run", run.method)
+    assert run.method == metodo, ("método da run", run.method)
     assert run.selected_analysts == [], (
-        "o atalho 1-2-3 selecionou analista — isso é LLM cobrado num botão que "
+        f"o atalho {metodo} selecionou analista — isso é LLM cobrado num botão que "
         f"promete $0: {run.selected_analysts}"
     )
 
@@ -86,10 +90,13 @@ def test_erick_traz_o_analista_erick_e_padrao_nao(runner):
 
 
 def test_rotas_sao_disjuntas(runner):
-    """Nenhum método completo produz run setup123, e o setup123 não produz run completa."""
+    """Cada método produz a SUA run. Nenhum completo cai na rota estrutural, e os
+    dois estruturais não se confundem entre si — 1-2-3 e Storm são setups
+    diferentes com a mesma numeração (DA-078), e a run tem que dizer qual é."""
     ids = {m: runner.start(TICKER, DATE, method=m, reuse=False)
-           for m in ("setup123", "padrao", "erick")}
+           for m in ("setup123", "storm123", "padrao", "erick")}
     metodos = {m: _run_of(runner, rid).method for m, rid in ids.items()}
     assert metodos["setup123"] == "setup123", metodos
-    assert metodos["padrao"] != "setup123", metodos
-    assert metodos["erick"] != "setup123", metodos
+    assert metodos["storm123"] == "storm123", metodos
+    assert metodos["padrao"] not in ("setup123", "storm123"), metodos
+    assert metodos["erick"] not in ("setup123", "storm123"), metodos

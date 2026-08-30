@@ -55,6 +55,14 @@ _MA_WINDOWS = (20, 50, 200)
 # already worked changes — this only *adds* the exponential line to the picture.
 _EMA_WINDOWS = (8, 21, 50)
 
+# As duas médias do filtro ÉDEN DOS TRADERS (setup 1-2-3 Storm, lá embaixo).
+# EXPONENCIAIS, como a spec escreve (MME = média móvel exponencial no jargão BR) —
+# não a simples, que seria a conveniente porque já existe em ``_MA_WINDOWS``. A 8 é
+# o viés de curto prazo; a 80 é a tendência principal. Ficam aqui em cima porque
+# ``_prep`` calcula a coluna da lenta junto com as outras EMAs.
+_STORM_EMA_RAPIDA = 8
+_STORM_EMA_LENTA = 80
+
 # Timeframes this detector runs on. The daily/weekly frames come from the cached
 # yfinance series; the intraday frames (15m/1h/4h) come from the keyless intraday
 # loader — the exchange for crypto, yfinance for an equity (see :mod:`.intraday`) —
@@ -296,7 +304,10 @@ def _prep(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> p
     close = df["Close"].astype(float)
     for w in _MA_WINDOWS:
         df[f"MA{w}"] = close.rolling(w).mean()
-    for w in _EMA_WINDOWS:
+    # A MME 80 do Éden (setup Storm) entra AQUI, junto das EMAs de sempre: é uma
+    # coluna a mais na série já carregada (custo ~zero) e não muda o que o gráfico
+    # desenha por padrão — quem decide desenhá-la é ``_chart_emas(method)``.
+    for w in sorted({*_EMA_WINDOWS, _STORM_EMA_LENTA}):
         # adjust=False = the recursive EMA a charting platform draws (Quantfury/TV).
         df[f"EMA{w}"] = close.ewm(span=w, adjust=False).mean()
     return df
@@ -684,6 +695,19 @@ def build_price_structure_section(
 
 
 # ----------------------------------------------------------------- chart -------
+def _chart_emas(method: str) -> tuple[int, ...]:
+    """EMAs que o gráfico DESENHA para este método.
+
+    O padrão é o de sempre (8/21/50). O método Storm acrescenta a MME 80 — ela é
+    metade do filtro Éden, e um Éden sem a lenta na tela é um veto que o leitor não
+    consegue conferir. Só nele: acrescentá-la a todos os métodos poria uma linha a
+    mais em telas que não a usam para nada.
+    """
+    if (method or "").startswith("storm"):
+        return tuple(sorted({*_EMA_WINDOWS, _STORM_EMA_LENTA}))
+    return _EMA_WINDOWS
+
+
 def build_price_chart(
     symbol: str, curr_date: str, bars: int = 260, timeframe: str = _DEFAULT_TIMEFRAME,
     method: str = _DEFAULT_METHOD,
@@ -721,7 +745,8 @@ def build_price_chart(
         for _, row in tail.iterrows()
     ]
     ma = {str(w): [num(v) for v in tail[f"MA{w}"]] for w in _MA_WINDOWS}
-    ema = {str(w): [num(v) for v in tail[f"EMA{w}"]] for w in _EMA_WINDOWS}
+    emas = _chart_emas(method)
+    ema = {str(w): [num(v) for v in tail[f"EMA{w}"]] for w in emas}
     window_dates = {c["d"] for c in candles}
 
     regions = [r.as_dict() for r in struct.buy_regions if r.date in window_dates]
@@ -739,7 +764,7 @@ def build_price_chart(
         "ma": ma,
         "ma_windows": list(_MA_WINDOWS),
         "ema": ema,
-        "ema_windows": list(_EMA_WINDOWS),
+        "ema_windows": list(emas),
         "markers": {
             "buy_regions": regions,
             "active_region": struct.active_region.as_dict() if struct.active_region else None,
@@ -1236,3 +1261,368 @@ def build_actionable_plan_dict(
             horizon=_HORIZON["sem_dado"], setup_state="sem_dado",
             buy_zone=None, realize_zone=None, pullback_zone=None,
         ).as_dict()
+
+
+# ============================================================== SETUP 1-2-3 STORM ==
+# O 1-2-3 do Alexandre Wolwacz ("Stormer") com o filtro ÉDEN DOS TRADERS.
+#
+# NÃO é variação do 1-2-3 que já vive neste módulo (:func:`_pattern_123`). É OUTRO
+# padrão, com a MESMA NUMERAÇÃO significando coisas DIFERENTES — por isso ele tem
+# detector PRÓPRIO, e não um ramo dentro do existente:
+#
+#                       1-2-3 deste módulo             1-2-3 STORM
+#   pontos              swings confirmados (k=5)       3 CANDLES consecutivos
+#   ponto 2 (compra)    o TOPO do repique              o FUNDO (menor mínima dos 3)
+#   ponto 3 (compra)    fundo ASCENDENTE acima do p1   recuperação que FALHA em
+#                                                        romper a máxima do ponto 1
+#   stop                ponto 3 + folga de ATR         abaixo do PONTO 2
+#   alvo                swing anterior mais próximo    PROJEÇÃO DA AMPLITUDE dos 3
+#   filtro              nenhum                         ÉDEN (MME 8 × MME 80) — VETO
+#
+# A semântica do ponto 2 está literalmente INVERTIDA entre os dois. Forçar o detector
+# de swings a servir aos dois produziria exatamente o gênero de defeito que este
+# projeto passou o dia matando: um nome para duas coisas (ver DA-075).
+
+# Rótulos pt-BR do estado do gatilho Storm — os mesmos três estados do 1-2-3 deste
+# módulo, porque a pergunta que eles respondem é a mesma ("já rompeu? o preço segue
+# do lado rompido?"), só que medida no gatilho do Storm.
+_STORM_ESTADO = {
+    "formando": "em formação — o gatilho ainda não foi rompido",
+    "acionado": "acionado — rompeu e o preço segue do lado rompido",
+    "rompeu_retracou": "rompeu e retraçou (não confirmado)",
+}
+
+
+@dataclass
+class StormPattern:
+    """Os três CANDLES do 1-2-3 Storm, mais o que se deriva deles.
+
+    ``p1``/``p2``/``p3`` carregam o OHLC inteiro do candle (nada de guardar só um
+    preço: a amplitude, o gatilho e a invalidação leem extremos diferentes) e o
+    ``price`` que aquele ponto REPRESENTA na leitura — a máxima do ponto 1 (o nível
+    que o ponto 3 falha em romper), a mínima do ponto 2 (o fundo) e a máxima do
+    ponto 3 numa compra; espelhado na venda.
+    """
+    p1: dict[str, Any]
+    p2: dict[str, Any]
+    p3: dict[str, Any]
+    direction: str      # "compra" (fundo) | "venda" (topo)
+    trigger: float
+    state: str          # "formando" | "acionado" | "rompeu_retracou"
+    amplitude: float    # maior máxima − menor mínima dos 3 candles
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "p1": self.p1, "p2": self.p2, "p3": self.p3,
+            "direction": self.direction, "trigger": self.trigger,
+            "state": self.state, "state_label": _STORM_ESTADO.get(self.state, self.state),
+            "amplitude": self.amplitude,
+        }
+
+
+def _eden(df: pd.DataFrame) -> dict[str, Any]:
+    """Filtro ÉDEN DOS TRADERS: MME 8 × MME 80 × posição do preço.
+
+    Três estados, e o terceiro é VETO — não é penalidade de tamanho:
+
+    * MME 8 **acima** da MME 80 **e** preço acima das duas → Éden de **compra**;
+    * MME 8 **abaixo** da MME 80 **e** preço abaixo das duas → Éden de **venda**;
+    * qualquer outra combinação → **sem Éden, não opera**.
+
+    A ARMADILHA que a spec nomeia ganha nome próprio no motivo: preço acima da MME 8
+    mas ABAIXO da MME 80 é repique dentro de tendência de baixa, não reversão (e o
+    espelho vale na venda). Ela já cai no terceiro estado pela regra geral; nomeá-la
+    é o que impede a tela de dizer só "desalinhado" no caso mais caro.
+
+    Série curta: a EMA recursiva devolve número desde a primeira barra, então uma
+    MME 80 lida com 30 candles é um número que PARECE média de 80 períodos e não é.
+    Aqui isso vira ``disponivel: False`` declarado — nunca um Éden inventado.
+    """
+    col_r, col_l = f"EMA{_STORM_EMA_RAPIDA}", f"EMA{_STORM_EMA_LENTA}"
+    n = len(df)
+    if n < _STORM_EMA_LENTA or col_r not in df.columns or col_l not in df.columns:
+        return {
+            "disponivel": False, "alinhado": False, "direcao": None, "armadilha": False,
+            "ema_rapida": None, "ema_lenta": None, "preco": None,
+            "motivo": (f"série com {n} candles — a MME {_STORM_EMA_LENTA} precisa de pelo "
+                       f"menos {_STORM_EMA_LENTA} para significar alguma coisa"),
+        }
+    rapida = round(float(df[col_r].iloc[-1]), 2)
+    lenta = round(float(df[col_l].iloc[-1]), 2)
+    preco = round(float(df["Close"].astype(float).iloc[-1]), 2)
+    base = {"disponivel": True, "ema_rapida": rapida, "ema_lenta": lenta, "preco": preco}
+    if rapida > lenta and preco > rapida and preco > lenta:
+        return {**base, "alinhado": True, "direcao": "compra", "armadilha": False,
+                "motivo": (f"MME {_STORM_EMA_RAPIDA} acima da MME {_STORM_EMA_LENTA} e "
+                           "preço acima das duas")}
+    if rapida < lenta and preco < rapida and preco < lenta:
+        return {**base, "alinhado": True, "direcao": "venda", "armadilha": False,
+                "motivo": (f"MME {_STORM_EMA_RAPIDA} abaixo da MME {_STORM_EMA_LENTA} e "
+                           "preço abaixo das duas")}
+    armadilha_compra = preco > rapida and preco < lenta
+    armadilha_venda = preco < rapida and preco > lenta
+    if armadilha_compra:
+        motivo = (f"ARMADILHA: preço acima da MME {_STORM_EMA_RAPIDA} mas ABAIXO da MME "
+                  f"{_STORM_EMA_LENTA} — repique dentro de tendência de baixa, não reversão")
+    elif armadilha_venda:
+        motivo = (f"ARMADILHA: preço abaixo da MME {_STORM_EMA_RAPIDA} mas ACIMA da MME "
+                  f"{_STORM_EMA_LENTA} — recuo dentro de tendência de alta, não reversão")
+    else:
+        motivo = (f"MME {_STORM_EMA_RAPIDA} e MME {_STORM_EMA_LENTA} cruzadas ou o preço "
+                  "entre elas — sem Éden")
+    return {**base, "alinhado": False, "direcao": None,
+            "armadilha": bool(armadilha_compra or armadilha_venda), "motivo": motivo}
+
+
+def _storm_ponto(df: pd.DataFrame, idx: int, kind: str, fmt: str) -> dict[str, Any]:
+    """Um ponto do Storm = o CANDLE inteiro + o preço que ele representa na leitura."""
+    row = df.iloc[idx]
+    preco = float(row["Low"]) if kind == "L" else float(row["High"])
+    return {
+        "date": row["Date"].strftime(fmt),
+        "price": round(preco, 2),
+        "open": round(float(row["Open"]), 2),
+        "high": round(float(row["High"]), 2),
+        "low": round(float(row["Low"]), 2),
+        "close": round(float(row["Close"]), 2),
+    }
+
+
+def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
+    """O 1-2-3 Storm mais RECENTE em qualquer direção, lido em 3 candles seguidos.
+
+    Compra (fundo) — as três condições da spec, nesta ordem:
+      1. ponto 1 é candle de alta ou lateral (``close >= open``);
+      2. ponto 2 é O FUNDO: mínima menor que a do 1 E que a do 3 (é o que faz dele
+         "a menor mínima dos 3"; empate não serve, senão o fundo é ambíguo);
+      3. ponto 3 é RECUPERAÇÃO (fecha acima do fechamento do ponto 2) que FALHA em
+         romper o ponto 1 (``high3 < high1``) — a falha é o coração do padrão.
+
+    Venda é o espelho exato. Varre da esquerda pra direita sobrescrevendo, então o
+    triplo válido MAIS RECENTE vence (mesma regra do 1-2-3 deste módulo).
+
+    Gatilho = a MAIOR das máximas do ponto 2 e do ponto 3 na compra (a menor das
+    mínimas na venda). A spec escreve "máxima do ponto 2 (ou 3)"; usar só a do 2
+    quando a do 3 está acima entregaria um gatilho já rompido no nascimento.
+    """
+    if len(df) < 3:
+        return None
+    o = df["Open"].astype(float).values
+    h = df["High"].astype(float).values
+    lo = df["Low"].astype(float).values
+    c = df["Close"].astype(float).values
+    best: tuple[int, int, int, str] | None = None
+    for i in range(len(df) - 2):
+        a, b, d = i, i + 1, i + 2
+        if (c[a] >= o[a]                                  # 1. alta ou lateral
+                and lo[b] < lo[a] and lo[b] < lo[d]       # 2. o fundo
+                and c[d] > c[b] and h[d] < h[a]):         # 3. recupera e falha
+            best = (a, b, d, "compra")
+        elif (c[a] <= o[a]                                # 1. baixa ou lateral
+                and h[b] > h[a] and h[b] > h[d]           # 2. o topo
+                and c[d] < c[b] and lo[d] > lo[a]):       # 3. cai e falha
+            best = (a, b, d, "venda")
+    if best is None:
+        return None
+    a, b, d, direction = best
+    compra = direction != "venda"
+    amplitude = round(float(max(h[a], h[b], h[d]) - min(lo[a], lo[b], lo[d])), 2)
+    last_close = round(float(c[-1]), 2)
+    if compra:
+        trigger = round(float(max(h[b], h[d])), 2)
+        broke = bool((h[d + 1:] > trigger).any())
+        kinds = ("H", "L", "H")   # p1 vale pela MÁXIMA (o teto que o 3 não rompe)
+        state = "formando" if not broke else (
+            "acionado" if last_close > trigger else "rompeu_retracou")
+    else:
+        trigger = round(float(min(lo[b], lo[d])), 2)
+        broke = bool((lo[d + 1:] < trigger).any())
+        kinds = ("L", "H", "L")
+        state = "formando" if not broke else (
+            "acionado" if last_close < trigger else "rompeu_retracou")
+    return StormPattern(
+        p1=_storm_ponto(df, a, kinds[0], fmt),
+        p2=_storm_ponto(df, b, kinds[1], fmt),
+        p3=_storm_ponto(df, d, kinds[2], fmt),
+        direction=direction, trigger=trigger, state=state, amplitude=amplitude,
+    )
+
+
+def _storm_levels(
+    pat: StormPattern, atr: float | None, price: float,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+    """``(invalidação, stop, alvo, risco_retorno)`` do Storm — nenhum herdado do outro 1-2-3.
+
+    * **invalidação** — o PONTO 2 (a mínima na compra, a máxima na venda). É o fundo
+      que o padrão declara: perdê-lo é dizer que a reversão não aconteceu.
+    * **stop** — o PONTO 2, exato. Sem a folga de meio ATR que o 1-2-3 de swings usa:
+      medida na watchlist real, ela derruba a mediana de R:R de 1,13 para 0,80 porque
+      meio ATR14 é enorme perto da amplitude de TRÊS candles. O quanto abaixo do ponto
+      2 se põe a ordem é decisão de quem opera — ver o comentário na função.
+    * **alvo** — PROJEÇÃO DA AMPLITUDE: (maior máxima − menor mínima dos 3 candles)
+      lançada a partir do GATILHO. Ancorar no gatilho, e não no preço de agora, é o
+      que mantém o alvo um nível ESTRUTURAL: projetado do preço corrente ele fugiria
+      junto com o preço e nunca seria atingido.
+    * **risco/retorno** — pela mesma função do resto do módulo (:func:`_risk_reward`),
+      com a entrada de referência degradando pro preço atual depois de acionado.
+    """
+    compra = pat.direction != "venda"
+    inval_price = float(pat.p2["low"] if compra else pat.p2["high"])
+    lado = "perder" if compra else "voltar acima de"
+    invalidation = {
+        "label": f"perda do ponto 2 ({pat.p2['date']})" if compra
+                 else f"retomada do ponto 2 ({pat.p2['date']})",
+        "price": round(inval_price, 2),
+        "meaning": (f"o setup morre se {lado} o ponto 2 — é o fundo que a reversão "
+                    "declarou" if compra else
+                    f"o setup morre se {lado} o ponto 2 — é o topo que a reversão declarou"),
+    }
+    # STOP NO PONTO 2 — e no ponto 2 EXATO, sem folga inventada.
+    #
+    # A primeira versão desta função usava a folga de meio ATR que o resto do módulo
+    # aplica ao 1-2-3 de swings. MEDIDO na watchlist real (20 ativos × 1d/4h/1h,
+    # 29/08): com a folga, a mediana de R:R do Storm é 0,80 e só 21% dos pares dão
+    # R:R ≥ 1; sem ela, mediana 1,13 e 77% ≥ 1. A razão é estrutural, não estatística:
+    # o Storm mede TRÊS CANDLES, e meio ATR14 é enorme perto da amplitude de três
+    # candles — no 1-2-3 de swings, que abrange dezenas de barras, a mesma folga é
+    # ruído. Aplicar aqui a folga de lá era carregar um número de um setup pro outro.
+    #
+    # A spec do Stormer diz "stop abaixo do ponto 2" sem quantificar o "abaixo". O
+    # nível ESTRUTURAL é o ponto 2; o quanto abaixo dele cada um põe a ordem é
+    # decisão de quem opera, e inventar um valor aqui seria publicar como estrutura
+    # uma preferência. Fica o ponto 2 exato, com o motivo escrito na tela.
+    stop_price = inval_price
+    stop_basis = ("no ponto 2 — a spec põe o stop abaixo dele, e o quanto abaixo é "
+                  "decisão de quem opera (não se inventa folga aqui)")
+    stop = {"label": "stop (SL)", "price": round(stop_price, 2),
+            "anchor": round(inval_price, 2), "atr": atr, "basis": stop_basis,
+            "slack": 0.0}
+
+    alvo_price = pat.trigger + pat.amplitude if compra else pat.trigger - pat.amplitude
+    target = {
+        "label": f"projeção da amplitude dos 3 candles ({pat.amplitude:,.2f}) a partir do gatilho",
+        "price": round(float(alvo_price), 2),
+        "amplitude": pat.amplitude,
+        "low": None, "high": None, "band_basis": None, "same_as_realize": False,
+    }
+    if pat.state == "acionado":
+        entry, entry_basis = float(price), "preço atual (padrão já acionado)"
+    else:
+        entry, entry_basis = float(pat.trigger), (
+            "gatilho — rompimento da máxima do ponto 2/3" if compra
+            else "gatilho — perda da mínima do ponto 2/3")
+    risk_reward = _risk_reward(entry, entry_basis, stop, target, compra)
+    return invalidation, stop, target, risk_reward
+
+
+def _storm_qualidade(
+    pat: StormPattern | None, eden: dict[str, Any], ema_lenta_no_p3: float | None,
+) -> dict[str, Any]:
+    """Classificação perfeita/boa/ruim + o VETO, escrito.
+
+    A spec só opera **perfeita** e **boa**. As regras, na ordem em que vetam:
+
+    1. **Sem Éden alinhado → ruim, não opera.** É veto, não desconto: a tela diz
+       "não opera" e o motivo (inclusive quando o motivo é a armadilha nomeada).
+    2. **Éden alinhado na direção CONTRÁRIA à do padrão → ruim, não opera.** Um 1-2-3
+       de compra sob Éden de venda é justamente o trade contra a tendência principal
+       que a regra proíbe.
+    3. **Alinhado e na mesma direção → perfeita quando o PONTO 3 está inteiro do lado
+       certo da MME 80** (o candido do ponto 3 acima dela na compra, abaixo na venda,
+       medida NA BARRA DO PRÓPRIO PONTO 3 — comparar um candle de semanas atrás com a
+       média de hoje seria comparar coisas de tempos diferentes). Senão, **boa**:
+       estrutura válida, sem o reforço da tendência principal.
+    """
+    if pat is None:
+        return {"qualidade": None, "motivo": "nenhum 1-2-3 Storm na janela lida",
+                "opera": False, "veto": None}
+    if not eden.get("alinhado"):
+        return {"qualidade": "ruim", "motivo": eden.get("motivo") or "sem Éden",
+                "opera": False,
+                "veto": f"sem Éden alinhado — {eden.get('motivo') or 'não opera'}"}
+    if eden.get("direcao") != pat.direction:
+        return {
+            "qualidade": "ruim",
+            "motivo": (f"o Éden está de {eden.get('direcao')} e o padrão é de "
+                       f"{pat.direction}"),
+            "opera": False,
+            "veto": (f"padrão de {pat.direction} contra Éden de {eden.get('direcao')} — "
+                     "operar contra o Éden é o caso que a regra proíbe"),
+        }
+    compra = pat.direction != "venda"
+    lado_certo = (
+        ema_lenta_no_p3 is not None
+        and (pat.p3["low"] > ema_lenta_no_p3 if compra else pat.p3["high"] < ema_lenta_no_p3)
+    )
+    if lado_certo:
+        onde = "acima" if compra else "abaixo"
+        return {"qualidade": "perfeita", "opera": True, "veto": None,
+                "motivo": (f"ponto 3 inteiro {onde} da MME {_STORM_EMA_LENTA} — a tendência "
+                           "principal sustenta a reversão")}
+    onde = "acima" if compra else "abaixo"
+    return {"qualidade": "boa", "opera": True, "veto": None,
+            "motivo": (f"estrutura válida e Éden alinhado, mas o ponto 3 não está inteiro "
+                       f"{onde} da MME {_STORM_EMA_LENTA}")}
+
+
+def build_storm_plan(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+) -> dict[str, Any]:
+    """Plano do 1-2-3 Storm na série date-guarded — leitura estrutural, $0 de LLM.
+
+    Devolve sempre um dicionário serializável, com o Éden declarado mesmo quando não
+    há padrão: "por que não opera" é informação, e some-la seria a tela ficar muda
+    justamente no caso em que o filtro fez o seu trabalho.
+    """
+    fmt = _date_fmt(timeframe)
+    df = _prep(symbol, curr_date, timeframe)
+    price = round(float(df["Close"].astype(float).iloc[-1]), 2) if len(df) else None
+    as_of = df["Date"].iloc[-1].strftime(fmt) if len(df) else None
+    eden = _eden(df)
+    pat = _storm_123(df, fmt)
+    col_l = f"EMA{_STORM_EMA_LENTA}"
+    ema_lenta_no_p3 = None
+    if pat is not None and eden.get("disponivel") and col_l in df.columns:
+        # A MME 80 NA BARRA DO PONTO 3 (não a de hoje): a regra de qualidade compara
+        # aquele candle com a média que existia quando ele se formou.
+        alvo_data = pat.p3["date"]
+        casadas = df.index[df["Date"].dt.strftime(fmt) == alvo_data]
+        if len(casadas):
+            v = df[col_l].iloc[int(casadas[-1])]
+            ema_lenta_no_p3 = None if pd.isna(v) else round(float(v), 2)
+    qual = _storm_qualidade(pat, eden, ema_lenta_no_p3)
+    out: dict[str, Any] = {
+        "symbol": symbol, "as_of": as_of, "price": price,
+        "timeframe": _plan_timeframe_ref(timeframe),
+        "eden": eden,
+        "pattern": pat.as_dict() if pat is not None else None,
+        "ema_lenta_no_p3": ema_lenta_no_p3,
+        "invalidation": None, "stop": None, "target": None, "risk_reward": None,
+        **qual,
+    }
+    if pat is not None and price is not None:
+        inval, stop, target, rr = _storm_levels(pat, _atr(df), price)
+        out.update({"invalidation": inval, "stop": stop, "target": target,
+                    "risk_reward": rr})
+    return out
+
+
+def build_storm_plan_dict(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+) -> dict[str, Any]:
+    """Wrapper de UI: nunca levanta — falha vira plano vazio com o motivo escrito."""
+    try:
+        return build_storm_plan(symbol, curr_date, timeframe)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("storm-plan build failed for %s: %s", symbol, exc)
+        return {
+            "symbol": symbol, "as_of": None, "price": None,
+            "timeframe": _plan_timeframe_ref(timeframe),
+            "eden": {"disponivel": False, "alinhado": False, "direcao": None,
+                     "armadilha": False, "ema_rapida": None, "ema_lenta": None,
+                     "preco": None, "motivo": "série indisponível para esta data/frame"},
+            "pattern": None, "ema_lenta_no_p3": None,
+            "invalidation": None, "stop": None, "target": None, "risk_reward": None,
+            "qualidade": None, "motivo": "sem dado para ler o Storm",
+            "opera": False, "veto": None,
+        }

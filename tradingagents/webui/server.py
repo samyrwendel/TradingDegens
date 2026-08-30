@@ -76,6 +76,11 @@ from tradingagents.webui.subscription import SubscriptionStore
 #     não tem chave, ex.: Ollama self-host) e que o 1-2-3 sequer consome.
 # `compare` está FORA de propósito: é ele que troca a rota por Padrão x Erick x
 # meta-juiz na chave do servidor.
+# Métodos ESTRUTURAIS: leem a série e devolvem níveis, $0 de LLM — o portão de custo
+# protegeria um custo que não existe. Lista, nunca um ``if`` por método: cada novo
+# caminho de isenção é uma chance nova de reabrir o buraco da task 007.
+_METODOS_SEM_LLM = frozenset({"setup123", "storm123"})
+
 _CORPO_ISENTO_DE_GATE = frozenset({
     "ticker", "date", "method", "timeframe", "force_fresh",
     "llm_provider", "deep_think_llm", "quick_think_llm", "backend_url",
@@ -276,14 +281,20 @@ class _Handler(BaseHTTPRequestHandler):
     def _rota_sem_llm(method: str, body: dict) -> bool:
         """A requisição vai mesmo subir a rota estrutural de $0 (sem LLM nenhum)?
 
-        Só o atalho 1-2-3 puro, e só com um corpo INTEIRAMENTE conhecido: toda chave
-        de valor com peso tem que estar em ``_CORPO_ISENTO_DE_GATE``. Chave que
-        ninguém reconhece pode ser uma flag de rota nova (``compare`` foi exatamente
-        isso) — e diante do desconhecido a resposta é o portão, não a isenção. Chave
-        de valor vazio/falso é ignorada porque não liga rota nenhuma (o front manda
-        ``compare: false`` no 1-2-3 legítimo).
+        Só um método ESTRUTURAL puro (``setup123`` ou ``storm123`` — os dois leem a
+        série e não chamam modelo nenhum), e só com um corpo INTEIRAMENTE conhecido:
+        toda chave de valor com peso tem que estar em ``_CORPO_ISENTO_DE_GATE``.
+        Chave que ninguém reconhece pode ser uma flag de rota nova (``compare`` foi
+        exatamente isso) — e diante do desconhecido a resposta é o portão, não a
+        isenção. Chave de valor vazio/falso é ignorada porque não liga rota nenhuma
+        (o front manda ``compare: false`` no 1-2-3 legítimo).
+
+        O método novo entra pela LISTA, não por um segundo ``if`` paralelo: era o
+        segundo caminho de isenção que abriria de novo o buraco que a task 007
+        fechou. A allowlist do corpo continua a mesma — ``storm123`` não traz chave
+        nova nenhuma.
         """
-        if method != "setup123":
+        if method not in _METODOS_SEM_LLM:
             return False
         return all(k in _CORPO_ISENTO_DE_GATE for k, v in (body or {}).items() if v)
 

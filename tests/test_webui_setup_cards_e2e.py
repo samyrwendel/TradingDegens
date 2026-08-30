@@ -304,7 +304,7 @@ def test_o_frame_e_chao_comum_e_sai_uma_vez_so_embaixo_dos_dois(base):
           c123: document.querySelector('#setupCards .sc-123').innerText,
           recuo: document.querySelector('#setupCards .sc-recuo').innerText,
         })""")
-        assert "as duas leituras no 4h" in m["rodape"], m
+        assert "as 2 leituras no 4h" in m["rodape"], m
         assert "4h" not in m["c123"] and "4h" not in m["recuo"], ("uma vez só", m)
         browser.close()
 
