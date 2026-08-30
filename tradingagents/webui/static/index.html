@@ -379,6 +379,12 @@
                 <span class="chart-zoom-hint">roda = zoom · régua direita = zoom vertical · régua de baixo = zoom horizontal · arrasta = move 2 eixos · 2 cliques = reseta</span>
                 <canvas id="priceChart"></canvas>
               </div>
+              <!-- O QUE A TELA ANUNCIA E NÃO ESTÁ ENQUADRADO. Fica ENTRE o canvas e a
+                   nota de propósito: a nota descreve a ANÁLISE (não muda com o dedo),
+                   esta linha descreve o ENQUADRAMENTO e é reescrita a cada zoom/pan.
+                   Sem ela, um 1-2-3 empurrado pra fora da janela some sem aviso e a
+                   nota logo abaixo continua prometendo pontos que ninguém acha. -->
+              <p class="chart-fora hidden" id="chartFora"></p>
               <p class="chart-note" id="chartNote"></p>
             </div>
           </div>

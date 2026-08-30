@@ -786,6 +786,28 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .camadas-aviso .cav-btn:hover { background: rgba(110,168,254,0.12); }
 
+/* AVISO DE ENQUADRAMENTO (DA-107). Mesma caixa do .camadas-aviso — as duas dizem a
+   mesma classe de coisa ("o que a tela anuncia e você não está vendo"), e dar
+   aparência nova a cada aviso ensina o olho a tratar cada um como assunto separado.
+   Fica colado no canvas (margem só em cima) porque é sobre o que está NELE. */
+.chart-fora {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin: 8px 0 0; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.chart-fora b { color: var(--text); }
+.chart-fora .cn-line { display: block; flex: 1 1 100%; }
+.chart-fora .cn-line + .cn-line { margin-top: 3px; }
+.chart-fora .cav-btn {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-bold); cursor: pointer;
+  padding: 5px 10px; border-radius: var(--radius);
+  border: 1px solid var(--accent); background: transparent; color: var(--accent);
+}
+.chart-fora .cav-btn:hover { background: rgba(110,168,254,0.12); }
+
 .chart-note { color: var(--muted); font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
 .chart-note b { color: var(--text); }
 /* Cada fato do setup (gatilho, invalidação, stop, alvo, R:R) em sua própria
@@ -1268,8 +1290,13 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .reeval-btn { order: 5; }
   .chart-degrade { order: 6; }
   .chart-wrap { order: 7; }
-  #chartLegend { order: 8; margin-top: 10px; }
-  .chart-note { order: 9; }
+  /* O AVISO DE ENQUADRAMENTO cai na MESMA armadilha do bloco acima — sem `order`
+     declarado ele vai pro 0 e sobe pro topo do card, longe do gráfico de que fala.
+     Aqui ele vem COLADO embaixo do canvas: é ali que o olho para depois de varrer o
+     gráfico e não achar o padrão que a tela anuncia. */
+  #chartFora { order: 8; }
+  #chartLegend { order: 9; margin-top: 10px; }
+  .chart-note { order: 10; }
   /* LEGENDA no telefone: mesma informação, escala menor (DA-101). Com 11 itens a
      12px ela somava cinco linhas depois do gráfico; a 10px cabe em três, e nenhum
      item sai. */

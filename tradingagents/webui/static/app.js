@@ -3866,8 +3866,14 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
     rotulos.push({ x: px, y: my + lado * 16, text: preco, align: "centro", pilula: false,
                    cor: fantasma ? COR_FANTASMA : "#8b97ad",
                    opaco: fantasma ? 0.45 : (vetado ? 0.7 : 1) });
+    // `naVista` é o que separa DESENHADO de VISÍVEL: com zoom, um ponto antigo cai
+    // centenas de pixels à esquerda do plot e continua sendo "pintado" — o canvas
+    // não recorta, então o comando de desenho ocorre e nada aparece. Sem esta marca
+    // a telemetria diz três pontos na tela enquanto a tela está vazia, e a suíte
+    // fica verde por cima do defeito que o usuário está olhando.
     if (saida) saida.push({ familia, nome, lab: p.lab, preco, forma, cor,
                             fantasma: !!fantasma, vetado: !!vetado,
+                            naVista: px >= padL && px <= padL + plotW,
                             estado: estado || (fantasma ? "invalidado" : "") });
   });
   // Etiquetas ao lado do PRIMEIRO ponto: o nome da família (só quando há mais de uma
@@ -4321,17 +4327,22 @@ function drawPriceChart(canvas, chart, a) {
   // OS PONTOS DO PLANO vêm do detector de SWINGS; os do Storm são três candles
   // consecutivos com a MESMA numeração para pontos DIFERENTES. Desenhá-los juntos
   // sem dizer de quem é cada marcador é a colisão que o módulo já declarava.
+  // O QUE FOI ANUNCIADO E NÃO COUBE NO ENQUADRAMENTO — ver `resumoEnquadramento`.
+  const _fora = [];
   if (pat && camadaVisivel("plano")) {
     const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
-    const pts = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
-      .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
-      .filter((p) => p.i != null);
+    const brutos = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
+      .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price, d: p.date }));
+    const pts = brutos.filter((p) => p.i != null);
+    const _antes = _pontos123.length;
     desenha123(ctx, _geom, {
       pts, familia: "plano", nome: "Setup123", cor: patColor(pat),
       forma: FORMA_DA_FAMILIA.plano, dash: [4, 3], dist: 14,
       // O gatilho é o convite a operar: um padrão morto não o desenha.
       trigger: pat.trigger, fantasma: ehFantasma(pat), mostraNome: _duasFamilias,
     }, _pontos123, _rotulos123);
+    _fora.push(resumoEnquadramento("Setup123", brutos, _pontos123.slice(_antes),
+                                   { v0, v1, candles }));
   }
 
   // OS TRÊS CANDLES DO STORM. Até a DA-088 o Storm só existia no gráfico como linhas
@@ -4346,9 +4357,10 @@ function drawPriceChart(canvas, chart, a) {
   if (_stormPat) {
     const compra = _stormPat.direction !== "venda";
     const kinds = compra ? ["H", "L", "H"] : ["L", "H", "L"];
-    const pts = [["1", _stormPat.p1], ["2", _stormPat.p2], ["3", _stormPat.p3]]
-      .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price }))
-      .filter((p) => p.i != null);
+    const brutos = [["1", _stormPat.p1], ["2", _stormPat.p2], ["3", _stormPat.p3]]
+      .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price, d: p.date }));
+    const pts = brutos.filter((p) => p.i != null);
+    const _antes = _pontos123.length;
     desenha123(ctx, _geom, {
       pts, familia: "storm", nome: "Storm123", cor: stormColor(_stormPat),
       forma: FORMA_DA_FAMILIA.storm, dash: [3, 3], dist: _duasFamilias ? 34 : 14,
@@ -4357,6 +4369,8 @@ function drawPriceChart(canvas, chart, a) {
       trigger: null, fantasma: _stormEst === "invalidado", vetado: _stormEst === "vetado",
       estado: stormEstadoTexto(_stormEst, a.storm), mostraNome: _duasFamilias,
     }, _pontos123, _rotulos123);
+    _fora.push(resumoEnquadramento("Storm123", brutos, _pontos123.slice(_antes),
+                                   { v0, v1, candles }));
   }
   canvas.dataset.pat123 = JSON.stringify(_pontos123);
   // Os rótulos são pintados DEPOIS de todos os marcadores das duas famílias, dentro
@@ -4431,6 +4445,119 @@ function drawPriceChart(canvas, chart, a) {
       ctx.globalAlpha = 1;
     }
     drawAxisPill(ctx, axisX, padR, p.ry, p.text, p.bg, p.fg, p.strong);
+  });
+
+  // AS FAIXAS TAMBÉM SAEM DE VISTA — pelo eixo de PREÇO, não pelo de tempo. Com zoom
+  // vertical, uma banda inteira acima do topo (ou abaixo da base) deixa de ser
+  // desenhada, e o rótulo dela é ancorado de volta pra dentro do plot por
+  // `layoutAxisPills`: sobra um nome flutuando num preço que não está mais na tela.
+  const _foraFaixa = zones.filter((z) => {
+    const band = z.low != null && z.high != null && z.high > z.low;
+    const yTopo = band ? y(z.high) : y(z.price), yBase = band ? y(z.low) : y(z.price);
+    return yBase < padT || yTopo > padT + plotH;
+  }).map((z) => z.tagCurto || z.tag);
+
+  canvas.dataset.foraDaVista = JSON.stringify(
+    { padroes: _fora.filter(Boolean), faixas: _foraFaixa,
+      temZoom: !!(canvas._view || canvas._vview) });
+  avisoForaDaVista(canvas);
+}
+
+// ─────────── O QUE A TELA ANUNCIA E NÃO ESTÁ NO ENQUADRAMENTO (DA-107) ───────────
+//
+// O canvas não recorta: um ponto do 1-2-3 cujo candle ficou fora da janela de zoom
+// continua sendo "desenhado", só que a centenas de pixels da borda esquerda. Do lado
+// de fora isso é indistinguível de padrão não detectado — o Samyr olhou a tela, a
+// nota abaixo dela prometia "os pontos ficam em cinza como história", e ele perguntou
+// "aqui não fez o 1-2-3 do storm?". A promessa não era falsa sobre a COR; era muda
+// sobre o LUGAR.
+//
+// São DUAS causas distintas, e confundi-las dá conselho errado:
+//   * fora da JANELA de zoom — o padrão está na série, o dedo é que o empurrou pra
+//     fora; tem volta, e a volta é um clique;
+//   * sem VELA — a data do ponto não está no período carregado deste tempo gráfico;
+//     não há zoom que traga, e prometer um gesto que não resolve é pior que calar.
+function resumoEnquadramento(nome, brutos, pintados, janela) {
+  const semVela = brutos.filter((p) => p.i == null);
+  const foraJanela = pintados.filter((p) => !p.naVista);
+  if (!semVela.length && !foraJanela.length) return null;
+  const idxs = brutos.filter((p) => p.i != null).map((p) => p.i);
+  const antes = idxs.length && Math.max(...idxs) < janela.v0;
+  const depois = idxs.length && Math.min(...idxs) >= janela.v1;
+  const velas = antes ? janela.v0 - Math.max(...idxs)
+              : (depois ? Math.min(...idxs) - janela.v1 + 1 : 0);
+  return {
+    nome, total: brutos.length, naVista: pintados.length - foraJanela.length,
+    semVela: semVela.map((p) => p.d), foraJanela: foraJanela.length,
+    lado: antes ? "esquerda" : (depois ? "direita" : null), velas,
+    periodo: [janela.candles[0].d, janela.candles[janela.candles.length - 1].d],
+  };
+}
+
+// "2026-08-24" / "2026-08-24 14:00" → "24/08" / "24/08 14:00"
+function diaMes(d) {
+  if (!d || d.length < 10) return d || "";
+  const hora = d.length > 10 ? ` ${d.slice(11, 16)}` : "";
+  return `${d.slice(8, 10)}/${d.slice(5, 7)}${hora}`;
+}
+
+function frasesForaDaVista(dados) {
+  const fs = [];
+  (dados.padroes || []).forEach((f) => {
+    if (f.semVela.length === f.total) {
+      fs.push(`<b>${escapeHtml(f.nome)}</b> não cabe neste tempo gráfico — os ` +
+        `${f.total} pontos são de ${diaMes(f.semVela[0])} a ` +
+        `${diaMes(f.semVela[f.semVela.length - 1])}, e o gráfico carregou de ` +
+        `${diaMes(f.periodo[0])} a ${diaMes(f.periodo[1])}.`);
+    } else if (f.semVela.length) {
+      fs.push(`<b>${escapeHtml(f.nome)}</b> entrou pela metade — ` +
+        `${f.total - f.semVela.length} dos ${f.total} pontos estão no período ` +
+        `carregado (${diaMes(f.periodo[0])} a ${diaMes(f.periodo[1])}).`);
+    }
+    if (f.foraJanela) {
+      const quantos = f.foraJanela === f.total
+        ? `os ${f.total} pontos estão`
+        : `${f.foraJanela} dos ${f.total} pontos estão`;
+      // A CONTA DE VELAS é o "quanto" que transforma "está fora" em "está ali": sem
+      // ela o aviso manda procurar sem dizer onde. Quando o padrão fica a cavaleiro
+      // das duas bordas não há um lado só — aí a distância não significa nada e a
+      // frase para no fato.
+      const onde = f.lado
+        ? `${f.velas} vela${f.velas > 1 ? "s" : ""} à ${f.lado} do enquadramento`
+        : "fora do enquadramento";
+      fs.push(`<b>${escapeHtml(f.nome)}</b>: ${quantos} ${onde}.`);
+    }
+  });
+  if ((dados.faixas || []).length) {
+    fs.push(`Fora do enquadramento de preço: ` +
+      `${dados.faixas.map(escapeHtml).join(" · ")}.`);
+  }
+  return fs;
+}
+
+// A linha vive COLADA no gráfico e é reescrita a cada redesenho — ela descreve o
+// ENQUADRAMENTO, que muda com o dedo, e não a análise, que não muda. Ficar dentro da
+// #chartNote (montada uma vez por render) faria o aviso envelhecer no primeiro zoom.
+function avisoForaDaVista(canvas) {
+  if (!canvas || canvas.id !== "priceChart") return;   // gráficos da comparação não têm a linha
+  const el = document.getElementById("chartFora");
+  if (!el) return;
+  let dados = {};
+  try { dados = JSON.parse(canvas.dataset.foraDaVista || "{}"); } catch (_) { dados = {}; }
+  const fs = frasesForaDaVista(dados);
+  if (!fs.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  // O BOTÃO só aparece quando existe zoom pra desfazer: oferecer "ver a série
+  // inteira" quando a série inteira JÁ está na tela manda o usuário num gesto que
+  // não muda nada — e um conselho que não resolve gasta a confiança do próximo.
+  const botao = dados.temZoom
+    ? `<button type="button" class="cav-btn" id="foraResetBtn">ver a série inteira</button>`
+    : "";
+  el.innerHTML = fs.map((f) => `<span class="cn-line">${f}</span>`).join("") + botao;
+  el.classList.remove("hidden");
+  const btn = document.getElementById("foraResetBtn");
+  if (btn) btn.addEventListener("click", () => {
+    canvas._view = null; canvas._vview = null;
+    drawPriceChart(canvas, canvas._chart, canvas._actionable);
   });
 }
 
