@@ -153,7 +153,7 @@ _LE = """() => ({
   medias: (() => { const m = mediasVisiveis(document.getElementById('priceChart')._actionable || {});
     return {ma: [...m.ma].sort(), ema: [...m.ema].sort()}; })(),
   legenda: document.getElementById('chartLegend').innerText.replace(/\\s+/g, ' ').trim(),
-  camadasBtn: [...document.querySelectorAll('.camada-btn')].map(b => b.innerText.trim()),
+  camadasBtn: [...document.querySelectorAll('#camadasSelector .camada-btn')].map(b => b.innerText.trim()),
   camadasVisivel: !document.getElementById('camadasSelector').classList.contains('hidden'),
   cards: [...document.querySelectorAll('#setupCards .sc-title')].map(e => e.innerText.trim()),
 })"""

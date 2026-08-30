@@ -366,6 +366,11 @@
                    quando há outra camada no plano. -->
               <div class="camadas hidden" id="camadasSelector" role="group"
                    aria-label="Camadas de outros métodos no gráfico"></div>
+              <!-- ANÚNCIO da leitura DISPONÍVEL E DESLIGADA. Sem ele, o gráfico de uma
+                   análise Padrão simplesmente não tinha Storm123 e nada dizia que ele
+                   existia — "sumiu e não avisou". Fica AQUI, colado no gráfico e acima
+                   do canvas (nunca escondido em menu), com o clique que liga. -->
+              <p class="camadas-aviso hidden" id="camadasAviso"></p>
               <!-- Reavaliar o VEREDITO no timeframe escolhido: roda uma análise real
                    com o analista de mercado lendo esse frame (o veredito pode mudar). -->
               <button type="button" class="reeval-btn hidden" id="reevalBtn"></button>

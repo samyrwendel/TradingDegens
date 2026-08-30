@@ -560,6 +560,27 @@ def fetch_storm_plan(ticker: str, date: str,
         return {}
 
 
+def plano_com_storm(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+                    method: str = "padrao") -> dict[str, Any]:
+    """O plano da tela: família Padrão/Erick + a leitura do Storm SEMPRE ao lado.
+
+    O Storm viajava só na run do método dele. O efeito na tela era o oposto do que
+    a DA-088 quis: numa análise Padrão ou Erick o Storm não estava desligado — ele
+    **não existia**, e por isso nem a camada aparecia pra ligar. *"eu não vi nenhum
+    desenho do storm123 nos gráficos que analisei"* é exatamente isso: trocamos
+    "mistura tudo" por "sumiu e não avisou".
+
+    Custa ~10ms e **$0 de LLM**: lê a MESMA série cacheada e date-guarded que o
+    plano acabou de ler. Com a leitura no payload, a tela pode fazer o que a DA-088
+    pede — **desenhar só o método aberto** — e ainda assim ANUNCIAR que a outra
+    existe, com um clique pra ligar. Disponível-e-desligado é um estado; ausente é
+    outro, e só um deles o usuário consegue desfazer.
+    """
+    p = dict(fetch_actionable_plan(ticker, date, timeframe, method) or {})
+    p["storm"] = fetch_storm_plan(ticker, date, timeframe)
+    return p
+
+
 def fetch_symbol_search(term: str, limit: int = 8) -> list[dict[str, Any]]:
     """Autocomplete candidates for a name-or-ticker term (fail-open -> [])."""
     try:
@@ -1010,10 +1031,7 @@ class AnalysisRunner:
         try:
             chart = fetch_price_chart(run.ticker, run.date, run.timeframe,
                                       "storm" if storm else "padrao")
-            plan = fetch_actionable_plan(run.ticker, run.date, run.timeframe, "padrao")
-            if storm:
-                plan = dict(plan or {})
-                plan["storm"] = fetch_storm_plan(run.ticker, run.date, run.timeframe)
+            plan = plano_com_storm(run.ticker, run.date, run.timeframe, "padrao")
             run.result = {
                 "verdict": None,
                 "final_decision": "",
@@ -1186,7 +1204,10 @@ class AnalysisRunner:
             run.result["price_chart"] = fetch_price_chart(
                 run.ticker, run.date, run.timeframe, method
             )
-            run.result["actionable"] = fetch_actionable_plan(
+            # O Storm entra AQUI também: sem ele no payload, uma análise Padrão ou
+            # Erick não tinha nem o botão da camada — a leitura não estava desligada,
+            # estava ausente (ver :func:`plano_com_storm`).
+            run.result["actionable"] = plano_com_storm(
                 run.ticker, run.date, run.timeframe, method
             )
             # THE single frozen reference price of the run (date-guarded daily close,
@@ -2600,10 +2621,7 @@ class AnalysisRunner:
         date = (date or "").strip() or timeutil.today()
         if not ticker:
             raise ValueError("ticker vazio")
-        plan = fetch_actionable_plan(ticker, date, timeframe, method)
-        if (method or "").startswith("storm"):
-            plan = dict(plan or {})
-            plan["storm"] = fetch_storm_plan(ticker, date, timeframe)
+        plan = plano_com_storm(ticker, date, timeframe, method)
         # O track record é fail-open: um ledger vazio ou ilegível não pode derrubar o
         # card — ele só faz o índice dizer que não há amostra, que é a verdade.
         try:
@@ -2749,14 +2767,8 @@ class AnalysisRunner:
         # vindo do /api/chart, sem nada de Storm) discordarem no mesmo frame.
         # Mesma montagem do worker: o 1-2-3/recuo saem da família Padrão e o Storm
         # entra AO LADO, nunca no lugar (DA-077/DA-081).
-        storm = (method or "").startswith("storm")
-
         def _plano(tf: str) -> dict[str, Any]:
-            p = fetch_actionable_plan(ticker, date, tf, method)
-            if storm:
-                p = dict(p or {})
-                p["storm"] = fetch_storm_plan(ticker, date, tf)
-            return p
+            return plano_com_storm(ticker, date, tf, method)
 
         chart = fetch_price_chart(ticker, date, timeframe, method)
         plan = _plano(timeframe)

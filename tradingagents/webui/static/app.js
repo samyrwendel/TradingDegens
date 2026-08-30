@@ -2919,6 +2919,7 @@ function renderChartCard(chart, ticker, actionable) {
   // "aguardar recuo" (mesma média) — desenha-se uma só (ver drawPriceChart).
   const zones = planZones(actionable);
   renderCamadasSelector(actionable);
+  renderCamadasAviso(actionable);
   $("chartLegend").innerHTML = chartLegendHtml(chart, actionable);
 
   // NOTA DO GRÁFICO — o que está DESENHADO, e só isso (task 021).
@@ -3134,12 +3135,49 @@ function renderCamadasSelector(a) {
   bindCamadasSelector();
 }
 
-function bindCamadasSelector() {
-  const el = $("camadasSelector");
+// LEITURA DISPONÍVEL E DESLIGADA SE ANUNCIA.
+//
+// *"eu não vi nenhum desenho do storm123 nos gráficos que analisei."* O gráfico passou
+// a desenhar só a leitura do método aberto (DA-088) — está certo, foi o que ele pediu.
+// O que faltou foi DIZER que a outra existe: numa análise Padrão o Storm não aparecia,
+// não havia aviso, e o botão de ligar se confundia com o resto da barra. Do ponto de
+// vista dele, o Storm deixou de existir. Trocamos "mistura tudo" por "sumiu e não
+// avisou", que é pior — o primeiro ele consegue desfazer.
+//
+// O aviso fica NO GRÁFICO, acima do canvas, e liga a camada em UM clique. Ele não
+// desenha nada sozinho e não é alarme: é o estado "disponível, desligado" dito em voz
+// alta. Some quando tudo que existe já está na tela.
+function renderCamadasAviso(a) {
+  const el = $("camadasAviso");
+  if (!el) return;
+  const fora = leiturasDisponiveis(a).filter((f) => !camadaVisivel(f));
+  if (!fora.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const nomes = fora.map((f) => CAMADA_NOME_TODAS[f]);
+  const quantos = fora.length > 1
+    ? `${nomes.join(" e ")} têm leitura` : `${nomes[0]} tem leitura`;
+  el.innerHTML =
+    `<span class="cav-txt">${escapeHtml(quantos)} para este ativo e ` +
+    `${fora.length > 1 ? "não estão desenhadas" : "não está desenhada"} no gráfico.</span>` +
+    // Classe PRÓPRIA (não `camada-btn`): o botão da barra é um interruptor que também
+    // desliga; este é uma chamada pra ação, e um `querySelectorAll('.camada-btn')`
+    // passaria a ver dois botões da mesma camada — o mesmo `data-camada` já basta pro
+    // ouvinte compartilhado.
+    fora.map((f) => `<button type="button" class="cav-btn" data-camada="${f}" ` +
+      `title="Desenhar ${escapeHtml(CAMADA_NOME_TODAS[f])} no gráfico">` +
+      `mostrar ${escapeHtml(CAMADA_NOME_TODAS[f])}</button>`).join("");
+  el.classList.remove("hidden");
+  bindCamadasSelector(el);
+}
+
+function bindCamadasSelector(alvo) {
+  // O MESMO ouvinte serve à barra e ao aviso: os dois disparam a mesma ação (ligar/
+  // desligar a camada), e duplicar a lógica faria o botão do aviso divergir do da
+  // barra na primeira mudança.
+  const el = alvo || $("camadasSelector");
   if (!el || el._bound) return;
   el._bound = true;
   el.addEventListener("click", (e) => {
-    const btn = e.target.closest("button.camada-btn");
+    const btn = e.target.closest("button[data-camada]");
     if (!btn) return;
     const f = btn.dataset.camada;
     const ativas = camadasAtivas();
@@ -3342,7 +3380,14 @@ function iniciaCamadas(a) {
   _camadasTocado = !!(salvo && salvo.tocado);
   _camadas = _camadasTocado ? new Set(salvo.camadas) : camadasPadrao(_openMethod);
   const existem = camadasDisponiveis(a);
-  if (!existem.some((f) => _camadas.has(f))) _camadas.add(camadaDoMetodo());
+  // O chão é a camada do MÉTODO — a não ser que ela não tenha o que desenhar (Storm
+  // vetado pelo Éden, por exemplo). Aí o chão é a primeira que EXISTE: "nunca deixar o
+  // gráfico vazio" era a intenção desta linha, e ligar uma camada sem desenho deixava
+  // o gráfico igualmente vazio, só que sem ninguém dizer por quê.
+  if (!existem.some((f) => _camadas.has(f))) {
+    const doMetodo = camadaDoMetodo();
+    _camadas.add(existem.includes(doMetodo) ? doMetodo : existem[0]);
+  }
   salvaCamadas();
 }
 
@@ -3401,7 +3446,12 @@ function camadasDisponiveis(a) {
   // Camada que não tem nível nenhum não é camada: oferecê-la seria um botão que
   // liga o nada, e a legenda diria que há algo desenhado onde não há.
   if (a && (a.pattern || a.buy_zone || a.stop || a.target || a.realize_zone)) fam.push("plano");
-  if (a && a.storm && a.storm.pattern) fam.push("storm");
+  // O STORM SÓ SE OFERECE QUANDO O ÉDEN AUTORIZA — que é a mesma condição do desenho.
+  // Setup vetado não ganha traço no gráfico (regra do módulo), então oferecer a camada
+  // dele seria um botão que liga o nada; e agora que a leitura viaja em TODA run, esse
+  // botão apareceria em toda análise, prometendo um desenho que nunca vem. Os números
+  // e o motivo do veto continuam inteiros no card do Storm.
+  if (a && a.storm && a.storm.pattern && a.storm.opera === true) fam.push("storm");
   return fam.length ? fam : ["plano"];
 }
 

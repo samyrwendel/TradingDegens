@@ -764,6 +764,28 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .chart-wrap { position: relative; width: 100%; }
 #priceChart { width: 100%; height: 380px; display: block; }
+/* AVISO de leitura disponível e desligada (task 033). Tom de INFORMAÇÃO, não de
+   alarme: o estado é normal, o que não pode é ser mudo. Fica acima do canvas, dentro
+   do card do gráfico, e some quando tudo que existe já está desenhado. */
+.camadas-aviso {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin: 0 0 8px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+}
+.camadas-aviso .cav-txt {
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted);
+}
+.camadas-aviso .cav-btn {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  font-weight: var(--fw-bold); cursor: pointer;
+  /* raio do sistema (2px): a DA-070/078 proíbe pílula, e um botão arredondado aqui
+     seria a exceção que reabre a discussão em toda tela nova */
+  padding: 5px 10px; border-radius: var(--radius);
+  border: 1px solid var(--accent); background: transparent; color: var(--accent);
+}
+.camadas-aviso .cav-btn:hover { background: rgba(110,168,254,0.12); }
+
 .chart-note { color: var(--muted); font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
 .chart-note b { color: var(--text); }
 /* Cada fato do setup (gatilho, invalidação, stop, alvo, R:R) em sua própria

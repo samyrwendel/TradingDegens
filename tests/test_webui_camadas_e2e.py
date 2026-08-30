@@ -73,7 +73,7 @@ _LE = """() => ({
   camadas: [..._camadas].sort(),
   tocado: _camadasTocado,
   zonas: planZones(document.getElementById('priceChart')._actionable || {}).map(z => z.tag),
-  botoes: [...document.querySelectorAll('.camada-btn')].map(
+  botoes: [...document.querySelectorAll('#camadasSelector .camada-btn')].map(
     b => ({nome: b.innerText.trim(), on: b.classList.contains('is-active')})),
   medias: (() => { const m = mediasVisiveis(document.getElementById('priceChart')._actionable || {});
     return {ma: [...m.ma].sort(), ema: [...m.ema].sort()}; })(),

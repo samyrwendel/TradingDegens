@@ -234,9 +234,12 @@ def test_o_api_chart_devolve_o_storm_quando_o_metodo_e_storm(tmp_path, monkeypat
     assert v["actionable"].get("storm", {}).get("opera") is True, v["actionable"]
     assert chamadas == ["4h"], ("o Storm é lido no frame PEDIDO", chamadas)
 
-    # e num método que NÃO é Storm ele não aparece — a leitura não se cola em quem
-    # não a pediu
+    # E NUM MÉTODO QUE NÃO É STORM ELE TAMBÉM VEM (task 033, supersede a regra antiga
+    # de "a leitura não se cola em quem não a pediu"). Aquela regra produziu o defeito
+    # que o Samyr reportou: numa análise Padrão o Storm não estava desligado, estava
+    # AUSENTE — sem payload não há camada, e sem camada não há como anunciar nem ligar.
+    # Quem decide o que é DESENHADO continua sendo a camada, na tela (DA-088).
     chamadas.clear()
     v2 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
-    assert "storm" not in (v2["actionable"] or {}), v2["actionable"]
-    assert chamadas == [], chamadas
+    assert (v2["actionable"] or {}).get("storm", {}).get("opera") is True, v2["actionable"]
+    assert chamadas == ["4h"], ("no frame pedido, também fora da run do Storm", chamadas)
