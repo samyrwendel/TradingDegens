@@ -365,7 +365,10 @@ def test_cada_carimbo_de_hora_mora_dentro_da_sua_unidade(base):
         # cada unidade carrega UM carimbo — o seu
         assert [u["quando"] for u in m["un"]] == [["29/08 20:42"], ["29/08 20:00"]], m
         assert m["un"][0]["tags"] == ["COTAÇÃO AGORA · 24H"], m
-        assert m["un"][1]["tags"] == ["ANÁLISE"], m
+        # a unidade da ANÁLISE ganhou o mesmo molde da cotação (task 20260830-006):
+        # número · O QUE ELE É · de quando. O horário dela muda por frame (é o último
+        # candle daquele frame) e, sem rótulo, parecia dado inconsistente.
+        assert m["un"][1]["tags"] == ["ANÁLISE", "ÚLTIMO CANDLE"], m
         # e o carimbo NÃO se veste de rótulo: mono, e não a caixa-alta de 10px
         assert m["quando"]["fam"] != m["tag"]["fam"], m
         assert m["quando"]["fam"] == m["num"]["fam"], ("hora é número, fonte de número", m)

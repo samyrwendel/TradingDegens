@@ -175,7 +175,7 @@ def test_atencao_sobreviveu_a_saida_do_ambar(base):
           aviso: rrAviso(0.31),
         })""")
         assert "risco > retorno" in m["ruim"], m
-        assert "3.2x" in m["ruim"], ("a conta vem junto", m)
+        assert "3,2x" in m["ruim"], ("a conta vem junto, e em pt-BR como o resto", m)
         assert m["bom"] == "", ("R:R bom não vira alarme", m)
         assert "risco MAIOR que o retorno" in m["aviso"], m
         browser.close()

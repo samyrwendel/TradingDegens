@@ -1077,14 +1077,41 @@ def _risk_reward(
 ) -> dict | None:
     """R:R do setup a partir de níveis REAIS (entrada, stop, alvo).
 
-    ``None`` quando falta stop ou alvo — sem os dois não há razão a calcular, e
-    inventar uma seria pior que não mostrar nada. Quando os níveis existem mas
-    estão do lado errado da entrada (alvo já para trás, stop além da entrada),
-    devolve ``rr=None`` com o motivo em ``note`` — a tela diz por que não há R:R
-    em vez de exibir um número sem sentido.
+    ``None`` só quando NÃO HÁ ESQUELETO nenhum (sem stop e sem alvo) — aí não há
+    nem o que explicar. Faltando UM dos dois, ou com os dois do lado errado da
+    entrada (alvo já para trás, stop além dela), devolve ``rr=None`` com o motivo
+    em ``note``: a tela diz POR QUE não há R:R em vez de exibir um número sem
+    sentido — ou, pior, de simplesmente não mostrar a linha.
+
+    O ``None`` mudo era o buraco: um padrão com stop, invalidação e pontos 1-2-3
+    desenhados, mas sem topo anterior à frente da entrada, devolvia ``None`` — e a
+    tela ficava SEM linha de R:R, indistinguível de um frame que nem padrão tem.
+    Nos prints do Samyr (mesmo ativo, 29/08) o R:R aparecia só no diário; no 1h e
+    no 4h ele sumia sem uma palavra, e sumir sem palavra é o mesmo defeito que a
+    DA-072 combate do outro lado (número incoerente publicado).
     """
-    if stop is None or target is None or target.get("price") is None:
+    tem_stop = stop is not None and stop.get("price") is not None
+    tem_alvo = target is not None and target.get("price") is not None
+    if not tem_stop and not tem_alvo:
         return None
+    if not tem_alvo or not tem_stop:
+        # Precisão PUBLICADA aqui também: a perna que EXISTE continua sendo um
+        # número conferível na tela, mesmo sem a razão.
+        entry = round(entry, 2)
+        base = {"entry": entry, "entry_basis": entry_basis,
+                "risk": None, "reward": None, "rr": None, "note": None}
+        if not tem_alvo:
+            onde = "topo anterior acima" if compra else "fundo anterior abaixo"
+            base["risk"] = round(abs(entry - float(stop["price"])), 2)
+            base["note"] = (
+                f"sem alvo estrutural à frente da entrada — não há {onde} dela nesta "
+                "série, então não há retorno a projetar (o risco continua medido)."
+            )
+        else:
+            base["reward"] = round(abs(float(target["price"]) - entry), 2)
+            base["note"] = ("sem stop definido nesta leitura — sem risco a medir, "
+                            "a razão não se calcula.")
+        return base
     stop_p, tgt_p = float(stop["price"]), float(target["price"])
     # Contas na precisão PUBLICADA: stop e alvo já vêm arredondados, e medir o risco
     # contra uma entrada CRUA fazia a conta discordar da tela por frações de centavo

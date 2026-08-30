@@ -1970,16 +1970,23 @@ function rrRuim(rr) {
   return rr != null && rr < 1;
 }
 
+// Quantas vezes o risco supera o retorno, em pt-BR: o resto da tela escreve
+// "0,21:1" e "218,40", e o multiplicador saía "4.8x" — mesma frase, duas
+// convenções de decimal.
+function rrVezes(rr) {
+  return (1 / rr).toFixed(1).replace(".", ",");
+}
+
 function rrAviso(rr) {
   if (!rrRuim(rr)) return "";
-  return ` — risco MAIOR que o retorno: arrisca ${(1 / rr).toFixed(1)}x o que pretende ganhar`;
+  return ` — risco MAIOR que o retorno: arrisca ${rrVezes(rr)}x o que pretende ganhar`;
 }
 
 // R:R ruim vira PALAVRA, não cor (DA-078 regra 3: âmbar saiu da paleta; aviso se
 // resolve com palavra e hierarquia). Era o âmbar que dizia "atenção" — sem ele, e
 // sem isto, 0,31 ficaria com a mesma cara de 2,50, que é informação sumindo da tela.
 function rrMarca(rr) {
-  return rrRuim(rr) ? `risco > retorno (${(1 / rr).toFixed(1)}x) · ` : "";
+  return rrRuim(rr) ? `risco > retorno (${rrVezes(rr)}x) · ` : "";
 }
 
 // ---- rodapé do cabeçalho: gatilhos + preço, no canto inferior direito -------
@@ -2002,9 +2009,16 @@ function rrMarca(rr) {
 function renderHeadPrice(a, live) {
   const el = $("headPrice");
   const box = $("headLevels");
+  // O carimbo da análise MUDA de hora quando se troca o frame — "28/08" no diário,
+  // "19:30" no 1h, "17:30" no 4h — porque é o ÚLTIMO CANDLE daquele frame. Faz
+  // sentido e, sem rótulo, parecia dado inconsistente. Agora a unidade diz o que o
+  // horário é, no mesmo molde da cotação (número · o que ele é · de quando).
+  const candle = a && a.timeframe
+    ? `último candle ${TF_LABEL[_tf] || _tf}` : "último candle";
   const analise = a && a.price != null
     ? `<span class="hp-unit hp-ref"><span class="hp-k">análise</span>` +
       `<b>${fmtNum(a.price)}</b>` +
+      `<span class="hp-tag">${escapeHtml(candle)}</span>` +
       // O as_of da análise costuma trazer a HORA do candle no intradiário; ela
       // estava sendo jogada fora por fmtDate e é justamente o que distingue este
       // momento do da cotação (os dois caem no mesmo dia).
@@ -2094,9 +2108,26 @@ function scRow(nome, valor, base, cls, titulo) {
 // Nível que a análise não produziu: diz "sem nível definido" em vez de inventar
 // número (mesma regra que a nota do gráfico aplicava antes de perder essas linhas).
 // Nível que NÃO EXISTE naquela leitura é outra coisa: nem linha ele ganha.
-function scSemNivel(nome) {
+function scSemNivel(nome, valor) {
   return `<div class="sc-row sc-sem"><span class="sc-k">${escapeHtml(nome)}</span>` +
-    `<span class="sc-v sc-sem-v">sem nível definido</span></div>`;
+    `<span class="sc-v sc-sem-v">${escapeHtml(valor || "sem nível definido")}</span></div>`;
+}
+
+// A LINHA DO R:R NUNCA SOME. Ela é o número que diz se o setup vale o risco, e
+// some-la quando não dá pra calcular deixava o leitor sem saber se o R:R era
+// ruim, bom ou inexistente — nos prints do Samyr (mesmo ativo, três frames) ele
+// aparecia só no diário, e no 1h e no 4h não havia nem a linha nem uma palavra.
+// Sem número, a linha carrega o MOTIVO, que o backend escreve.
+function rrLinha(rr, entradaTxt) {
+  if (rr && rr.rr != null) {
+    return scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
+      `${rrMarca(rr.rr)}${entradaTxt} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
+      rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : "");
+  }
+  const motivo = (rr && rr.note) || "sem base: esta leitura não produziu stop nem alvo.";
+  return `<div class="sc-row sc-sem"><span class="sc-k">risco/retorno</span>` +
+    `<span class="sc-v sc-sem-v">não calculável</span>` +
+    `<span class="sc-basis">${escapeHtml(motivo)}</span></div>`;
 }
 
 // Rótulo pt-BR da qualidade do Storm — a spec só opera "perfeita" e "boa".
@@ -2168,14 +2199,7 @@ function stormCardHtml(st) {
       if (L.trigger != null) rows.push(scRow("gatilho", fmtNum(L.trigger), L.label || ""));
       const tp = L.target || {};
       if (tp.price != null) rows.push(scRow("alvo (TP)", fmtNum(tp.price), tp.label || ""));
-      const rr = L.risk_reward || {};
-      if (rr.rr != null) {
-        rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
-          `${rrMarca(rr.rr)}${rr.entry_basis || ""} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
-          rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
-      } else if (rr.note) {
-        rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
-      }
+      rows.push(rrLinha(L.risk_reward || {}, (L.risk_reward || {}).entry_basis || ""));
     });
   } else {
     rows.push(`<div class="sc-row sc-sem-txt">Nenhum 1-2-3 Storm na janela lida ` +
@@ -2253,28 +2277,22 @@ function renderSetupCards(a) {
       ? scRow("stop (SL)", fmtNum(sl.price), sl.basis || "")
       : scSemNivel("stop (SL)"));
     const tp = a.target || {};
-    // Alvo recusado não vira número sem sentido: vira o MOTIVO (DA-072 — alvo
-    // incoerente não se publica, e a tela mostra por quê).
+    // Alvo recusado não vira número sem sentido (DA-072 — alvo incoerente não se
+    // publica). O MOTIVO, porém, desceu pra linha do R:R: é o ``note`` DELE, e
+    // escrevê-lo aqui em cima fazia a linha de risco/retorno desaparecer junto —
+    // duas informações no lugar de uma.
     if (tp.price != null && !(rr.note && rr.rr == null)) {
       rows.push(scRow("alvo (TP)", fmtNum(tp.price),
         (tp.label || "") + (tp.same_as_realize ? " (é o mesmo nível da região de realização)" : "")));
-    } else if (rr.note) {
-      rows.push(`<div class="sc-row sc-warn">${escapeHtml(rr.note)}</div>`);
+    } else if (tp.price != null) {
+      rows.push(scSemNivel("alvo (TP)", "não publicável"));
     } else {
       rows.push(scSemNivel("alvo (TP)"));
     }
-    if (rr.rr != null) {
-      // A conta do R:R declara a entrada — mas quando ela É o gatilho (o caso comum),
-      // repetir o número seria escrever o mesmo preço duas vezes no mesmo card: aqui
-      // ele vira NOME ("entrada no gatilho").
-      const entrada = entradaPropria ? `entrada ${fmtNum(rr.entry)}` : "entrada no gatilho";
-      rows.push(scRow("risco/retorno", `${fmtNum(rr.rr)}:1`,
-        `${rrMarca(rr.rr)}${entrada} · risco ${fmtNum(rr.risk)} · retorno ${fmtNum(rr.reward)}`,
-        rrRuim(rr.rr) ? "rr-ruim" : "", rrRuim(rr.rr) ? "R:R" + rrAviso(rr.rr) : ""));
-    } else if (!rr.note) {
-      rows.push(`<div class="sc-row sc-sem"><span class="sc-k">risco/retorno</span>` +
-        `<span class="sc-v sc-sem-v">sem base (stop ou alvo indefinido)</span></div>`);
-    }
+    // A conta do R:R declara a entrada — mas quando ela É o gatilho (o caso comum),
+    // repetir o número seria escrever o mesmo preço duas vezes no mesmo card: aqui
+    // ele vira NOME ("entrada no gatilho").
+    rows.push(rrLinha(rr, entradaPropria ? `entrada ${fmtNum(rr.entry)}` : "entrada no gatilho"));
     // O estado NATIVO do padrão fica sempre: "em formação" e "rompeu e retraçou
     // (não confirmado)" são fatos que o veredito não carrega — ele diz o que fazer,
     // não em que pé o padrão está.
@@ -2358,7 +2376,22 @@ function renderSetupCards(a) {
       ` no ${escapeHtml(a.timeframe)}</span>`
     : "";
   const rodape = ((!semCard && !donoNaTela) ? carimbo : "") + frame;
-  el.innerHTML = cards.join("") + (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
+
+  // LEITURA EXPLORATÓRIA — o frame na tela não é o que decidiu. Trocar o chip de
+  // tempo recalcula o plano inteiro, e os planos discordam de verdade (mesma ação,
+  // 29/08: SL 207,00 no 1h, 176,83 no 4h, 175,09 no diário). Sem isto os três eram
+  // pintados com o mesmo peso, e três trades diferentes com a mesma cara é convite
+  // a operar o errado. Nada some — os níveis continuam todos lá, inteiros; o que
+  // muda é a tarja dizendo que não são o plano da decisão.
+  const explor = ehExploratorio(_tf);
+  const aviso = explor
+    ? `<div class="sc-explor"><span class="sc-explor-k">exploratório</span>` +
+      `<span>estes níveis são recalculados no ${escapeHtml(TF_LABEL[_tf] || _tf)} e ` +
+      `NÃO são o plano da decisão — o veredito desta análise é no ` +
+      `${escapeHtml(TF_LABEL[_verdictTf] || _verdictTf)}.</span></div>`
+    : "";
+  el.classList.toggle("is-exploratorio", explor);
+  el.innerHTML = aviso + cards.join("") + (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
   el.classList.remove("hidden");
 }
 
@@ -2440,7 +2473,11 @@ function patColor(pat) {
 // função (onde se realiza), e quando os dois são o mesmo nível vira UMA faixa só.
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc",
                       stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad",
-                      target: "#26de81", storm: "#7cb0ff" };
+                      target: "#26de81", storm: "#7cb0ff", inativa: "#8b97ad" };
+// ``inativa`` é o cinza de quem NÃO é entrada agora. A faixa da média saía verde
+// com o rótulo "não ativa agora" escrito nela — a cor afirmando o contrário do
+// texto, e verde é "pode ir" na tela inteira. Tracejado e apagado não bastavam:
+// eram diferença de ACABAMENTO dentro da mesma cor, e a cor é o que se lê primeiro.
 // Cor POR PAPEL: vermelho para o que tira do trade (invalidação clara, stop
 // forte), verde-alvo para o TP, dourado para a realização quando não há padrão,
 // cinza-neutro para o topo overhead que NÃO é alvo (setup de venda) — ali ele é
@@ -2763,6 +2800,21 @@ async function switchTimeframe(tf) {
   }
 }
 
+// O frame EXIBIDO é o que produziu o veredito? Só quando os dois são conhecidos e
+// DIFERENTES a leitura é exploratória — frame desconhecido não vira acusação.
+//
+// Isto não é cosmético: cada frame recalcula o plano INTEIRO (a mesma ação, no
+// mesmo dia, saía com stop 207,00 no 1h e 175,09 no diário). São trades distintos,
+// e só um deles é o da decisão. O outro serve pra olhar a estrutura, não pra operar.
+function ehExploratorio(tf) {
+  // Na COMPARAÇÃO isto não vale: lá são duas runs, cada uma com o SEU veredito no
+  // SEU frame, e `_verdictTf` guarda o da coluna A. Carimbar a B de "exploratória"
+  // seria afirmar que ela não decidiu nada — o oposto do que ela é.
+  if (_openView === "compare") return false;
+  const f = tf || _tf;
+  return !!(f && _verdictTf && f !== _verdictTf);
+}
+
 // The plan's operable zones, ready to draw ON the chart (price on the band edge),
 // de-duplicated: in "aguardar recuo" the buy zone and the pullback are the same
 // rising average, so only one green band is drawn. A trigger-point pullback is a
@@ -2786,7 +2838,8 @@ function planZones(a) {
     // atravessava a régua do eixo e saía cortado (task 020). A curta diz o mesmo
     // em menos letra; a longa continua na legenda, que tem a linha inteira.
     const curto = `recuo ${buy.ma_label || "média"}`;
-    out.push({ ...buy, color: ZONE_COLORS.buy, inactive: fora,
+    out.push({ ...buy, color: fora ? ZONE_COLORS.inativa : ZONE_COLORS.buy,
+               inactive: fora,
                tag: fora ? `${nome} — não ativa agora` : nome,
                tagCurto: fora ? `${curto} (inativa)` : curto });
   }
@@ -3019,36 +3072,87 @@ function drawPriceChart(canvas, chart, a) {
     }
   }
 
-  // timeframe stamp — o frame do padrão fica escrito NO gráfico (não só no card),
-  // pra ninguém confundir um 1-2-3 de 15m com o do diário.
-  const tfText = TF_LABEL[chart.timeframe] || chart.timeframe || "Diário";
-  ctx.font = "bold 11px ui-monospace, Menlo, monospace";
-  const tfW = ctx.measureText(tfText).width + 14;
-  roundRect(ctx, padL + 2, padT + 2, tfW, 17, 4);
-  ctx.globalAlpha = 0.85; ctx.fillStyle = "#111111"; ctx.fill(); ctx.globalAlpha = 1;
-  ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1; ctx.stroke();
-  ctx.fillStyle = "#cdd6e4"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-  ctx.fillText(tfText, padL + 9, padT + 2 + 8.5);
-
-  // R:R do setup DENTRO do gráfico, colado no carimbo do frame — é a razão que
-  // decide se o 1-2-3 vale o risco, então não pode ficar só num card ao lado.
-  // Verde quando o retorno é maior que o risco, âmbar quando não é (o fato, não
-  // uma regra inventada de "R:R mínimo").
-  const rrPlan = a && a.risk_reward;
-  canvas.dataset.rr = "";
-  if (rrPlan && rrPlan.rr != null) {
-    const rrText = `R:R ${fmtNum(rrPlan.rr)}:1`;
-    canvas.dataset.rr = rrText;
-    const rrCol = rrPlan.rr >= 1 ? "#26de81" : "#ff9f43";
+  // OS CARIMBOS SÃO DESENHADOS POR ÚLTIMO (ver a chamada, depois das velas).
+  // Eles ficam no canto superior esquerdo, que é onde as velas chegam quando o preço
+  // está no topo da janela — e velas desenhadas DEPOIS passavam por cima do texto.
+  // A definição fica aqui, junto do carimbo do eixo a que ela pertence; só a ordem
+  // de execução muda.
+  const desenharCarimbos = () => {
+    // timeframe stamp — o frame do padrão fica escrito NO gráfico (não só no card),
+    // pra ninguém confundir um 1-2-3 de 15m com o do diário.
+    //
+    // E ele diz se o frame é o DO VEREDITO. Trocar o chip de tempo trocava o plano
+    // inteiro — mesmo ativo, mesmo dia, SL de 207,00 no 1h e 175,09 no diário — e os
+    // três saíam pintados igual, como se os três fossem operáveis. O frame que não
+    // decidiu nada é EXPLORATÓRIO, e agora está escrito em cima do gráfico, não só
+    // num carimbo lá no topo da página que sai da tela quando se rola até aqui.
+    const exploratorio = ehExploratorio(chart.timeframe);
+    const tfText = (TF_LABEL[chart.timeframe] || chart.timeframe || "Diário")
+      + (exploratorio ? "  ·  exploratório" : "");
     ctx.font = "bold 11px ui-monospace, Menlo, monospace";
-    const rrW = ctx.measureText(rrText).width + 14;
-    const rrY = padT + 23;   // 2ª linha: a 1ª divide espaço com a dica de zoom (HTML)
-    roundRect(ctx, padL + 2, rrY, rrW, 17, 4);
-    ctx.globalAlpha = 0.85; ctx.fillStyle = "#111111"; ctx.fill(); ctx.globalAlpha = 1;
-    ctx.strokeStyle = rrCol + "88"; ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = rrCol; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillText(rrText, padL + 9, rrY + 8.5);
-  }
+    const tfW = ctx.measureText(tfText).width + 14;
+    roundRect(ctx, padL + 2, padT + 2, tfW, 17, 4);
+    ctx.fillStyle = "#0d0d0d"; ctx.fill();
+    ctx.strokeStyle = exploratorio ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = exploratorio ? "#e6e9ef" : "#cdd6e4";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(tfText, padL + 9, padT + 2 + 8.5);
+    canvas.dataset.tf = tfText;
+    // Onde o carimbo TERMINA, em px de CSS a partir da borda do canvas. É o que
+    // permite provar que a dica de zoom (HTML, por cima) não cai em cima dele.
+    canvas.dataset.carimboFim = String(Math.round(padL + 2 + tfW));
+
+    // R:R do setup DENTRO do gráfico, colado no carimbo do frame — é a razão que
+    // decide se o 1-2-3 vale o risco, então não pode ficar só num card ao lado.
+    //
+    // A COR SEGUE O NÚMERO, e só ela: VERDE exclusivamente quando o retorno supera o
+    // risco. Abaixo de 1 o chip sai BRANCO com a conta escrita ao lado — "R:R 0,21:1"
+    // em verde afirmava o contrário do que o número diz, e verde é o vocabulário de
+    // "pode ir" na tela inteira (print do Samyr, 29/08, diário). Nem vermelho: o
+    // setup existe, quem está desfavorável é a conta (DA-078 regra 3 — aviso é
+    // palavra, não cor nova).
+    //
+    // E o fundo é OPACO. Com 0,85 de alfa a faixa verde do alvo atravessava o chip
+    // por baixo e o tingia — a cor certa no texto e a errada atrás dele.
+    const rrPlan = (a && a.risk_reward) || null;
+    const rrTem = rrPlan && rrPlan.rr != null;
+    // Sem número a linha NÃO desaparece: ela diz que não é calculável. Um gráfico sem
+    // chip nenhum é indistinguível de um sem setup, e era assim que o R:R aparecia só
+    // no diário enquanto 1h e 4h ficavam mudos.
+    //
+    // No telefone o plot útil é ~250px e a frase inteira passava por cima da régua de
+    // preço. Em vez de cortar (perder letra) ou encolher a fonte (ilegível), o texto
+    // DEGRADA por medida: cai pra forma mais curta que couber. A conta nunca se perde
+    // de vez — o card logo abaixo carrega "risco > retorno (4,8x)" sempre.
+    const rrOpcoes = rrTem
+      ? (rrRuim(rrPlan.rr)
+          ? [`R:R ${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x o retorno`,
+             `R:R ${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x`,
+             `R:R ${fmtNum(rrPlan.rr)}:1`]
+          : [`R:R ${fmtNum(rrPlan.rr)}:1`])
+      : (rrPlan ? ["R:R não calculável", "R:R sem base"] : []);
+    ctx.font = "bold 11px ui-monospace, Menlo, monospace";
+    const rrText = rrOpcoes.find((t) => ctx.measureText(t).width + 14 <= plotW)
+      || rrOpcoes[rrOpcoes.length - 1] || "";
+    canvas.dataset.rr = rrText;
+    canvas.dataset.rrCor = "";
+    if (rrText) {
+      const rrCol = rrTem && !rrRuim(rrPlan.rr) ? "#26de81" : "#e6e9ef";
+      // A cor do chip fica OBSERVÁVEL (mesmo padrão do dataset.levelLabels): "verde só
+      // quando o retorno supera o risco" é regra de tela, e regra de tela que não se
+      // mede volta sozinha na próxima mudança de layout.
+      canvas.dataset.rrCor = rrCol;
+      ctx.font = "bold 11px ui-monospace, Menlo, monospace";
+      const rrW = ctx.measureText(rrText).width + 14;
+      const rrY = padT + 23;   // 2ª linha: a 1ª divide espaço com a dica de zoom (HTML)
+      roundRect(ctx, padL + 2, rrY, rrW, 17, 4);
+      ctx.fillStyle = "#0d0d0d"; ctx.fill();
+      ctx.strokeStyle = rrCol + "88"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = rrCol; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(rrText, padL + 9, rrY + 8.5);
+    }
+  };
 
   // plan zones: translucent bands BEHIND the candles (edge labels drawn on top later)
   zones.forEach((z) => {
@@ -3128,6 +3232,9 @@ function drawPriceChart(canvas, chart, a) {
     ctx.stroke(); ctx.lineWidth = 1;
   });
 
+  // Agora sim os carimbos, POR CIMA das velas e das médias (ver a definição acima).
+  desenharCarimbos();
+
   // date -> index map for markers
   const idx = {}; candles.forEach((c, i) => { idx[c.d] = i; });
 
@@ -3206,7 +3313,10 @@ function drawPriceChart(canvas, chart, a) {
       const text = cabe(inteiro) ? inteiro : (cabe(curto) ? curto : preco);
       return { y: yl, ry: yl, text, color: z.color };
     });
-    const labelTop = padT + ((a && a.risk_reward && a.risk_reward.rr != null) ? 52 : 30);
+    // O chip de R:R agora existe também quando não há número (ele diz o porquê), e
+    // o topo dos rótulos tem de descer nos DOIS casos — senão o primeiro rótulo de
+    // nível encosta no chip.
+    const labelTop = padT + ((a && a.risk_reward) ? 52 : 30);
     layoutAxisPills(tagPills, labelTop, padT + plotH - 10, 17);
     // rótulos realmente PINTADOS ficam observáveis (mesmo padrão do zoom em
     // dataset.v0/v1): é assim que o E2E prova que estão no candle, não só na legenda

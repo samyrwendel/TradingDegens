@@ -277,13 +277,21 @@ def test_sem_base_diz_sem_nivel_definido(live_server):
             out = _seed(page, plan)
             _shot(page, "depois-sem-nivel.png")
             assert "alvo (TP)" in out["card"] and "sem nível definido" in out["card"]
-            assert "sem base (stop ou alvo indefinido)" in out["card"]
+            # A LINHA DO R:R FICA (task 20260830-006): sem número ela carrega o
+            # motivo. Sumir com ela deixava o leitor sem saber se o R:R era ruim,
+            # bom ou inexistente — era assim que ele aparecia só no diário nos
+            # prints do Samyr, mudo no 1h e no 4h.
+            assert "risco/retorno" in out["card"]
+            assert "não calculável" in out["card"]
+            assert "não produziu stop nem alvo" in out["card"]
             # invalidação e stop continuam com número real
             assert "morre se perder" in out["card"]
             assert "128,5" in out["card"]
             assert "alvo (TP)" not in out["zones"]
             # sem alvo e sem R:R nada é pintado no lugar deles
             assert not any(t.startswith("alvo (TP)") for t in out["painted"])
+            # aqui o plano NÃO tem risk_reward nenhum (nem esqueleto): o chip do
+            # gráfico não inventa uma explicação que o backend não deu
             assert out["rrChip"] == ""
             assert "invalidação 131,00" in out["painted"]   # o que TEM base, pinta
         finally:

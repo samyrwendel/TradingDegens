@@ -190,8 +190,15 @@ def test_sem_padrao_nao_inventa_nivel(monkeypatch):
 
 @pytest.mark.unit
 def test_alvo_em_ar_de_novo_extremo_e_sem_nivel(monkeypatch):
-    """Preço em ar de fundo novo (venda sem fundo anterior abaixo): alvo None e,
-    sem alvo, R:R None — a tela mostra "sem nível definido", não um alvo plausível."""
+    """Preço em ar de fundo novo (venda sem fundo anterior abaixo): alvo None — a
+    tela mostra "sem nível definido", não um alvo plausível.
+
+    E o R:R **não some calado**. DENTE (task 20260830-006): aqui ele devolvia
+    ``None``, a linha de risco/retorno desaparecia do card e o frame ficava
+    indistinguível de um que nem padrão tem. Era o defeito dos prints do Samyr — o
+    R:R só aparecia no diário. Agora vem ``rr=None`` COM o motivo escrito, e o
+    risco, que existe, continua medido.
+    """
     import tests.test_price_structure as tps
     df = tps._top_frame()
     monkeypatch.setattr(ps, "load_ohlcv", lambda s, d: df.copy())
@@ -199,7 +206,12 @@ def test_alvo_em_ar_de_novo_extremo_e_sem_nivel(monkeypatch):
     assert p.pattern is not None and p.pattern["direction"] == "venda"
     assert p.invalidation is not None and p.stop is not None   # estrutura existe
     assert p.target is None                                     # alvo não
-    assert p.risk_reward is None
+    rr = p.risk_reward
+    assert rr is not None and rr["rr"] is None, rr
+    assert "sem alvo estrutural" in rr["note"], rr
+    assert "fundo anterior abaixo" in rr["note"], ("a venda procura fundo, não topo", rr)
+    assert rr["risk"] is not None and rr["reward"] is None, (
+        "o risco existe (há stop) e o retorno não — cada perna diz a verdade", rr)
 
 
 @pytest.mark.unit

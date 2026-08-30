@@ -1286,6 +1286,32 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   color: var(--text); overflow-wrap: anywhere;
 }
 .sc-nenhum { border-left: 3px solid var(--border); }
+/* LEITURA EXPLORATÓRIA — o frame na tela não é o que produziu o veredito.
+   Trocar o chip de tempo recalcula o PLANO INTEIRO: a mesma ação em 29/08 saía com
+   stop 207,00 no 1h, 176,83 no 4h e 175,09 no diário. Três trades diferentes, e os
+   três pintados com o mesmo peso visual — o usuário trocava o frame e via outro
+   plano operável sem nada dizendo qual vale.
+   A tarja atravessa a grade inteira (ela fala das leituras TODAS, não de uma), e os
+   cards trocam a borda cheia pela tracejada. A borda ESQUERDA fica sólida: é a cor
+   da leitura, a identidade do card, e apagá-la trocaria um problema por outro.
+   Nada de informação some — os níveis continuam inteiros e legíveis. */
+.setup-cards .sc-explor {
+  grid-column: 1 / -1;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px;
+  border: 1px dashed var(--border); border-left: 3px solid var(--muted);
+  border-radius: var(--radius); background: var(--panel-2);
+  padding: 7px 12px; min-width: 0;
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text);
+}
+.sc-explor-k {
+  font-size: var(--fs-10); line-height: var(--lh-10); font-weight: var(--fw-bold);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+  white-space: nowrap;
+}
+.sc-explor > span + span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.setup-cards.is-exploratorio .setup-card {
+  border-top-style: dashed; border-right-style: dashed; border-bottom-style: dashed;
+}
 .sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
 .sc-title {
   font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); color: var(--text);
@@ -1494,6 +1520,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   font-size: var(--fs-10); color: var(--muted, #8b97ad);
   background: rgba(20,24,34,.7); padding: 2px 7px; border-radius: 2px;
   pointer-events: none; letter-spacing: .02em;
+  /* A dica fica na METADE DIREITA e nunca invade a esquerda, onde o canvas desenha
+     os carimbos de frame e de R:R. Ela é uma frase longa numa linha só, e quando o
+     carimbo cresceu ("Diário · exploratório") os dois se sobrepuseram — texto por
+     cima de texto, os dois ilegíveis. Quebrar em duas linhas custa nada: ali em cima
+     é área vazia do gráfico. Afordância cede espaço pra dado, nunca o contrário. */
+  max-width: min(46%, 430px); text-align: right;
 }
 #priceChart { touch-action: none; cursor: default; }
 
