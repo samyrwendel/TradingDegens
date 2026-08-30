@@ -179,7 +179,11 @@ def _abre(page, base_url, actionable=None, viewport=None):
             route.fulfill(status=200, content_type="application/json", body=json.dumps({
                 "timeframe": tf, "timeframes": ["1w", "1d", "4h", "1h", "15m"],
                 "actionable": plano, "price_chart": {**_CHART, "timeframe": tf},
-                "live_price": snap["result"]["live_price"], "degraded": []}))
+                # SEM `live_price` — de propósito: o /api/chart de verdade não o
+                # devolve (`runner.timeframe_view`). Uma fixture mais generosa que a
+                # rota real escondia justamente o defeito da task 007, em que a
+                # cotação sumia da tira ao trocar de frame.
+                "degraded": []}))
         elif "/api/status/" in url or re.search(r"/api/run/[^/]+$", url):
             route.fulfill(status=200, content_type="application/json", body=json.dumps(snap))
         else:

@@ -20,6 +20,8 @@ import json
 import pytest
 
 from tradingagents.webui import scanner as sc
+from tradingagents.webui.runner import AnalysisRunner
+from tradingagents.webui.store import HistoryStore
 
 
 # --------------------------------------------------------------- a linha ------
@@ -192,3 +194,42 @@ def test_o_track_record_decompoe_por_setup(tmp_path, monkeypatch, setup, esperad
     # o agregado continua existindo (é a leitura do painel inteiro)
     assert "taxa_acerto" in out and "verdicts" in out
     assert {v["setup"] for v in out["verdicts"]} == {"123", "storm"}
+
+
+# ─────────── o Storm sobrevive à troca de frame (task 20260830-007) ───────────
+@pytest.mark.unit
+def test_o_api_chart_devolve_o_storm_quando_o_metodo_e_storm(tmp_path, monkeypatch):
+    """DENTE: `/api/chart` montava o plano SEM `storm`, e trocar de timeframe numa
+    run do Storm apagava a leitura inteira — card do veto do Éden, as duas entradas
+    e as linhas do gráfico. Era a discordância entre os prints A e B do mesmo 4h: um
+    veio do render da run (com Storm), o outro do /api/chart (sem).
+    """
+    from tradingagents.webui import runner as R
+
+    r = AnalysisRunner(
+        base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
+                     "deep_think_llm": "x", "quick_think_llm": "y"},
+        store=HistoryStore(tmp_path))
+    monkeypatch.setattr(R.AnalysisRunner, "detect_asset_type", lambda self, t: "stock")
+    monkeypatch.setattr(R, "fetch_price_chart",
+                        lambda *a, **k: {"candles": [{"d": "2026-08-28", "o": 1, "h": 2,
+                                                      "l": 0.5, "c": 1.5}] * 5})
+    monkeypatch.setattr(R, "fetch_actionable_plan",
+                        lambda *a, **k: {"setup_state": "aguardar_rompimento"})
+    chamadas = []
+
+    def _storm(ticker, date, timeframe="1d"):
+        chamadas.append(timeframe)
+        return {"opera": True, "pattern": {"direction": "compra"}, "leituras": []}
+    monkeypatch.setattr(R, "fetch_storm_plan", _storm)
+
+    v = r.timeframe_view("AMD", "2026-08-29", "4h", method="storm123")
+    assert v["actionable"].get("storm", {}).get("opera") is True, v["actionable"]
+    assert chamadas == ["4h"], ("o Storm é lido no frame PEDIDO", chamadas)
+
+    # e num método que NÃO é Storm ele não aparece — a leitura não se cola em quem
+    # não a pediu
+    chamadas.clear()
+    v2 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
+    assert "storm" not in (v2["actionable"] or {}), v2["actionable"]
+    assert chamadas == [], chamadas

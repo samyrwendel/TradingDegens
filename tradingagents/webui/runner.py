@@ -2708,8 +2708,25 @@ class AnalysisRunner:
                 f"(disponíveis: {', '.join(allowed)})"
             )
 
+        # O STORM É PARTE DO PLANO, não da run. Ao trocar de frame o `/api/chart`
+        # devolvia o plano SEM `storm`, e a leitura inteira do Storm — o card com o
+        # veto do Éden, as duas entradas e as linhas no gráfico — simplesmente sumia
+        # da tela numa run cujo MÉTODO é o Storm. Era o que fazia o print A (render
+        # original da run, com "Storm · stop (SL) 497,98") e o print B (mesmo 4h,
+        # vindo do /api/chart, sem nada de Storm) discordarem no mesmo frame.
+        # Mesma montagem do worker: o 1-2-3/recuo saem da família Padrão e o Storm
+        # entra AO LADO, nunca no lugar (DA-077/DA-081).
+        storm = (method or "").startswith("storm")
+
+        def _plano(tf: str) -> dict[str, Any]:
+            p = fetch_actionable_plan(ticker, date, tf, method)
+            if storm:
+                p = dict(p or {})
+                p["storm"] = fetch_storm_plan(ticker, date, tf)
+            return p
+
         chart = fetch_price_chart(ticker, date, timeframe, method)
-        plan = fetch_actionable_plan(ticker, date, timeframe, method)
+        plan = _plano(timeframe)
 
         degraded = False
         notice: str | None = None
@@ -2729,7 +2746,7 @@ class AnalysisRunner:
                 "Nenhuma barra inventada."
             )
             chart = fetch_price_chart(ticker, date, timeframe, method)
-            plan = fetch_actionable_plan(ticker, date, timeframe, method)
+            plan = _plano(timeframe)
 
         return {
             "ticker": ticker,

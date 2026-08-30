@@ -1182,7 +1182,8 @@ function renderResult(snap) {
   renderDegraded(r.degraded);
   hideDegrade();
 
-  renderHeadPrice(r.actionable, r.live_price);
+  _openLive = r.live_price || null;
+  renderHeadPrice(r.actionable, _openLive);
   renderSetupCards(r.actionable);
   renderChartCard(r.price_chart, snap.ticker, r.actionable);
   renderTfSelector();
@@ -2491,6 +2492,15 @@ let _timeframes = ["1d"];     // frames operáveis do ativo aberto (ação e cri
 let _openDate = "";           // data da análise aberta (recomputa por timeframe)
 let _assetType = "";          // tipo do ativo aberto (define a fonte do intradiário)
 let _verdictTf = "1d";        // timeframe em que o veredito ABERTO foi computado (carimbo)
+// Frame CLICADO cuja resposta ainda não chegou. O ATIVO continua sendo _tf (o que
+// está desenhado) — é essa separação que impede a tela de afirmar um frame e
+// mostrar os níveis de outro. `_tfSeq` sela cada pedido: resposta de troca superada
+// não pinta nada.
+let _tfPendente = null;
+let _tfSeq = 0;
+// Cotação da run ABERTA. Não é propriedade do frame — o /api/chart não a devolve, e
+// sem lembrá-la a unidade sumia da tira ao trocar de timeframe.
+let _openLive = null;
 
 // paddings do gráfico, compartilhados entre o desenho e a interação de zoom/pan
 // (o zoom vertical precisa converter y do cursor → preço com a MESMA geometria)
@@ -2616,9 +2626,15 @@ function renderTfSelector() {
   el.innerHTML = ALL_TFS.map(([tf, curto, completo]) => {
     const on = enabled.has(tf);
     const active = tf === _tf;
-    const cls = ["tf-btn", active ? "is-active" : "", on ? "" : "is-off"]
-      .filter(Boolean).join(" ");
-    const title = on
+    // PENDENTE ≠ ATIVO: o clicado se marca na hora (o clique não se perde), mas
+    // quem carrega o realce é o frame que está DESENHADO. Enquanto a resposta não
+    // chega, chip ativo, carimbo do gráfico e níveis dizem todos a mesma coisa.
+    const pendente = tf === _tfPendente;
+    const cls = ["tf-btn", active ? "is-active" : "", pendente ? "is-pendente" : "",
+                 on ? "" : "is-off"].filter(Boolean).join(" ");
+    const title = pendente
+      ? `Recalculando no ${completo}… os níveis na tela ainda são do frame atual`
+      : on
       ? `Recalcular no ${completo}`
       : "Frame indisponível para este ativo (o backend não inventa candle)";
     return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
@@ -2768,34 +2784,56 @@ function hideDegrade() {
   if (el) { el.textContent = ""; el.classList.add("hidden"); }
 }
 
+// TROCA DE FRAME É ATÔMICA: o realce só se move quando os NÍVEIS chegam.
+//
+// Antes o `_tf` mudava no clique e o seletor se repintava na hora, enquanto o
+// gráfico e os cards continuavam mostrando o frame ANTERIOR até a resposta chegar.
+// Nessa janela a tela afirmava uma coisa falsa: chip no "D", carimbo do gráfico no
+// "4h" e stop 497,59 — quando o stop do diário era 526,92. Trinta pontos de
+// diferença num nível que se opera, apresentados como se fossem daquele frame.
+//
+// Agora o clicado fica PENDENTE (marcado, pra o clique não parecer perdido) e o
+// ATIVO continua sendo o frame que está de fato desenhado. Em nenhum instante o
+// par (chip ativo, carimbo, níveis) discorda.
+//
+// E a resposta ATRASADA de uma troca superada é descartada pelo selo `_tfSeq`:
+// clicar D e logo 1h fazia a resposta do D, se chegasse depois, pintar o diário
+// por cima do 1h já selecionado — a mesma incoerência por outra porta.
 async function switchTimeframe(tf) {
   if (!_openTicker || tf === _tf) return;
-  const prev = _tf;
-  _tf = tf;
-  renderTfSelector();                       // realce imediato no clicado
+  const selo = ++_tfSeq;
+  _tfPendente = tf;
+  renderTfSelector();                       // marca o clicado como pendente
   hideDegrade();
   const note = $("chartNote");
   if (note) note.textContent = `Recalculando no ${TF_LABEL[tf] || tf}…`;
+  const encerra = () => { if (selo === _tfSeq) { _tfPendente = null; renderTfSelector(); } };
   try {
     const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf, method: _openMethod || "padrao" });
     const res = await fetch("/api/chart?" + q.toString());
     const data = await res.json();
+    if (selo !== _tfSeq) return;            // troca mais nova venceu: esta é lixo
     if (!res.ok || data.error) {
-      _tf = prev; renderTfSelector();
+      encerra();
       if (note) note.textContent = data.error || "Falha ao recalcular timeframe.";
       return;
     }
     // O backend pode ter caído pro diário (fonte intradiária fora do ar); o
     // frame realmente exibido vem de data.timeframe, nunca uma barra inventada.
     _tf = data.timeframe || tf;
+    _tfPendente = null;
     if (Array.isArray(data.timeframes) && data.timeframes.length) _timeframes = data.timeframes;
     renderTfSelector();
-    renderHeadPrice(data.actionable, data.live_price);
+    // A COTAÇÃO não é do frame — é do ativo AGORA. O /api/chart não a devolve, e
+    // passar `undefined` fazia a unidade "último fechamento 465,58" sumir da tira
+    // ao trocar de frame e voltar ao trocar de novo. Ela é lembrada da run aberta.
+    renderHeadPrice(data.actionable, data.live_price || _openLive);
     renderSetupCards(data.actionable);
     renderChartCard(data.price_chart, _openTicker, data.actionable);
     if (data.degraded && data.notice) showDegrade(data.notice);
   } catch (err) {
-    _tf = prev; renderTfSelector();
+    if (selo !== _tfSeq) return;
+    encerra();
     if (note) note.textContent = "Falha ao recalcular timeframe.";
   }
 }

@@ -780,6 +780,15 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .tf-btn:hover:not(.is-off):not(.is-active) { color: var(--text); }
 .tf-btn.is-active { color: var(--green); font-weight: var(--fw-bold); }
+/* PENDENTE: o frame foi clicado e a resposta ainda não chegou. Não pode se parecer
+   com o ATIVO — é justamente essa confusão que punha o chip no "D" com os níveis do
+   "4h" na tela. Sublinhado pontilhado (o vocabulário de "em andamento"), sem mudar
+   cor de estado nem largura: mexer na largura empurraria os outros chips a cada
+   clique. O texto do gráfico ("Recalculando no Diário…") diz o resto. */
+.tf-btn.is-pendente {
+  text-decoration: underline dotted; text-underline-offset: 3px;
+  text-decoration-color: var(--muted);
+}
 /* frame indisponível: continua DITO (riscado + não clicável), sem caixa */
 .tf-btn.is-off {
   color: #55607a; cursor: not-allowed; opacity: .6;
