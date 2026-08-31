@@ -1211,9 +1211,15 @@ function renderResult(snap) {
   // uma análise antiga, sem o campo, simplesmente não a mostra — nada de escada
   // vazia nem de recomputar por trás pra fingir que sempre existiu.
   renderEscada(r.multiframe);
-  renderChartCard(r.price_chart, snap.ticker, r.actionable);
+  const desenhouRun = renderChartCard(r.price_chart, snap.ticker, r.actionable,
+                                     r.timeframe || snap.timeframe);
+  if (desenhouRun) _tfDesenhado = r.timeframe || snap.timeframe || _tf;
+  declaraFrameDoGrafico(_tf, desenhouRun);
   renderTfSelector();
   carregaExecCard();
+  // Análise aberta: a revalidação automática passa a acompanhar o candle DESTE
+  // frame (DA-118). Sem isto, ela só existiria depois de uma troca manual.
+  agendaProximaRevalidacao();
 
   renderThesis("bull", r.bull);
   renderThesis("bear", r.bear);
@@ -3267,6 +3273,15 @@ let _verdictTf = "1d";        // timeframe em que o veredito ABERTO foi computad
 // não pinta nada.
 let _tfPendente = null;
 let _tfSeq = 0;
+// O frame que está DE FATO desenhado no canvas. Diferente de `_tf` (o frame cujos
+// NÍVEIS estão na tela): quando a carga volta sem velas, os níveis trocam e o
+// desenho não — e sem os dois separados a tela afirmava um frame mostrando o
+// desenho de outro, e o reclique no mesmo frame virava no-op (DA-118).
+let _tfDesenhado = null;
+// Revalidação automática em voo. Não se empilha: uma resposta lenta não pode
+// gerar uma fila de recargas do mesmo frame.
+let _revalEmVoo = false;
+let _revalTimer = null;
 // Cotação da run ABERTA. Não é propriedade do frame — o /api/chart não a devolve, e
 // sem lembrá-la a unidade sumia da tira ao trocar de timeframe.
 let _openLive = null;
@@ -3392,16 +3407,36 @@ function chartLegendHtml(chart, actionable) {
   return legend.join("");
 }
 
-function renderChartCard(chart, ticker, actionable) {
+// Desenha o gráfico. Devolve **true se desenhou** — quem chama precisa saber, e
+// hoje ninguém sabia (DA-118).
+//
+// DUAS coisas que esta função fazia e não devia:
+//
+// 1. **Sumia com o gráfico** quando a resposta vinha sem velas: `card.hidden` +
+//    `cv._chart = null`. O usuário trocava de frame, a fonte intradiária daquele
+//    frame não respondia, e a tela ficava sem gráfico nenhum — a leitura dele foi
+//    "às vezes mudo o timeframe e o gráfico não muda". O que já se sabe não se
+//    apaga por causa de uma atualização que não chegou: o gráfico ANTERIOR fica, e
+//    quem chama DECLARA que ele é de outro frame. Some só se nunca houve gráfico.
+// 2. **Zerava o zoom** (`_view`/`_vview`) em toda pintura, inclusive quando o
+//    assunto era o MESMO (ativo + frame) — ou seja, a cada revalidação. Ajustar o
+//    enquadramento e perdê-lo sozinho a cada minuto é o "piscar" reclamado. Agora
+//    a vista só reinicia quando o assunto muda; revalidação atualiza EM LUGAR.
+function renderChartCard(chart, ticker, actionable, tf) {
   const card = $("chartCard");
   const cv = $("priceChart");
   const hasData = chart && Array.isArray(chart.candles) && chart.candles.length > 2;
-  if (!hasData) { card.classList.add("hidden"); if (cv) cv._chart = null; return; }
-  // Estado de zoom/pan vive no próprio canvas; novo gráfico recomeça na autoescala.
-  cv._view = null;
-  cv._vview = null;
+  if (!hasData) {
+    // Nunca houve gráfico: não há o que preservar, e o card vazio é a verdade.
+    if (!cv || !cv._chart) { card.classList.add("hidden"); if (cv) cv._chart = null; }
+    return false;
+  }
+  const mesmoAssunto = cv._chart && cv._ticker === ticker && cv._tf === (tf || cv._tf);
+  if (!mesmoAssunto) { cv._view = null; cv._vview = null; }
   cv._chart = chart;
   cv._actionable = actionable || null;
+  cv._ticker = ticker;
+  if (tf) cv._tf = tf;
   card.classList.remove("hidden");
 
   const active = chart.markers && chart.markers.active_region;
@@ -3454,6 +3489,7 @@ function renderChartCard(chart, ticker, actionable) {
 
   drawPriceChart(cv, chart, cv._actionable);
   bindChartZoom(cv);
+  return true;
 }
 
 // ---- timeframe selector ----------------------------------------------------
@@ -3710,7 +3746,7 @@ function bindCamadasSelector(alvo) {
     salvaCamadas();
     // redesenha com o estado do canvas (o plano e o chart moram nele)
     const cv = $("priceChart");
-    if (cv && cv._chart) renderChartCard(cv._chart, _openTicker, cv._actionable);
+    if (cv && cv._chart) renderChartCard(cv._chart, _openTicker, cv._actionable, cv._tf);
   });
 }
 
@@ -3910,28 +3946,71 @@ function horaCurta() {
 // clicar D e logo 1h fazia a resposta do D, se chegasse depois, pintar o diário
 // por cima do 1h já selecionado — a mesma incoerência por outra porta.
 async function switchTimeframe(tf) {
-  if (!_openTicker || tf === _tf) return;
+  if (!_openTicker) return;
+  // A GUARDA olha o que está DESENHADO, não só o que `_tf` diz. Quando o frame
+  // pedido volta sem velas, `_tf` passava a valer o novo e o canvas continuava no
+  // antigo; o clique seguinte no MESMO frame caía neste return e não fazia nada —
+  // o "às vezes mudo o timeframe e o gráfico não muda", com o clique morrendo em
+  // silêncio. Reclicar tem de tentar de novo enquanto a tela não estiver naquele
+  // frame (DA-118).
+  if (tf === _tf && tf === _tfDesenhado && !_tfPendente) return;
+  return carregaFrame(tf, {});
+}
+
+// REVALIDAÇÃO: o MESMO caminho da troca, sem apagar nada e sem anunciar-se alto.
+// Um segundo caminho de recarga divergiria do primeiro — foi assim que o gráfico
+// ganhou um jeito de sumir que a troca não tinha.
+async function revalidaFrame(motivo) {
+  if (!_openTicker || _revalEmVoo) return;   // não se empilha revalidação
+  return carregaFrame(_tf, { revalidacao: true, motivo: motivo || "" });
+}
+
+// O caminho ÚNICO de carga do frame. `opts.revalidacao` muda só a apresentação:
+// a troca ANUNCIA ("Recalculando no 4h…", chip pendente) porque é uma ação que o
+// usuário acabou de pedir; a revalidação é silenciosa e EM LUGAR, porque ninguém
+// pediu nada e o que está na tela continua válido até o novo chegar.
+async function carregaFrame(tf, opts) {
+  const reval = !!(opts && opts.revalidacao);
   const selo = ++_tfSeq;
-  _tfPendente = tf;
-  // A nota nomeia o frame em que se revalidou. Sobrevivendo à troca ela passaria a
-  // apontar um frame que não está mais na tela — a próxima revalidação a reescreve.
-  _revalNota = null;
-  renderTfSelector();                       // marca o clicado como pendente
-  renderEscada(_escada);                    // e o degrau clicado também
-  hideDegrade();
+  let notaAnterior = null;
+  if (reval) _revalEmVoo = true;
   const note = $("chartNote");
-  if (note) note.textContent = `Recalculando no ${tfNome(tf)}…`;
+  if (!reval) {
+    _tfPendente = tf;
+    // A nota nomeia o frame em que se revalidou. Sobrevivendo à troca ela passaria a
+    // apontar um frame que não está mais na tela — a próxima revalidação a reescreve.
+    _revalNota = null;
+    renderTfSelector();                       // marca o clicado como pendente
+    renderEscada(_escada);                    // e o degrau clicado também
+    hideDegrade();
+    // A nota do gráfico descreve o DESENHO. Enquanto a carga corre ela vira
+    // "Recalculando…"; se a carga falhar, deixá-la assim faria a tela afirmar para
+    // sempre um recálculo que já terminou (mal). Guarda-se o texto pra devolver.
+    if (note) { notaAnterior = note.innerHTML; note.textContent = `Recalculando no ${tfNome(tf)}…`; }
+  } else {
+    marcaRevalidando(true);
+  }
   const encerra = () => {
-    if (selo === _tfSeq) { _tfPendente = null; renderTfSelector(); renderEscada(_escada); }
+    if (reval) { _revalEmVoo = false; marcaRevalidando(false); }
+    if (selo === _tfSeq && !reval) { _tfPendente = null; renderTfSelector(); renderEscada(_escada); }
+    // O desenho não mudou: a nota dele volta a ser o que era.
+    if (note && notaAnterior !== null) note.innerHTML = notaAnterior;
   };
   try {
     const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf, method: _openMethod || "padrao" });
     const res = await fetch("/api/chart?" + q.toString());
     const data = await res.json();
-    if (selo !== _tfSeq) return;            // troca mais nova venceu: esta é lixo
+    if (selo !== _tfSeq) { if (reval) { _revalEmVoo = false; marcaRevalidando(false); } return; }
     if (!res.ok || data.error) {
       encerra();
-      if (note) note.textContent = data.error || "Falha ao recalcular timeframe.";
+      // O ERRO PASSA A TER NOME. Antes tudo virava "Falha ao recalcular timeframe."
+      // e a causa morria no catch — por isso o sintoma chegava como "não muda" em
+      // vez de uma mensagem que dissesse o quê.
+      avisaFalhaDeFrame(tf, data.error || `o servidor respondeu ${res.status}`, reval);
+      // Uma falha não desliga a revalidação automática: o próximo candle continua
+      // fechando, e desistir na primeira recusa da fonte deixaria a tela parada
+      // até alguém clicar em alguma coisa.
+      agendaProximaRevalidacao();
       return;
     }
     // O backend pode ter caído pro diário (fonte intradiária fora do ar); o
@@ -3954,7 +4033,16 @@ async function switchTimeframe(tf) {
     // mesmas. O que muda é qual degrau está ABERTO, e essa marca é diferente da
     // do veredito: "o que estou vendo" e "o que decidiu" são duas coisas.
     renderEscada(_escada);
-    renderChartCard(data.price_chart, _openTicker, data.actionable);
+    // O gráfico DIZ se conseguiu desenhar. Sem velas o desenho anterior FICA (não
+    // se apaga o que já se sabe), e aí a tela tem de declarar que ele é de outro
+    // frame — senão ela afirma o frame novo mostrando o desenho velho.
+    const desenhou = renderChartCard(data.price_chart, _openTicker, data.actionable, _tf);
+    if (desenhou) _tfDesenhado = _tf;
+    // Resposta boa que não trouxe velas: `renderChartCard` sai antes de reescrever
+    // a nota, e o "Recalculando no 1h…" ficaria na tela para sempre — afirmando um
+    // recálculo que já terminou. A nota descreve o desenho, e o desenho é o antigo.
+    if (!desenhou && note && notaAnterior !== null) note.innerHTML = notaAnterior;
+    declaraFrameDoGrafico(_tf, desenhou);
     carregaExecCard();          // outro frame, outro plano: o card acompanha
     if (data.degraded && data.notice) showDegrade(data.notice);
     // E SÓ AGORA a cotação, FORA do caminho da troca. Medido: pendurar a troca na
@@ -3962,11 +4050,121 @@ async function switchTimeframe(tf) {
     // trocar — a ação primária esperando o enriquecimento dela. A troca desenha com
     // o que tem; quando o preço chega, a tira e a nota se atualizam por cima.
     aplicaRevalidacao(selo, _tf, data.actionable);
+    if (reval) { _revalEmVoo = false; marcaRevalidando(false); }
+    agendaProximaRevalidacao();   // o próximo fechamento de candle DESTE frame
   } catch (err) {
-    if (selo !== _tfSeq) return;
+    if (selo !== _tfSeq) { if (reval) { _revalEmVoo = false; marcaRevalidando(false); } return; }
     encerra();
-    if (note) note.textContent = "Falha ao recalcular timeframe.";
+    // A CAUSA vai pra tela. "Falha ao recalcular timeframe." sem o motivo é o que
+    // fazia o defeito chegar como "às vezes não muda": a tela não mentia, ela
+    // simplesmente não contava.
+    avisaFalhaDeFrame(tf, (err && err.message) || String(err), reval);
+    agendaProximaRevalidacao();   // idem: a falha não desliga o relógio
   }
+}
+
+// A tela nunca mente sobre QUAL frame está desenhado. Quando a carga do frame novo
+// não trouxe velas, o desenho anterior fica — e esta linha diz de qual frame ele é.
+function declaraFrameDoGrafico(tfPedido, desenhou) {
+  const el = $("chartFrameAviso");
+  if (!el) return;
+  const mostra = !desenhou && _tfDesenhado && _tfDesenhado !== tfPedido;
+  el.classList.toggle("hidden", !mostra);
+  el.innerHTML = mostra
+    ? `o gráfico continua no <b>${escapeHtml(tfNome(_tfDesenhado))}</b> — o ` +
+      `<b>${escapeHtml(tfNome(tfPedido))}</b> não voltou com velas. Os níveis abaixo ` +
+      `já são do ${escapeHtml(tfNome(tfPedido))}.`
+    : "";
+}
+
+// A falha ganha NOME e lugar fixo. Numa troca ela é ruidosa (o usuário pediu e não
+// recebeu); numa revalidação automática é discreta (ninguém pediu), mas nunca
+// silenciosa — silêncio foi o que transformou um erro em "às vezes não funciona".
+function avisaFalhaDeFrame(tf, causa, reval) {
+  const el = $("chartFrameAviso");
+  if (el) {
+    el.classList.remove("hidden");
+    el.innerHTML = reval
+      ? `a revalidação automática do <b>${escapeHtml(tfNome(tf))}</b> falhou ` +
+        `(${escapeHtml(causa)}) — o que está na tela continua sendo a leitura anterior.`
+      : `não deu pra carregar o <b>${escapeHtml(tfNome(tf))}</b> (${escapeHtml(causa)}) — ` +
+        `a tela continua no <b>${escapeHtml(tfNome(_tfDesenhado || _tf))}</b>. Clique de novo pra tentar.`;
+  }
+  // eslint-disable-next-line no-console
+  console.warn("[frame]", tf, causa);
+}
+
+// Indicador DISCRETO de revalidação em curso: opacidade no card, como o scan faz
+// durante a varredura (task 014). Sem spinner cobrindo o gráfico, sem apagar nada.
+function marcaRevalidando(on) {
+  const card = $("chartCard");
+  if (card) card.classList.toggle("is-revalidando", !!on);
+}
+
+
+// ============ REVALIDAÇÃO AUTOMÁTICA POR FECHAMENTO DE CANDLE (DA-118) ========
+//
+// Pedido do Samyr: *"as revalidações no diário, 4h e 1h devem acontecer em cada
+// fechamento de timeframe respectivo e deve ser automático"*.
+//
+// **O relógio é do SERVIDOR, e é o mesmo do scan.** `agenda.py` já calcula o
+// próximo fechamento (cadência pelo candle + atraso pós-fechamento) e a passada
+// agendada do scan roda por ele. Recalcular esse horário em JavaScript criaria um
+// segundo agendador com regra própria, e no dia em que as duas divergissem
+// ninguém saberia qual manda. A tela PERGUNTA (`/api/agenda/proxima`).
+//
+// **Ação fora do pregão não revalida à toa** — a mesma regra de
+// `agenda.alvos_da_passada`, respondida pelo servidor no campo `revalida`: cripto
+// sempre, ação só com a sessão ativa. Fora disso o candle não anda e a chamada
+// seria gasto sem informação.
+//
+// **Custo: $0.** A revalidação chama `/api/chart`, que é plano determinístico —
+// nenhum LLM entra neste caminho.
+//
+// **Aba em segundo plano:** o navegador afrouxa `setTimeout` (e no mobile chega a
+// parar). Por isso o horário-alvo é guardado em `_revalAlvoMs` e checado ao voltar
+// pro primeiro plano: se já passou, revalida na hora e reagenda. O timer é o
+// caminho feliz; a volta da aba é a rede de segurança — mesma disciplina do
+// `onVisibleForeground` que já existia pro progresso e pros preços.
+let _revalAlvoMs = 0;
+
+function cancelaRevalidacaoAgendada() {
+  if (_revalTimer) { clearTimeout(_revalTimer); _revalTimer = null; }
+  _revalAlvoMs = 0;
+}
+
+async function agendaProximaRevalidacao() {
+  cancelaRevalidacaoAgendada();
+  if (!_openTicker || !_tf) return;
+  try {
+    const q = new URLSearchParams({ tf: _tf, ticker: _openTicker, asset_type: _assetType || "" });
+    const res = await fetch("/api/agenda/proxima?" + q.toString());
+    if (!res.ok) return;
+    const a = await res.json();
+    if (!a || !a.revalida || !a.em_segundos) return;   // pregão fechado: não insiste
+    const ms = Math.max(1000, Number(a.em_segundos) * 1000);
+    _revalAlvoMs = Date.now() + ms;
+    _revalTimer = setTimeout(() => { _revalTimer = null; disparaRevalidacaoDoCandle(); }, ms);
+  } catch (e) { /* sem agenda a tela só não se atualiza sozinha — nada quebra */ }
+}
+
+function disparaRevalidacaoDoCandle() {
+  _revalAlvoMs = 0;
+  // Aba escondida: não gasta chamada agora. Ao voltar, `onVisibleForeground` vê o
+  // alvo vencido e revalida — melhor uma revalidação na volta do que um punhado
+  // acumulado que o navegador soltou de uma vez.
+  if (document.visibilityState !== "visible") { _revalAlvoMs = 1; return; }
+  revalidaFrame("fechamento de candle").finally(() => agendaProximaRevalidacao());
+}
+
+// Chamado pelo `onVisibleForeground`: se o fechamento passou enquanto a aba estava
+// atrás, revalida agora. Se não passou, só garante que o timer existe (o navegador
+// pode tê-lo matado).
+function revalidaSeOCandleFechouEnquantoEuNaoOlhava() {
+  if (!_openTicker) return;
+  const venceu = _revalAlvoMs && Date.now() >= _revalAlvoMs;
+  if (venceu) { cancelaRevalidacaoAgendada(); disparaRevalidacaoDoCandle(); return; }
+  if (!_revalTimer) agendaProximaRevalidacao();
 }
 
 // ────────────────────────── UM GRÁFICO, UM MÉTODO ───────────────────────────
@@ -8294,6 +8492,7 @@ function onVisibleForeground() {
   if (_watchedRunId && pollTimer) watchRun(_watchedRunId);   // poll já + intervalo novo
   else resumeActiveRun();                                    // timer morreu: reengata o vivo
   refreshPrices();                                           // preços live ao voltar pra aba
+  revalidaSeOCandleFechouEnquantoEuNaoOlhava();              // candle que fechou atrás da aba
 }
 
 // A lista de fundo se atualiza devagar (5s), independente do run assistido: é o

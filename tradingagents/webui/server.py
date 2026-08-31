@@ -563,6 +563,16 @@ class _Handler(BaseHTTPRequestHandler):
                             self.runner.execution_card(ticker, date, tf, method))
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, 400)
+            elif path == "/api/agenda/proxima":
+                # QUANDO o próximo candle do frame fecha. A tela agenda a
+                # revalidação automática por aqui em vez de recalcular o horário em
+                # JavaScript: a regra é a do :mod:`agenda`, a MESMA que a passada
+                # agendada do scan usa, e dois relógios divergiriam. $0, sem varrer.
+                qs = parse_qs(urlparse(self.path).query)
+                self._send_json(self.runner.agenda_proxima(
+                    (qs.get("tf", ["1d"])[0] or "1d"),
+                    (qs.get("ticker", [""])[0] or ""),
+                    (qs.get("asset_type", [""])[0] or "")))
             elif path == "/api/scan/salvo":
                 # O ÚLTIMO scan COMPLETO já salvo em disco — leitura de arquivo, $0 e
                 # instantânea. É o que o painel pinta na ABERTURA, com o carimbo de

@@ -224,7 +224,14 @@ def test_falha_no_recalculo_deixa_a_tela_no_frame_que_esta_desenhado(base):
         page.wait_for_timeout(150)
         r = page.evaluate(_RETRATO)
         assert _coerente(r, "4h"), ("a falha deixou a tela dizendo outro frame", r)
-        assert "fonte fora do ar" in page.inner_text("#chartNote"), page.inner_text("#chartNote")
+        # A CAUSA mudou de lugar (DA-118): saiu da nota do gráfico — que descreve o
+        # DESENHO e voltou a descrevê-lo — e passou a ter linha própria, junto do
+        # "a tela continua no 4h". O que este teste garante é o mesmo: o erro FALA.
+        aviso = page.inner_text("#chartFrameAviso")
+        assert "fonte fora do ar" in aviso, aviso
+        assert "4h" in aviso, ("a tela tem de dizer onde ela continua", aviso)
+        assert "Recalculando" not in page.inner_text("#chartNote"), \
+            ("a nota ficou afirmando um recálculo que já terminou", page.inner_text("#chartNote"))
         browser.close()
 
 

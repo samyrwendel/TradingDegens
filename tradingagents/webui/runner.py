@@ -2839,6 +2839,54 @@ class AnalysisRunner:
         return {"ticker": ticker, "date": date, "timeframe": timeframe,
                 "method": method, "card": execucao.card(plan, por_setup)}
 
+    def agenda_proxima(self, tf: str, ticker: str = "",
+                       asset_type: str = "") -> dict[str, Any]:
+        """QUANDO o próximo candle de ``tf`` fecha, e se vale revalidar este ativo.
+
+        A regra de horário mora em :mod:`agenda` e é a MESMA que a passada agendada
+        do scan usa — cadência pelo candle e o mesmo atraso pós-fechamento. Um
+        segundo agendador com relógio próprio divergiria do primeiro, e ninguém
+        saberia qual manda; por isso a tela PERGUNTA em vez de recalcular em
+        JavaScript.
+
+        ``revalida`` responde a outra pergunta da mesma família — a de
+        :func:`agenda.alvos_da_passada`: cripto sempre; ação só com o pregão ativo,
+        porque fora dele ela repete o mesmo candle e revalidar é gasto sem
+        informação. Reusa a função, não a regra copiada.
+
+        Fail-open na sessão: sem cotação de referência a resposta é
+        ``desconhecida`` e ``revalida`` fica ``True`` — não saber não é motivo pra
+        deixar de olhar (é o mesmo default de lá).
+        """
+        tf = (tf or "1d").strip()
+        agora = timeutil.now()
+        proxima = agenda.proxima_passada(agora, (tf,), agenda.ATRASO_POS_FECHAMENTO_S)
+        item = {"ticker": (ticker or "").strip().upper(),
+                "asset_type": (asset_type or "").strip().lower()}
+        # CRIPTO nem pergunta a sessão: ela é 24/7, e a resposta não mudaria a
+        # decisão. A tela chama isto a cada render de gráfico — pagar uma cotação
+        # por render pra confirmar o óbvio seria custo por nada.
+        if item["asset_type"] == "crypto":
+            sessao, revalida = "24h", True
+        elif item["ticker"]:
+            # Pelo cache de cotação do runner (:data:`_PRICE_TTL`, 45s), não pelo
+            # ``fetch_live_price`` cru: perguntar a hora não pode martelar a fonte.
+            sessao, _ref = agenda.sessao_de_mercado(
+                [item], lambda sym: (self.live_prices([sym]) or {}).get(sym))
+            revalida = bool(agenda.alvos_da_passada([item], sessao))
+        else:
+            sessao, revalida = "desconhecida", True
+        return {
+            "tf": tf,
+            "cadencia_min": agenda.cadencia_minutos((tf,)),
+            "atraso_s": agenda.ATRASO_POS_FECHAMENTO_S,
+            "agora": timeutil.stamp(agora),
+            "proxima": timeutil.stamp(proxima),
+            "em_segundos": max(1, int((proxima - agora).total_seconds())),
+            "sessao": sessao,
+            "revalida": revalida,
+        }
+
     def scan_ultimo(self) -> dict[str, Any]:
         """O último scan COMPLETO salvo em disco, ou ``{}`` se nunca houve um.
 

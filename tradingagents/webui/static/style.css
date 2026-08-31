@@ -2891,3 +2891,24 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   font-size: var(--fs-12); }
 .sn-lado b { color: var(--text); letter-spacing: .5px; }
 .sn-lado-frames { display: inline-flex; gap: 4px; }
+
+/* AVISO DE FRAME DO GRÁFICO (DA-118). Mesma caixa do .chart-fora e do
+   .camadas-aviso: as três dizem a mesma classe de coisa — "o que a tela anuncia e
+   você não está vendo" —, e dar aparência nova a cada aviso ensina o olho a tratar
+   cada um como assunto separado. Sem cor nova: verde é ganho e vermelho é perda
+   (DA-078 regra 3), então quem destaca aqui é o peso da palavra. */
+.chart-frame-aviso {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin: 8px 0 0; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.chart-frame-aviso b { color: var(--text); }
+/* REVALIDANDO: indicador discreto, o mesmo vocabulário do scan durante a varredura
+   (opacidade, sem spinner cobrindo nada). O gráfico NÃO é apagado — atualiza em
+   lugar, e o zoom que o usuário ajustou sobrevive. */
+.chart-card.is-revalidando .chart-wrap { opacity: .78; }
+@media (prefers-reduced-motion: no-preference) {
+  .chart-card .chart-wrap { transition: opacity .18s ease; }
+}

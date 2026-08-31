@@ -398,6 +398,13 @@
                    Sem ela, um 1-2-3 empurrado pra fora da janela some sem aviso e a
                    nota logo abaixo continua prometendo pontos que ninguém acha. -->
               <p class="chart-fora hidden" id="chartFora"></p>
+              <!-- DE QUAL FRAME É O DESENHO, quando ele não é o frame pedido, e a
+                   CAUSA quando uma carga falha (DA-118). O gráfico anterior nunca
+                   mais é apagado por uma atualização que não chegou — então a tela
+                   precisa de um lugar fixo pra dizer que o que está desenhado é de
+                   outro frame, e por quê. Antes isso morria no catch e o defeito
+                   chegava como "às vezes o timeframe não muda". -->
+              <p class="chart-frame-aviso hidden" id="chartFrameAviso"></p>
               <p class="chart-note" id="chartNote"></p>
             </div>
           </div>
