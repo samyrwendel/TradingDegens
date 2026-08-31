@@ -484,22 +484,40 @@ def scan_watchlist(tickers: list[str], date: str,
     n = max(1, min(workers, len(tickers)))
     with ThreadPoolExecutor(max_workers=n, thread_name_prefix="scan") as ex:
         out = list(ex.map(lambda t: scan_symbol(t, date, frames), tickers))
-    # Dentro do mesmo estado, quem tem MAIS movimento pela frente vem antes: um
-    # acionado que sobrou 80% do caminho ainda é aproveitável; um que sobrou 5% é
-    # um trade que já aconteceu, e mostrar os dois com o mesmo peso é o que faz o
-    # leitor concluir que o método só dá R:R ruim.
-    out.sort(key=lambda s: (_URGENCIA.get(s["melhor"].get("estado"), 9),
-                            -_resto(s["melhor"]),
-                            s["melhor"].get("dist_pct") if s["melhor"].get("dist_pct") is not None else 9.9))
-    counts: dict[str, int] = {}
-    for s in out:
-        counts[s["melhor"]["estado"]] = counts.get(s["melhor"]["estado"], 0) + 1
+    ativos, counts = ordenar_e_resumir(out)
     # ``gerado_em`` é o carimbo da varredura, em Manaus e offset-aware: sem ele a
     # tela só sabe a hora em que o JSON *chegou* nela, e um resultado servido do
     # disco (ou do memo) se passaria por recém-saído. Marcado ANTES do trabalho —
     # é a hora do dado que se leu, não a de quando o último ativo terminou.
-    return {"date": date, "frames": list(frames), "resumo": counts, "ativos": out,
+    return {"date": date, "frames": list(frames), "resumo": counts, "ativos": ativos,
             "gerado_em": gerado_em}
+
+
+def ordenar_e_resumir(ativos: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Ordem de urgência + contagem por estado — a apresentação da lista, num lugar só.
+
+    Sai de dentro do :func:`scan_watchlist` porque o **último conhecido** (o snapshot
+    em disco) mistura ativos de passadas diferentes e precisa reordenar e recontar o
+    conjunto MESCLADO. Duas cópias divergiriam, e a divergência apareceria como a
+    lista da abertura ordenada de um jeito e a da varredura de outro — o mesmo
+    portfólio parecendo dois.
+
+    Dentro do mesmo estado, quem tem MAIS movimento pela frente vem antes: um
+    acionado que sobrou 80% do caminho ainda é aproveitável; um que sobrou 5% é um
+    trade que já aconteceu, e mostrar os dois com o mesmo peso é o que faz o leitor
+    concluir que o método só dá R:R ruim.
+    """
+    out = sorted(ativos, key=lambda s: (
+        _URGENCIA.get((s.get("melhor") or {}).get("estado"), 9),
+        -_resto(s.get("melhor") or {}),
+        (s.get("melhor") or {}).get("dist_pct")
+        if (s.get("melhor") or {}).get("dist_pct") is not None else 9.9))
+    counts: dict[str, int] = {}
+    for s in out:
+        estado = (s.get("melhor") or {}).get("estado")
+        if estado:
+            counts[estado] = counts.get(estado, 0) + 1
+    return out, counts
 
 
 # ------------------------------------------------------ track record do scan ----

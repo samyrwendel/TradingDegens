@@ -58,6 +58,7 @@ from tradingagents.webui.resume_store import ActiveRunStore
 from tradingagents.webui.scanner import (
     ScanLog,
     _setup_da_entrada,
+    ordenar_e_resumir,
     scan_verdicts,
     scan_watchlist,
 )
@@ -2652,21 +2653,27 @@ class AnalysisRunner:
            revisão mediu. O segundo pedido espera o primeiro e recebe o resultado dele.
            Cinco segundos bastam pra isso, e é por isso que é curto: passada a janela,
            "Escanear" escaneia de verdade.
-        2. **Último resultado conhecido — "o que eu sabia da última vez?"**
-           (:class:`ScanSnapshotStore`, em DISCO, sem TTL). Protege o **usuário**. É o
-           que a tela pinta na ABERTURA, antes de a varredura nova terminar, e
-           sobrevive ao restart — que é justamente onde o memo não chega. Nunca se
-           passa por dado de agora: viaja com o ``gerado_em`` e a tela carimba a hora.
+        2. **Último conhecido — "o que eu sabia da última vez?"**
+           (:class:`ScanSnapshotStore`, em DISCO, por ATIVO, sem TTL). Protege o
+           **usuário**. É o que a tela pinta na ABERTURA, antes de a varredura nova
+           terminar, e sobrevive ao restart — que é justamente onde o memo não chega.
+           Nunca se passa por dado de agora: cada ativo viaja com o ``gerado_em``
+           DELE e a tela carimba a hora.
 
         A segunda **não substitui** a primeira: um snapshot em disco não impede a
         segunda rajada no provedor, e um memo de 5s em memória não tem o que mostrar
         quando o processo acabou de subir.
 
-        A gravação do snapshot fica DENTRO do lock de propósito: assim o arquivo segue
-        a ordem em que as varreduras terminaram, e uma varredura mais lenta de outra
-        data não sobrescreve por cima da mais recente. O custo é o de um
-        ``os.replace`` (milissegundos) contra os segundos da varredura que já se
-        pagou.
+        **Quem alimenta a camada 2: TODA varredura bem-sucedida** — esta e a da
+        agenda —, por :meth:`_guardar_ultimo`, o ÚNICO ponto de escrita. O memo já é
+        global do runner (a varredura de qualquer visitante serve a todos), então o
+        último conhecido não tem por que exigir origem privilegiada. E dois caminhos
+        de escrita divergiriam justo na parte difícil: a fusão por ativo.
+
+        A gravação fica DENTRO do lock de propósito: assim o arquivo segue a ordem em
+        que as varreduras terminaram, e uma varredura mais lenta não sobrescreve por
+        cima da mais recente. O custo é o de um ``os.replace`` (milissegundos) contra
+        os segundos da varredura que já se pagou.
         """
         with self._scan_lock:
             memo = self._scan_memo
@@ -2677,17 +2684,31 @@ class AnalysisRunner:
             self._registrar_gatilhos(result)
             # CAMADA 2 (disco). Só o caminho FRESCO grava: o retorno pelo memo
             # acima já devolveu este mesmo objeto, e regravá-lo seria I/O à toa
-            # dentro do lock — sem mudar um byte do arquivo. Esta é também a
-            # varredura COMPLETA (a watchlist inteira), a única que pode virar "o
-            # último scan" (a passada agendada varre um subconjunto). Fail-open:
-            # disco cheio ou sem permissão não derruba a varredura que o usuário
-            # está esperando.
-            try:
-                self.scan_snapshot.save(result)
-            except OSError:
-                logger.warning("não deu pra salvar o último scan em disco", exc_info=True)
+            # dentro do lock — sem mudar um byte do arquivo. Esta varredura é
+            # COMPLETA (a watchlist inteira), e é isso que ``completa=True`` afirma.
+            self._guardar_ultimo(result, universo=tickers, completa=True)
             self._scan_memo = (date, time.time(), result)
             return result
+
+    def _guardar_ultimo(self, result: dict[str, Any], *, universo: list[str],
+                        completa: bool, sessao: str | None = None) -> None:
+        """O ÚNICO ponto de escrita do último conhecido. Fail-open, sempre.
+
+        Uma varredura que já custou 8–20s não pode ser perdida porque o disco encheu —
+        nem, o que é pior, derrubar a resposta que o usuário está esperando por causa
+        de uma gravação de conveniência. Qualquer falha aqui vira log e a varredura
+        segue: a tela perde a memória, não o resultado.
+
+        ``completa`` distingue a varredura da TELA (a watchlist inteira) da passada da
+        AGENDA (parcial por desenho: cripto sempre, ação só com pregão aberto). Não é
+        cosmético — é o que a abertura usa pra dizer o que está mostrando, em vez de
+        deixar o leitor supor que viu a lista toda."""
+        try:
+            self.scan_snapshot.registrar(
+                result, universo=universo, completa=completa, sessao=sessao,
+                ordenar_e_resumir=ordenar_e_resumir)
+        except Exception:  # noqa: BLE001 — memória de conveniência nunca derruba a varredura
+            logger.warning("não deu pra guardar o último conhecido do scan", exc_info=True)
 
     def _registrar_gatilhos(self, result: dict[str, Any]) -> dict[str, int]:
         """Loga os gatilhos NOVOS de uma varredura. Devolve a contagem da passada.
@@ -2744,6 +2765,14 @@ class AnalysisRunner:
         DA do single-flight veio matar. O que ela não usa é o memo — uma passada
         agendada existe pra ler dado NOVO, e devolver o resultado de 30s atrás seria
         agendar para nada.
+
+        **E o resultado NÃO se joga mais fora.** Esta passada computava o scan
+        inteiro — pares, níveis, R:R, blocos do Storm — só pra contar gatilhos novos e
+        descartar o objeto; o usuário então esperava 20s por uma varredura que a
+        máquina tinha acabado de fazer. Agora ela alimenta o mesmo último conhecido
+        que a tela alimenta (:meth:`_guardar_ultimo`), com ``completa=False`` e a
+        sessão de mercado junto: a fusão é por ATIVO, então quem esta passada não
+        varreu continua na tela com o dado e a hora da passada em que ELE foi lido.
         """
         # Import local, como nos outros pontos que só precisam da cotação: o módulo
         # puxa yfinance, e o runner é importado pela suíte centenas de vezes.
@@ -2761,6 +2790,12 @@ class AnalysisRunner:
         with self._scan_lock:
             result = scan_watchlist(alvos, agora)
             contagem = self._registrar_gatilhos(result)
+            # PARCIAL por desenho (``completa=False``): fora do pregão os alvos são só
+            # as criptos. A sessão viaja junto porque é ela que explica a cobertura —
+            # "8 de 20" sem "pregão fechado" parece falha, e é regra.
+            self._guardar_ultimo(result, universo=[w.get("ticker") for w in watch
+                                                   if w.get("ticker")],
+                                 completa=False, sessao=sessao)
         self.scan_log.record_pass(alvos=len(alvos), lidos=contagem["lidos"],
                                   sem_dado=contagem["sem_dado"],
                                   gatilhos=contagem["gatilhos"], sessao=sessao)

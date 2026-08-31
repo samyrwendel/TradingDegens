@@ -239,32 +239,37 @@ class WatchlistStore:
 
 
 class ScanSnapshotStore:
-    """O último scan COMPLETO em disco — pra a tela nascer com informação.
+    """O ÚLTIMO CONHECIDO da watchlist — por ATIVO, em disco, alimentado por TODA
+    varredura bem-sucedida (a da tela e a da agenda).
 
-    A varredura da watchlist custa 8–20s (20 ativos × 3 frames, e o Storm somou
-    trabalho). O ``_scan_memo`` do runner dura 5s e o ``_live_cache`` do scanner
-    30s; nenhum dos dois sobrevive a um restart, e o ``scans.jsonl`` é
-    append-only só dos ``em_gatilho`` — nenhum deles é "o último resultado
-    completo". Sem isso, quem abre o painel encara a tela VAZIA a varredura
-    inteira: a task 014 fez o resultado anterior sobreviver DENTRO da sessão do
-    navegador, e na primeira carga não existe anterior nenhum.
+    **Por que existe.** A varredura completa custa 8–20s e o painel abria vazio esse
+    tempo todo. O ``_scan_memo`` do runner dura 5s e o ``_live_cache`` do scanner 30s
+    — os dois em memória, os dois mortos no restart —, e o ``scans.jsonl`` é
+    append-only só dos ``em_gatilho`` (é um ledger de gatilhos, não uma varredura).
+    Enquanto isso a agenda já varria de hora em hora e **jogava o resultado fora**,
+    guardando só as contagens: o dado que a tela precisava estava sendo produzido e
+    descartado.
 
-    Aqui ele passa a sobreviver ao navegador E ao processo: um arquivo só
-    (``last_scan.json``), escrita atômica com lock, na mesma disciplina do
-    :class:`HistoryStore` (temp + rename) — a última varredura sobrescreve a
-    anterior, porque o que se quer é o estado mais recente, não um histórico.
+    **Por que por ATIVO, e não "o último scan completo".** A passada agendada é
+    PARCIAL por desenho — cripto sempre, ação só com o pregão aberto, porque fora
+    dele a ação repete o mesmo candle. Guardar a passada inteira como "o último scan"
+    faria a abertura de madrugada mostrar meia watchlist sem dizer. Aqui cada ativo
+    guarda a leitura DELE com a hora DELE: a passada nova sobrescreve quem ela
+    varreu, e quem ficou de fora permanece com o dado anterior e o carimbo anterior.
+    Nunca some, nunca finge ser de agora.
 
-    Duas regras que a leitura da tela depende:
+    **O que a passada declara** (``ultima_passada``): quando foi, se foi COMPLETA (a
+    watchlist inteira) ou parcial, qual era a sessão de mercado e quais tickers ela
+    cobriu. É com isso que a tela diz o que está mostrando em vez de deixar o leitor
+    supor.
 
-    * **Só varredura COMPLETA entra.** A passada agendada varre um subconjunto
-      (só o que o mercado justifica varrer agora) — gravá-la aqui faria a
-      abertura mostrar meia watchlist como se fosse a lista toda.
-    * **Vazio não se grava.** Watchlist vazia (ou varredura que não devolveu
-      ativo nenhum) não carrega informação: guardá-la faria a abertura pintar
-      uma lista vazia que se lê como "não há nada em gatilho".
+    **Universo.** Todo registro passa a lista atual da watchlist: ativo removido dela
+    sai do arquivo na gravação seguinte. Sem isso um ticker apagado ficaria para
+    sempre, porque uma passada parcial nunca o mencionaria de novo.
 
-    Fail-open em toda leitura: arquivo ausente, ilegível ou corrompido devolve
-    ``{}`` e a tela cai no comportamento de primeira carga.
+    Escrita atômica com lock (temp + rename), na mesma disciplina do
+    :class:`HistoryStore`. Fail-open em toda leitura: arquivo ausente, ilegível ou
+    corrompido devolve ``{}`` e a tela cai no comportamento de primeira carga.
     """
 
     def __init__(self, base_dir: str | os.PathLike):
@@ -272,27 +277,82 @@ class ScanSnapshotStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
-    def save(self, resultado: dict[str, Any]) -> bool:
-        """Grava ``resultado`` como o último scan completo. ``False`` = não gravou.
+    def registrar(self, resultado: dict[str, Any], *,
+                  universo: list[str] | None = None,
+                  completa: bool = True,
+                  sessao: str | None = None,
+                  ordenar_e_resumir=None) -> dict[str, Any]:
+        """Funde uma varredura no último conhecido e devolve o estado resultante.
 
-        O resultado vai inteiro, com o ``gerado_em`` que o
-        :func:`scanner.scan_watchlist` carimbou — é ele que a tela exibe pra
-        dizer DE QUANDO é o que está mostrando.
+        ``resultado`` é o que :func:`scanner.scan_watchlist` produziu (completo ou de
+        uma passada parcial). ``universo`` é a watchlist ATUAL — quem não estiver nela
+        sai. ``ordenar_e_resumir`` é injetado pelo chamador (:mod:`scanner`) para que
+        a lista mesclada saia na MESMA ordem e com a MESMA contagem da varredura viva;
+        sem ele a fusão preserva a ordem de chegada e recontagem simples.
+
+        Devolve ``{}`` sem gravar quando não há o que guardar — nem ativo novo nem
+        ativo anterior. Uma lista vazia guardada se leria na tela como "não há nada em
+        gatilho", que é uma afirmação, não uma ausência de dado.
         """
-        if not (resultado or {}).get("ativos"):
-            return False
+        gerado_em = resultado.get("gerado_em")
+        novos = {a.get("ticker"): a for a in (resultado.get("ativos") or []) if a.get("ticker")}
         with self._lock:
-            HistoryStore._atomic_write(self.path, resultado)
-        return True
+            atual = self._ler()
+            guardados = {a.get("ticker"): a for a in (atual.get("ativos") or []) if a.get("ticker")}
+            # O ativo varrido AGORA sobrescreve o anterior e leva o carimbo desta
+            # passada. Quem não foi varrido fica exatamente como estava — com o
+            # carimbo da passada em que ELE foi lido.
+            for ticker, row in novos.items():
+                guardados[ticker] = {**row, "gerado_em": gerado_em}
+            if universo is not None:
+                permitidos = {str(t).strip().upper() for t in universo}
+                guardados = {t: r for t, r in guardados.items() if t.upper() in permitidos}
+            if not guardados:
+                return {}
+            ativos = list(guardados.values())
+            if ordenar_e_resumir is not None:
+                ativos, resumo = ordenar_e_resumir(ativos)
+            else:
+                resumo = {}
+                for a in ativos:
+                    estado = (a.get("melhor") or {}).get("estado")
+                    if estado:
+                        resumo[estado] = resumo.get(estado, 0) + 1
+            estado = {
+                "date": resultado.get("date") or atual.get("date"),
+                "frames": resultado.get("frames") or atual.get("frames") or [],
+                # O carimbo do TOPO é o da passada mais recente. Cada ativo carrega o
+                # dele; é a comparação entre os dois que a tela usa pra marcar quem
+                # ficou para trás.
+                "gerado_em": gerado_em or atual.get("gerado_em"),
+                "ultima_passada": {
+                    "gerado_em": gerado_em,
+                    "completa": bool(completa),
+                    "sessao": sessao,
+                    "tickers": sorted(novos),
+                    "universo": len(guardados),
+                },
+                "resumo": resumo,
+                "ativos": ativos,
+            }
+            self._escrever(estado)
+            return estado
 
     def get(self) -> dict[str, Any]:
-        """O último scan completo salvo, ou ``{}`` se não houver (ou não ler)."""
+        """O último conhecido, ou ``{}`` se não houver (ou não der pra ler)."""
         with self._lock:
-            if not self.path.exists():
-                return {}
-            try:
-                with open(self.path, encoding="utf-8") as fh:
-                    data = json.load(fh)
-            except (OSError, json.JSONDecodeError):
-                return {}
+            return self._ler()
+
+    # -- privados (sempre chamados com o lock tomado) ---------------------------
+    def _ler(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {}
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return {}
         return data if isinstance(data, dict) else {}
+
+    def _escrever(self, estado: dict[str, Any]) -> None:
+        HistoryStore._atomic_write(self.path, estado)

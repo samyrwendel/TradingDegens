@@ -89,9 +89,9 @@ def test_o_snapshot_nao_afrouxou_o_singleflight(runner, monkeypatch):
     chamadas: list[str] = []
     _stub_lento(monkeypatch, chamadas, dur=0.3)
     gravacoes: list[dict] = []
-    original = runner.scan_snapshot.save
-    monkeypatch.setattr(runner.scan_snapshot, "save",
-                        lambda res: (gravacoes.append(res), original(res))[1])
+    original = runner.scan_snapshot.registrar
+    monkeypatch.setattr(runner.scan_snapshot, "registrar",
+                        lambda res, **kw: (gravacoes.append(res), original(res, **kw))[1])
     ths = [threading.Thread(target=runner.scan_portfolio, args=("2026-08-29",))
            for _ in range(4)]
     for t in ths:
@@ -112,7 +112,8 @@ def test_o_retorno_pelo_memo_nao_regrava_o_snapshot(runner, monkeypatch):
     chamadas: list[str] = []
     _stub_lento(monkeypatch, chamadas, dur=0.0)
     gravacoes: list[dict] = []
-    monkeypatch.setattr(runner.scan_snapshot, "save", lambda res: gravacoes.append(res))
+    monkeypatch.setattr(runner.scan_snapshot, "registrar",
+                        lambda res, **kw: gravacoes.append(res))
     a = runner.scan_portfolio("2026-08-29")
     b = runner.scan_portfolio("2026-08-29")     # dentro da janela do memo
     assert a is b, "o memo devia ter devolvido o MESMO objeto"

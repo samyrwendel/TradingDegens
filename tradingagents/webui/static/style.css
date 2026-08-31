@@ -2561,6 +2561,17 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   text-transform: uppercase; letter-spacing: .5px; font-weight: var(--fw-bold);
   color: var(--text); border-bottom: 1px solid var(--border);
 }
+/* O QUE a última passada cobriu — só sai quando ela foi parcial. Fica na mesma
+   linha do carimbo, depois dele, porque é qualificação da MESMA afirmação. */
+.scan-carimbo .sc-cobertura { color: var(--muted); }
+.scan-carimbo .sc-cobertura b { color: var(--text); font-weight: var(--fw-bold); }
+/* A hora DE UM ATIVO, quando ele ficou de fora da última passada. Menor e cinza
+   que a sigla (DA-078 regra 4: hierarquia por tamanho e peso, não por cor) —
+   tabular pra não empurrar a coluna quando o minuto muda. */
+.scan-tk-quando {
+  margin-left: 6px; font-size: var(--fs-10); line-height: 1; color: var(--muted);
+  font-weight: var(--fw-med); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 /* A linha que diz o que está acontecendo com a ATUALIZAÇÃO — e, quando ela
    falha, de quando é o dado que ficou na tela. Discreta por padrão; vermelha
    só no erro, porque aí ela é a única pista de que a tela está velha. */

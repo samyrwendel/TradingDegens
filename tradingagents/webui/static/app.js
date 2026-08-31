@@ -7322,22 +7322,54 @@ function scanQuando(data) {
   return new Date();
 }
 
-// O carimbo do dado que está na tela, em texto. Devolve ``null`` quando não há
-// scan nenhum — nunca uma string vazia que se leria como "sem hora".
+// UM instante vira texto legível: "14:32", "ontem 12:00", "29/08 14:32".
 //
-// **Dado de outro dia não se disfarça de recente**: só a hora ("14:32") num scan
-// de ontem é indistinguível de um de agora, e é justamente o scan salvo em disco
-// (que sobrevive ao restart e pode ter dias) que essa leitura decidiria errado.
-// A partir de ontem o DIA entra na frente da hora e o carimbo se declara velho.
-function scanCarimbo() {
-  if (!_scanAt) return null;
-  const hora = _scanAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const meiaNoite = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const dias = Math.round((meiaNoite(new Date()) - meiaNoite(_scanAt)) / 86400000);
+// **Dado de outro dia não se disfarça de recente**: só a hora num carimbo de ontem
+// é indistinguível de um de agora, e é justamente o que veio do disco (que
+// sobrevive ao restart e pode ter dias) que essa leitura decidiria errado. A
+// partir de ontem o DIA entra na frente da hora e o carimbo se declara velho.
+function carimboDeInstante(d) {
+  if (!d || isNaN(d.getTime())) return null;
+  const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const meiaNoite = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dias = Math.round((meiaNoite(new Date()) - meiaNoite(d)) / 86400000);
   if (dias <= 0) return { txt: hora, velho: false };
   if (dias === 1) return { txt: `ontem ${hora}`, velho: true };
-  const dm = _scanAt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const dm = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   return { txt: `${dm} ${hora}`, velho: true };
+}
+
+// O carimbo do conjunto que está na tela — a passada MAIS RECENTE. Devolve ``null``
+// quando não há scan nenhum: nunca uma string vazia, que se leria como "sem hora".
+function scanCarimbo() {
+  return carimboDeInstante(_scanAt);
+}
+
+// O carimbo de UM ativo — só para quem FICOU DE FORA da última passada.
+//
+// A passada da agenda é PARCIAL por desenho (cripto sempre, ação só com o pregão
+// aberto). O último conhecido funde por ATIVO, então a lista pode misturar uma
+// cripto lida agora com uma ação lida às 17h de ontem — e sem isto as duas
+// apareceriam com o mesmo peso, a segunda fingindo ser de agora.
+//
+// A pergunta que decide é "este ativo entrou na última passada?", respondida pela
+// LISTA que a passada declara — não por comparação de horário. Duas varreduras
+// podem cair no mesmo minuto, e aí a comparação diria "em dia" sobre um ativo que
+// ninguém leu. Quem está na passada não ganha carimbo: repetir a mesma hora em
+// vinte linhas é ruído, e o carimbo do topo já a diz.
+//
+// Sem hora conhecida (arquivo gravado antes de o carimbo por ativo existir) a
+// linha diz que não foi varrido, em vez de calar — calar é o disfarce.
+function scanCarimboDoAtivo(a) {
+  const p = _scanData && _scanData.ultima_passada;
+  if (!p || !a || !a.ticker) return null;      // varredura viva: tudo da mesma passada
+  if ((p.tickers || []).indexOf(a.ticker) >= 0) return null;
+  const c = a.gerado_em ? carimboDeInstante(new Date(a.gerado_em)) : null;
+  const txt = c ? c.txt : "não varrido agora";
+  const tit = c ? `este ativo não entrou na última passada — foi lido em ${c.txt}`
+                : "este ativo não entrou na última passada, e a hora da leitura " +
+                  "anterior dele não foi registrada";
+  return `<span class="scan-tk-quando" title="${escapeHtml(tit)}">${escapeHtml(txt)}</span>`;
 }
 
 // A linha PERMANENTE que diz de quando é o que está na tela. Fica enquanto houver
@@ -7354,8 +7386,38 @@ function renderScanCarimbo() {
   el.classList.remove("hidden");
   el.classList.toggle("is-velho", c.velho);
   el.innerHTML = `<span class="sc-rot">scan de</span> <b>${escapeHtml(c.txt)}</b>` +
-    (c.velho ? ` <span class="sc-alerta">não é de hoje</span>` : "");
+    (c.velho ? ` <span class="sc-alerta">não é de hoje</span>` : "") +
+    scanCoberturaHtml();
 }
+
+// O QUE a última passada cobriu. Só aparece quando ela foi PARCIAL — uma varredura
+// completa não precisa se explicar, e a linha viraria ruído fixo.
+//
+// A passada da agenda varre cripto sempre e ação só com o pregão aberto: de
+// madrugada ela lê 8 de 20. Servir isso calado mostraria meia watchlist como se
+// fosse a lista toda. Dizer "8 de 20" sem dizer POR QUE parece falha — e é regra —,
+// então a sessão de mercado vem junto. Os outros 12 não somem: continuam na lista
+// com o carimbo da passada em que foram lidos (:func:`scanCarimboDoAtivo`).
+function scanCoberturaHtml() {
+  const p = _scanData && _scanData.ultima_passada;
+  if (!p || p.completa !== false) return "";
+  const n = (p.tickers || []).length;
+  const tot = p.universo || (_scanData.ativos || []).length;
+  const porque = p.sessao && p.sessao !== "regular" && p.sessao !== "24h"
+    ? ` (bolsa ${escapeHtml(SESSAO_PT[p.sessao] || p.sessao)})` : "";
+  return `<span class="sc-cobertura">última passada leu <b>${n}</b> de ` +
+    `<b>${tot}</b>${porque} — os demais trazem a hora deles</span>`;
+}
+
+// Vocabulário da sessão de mercado, do jeito que se lê em português. O valor cru
+// vem do ``marketState`` do provedor (:mod:`live_price`), e "POSTPOST" na tela é
+// vazamento de implementação. Chave desconhecida cai no próprio valor — que é feio,
+// mas honesto, e melhor que inventar um estado que não se sabe.
+const SESSAO_PT = {
+  fechada: "fechada", closed: "fechada", regular: "aberta",
+  pre: "pré-mercado", pos: "after-market", "24h": "24h",
+  desconhecida: "sessão desconhecida",
+};
 
 async function runScan() {
   const btn = $("scanRunBtn");
@@ -7770,6 +7832,7 @@ function paintScan(data) {
         `<li class="scan-line-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
         scanTfBadge(f.frame) +
         `<b class="scan-tk-inline">${escapeHtml(a.ticker)}</b>` +
+        (scanCarimboDoAtivo(a) || "") +
         `<span class="scan-price">$${scanFmt(f.price)}</span>` +
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
         scanEstadoChip(f.estado, f.direction, f.andado_pct) +
@@ -7795,7 +7858,8 @@ function paintScan(data) {
         scanLevelsHtml(f) + scanActionsHtml(a.ticker, f) + `</div>`).join("");
       // (CARDS segue com os rótulos por célula — lá não há cabeçalho de coluna.)
       return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
-        `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}</b>` +
+        `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}` +
+        (scanCarimboDoAtivo(a) || "") + `</b>` +
         rows + `</li>`;
     }).join("") ||
       `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
