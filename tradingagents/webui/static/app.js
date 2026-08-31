@@ -161,13 +161,79 @@ function assetPt(t) {
 // (âmbar), `.sc-state.sem_*` (apagado) no card, e a mesma família de classes no
 // chip da lateral. Cor + palavra, nunca o vazio.
 const SETUP_PT = {
-  ativo: "Setup ativo agora",
+  // "Setup ativo agora" saiu (DA-121). Era o ÚNICO rótulo do produto cuja leitura
+  // natural em português ("está ativo", "está rodando") apontava para a fase
+  // ERRADA — o Samyr leu como "em movimento para o alvo", que é o oposto: `ativo`
+  // quer dizer que o preço está TOCANDO a entrada agora. "Na entrada" não tem como
+  // ser lida como "já andou".
+  ativo: "Na entrada agora",
   aguardar_pullback: "Aguardar recuo à média",
   aguardar_rompimento: "Aguardar rompimento",
   sem_setup: "Sem setup de preço definido",
   sem_dado: "Sem dado suficiente",
   intradiario_indisponivel: "Intradiário indisponível",
 };
+
+// ============ A FASE — UM eixo temporal para a tela inteira (DA-121) ==========
+//
+// ESPELHO de `webui/fases.py`, que é a AUTORIDADE. Um teste solda os dois: sem
+// ele a próxima palavra nova nasce de um lado só, que é exatamente como as três
+// taxonomias (lateral, scan, sinais) apareceram sem tradução entre elas.
+//
+// As taxonomias NÃO se fundem — cada uma descreve um sujeito diferente (o plano
+// da run, a leitura de um frame, a oportunidade agregada). O que passa a ser
+// único é o EIXO: quatro fases, quatro palavras, as mesmas em toda superfície. O
+// MECANISMO ("recuo à média", "rompimento do ponto 2") vira qualificador ao lado,
+// nunca sinônimo.
+const FASE_PT = {
+  agora: "NA ENTRADA",
+  esperando: "AGUARDANDO",
+  andou: "JÁ ANDOU",
+  morreu: "INVALIDADO",
+  sem_leitura: "SEM LEITURA",
+};
+const FASE_AJUDA = {
+  agora: "o preço está no ponto de entrar — é a hora de agir",
+  esperando: "o gatilho ainda não veio",
+  andou: "acionou e o preço já passou da entrada",
+  morreu: "a premissa rompeu — não há trade",
+  sem_leitura: "não há leitura para este ativo neste frame",
+};
+const FASE_DO_SETUP_STATE = {
+  ativo: "agora",
+  aguardar_pullback: "esperando",
+  aguardar_rompimento: "esperando",
+  sem_setup: "sem_leitura",
+  sem_dado: "sem_leitura",
+  intradiario_indisponivel: "sem_leitura",
+};
+const FASE_DO_SCAN_ESTADO = {
+  em_gatilho: "agora",
+  formando: "esperando",
+  em_movimento: "andou",
+  invalidou: "morreu",
+  sem_setup: "sem_leitura",
+  sem_dado: "sem_leitura",
+  vetado: "sem_leitura",
+  zona_neutra: "agora",
+};
+const FASE_DA_OPORTUNIDADE = {
+  entrada: "agora", a_caminho: "esperando", passou: "andou", conflito: null,
+};
+const MECANISMO_PT = {
+  aguardar_pullback: "recuo à média",
+  aguardar_rompimento: "rompimento do ponto 2",
+  formando: "padrão formando",
+  ativo: "recuo à média",
+  em_gatilho: "gatilho rompido",
+  em_movimento: "gatilho ficou para trás",
+  invalidou: "premissa rompida",
+};
+function faseDoSetupState(st) { return FASE_DO_SETUP_STATE[st] || null; }
+function faseDoScanEstado(e) { return FASE_DO_SCAN_ESTADO[e] || null; }
+function faseRotulo(f) { return f ? (FASE_PT[f] || "") : ""; }
+function faseAjuda(f) { return f ? (FASE_AJUDA[f] || "") : ""; }
+function mecanismoPt(e) { return MECANISMO_PT[e] || ""; }
 
 // DE QUAL setup veio o estado acima. São dois independentes, desenhados na mesma
 // tela, que podem coexistir e discordar: o RECUO À MÉDIA (faixa verde) e o 1-2-3
@@ -185,7 +251,9 @@ function setupSourcePt(src) {
 // veredito de uma run 1-2-3 é o estado do setup, não "CONCLUÍDO". SETUP_PT tem
 // a frase completa (cabeçalho da análise); aqui a forma curta cabe na coluna.
 const SETUP_COMPACT = {
-  ativo: "Ativo",
+  // "Ativo" era a palavra que induzia ao erro (DA-121) — e no chip estreito, onde
+  // não cabe explicação, era ainda mais sozinha. Vai a fase por extenso.
+  ativo: "Na entrada",
   aguardar_pullback: "Aguardar recuo",
   aguardar_rompimento: "Aguardar rompimento",
   sem_setup: "Sem setup",
@@ -2404,8 +2472,18 @@ function renderSetupCards(a) {
   // É o que torna a discordância LEGÍVEL: dá pra ver qual das duas decidiu, em vez
   // de um estado órfão pairando sobre as duas.
   const vlabel = SETUP_PT[a.setup_state] || a.setup_state;
+  // A FASE vem PRIMEIRO e o mecanismo em seguida (DA-121). É a tradução explícita
+  // entre as taxonomias, e ela mora na TELA: quem vê "AGUARDANDO · recuo à média"
+  // aqui e "AGUARDANDO" no scan não precisa deduzir que são o mesmo momento.
+  const fase = faseDoSetupState(a.setup_state);
+  const mec = mecanismoPt(a.setup_state);
+  const faseChip = fase
+    ? `<span class="sc-fase ${escapeHtml(fase)}" title="${escapeHtml(faseAjuda(fase))}">` +
+      `${escapeHtml(faseRotulo(fase))}</span>` +
+      (mec ? `<span class="sc-mec">${escapeHtml(mec)}</span>` : "")
+    : "";
   const carimbo =
-    `<div class="sc-verdict"><span class="sc-vk">veredito do plano</span>` +
+    `<div class="sc-verdict"><span class="sc-vk">veredito do plano</span>` + faseChip +
     `<span class="sc-state ${escapeHtml(a.setup_state)}">${escapeHtml(vlabel)}</span>` +
     (a.horizon ? `<span class="sc-hz">horizonte: ${escapeHtml(a.horizon)}</span>` : "") + "</div>";
   const dono = a.setup_source ? String(a.setup_source) : "";
@@ -7383,11 +7461,19 @@ function renderModelTest(data) {
 let _scanData = null;        // último scan completo (pra re-pintar ao trocar filtro)
 let _scanEstadoFilter = null; // estado selecionado no filtro de chips (null = todos)
 let _scanAt = null;          // QUANDO o scan que está na tela foi tirado (task 014)
+// Os rótulos do scan passam a ser as palavras do EIXO (DA-121): "EM MOVIMENTO" e
+// "FORMANDO" descreviam o MECANISMO e cada um convidava a uma leitura temporal
+// própria. Agora a fase é o que se lê, e o mecanismo desceu para o `title` — que é
+// onde ele sempre coube melhor que numa célula estreita.
+//
+// `em_gatilho` é a exceção declarada: ali o rótulo é COMPRA/VENDA porque a DIREÇÃO
+// é a informação que decide, e a fase ("na entrada") já está dita pela seção de
+// Sinais e pela cor. Trocá-la por "NA ENTRADA" apagaria de qual lado se entra.
 const SCAN_ESTADO_PT = {
   em_gatilho: { compra: ["COMPRA"], venda: ["VENDA"] },
-  em_movimento: ["EM MOVIMENTO"],
-  invalidou: ["INVALIDOU"],
-  formando: ["FORMANDO"],
+  em_movimento: ["JÁ ANDOU"],
+  invalidou: ["INVALIDADO"],
+  formando: ["AGUARDANDO"],
   sem_setup: ["sem setup", "·"],
   sem_dado: ["sem dado"],
 };
@@ -7407,15 +7493,22 @@ function scanEstadoChip(estado, direction, andado) {
   const cls = estado === "em_movimento" ? "scan-chip movimento"
     : estado === "invalidou" ? "scan-chip invalidou"
     : "scan-chip";
+  // O MECANISMO desceu pro title (DA-121): a célula mostra a FASE, e o que
+  // exatamente se espera (ou o que ficou para trás) fica a um hover — sem que a
+  // distinção se perca, que é a invariante da DA-078.
+  const mec = mecanismoPt(estado);
   // "em movimento" sozinho não distingue um rompimento de ontem de um trade que já
   // andou 91% do caminho — e é essa diferença que decide se ainda dá pra entrar.
   // O percurso entra NO CHIP, que é o que se lê de relance na lista.
   const pct = andado == null ? "" :
     ` <span class="scan-andado">${Math.round(andado)}%</span>`;
-  const tit = andado == null ? "" :
-    ` title="${escapeHtml(`o preço já andou ${Math.round(andado)}% do caminho do ` +
-      `gatilho até o alvo — sobra ${Math.round(100 - andado)}%`)}"`;
-  return `<span class="${cls}"${tit}>${escapeHtml(pt)}${pct}</span>`;
+  const faseTxt = [faseAjuda(faseDoScanEstado(estado)), mec].filter(Boolean).join(" — ");
+  const andadoTxt = andado == null ? "" :
+    `o preço já andou ${Math.round(andado)}% do caminho do gatilho até o alvo — ` +
+    `sobra ${Math.round(100 - andado)}%`;
+  const tit = [faseTxt, andadoTxt].filter(Boolean).join(". ");
+  const titAttr = tit ? ` title="${escapeHtml(tit)}"` : "";
+  return `<span class="${cls}"${titAttr}>${escapeHtml(pt)}${pct}</span>`;
 }
 function scanFmt(n) { return n == null ? "—" : Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 }); }
 
@@ -7698,7 +7791,11 @@ function renderScanFilters(s) {
       // em_gatilho é direção-aware no chip de linha ({compra,venda}), mas no
       // filtro é genérico — achatamos pra um label único. Os demais são [label].
       const entry = SCAN_ESTADO_PT[k];
-      const [label] = (k === "em_gatilho") ? ["EM GATILHO"] : entry;
+      // O filtro agrega compra E venda, então a DIREÇÃO não cabe nele — e é por
+      // isso que aqui vai a FASE: "NA ENTRADA", a mesma palavra da seção de
+      // Sinais e do card. Era "EM GATILHO", a última sobra de um quinto jeito de
+      // nomear o mesmo momento (DA-121).
+      const [label] = (k === "em_gatilho") ? [faseRotulo("agora")] : entry;
       return chip(k, label, s[k] || 0);
     }).join("");
   host.querySelectorAll("[data-filter]").forEach((b) => {
@@ -7994,15 +8091,19 @@ function scanActionsHtml(ticker, f) {
 
 // SEÇÕES na ordem em que se decide. O conflito fica por último de propósito: ele
 // não é entrada, e não pode competir por atenção com quem é.
+// Os títulos são as palavras do EIXO (DA-121) — as MESMAS da lateral e do scan.
+// A nota de cada seção acrescenta o que só ela sabe (a janela), sem redefinir a
+// fase: o leitor aprende quatro palavras uma vez e as reconhece em toda a tela.
 const SINAL_SECOES = [
-  { key: "entrada", titulo: "Entrada agora",
+  { key: "entrada", fase: "agora", titulo: "Na entrada",
     nota: "o preço está DENTRO da janela em que o retorno ainda paga o risco" },
-  { key: "a_caminho", titulo: "A caminho",
-    nota: "o padrão existe e o preço ainda não chegou no gatilho" },
-  { key: "passou", titulo: "Fora da janela",
-    nota: "acionou, mas entrar agora não paga o risco — ou nunca pagou" },
-  { key: "conflito", titulo: "Conflito entre frames",
-    nota: "os frames do mesmo método discordam da direção — não é entrada" },
+  { key: "a_caminho", fase: "esperando", titulo: "Aguardando",
+    nota: "o gatilho ainda não veio — o padrão existe e o preço não chegou nele" },
+  { key: "passou", fase: "andou", titulo: "Já andou",
+    nota: "acionou e o preço passou da entrada — agora não paga o risco, ou nunca pagou" },
+  { key: "conflito", fase: null, titulo: "Conflito entre frames",
+    nota: "os frames do mesmo método discordam da direção — não há fase a apontar, "
+          + "porque não há um lado a operar" },
 ];
 
 const SINAL_DIR_PT = { compra: "COMPRA", venda: "VENDA" };
@@ -8177,7 +8278,10 @@ function renderSinais(ul, ops) {
   ul.innerHTML = SINAL_SECOES.map((sec) => {
     const doGrupo = vis.filter((o) => o.estado === sec.key);
     if (!doGrupo.length) return "";
-    return `<li class="sn-secao"><span class="sn-secao-tit">${escapeHtml(sec.titulo)}</span>` +
+    const ajuda = sec.fase ? faseAjuda(sec.fase) : "";
+    return `<li class="sn-secao"><span class="sn-secao-tit"` +
+      (ajuda ? ` title="${escapeHtml(ajuda)}"` : "") +
+      `>${escapeHtml(sec.titulo)}</span>` +
       `<span class="sn-secao-n">${doGrupo.length}</span>` +
       `<span class="sn-secao-nota">${escapeHtml(sec.nota)}</span></li>` +
       doGrupo.map(sinalCardHtml).join("");
@@ -8214,9 +8318,13 @@ function paintScan(data) {
   if (dadoNovo) marcarSinaisNovos(data.oportunidades);
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
   const s = data.resumo || {};
+  // O RESUMO também fala o eixo (DA-121). Era a linha mais visível da tela e a
+  // última a manter o vocabulário antigo — "em gatilho · em movimento · invalidou
+  // · formando", quatro palavras que a seção logo abaixo já dizia de outro jeito.
+  const fr = (f) => faseRotulo(f).toLowerCase();
   $("scanSummary").innerHTML =
-    `<b>${s.em_gatilho || 0}</b> em gatilho · <b>${s.em_movimento || 0}</b> em movimento · ` +
-    `<b>${s.invalidou || 0}</b> invalidou · <b>${s.formando || 0}</b> formando · ` +
+    `<b>${s.em_gatilho || 0}</b> ${fr("agora")} · <b>${s.em_movimento || 0}</b> ${fr("andou")} · ` +
+    `<b>${s.invalidou || 0}</b> ${fr("morreu")} · <b>${s.formando || 0}</b> ${fr("esperando")} · ` +
     `${s.sem_setup || 0} sem setup · ${s.sem_dado || 0} sem dado` +
     (data.date ? `<span class="hint"> — ${escapeHtml(data.date)} · ${escapeHtml((data.frames || []).join(" + "))}</span>` : "");
   // De QUANDO é o que está na tela. Fixo, ao lado do resumo: o painel abre com o

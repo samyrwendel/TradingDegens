@@ -125,8 +125,11 @@ def test_a_visao_de_SINAIS_e_a_entrada_padrao_e_organiza_em_secoes(base):
 
         assert m["viewAtiva"]["view"] == "sinais", m["viewAtiva"]
         # (a caixa alta é do CSS; o texto vem como está escrito no código)
+        # Os títulos são as palavras do EIXO (DA-121) — as MESMAS da lateral e do
+        # scan. Antes eram um vocabulário próprio da visão de sinais, que é como a
+        # terceira taxonomia nasceu.
         titulos = [s["titulo"] for s in m["secoes"]]
-        assert titulos == ["Entrada agora", "A caminho", "Fora da janela",
+        assert titulos == ["Na entrada", "Aguardando", "Já andou",
                            "Conflito entre frames"], titulos
         # cada seção diz o que ela SIGNIFICA — título sozinho não organiza
         assert all(s["nota"] for s in m["secoes"]), m["secoes"]

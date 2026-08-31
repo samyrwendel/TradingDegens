@@ -197,7 +197,9 @@ def test_compra_e_venda_continuam_distinguiveis_por_COR_e_PALAVRA(base):
 @pytest.mark.parametrize("estado,cor_esperada,rotulo", [
     # verde = setup vivo (a única cor que a DA-078 deixa aqui, e ela significa
     # "janela aberta"); "aguardar" perdeu o âmbar e é dito por PALAVRA.
-    ("ativo", "rgb(46, 204, 113)", "Setup ativo agora"),
+    # "Setup ativo agora" virou "Na entrada agora" (DA-121): era o único rótulo
+    # cuja leitura natural apontava para a fase ERRADA. A cor não mudou.
+    ("ativo", "rgb(46, 204, 113)", "Na entrada agora"),
     ("aguardar_rompimento", None, "Aguardar rompimento"),
 ])
 def test_o_estado_do_setup_continua_marcado_por_cor(base, estado, cor_esperada, rotulo):

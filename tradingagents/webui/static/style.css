@@ -2912,3 +2912,17 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 @media (prefers-reduced-motion: no-preference) {
   .chart-card .chart-wrap { transition: opacity .18s ease; }
 }
+
+/* A FASE no card da análise (DA-121). Palavra do EIXO em caixa alta e peso, com o
+   MECANISMO ao lado em cinza — fase primeiro, qualificador depois. Sem cor nova:
+   verde é ganho e vermelho é perda (DA-078 regra 3), então quem separa as fases é
+   a hierarquia tipográfica, não uma paleta paralela. */
+.sc-fase {
+  font-size: var(--fs-10); line-height: 1; font-weight: var(--fw-bold);
+  letter-spacing: .8px; text-transform: uppercase; color: var(--text);
+  border: 1px solid var(--border); border-radius: 0; padding: 3px 5px;
+}
+/* NA ENTRADA é a única que pede ação agora — e aí a cor é semântica de verdade. */
+.sc-fase.agora { color: var(--green); border-color: var(--green-dim); }
+.sc-fase.morreu, .sc-fase.sem_leitura { color: var(--muted); }
+.sc-mec { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }

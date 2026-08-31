@@ -196,7 +196,8 @@ def test_a_discordancia_le_como_duas_leituras_e_nao_como_contradicao(base):
         # o veredito é UM só, e mora no card da leitura que o produziu (setup_source)
         assert len(m["carimbos"]) == 1, m
         assert "sc-recuo" in m["carimbos"][0], ("setup_source = recuo_media", m)
-        assert "Setup ativo agora" in m["recuo"], m
+        # DA-121: a fase substituiu "Setup ativo agora" — mesmo card, palavra do eixo.
+        assert "Na entrada agora" in m["recuo"], m
         assert "VEREDITO DO PLANO" in m["recuo"].upper(), m
         assert "veredito" not in m["c123"].lower(), ("o 1-2-3 não decidiu este plano", m)
         browser.close()

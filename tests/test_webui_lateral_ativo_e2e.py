@@ -167,11 +167,14 @@ def test_zero_pictograma_na_lateral_e_o_estado_ainda_se_distingue(base):
         fora = [c for c in txt
                 if c not in tipograficos and any(a <= ord(c) <= b for a, b in faixas)]
         assert fora == [], ("pictograma na lateral", fora)
-        # e o estado continua distinguível: "Ativo" (verde) × "Aguardar…" (âmbar)
+        # e o estado continua distinguível pela COR: a fase "Na entrada" (verde) ×
+        # "Aguardar…" (âmbar). O rótulo mudou na DA-121 ("Ativo" apontava para a
+        # fase errada); o que este teste garante — cor carregando o estado sem
+        # pictograma — é o mesmo.
         cores = {i["veredito"]: i["corDoVeredito"] for i in itens}
-        ativo = next(v for k, v in cores.items() if k.startswith("Ativo"))
+        entrada = next(v for k, v in cores.items() if k.startswith("Na entrada"))
         aguardar = next(v for k, v in cores.items() if k.startswith("Aguardar"))
-        assert ativo != aguardar, cores
+        assert entrada != aguardar, cores
         browser.close()
 
 

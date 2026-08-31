@@ -862,7 +862,11 @@ def build_price_structure_section(
         # número ao lado diz que ele está a alguns por cento dela.
         onde = "acima" if a.distance_pct >= 0 else "abaixo"
         lines += [
-            f"🎯 **Setup ativo agora — recuo à média** — a mínima está "
+            # "Setup ativo agora" saiu (DA-121): a leitura natural da palavra em
+            # português aponta para a fase ERRADA — o dono do produto leu "ativo"
+            # como "em movimento para o alvo", que é o oposto. A FASE vem primeiro
+            # e o mecanismo em seguida, o mesmo par que a tela mostra.
+            f"🎯 **Na entrada agora — recuo à média** — a mínima está "
             f"{abs(a.distance_pct):.1f}% {onde} da {a.ma_label} "
             f"(mínima {a.low:,.2f} / média {a.ma_value:,.2f}): "
             "região de recuo à média em formação.",

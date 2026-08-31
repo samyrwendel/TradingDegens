@@ -109,7 +109,9 @@ def test_o_veredito_declara_de_qual_setup_veio(plano):
 @pytest.mark.unit
 def test_o_relatorio_em_prosa_nomeia_o_setup_e_nao_se_contradiz(zec):
     md = ps.build_price_structure_section("ZEC-USD", "2026-08-29", timeframe="4h")
-    assert "Setup ativo agora — recuo à média" in md, md[:600]
+    # DA-121: a fase substituiu "Setup ativo agora"; o MECANISMO (recuo à média)
+    # continua ao lado, que é o ponto deste teste.
+    assert "Na entrada agora — recuo à média" in md, md[:600]
     assert "o preço está na MMS50" not in md, "a frase que afirmava e desmentia junto"
     assert "Regiões de recuo à média" in md
     assert "Regiões de compra na média" not in md
@@ -217,7 +219,7 @@ def test_na_tela_a_faixa_da_media_nao_se_chama_compra(webui, plano):
                                           .replace("recuo à média", "")), m
         # o veredito diz DE QUAL setup veio — desde a 021 ele mora DENTRO do card
         # da leitura que o produziu, e o título do card é o nome dela
-        assert "Setup ativo agora" in m["setup"] and "Recuo à média" in m["setup"], m
+        assert "Na entrada agora" in m["setup"] and "Recuo à média" in m["setup"], m
         browser.close()
 
 
