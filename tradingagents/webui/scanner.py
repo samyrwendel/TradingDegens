@@ -38,6 +38,7 @@ from tradingagents.dataflows.price_structure import (
     build_price_chart,
     build_storm_plan_dict,
 )
+from tradingagents.webui import timeutil
 
 logger = logging.getLogger(__name__)
 
@@ -476,8 +477,10 @@ def scan_watchlist(tickers: list[str], date: str,
     ``ex.map`` preserva a ordem de entrada; a ordenação por urgência vem depois,
     então o resultado é determinístico apesar do paralelismo.
     """
+    gerado_em = timeutil.stamp()
     if not tickers:
-        return {"date": date, "frames": list(frames), "resumo": {}, "ativos": []}
+        return {"date": date, "frames": list(frames), "resumo": {}, "ativos": [],
+                "gerado_em": gerado_em}
     n = max(1, min(workers, len(tickers)))
     with ThreadPoolExecutor(max_workers=n, thread_name_prefix="scan") as ex:
         out = list(ex.map(lambda t: scan_symbol(t, date, frames), tickers))
@@ -491,7 +494,12 @@ def scan_watchlist(tickers: list[str], date: str,
     counts: dict[str, int] = {}
     for s in out:
         counts[s["melhor"]["estado"]] = counts.get(s["melhor"]["estado"], 0) + 1
-    return {"date": date, "frames": list(frames), "resumo": counts, "ativos": out}
+    # ``gerado_em`` é o carimbo da varredura, em Manaus e offset-aware: sem ele a
+    # tela só sabe a hora em que o JSON *chegou* nela, e um resultado servido do
+    # disco (ou do memo) se passaria por recém-saído. Marcado ANTES do trabalho —
+    # é a hora do dado que se leu, não a de quando o último ativo terminou.
+    return {"date": date, "frames": list(frames), "resumo": counts, "ativos": out,
+            "gerado_em": gerado_em}
 
 
 # ------------------------------------------------------ track record do scan ----

@@ -493,6 +493,12 @@
         <div class="scan-watchlist" id="scanWatchlist"></div>
         <p class="hint" id="scanHint"></p>
         <div class="scan-summary" id="scanSummary"></div>
+        <!-- DE QUANDO é o scan que está na tela (task 014 estendida). O painel abre
+             com a última varredura salva em disco, então a hora do dado exibido é
+             OBRIGATÓRIA: sem ela, um scan de ontem se lê igual a um de agora.
+             Quando não é de hoje, o dia entra na frente da hora e a linha se
+             declara — palavra e peso, sem cor nova (DA-078 regra 3). -->
+        <div class="scan-carimbo hidden" id="scanCarimbo"></div>
         <!-- Estado da ATUALIZAÇÃO, ao lado do resumo (task 014). O scan anterior
              nunca é apagado: enquanto varre ele fica na tela esmaecido e esta linha
              diz que está atualizando; se a varredura FALHA ele CONTINUA na tela e

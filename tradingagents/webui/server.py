@@ -563,6 +563,13 @@ class _Handler(BaseHTTPRequestHandler):
                             self.runner.execution_card(ticker, date, tf, method))
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, 400)
+            elif path == "/api/scan/salvo":
+                # O ÚLTIMO scan COMPLETO já salvo em disco — leitura de arquivo, $0 e
+                # instantânea. É o que o painel pinta na ABERTURA, com o carimbo de
+                # quando foi tirado, enquanto a varredura nova roda por baixo; sem
+                # ele a tela ficava vazia os 8–20s da varredura. Público como o
+                # /api/scan (é o mesmo dado, só que de antes).
+                self._send_json(self.runner.scan_ultimo())
             elif path == "/api/scan/verdicts":
                 # TRACK RECORD do scan: cada gatilho flagrado é re-avaliado contra o
                 # preço de hoje (bateu TP / bateu SL / andamento) + taxa de acerto.

@@ -236,3 +236,63 @@ class WatchlistStore:
     def _write(self, tickers: list[dict[str, Any]]) -> None:
         with self._lock:
             HistoryStore._atomic_write(self.path, {"tickers": tickers})
+
+
+class ScanSnapshotStore:
+    """O último scan COMPLETO em disco — pra a tela nascer com informação.
+
+    A varredura da watchlist custa 8–20s (20 ativos × 3 frames, e o Storm somou
+    trabalho). O ``_scan_memo`` do runner dura 5s e o ``_live_cache`` do scanner
+    30s; nenhum dos dois sobrevive a um restart, e o ``scans.jsonl`` é
+    append-only só dos ``em_gatilho`` — nenhum deles é "o último resultado
+    completo". Sem isso, quem abre o painel encara a tela VAZIA a varredura
+    inteira: a task 014 fez o resultado anterior sobreviver DENTRO da sessão do
+    navegador, e na primeira carga não existe anterior nenhum.
+
+    Aqui ele passa a sobreviver ao navegador E ao processo: um arquivo só
+    (``last_scan.json``), escrita atômica com lock, na mesma disciplina do
+    :class:`HistoryStore` (temp + rename) — a última varredura sobrescreve a
+    anterior, porque o que se quer é o estado mais recente, não um histórico.
+
+    Duas regras que a leitura da tela depende:
+
+    * **Só varredura COMPLETA entra.** A passada agendada varre um subconjunto
+      (só o que o mercado justifica varrer agora) — gravá-la aqui faria a
+      abertura mostrar meia watchlist como se fosse a lista toda.
+    * **Vazio não se grava.** Watchlist vazia (ou varredura que não devolveu
+      ativo nenhum) não carrega informação: guardá-la faria a abertura pintar
+      uma lista vazia que se lê como "não há nada em gatilho".
+
+    Fail-open em toda leitura: arquivo ausente, ilegível ou corrompido devolve
+    ``{}`` e a tela cai no comportamento de primeira carga.
+    """
+
+    def __init__(self, base_dir: str | os.PathLike):
+        self.path = Path(base_dir) / "last_scan.json"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+
+    def save(self, resultado: dict[str, Any]) -> bool:
+        """Grava ``resultado`` como o último scan completo. ``False`` = não gravou.
+
+        O resultado vai inteiro, com o ``gerado_em`` que o
+        :func:`scanner.scan_watchlist` carimbou — é ele que a tela exibe pra
+        dizer DE QUANDO é o que está mostrando.
+        """
+        if not (resultado or {}).get("ativos"):
+            return False
+        with self._lock:
+            HistoryStore._atomic_write(self.path, resultado)
+        return True
+
+    def get(self) -> dict[str, Any]:
+        """O último scan completo salvo, ou ``{}`` se não houver (ou não ler)."""
+        with self._lock:
+            if not self.path.exists():
+                return {}
+            try:
+                with open(self.path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                return {}
+        return data if isinstance(data, dict) else {}

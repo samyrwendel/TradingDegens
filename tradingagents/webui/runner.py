@@ -61,7 +61,7 @@ from tradingagents.webui.scanner import (
     scan_verdicts,
     scan_watchlist,
 )
-from tradingagents.webui.store import HistoryStore, WatchlistStore
+from tradingagents.webui.store import HistoryStore, ScanSnapshotStore, WatchlistStore
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
 _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
@@ -892,6 +892,10 @@ class AnalysisRunner:
         # leitura) + log append-only dos gatilhos flagrados (track record $0).
         self.watchlist_store = WatchlistStore(self.store.base, store)
         self.scan_log = ScanLog(self.store.base / "scans.jsonl")
+        # O ÚLTIMO scan completo em disco: é o que a tela pinta na abertura, antes
+        # de a varredura nova terminar. O memo abaixo dura 5s e morre com o
+        # processo; este sobrevive ao restart (ver :class:`ScanSnapshotStore`).
+        self.scan_snapshot = ScanSnapshotStore(self.store.base)
         # Single-flight do scan: uma varredura por vez, com memo curtíssimo pra o
         # segundo pedido não re-varrer (ver :meth:`scan_portfolio`).
         self._scan_lock = threading.Lock()
@@ -2642,6 +2646,13 @@ class AnalysisRunner:
             tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
             result = scan_watchlist(tickers, date)
             self._registrar_gatilhos(result)
+            # Esta é a varredura COMPLETA (a watchlist inteira) — a única que pode
+            # virar "o último scan". A gravação é fail-open: disco cheio ou sem
+            # permissão não pode derrubar a varredura que o usuário está esperando.
+            try:
+                self.scan_snapshot.save(result)
+            except OSError:
+                logger.warning("não deu pra salvar o último scan em disco", exc_info=True)
             self._scan_memo = (date, time.time(), result)
             return result
 
@@ -2754,6 +2765,20 @@ class AnalysisRunner:
             por_setup = {}
         return {"ticker": ticker, "date": date, "timeframe": timeframe,
                 "method": method, "card": execucao.card(plan, por_setup)}
+
+    def scan_ultimo(self) -> dict[str, Any]:
+        """O último scan COMPLETO salvo em disco, ou ``{}`` se nunca houve um.
+
+        É o que a tela pinta na ABERTURA, antes de a varredura nova terminar: o
+        painel nasce com a última varredura conhecida e o carimbo de quando ela
+        foi tirada, em vez de ficar vazio os 8–20s da varredura. Não dispara
+        varredura nenhuma nem toca no provedor — é uma leitura de arquivo.
+
+        Sem varredura salva devolve ``{}`` (e não uma lista vazia): a tela cai no
+        comportamento de primeira carga, que diz "varrendo…" em vez de mostrar
+        uma lista vazia que se leria como "não há nada em gatilho".
+        """
+        return self.scan_snapshot.get()
 
     def scan_track_record(self, date: str) -> dict[str, Any]:
         """Re-avalia os gatilhos logados contra o preço da data dada.

@@ -7177,7 +7177,7 @@ function renderModelTest(data) {
 // EM GATILHO. Estados (vocabulário único do backend scanner.py):
 let _scanData = null;        // último scan completo (pra re-pintar ao trocar filtro)
 let _scanEstadoFilter = null; // estado selecionado no filtro de chips (null = todos)
-let _scanAt = null;          // quando o scan QUE ESTÁ NA TELA chegou (task 014)
+let _scanAt = null;          // QUANDO o scan que está na tela foi tirado (task 014)
 const SCAN_ESTADO_PT = {
   em_gatilho: { compra: ["COMPRA"], venda: ["VENDA"] },
   em_movimento: ["EM MOVIMENTO"],
@@ -7220,7 +7220,41 @@ async function openScanPanel() {
   $("comparePanel").classList.add("hidden");
   $("progressPanel").classList.add("hidden");
   clearActiveRun();
-  await Promise.all([loadScanWatchlist(), runScan()]);
+  // A watchlist e o último scan salvo são leituras baratas e independentes; a
+  // varredura é a cara. O salvo tem de PINTAR antes de a varredura começar —
+  // é ele que faz `runScan` enxergar um "anterior" a preservar em vez de abrir
+  // com a tela vazia (ver :func:`loadScanSalvo`).
+  const wl = loadScanWatchlist();
+  await loadScanSalvo();
+  await Promise.all([wl, runScan()]);
+}
+
+// O painel nasce com a ÚLTIMA VARREDURA CONHECIDA, do disco do servidor.
+//
+// A task 014 fez o resultado anterior sobreviver a uma re-varredura, mas só
+// DENTRO da sessão do navegador: ao abrir a página não existe anterior nenhum, e
+// a tela ficava vazia os 8–20s da varredura (medido: 20,0s depois de o Storm
+// entrar). O servidor não tinha onde guardar isso — o memo dele dura 5s e morre
+// no restart, e o scans.jsonl só registra os em_gatilho. Agora tem
+// (``/api/scan/salvo``), e a abertura mostra informação em vez de espera.
+//
+// Fail-open e silencioso: sem nada salvo (primeira vez de todas), endpoint fora
+// do ar ou resposta ilegível, a função não pinta nada e `runScan` cai no
+// comportamento de primeira carga — nunca uma lista vazia inventada, que se leria
+// como "não há nada em gatilho".
+async function loadScanSalvo() {
+  if (_scanData) return;              // já há scan na tela: não regride pro salvo
+  try {
+    const res = await fetch("/api/scan/salvo");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !(data.ativos || []).length) return;
+    // Sem carimbo do servidor não dá pra dizer DE QUANDO isto é, e o fallback
+    // (relógio local) dataria de AGORA um scan que pode ter dias — exatamente o
+    // disfarce que esta entrega existe pra impedir. Sem data honesta, não entra.
+    if (!data.gerado_em) return;
+    paintScan(data);
+  } catch (e) { /* sem salvo: a varredura pinta quando chegar */ }
 }
 
 async function loadScanWatchlist() {
@@ -7272,10 +7306,55 @@ function scanNotice(html, erro) {
   el.classList.toggle("err", !!erro);
 }
 
-// Hora do dado que está NA TELA (relógio local). O backend não carimba o scan, e
-// o memo dele dura 5s — o erro máximo é menor que o minuto que se exibe.
-function scanHoraDoDado() {
-  return _scanAt ? _scanAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+// QUANDO o scan que está na tela foi tirado. O servidor carimba a varredura
+// (``gerado_em``, Manaus, offset-aware) — sem esse campo a tela só saberia a hora
+// em que o JSON CHEGOU nela, e um resultado vindo do disco (aberto o painel) ou do
+// memo do servidor se passaria por recém-saído. O fallback pro relógio local (o
+// que a task 014 fazia) só alcança a varredura que ACABOU de chegar, e aí ele é
+// verdade; o resultado lido do disco sem carimbo é recusado antes de chegar aqui
+// (:func:`loadScanSalvo`), porque nele o relógio local seria mentira.
+function scanQuando(data) {
+  const iso = data && data.gerado_em;
+  if (iso) {
+    const d = new Date(iso);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
+// O carimbo do dado que está na tela, em texto. Devolve ``null`` quando não há
+// scan nenhum — nunca uma string vazia que se leria como "sem hora".
+//
+// **Dado de outro dia não se disfarça de recente**: só a hora ("14:32") num scan
+// de ontem é indistinguível de um de agora, e é justamente o scan salvo em disco
+// (que sobrevive ao restart e pode ter dias) que essa leitura decidiria errado.
+// A partir de ontem o DIA entra na frente da hora e o carimbo se declara velho.
+function scanCarimbo() {
+  if (!_scanAt) return null;
+  const hora = _scanAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const meiaNoite = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dias = Math.round((meiaNoite(new Date()) - meiaNoite(_scanAt)) / 86400000);
+  if (dias <= 0) return { txt: hora, velho: false };
+  if (dias === 1) return { txt: `ontem ${hora}`, velho: true };
+  const dm = _scanAt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return { txt: `${dm} ${hora}`, velho: true };
+}
+
+// A linha PERMANENTE que diz de quando é o que está na tela. Fica enquanto houver
+// scan pintado — inclusive depois que a varredura nova chega, porque "a hora do
+// scan exibido é obrigatória": o painel abre com o último resultado conhecido, e
+// sem carimbo fixo não há como saber se o que se está lendo é de agora ou de
+// terça. Quando o dado NÃO é de hoje o aviso deixa de ser discreto: palavra e
+// peso, sem cor nova (DA-078 regra 3 — verde é ganho, vermelho é perda).
+function renderScanCarimbo() {
+  const el = $("scanCarimbo");
+  if (!el) return;
+  const c = scanCarimbo();
+  if (!c) { el.innerHTML = ""; el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  el.classList.toggle("is-velho", c.velho);
+  el.innerHTML = `<span class="sc-rot">scan de</span> <b>${escapeHtml(c.txt)}</b>` +
+    (c.velho ? ` <span class="sc-alerta">não é de hoje</span>` : "");
 }
 
 async function runScan() {
@@ -7286,12 +7365,15 @@ async function runScan() {
   // junto o último resultado bom — o usuário perdia informação boa por causa de uma
   // atualização que nem chegou. Mesmo princípio do erro que preserva as etapas já
   // concluídas na tela de análise: não se descarta o que já se sabe.
-  const horaAnterior = _scanData ? scanHoraDoDado() : null;
+  const temAnterior = !!_scanData;
   btn.disabled = true;
   btn.textContent = "escaneando…";
-  if (horaAnterior !== null) {
+  if (temAnterior) {
     ul.classList.add("is-atualizando");
-    scanNotice(`atualizando… mostrando o scan das <b>${escapeHtml(horaAnterior)}</b>`);
+    // A HORA do dado exibido não se repete aqui: ela é PERMANENTE no carimbo logo
+    // acima (`#scanCarimbo`), e o mesmo número com dois nomes na mesma tela é a
+    // duplicata que a DA-077 proíbe. Esta linha diz só o que está acontecendo.
+    scanNotice("atualizando… o que está na tela é o scan anterior");
   } else {
     // PRIMEIRA carga: não há o que preservar, então o texto de varredura fica.
     $("scanSummary").innerHTML = '<span class="hint">varrendo 1d + 4h + 1h…</span>';
@@ -7306,10 +7388,12 @@ async function runScan() {
     scanNotice("");
   } catch (e) {
     const msg = escapeHtml(e.message);
-    if (horaAnterior !== null) {
-      // O anterior FICA. O aviso diz o que falhou e de quando é o que está na tela.
-      scanNotice(`a atualização falhou (${msg}) — mostrando o scan das ` +
-                 `<b>${escapeHtml(horaAnterior)}</b>`, true);
+    if (temAnterior) {
+      // O anterior FICA, e o carimbo acima continua dizendo de quando ele é. O que
+      // esta linha acrescenta — e só ela sabe — é que a tela NÃO se atualizou e
+      // por quê: sem isso, um dado velho com carimbo velho parece só um carimbo
+      // velho, e não uma varredura que falhou.
+      scanNotice(`a atualização falhou (${msg}) — a tela continua no scan anterior`, true);
     } else {
       $("scanSummary").innerHTML = `<span class="error">${msg}</span>`;
     }
@@ -7646,8 +7730,10 @@ function bindScanTools() {
 
 function paintScan(data) {
   // Carimba a hora só quando o dado é NOVO: filtro, busca e troca de modo
-  // re-pintam com a MESMA referência e não podem rejuvenescer o carimbo.
-  if (data !== _scanData) _scanAt = new Date();
+  // re-pintam com a MESMA referência e não podem rejuvenescer o carimbo. E o
+  // carimbo é o do SERVIDOR (`gerado_em`), não o relógio de quando chegou —
+  // senão o scan lido do disco na abertura nasceria com a hora de agora.
+  if (data !== _scanData) _scanAt = scanQuando(data);
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
   const s = data.resumo || {};
   $("scanSummary").innerHTML =
@@ -7655,6 +7741,10 @@ function paintScan(data) {
     `<b>${s.invalidou || 0}</b> invalidou · <b>${s.formando || 0}</b> formando · ` +
     `${s.sem_setup || 0} sem setup · ${s.sem_dado || 0} sem dado` +
     (data.date ? `<span class="hint"> — ${escapeHtml(data.date)} · ${escapeHtml((data.frames || []).join(" + "))}</span>` : "");
+  // De QUANDO é o que está na tela. Fixo, ao lado do resumo: o painel abre com o
+  // último scan salvo, e sem isto não haveria como distinguir a varredura de
+  // agora da de ontem.
+  renderScanCarimbo();
   // Chips de filtro por estado: cada um mostra a contagem; clicar filtra.
   renderScanFilters(s);
   bindScanTools();

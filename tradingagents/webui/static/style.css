@@ -2540,6 +2540,27 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 @media (prefers-reduced-motion: no-preference) {
   .scan-list { transition: opacity .18s ease; }
 }
+/* DE QUANDO é o scan na tela. Linha PERMANENTE (enquanto houver scan pintado),
+   porque o painel abre com a última varredura salva em disco e a hora do dado
+   exibido é obrigatória. Rótulo pequeno e cinza, valor mais forte (DA-078 regra
+   5); hora em tabular pra não dançar a cada minuto (regra 6); sem caixa, sem
+   raio, sem cor nova (regras 1/2/3). Agrupa à ESQUERDA — nada de espaço no meio
+   (regra 11). */
+.scan-carimbo {
+  display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap;
+  margin: -4px 0 8px; font-size: var(--fs-12); line-height: var(--lh-12);
+  color: var(--muted);
+}
+.scan-carimbo .sc-rot { text-transform: uppercase; letter-spacing: .5px; }
+.scan-carimbo b { color: var(--text); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+/* Não é de hoje: o carimbo deixa de ser discreto. O aviso é PALAVRA em caixa
+   alta e peso — âmbar/laranja saíram da paleta e vermelho já quer dizer perda
+   (DA-078 regra 3), então quem grita aqui é a hierarquia tipográfica. */
+.scan-carimbo.is-velho { color: var(--text); }
+.scan-carimbo.is-velho .sc-alerta {
+  text-transform: uppercase; letter-spacing: .5px; font-weight: var(--fw-bold);
+  color: var(--text); border-bottom: 1px solid var(--border);
+}
 /* A linha que diz o que está acontecendo com a ATUALIZAÇÃO — e, quando ela
    falha, de quando é o dado que ficou na tela. Discreta por padrão; vermelha
    só no erro, porque aí ela é a única pista de que a tela está velha. */

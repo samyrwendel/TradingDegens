@@ -84,7 +84,12 @@ def base(tmp_path):
 def _abre(page, base, payload=_SCAN):
     """Abre o painel e faz UM scan que dá certo — é o 'anterior' a preservar."""
     def handler(route):
-        if "/api/scan" in route.request.url and "verdicts" not in route.request.url:
+        # `/api/scan/salvo` (o último scan em disco) NÃO é mockado: ele vai ao
+        # servidor de verdade, cujo results_dir é um tmp_path sem nada salvo.
+        # Assim estes três testes continuam medindo o que mediam — a preservação
+        # DENTRO da sessão —, sem o painel já nascer com um resultado.
+        url = route.request.url
+        if "/api/scan" in url and "verdicts" not in url and "/salvo" not in url:
             route.fulfill(status=200, content_type="application/json",
                           body=json.dumps(payload))
         else:
@@ -140,12 +145,20 @@ def test_a_lista_anterior_fica_na_tela_durante_a_varredura(base):
           aviso: document.querySelector('#scanNotice').textContent,
           avisoVisivel: !document.querySelector('#scanNotice').classList.contains('hidden'),
           cobertura: document.querySelectorAll('#scanPanel .spinner, #scanPanel .overlay').length,
+          carimbo: document.querySelector('#scanCarimbo').textContent,
+          carimboVisivel: !document.querySelector('#scanCarimbo').classList.contains('hidden'),
         })""")
         assert m["esmaecida"], m           # indicador discreto: opacidade, não spinner
         assert m["cobertura"] == 0, m      # nada cobrindo o conteúdo
         assert "escaneando" in m["botao"], m
         assert m["avisoVisivel"] and "atualizando" in m["aviso"], m
-        assert re.search(r"\d{2}:\d{2}", m["aviso"]), ("falta a hora do dado exibido", m)
+        # A HORA do dado exibido saiu do aviso e virou linha PERMANENTE (task
+        # 20260831-014): o painel agora abre com o último scan salvo, então o
+        # carimbo tem de existir sempre, não só enquanto atualiza. Repetir o mesmo
+        # horário nos dois lugares seria a duplicata da DA-077.
+        assert m["carimboVisivel"], ("falta o carimbo do dado exibido", m)
+        assert re.search(r"\d{2}:\d{2}", m["carimbo"]), ("falta a hora do dado exibido", m)
+        assert not re.search(r"\d{2}:\d{2}", m["aviso"]), ("hora duplicada no aviso", m)
 
         # e quando o novo chega, SUBSTITUI (preservar ≠ congelar)
         page.evaluate("(b) => window.__portao.ok(b)", json.dumps(_SCAN2))
@@ -181,11 +194,15 @@ def test_scan_que_falha_preserva_o_anterior_e_diz_de_quando_ele_e(base):
           visivel: !document.querySelector('#scanNotice').classList.contains('hidden'),
           resumo: document.querySelector('#scanSummary').textContent,
           esmaecida: document.querySelector('#scanList').classList.contains('is-atualizando'),
+          carimbo: document.querySelector('#scanCarimbo').textContent,
+          carimboVisivel: !document.querySelector('#scanCarimbo').classList.contains('hidden'),
         })""")
         assert m["visivel"] and m["erro"], m
         assert "falhou" in m["aviso"], m
         assert "Failed to fetch" in m["aviso"], ("o aviso tem que dizer O QUE falhou", m)
-        assert re.search(r"\d{2}:\d{2}", m["aviso"]), ("falta DE QUANDO é o dado na tela", m)
+        # DE QUANDO é o dado continua obrigatório — agora no carimbo permanente.
+        assert m["carimboVisivel"], ("falta DE QUANDO é o dado na tela", m)
+        assert re.search(r"\d{2}:\d{2}", m["carimbo"]), ("falta DE QUANDO é o dado na tela", m)
         assert m["resumo"] == resumo_antes, ("o resumo do scan bom foi sobrescrito", m)
         assert not m["esmaecida"], ("acabou de atualizar: sai o esmaecido", m)
         browser.close()
@@ -210,11 +227,13 @@ def test_primeira_carga_sem_anterior_mostra_a_varredura_e_nao_inventa_lista(base
           itens: document.querySelectorAll('#scanList li').length,
           avisoVisivel: !document.querySelector('#scanNotice').classList.contains('hidden'),
           esmaecida: document.querySelector('#scanList').classList.contains('is-atualizando'),
+          carimboVisivel: !document.querySelector('#scanCarimbo').classList.contains('hidden'),
         })""")
         assert "varrendo" in m["resumo"], m       # não há o que preservar: texto de varredura
         assert m["itens"] == 0, m                 # e nada de lista vazia inventada
         assert not m["avisoVisivel"], ("sem anterior não existe 'mostrando o de tal hora'", m)
         assert not m["esmaecida"], ("nada a esmaecer na primeira carga", m)
+        assert not m["carimboVisivel"], ("sem dado na tela não há carimbo de hora", m)
 
         # e a falha na PRIMEIRA carga continua dizendo o erro no resumo
         page.evaluate("() => window.__portao.falha('Failed to fetch')")
