@@ -4411,6 +4411,13 @@ function drawPriceChart(canvas, chart, a) {
     _marcasPint.push({ naVista: px >= padL && px <= padL + plotW });
     ctx.fillStyle = "#2ecc71";
     ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
+    // ANEL ESCURO: o verde da bolinha é o MESMO pixel do candle de alta (ambos
+    // "#2ecc71", DA-078 regra de cor por PAPEL colidindo consigo mesma — um marcador
+    // histórico e a direção do candle não são o mesmo significado). Sem contorno, a
+    // bolinha some dentro do pavio de qualquer candle verde por perto — cor não
+    // muda (ainda é ESTE verde), mas ganha um portador que a cor sozinha não tem.
+    ctx.strokeStyle = "#0b0b0b"; ctx.lineWidth = 1.25;
+    ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.stroke();
   });
 
   // 1-2-3 NA VELA — as DUAS leituras, pelo mesmo desenhador.
