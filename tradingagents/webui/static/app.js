@@ -2809,8 +2809,16 @@ function patColor(pat) {
 // swings e ficou só lá: no gráfico, um Storm invalidado continuava com o azul de
 // um Storm vivo — e o Storm é o método mais usado. A regra é a mesma dos dois
 // lados, então a cor sai da mesma função.
+//
+// O PONTO SEGUE DIREÇÃO, IGUAL AO SETUP123 (task 20260831-004 — Samyr: "é só usar o
+// mesmo padrão de cor do Setup123"). Até aqui o Storm pintava o marcador por
+// FAMÍLIA (um azul só, compra ou venda) enquanto o Setup123 pinta por DIREÇÃO
+// (PAT_COLORS). Duas gramáticas de cor na mesma tela — e uma delas colidia com o
+// verde de outros marcadores (task 003). Uma gramática só: a cor do PONTO diz a
+// direção em qualquer família; quem separa família é o traço (ponto-traço) e a
+// forma (losango × círculo), que não competem com a cor.
 function stormColor(pat) {
-  return ehFantasma(pat) ? COR_FANTASMA : ZONE_COLORS.storm;
+  return patColor(pat);
 }
 
 // OS TRÊS ESTADOS DO STORM NO GRÁFICO — e nenhum deles é "sumir".
@@ -4475,7 +4483,15 @@ function drawPriceChart(canvas, chart, a) {
     const _antes = _pontos123.length;
     desenha123(ctx, _geom, {
       pts, familia: "storm", nome: "Storm123", cor: stormColor(_stormPat),
-      forma: FORMA_DA_FAMILIA.storm, dash: [3, 3], dist: _duasFamilias ? 34 : 14,
+      // A LINHA QUE LIGA OS TRÊS PONTOS TAMBÉM PRECISOU DO TRAÇO. Com o marcador
+      // seguindo a direção, as duas famílias na MESMA direção saem na mesma cor — e
+      // o marcador aguenta (círculo × losango é inconfundível), mas a linha entre os
+      // pontos ficava com [3,3] contra o [4,3] do plano: dois tracejados quase
+      // idênticos, em cor idêntica, se cruzando. No print de 390px não dava pra
+      // seguir qual linha era de quem. O ponto-traço do Storm já é o traço da família
+      // nos NÍVEIS (DA-108) — reusá-lo aqui não inventa vocabulário, aplica o que a
+      // tela já ensina, e é o mesmo movimento da forma no marcador.
+      forma: FORMA_DA_FAMILIA.storm, dash: TRACO_STORM, dist: _duasFamilias ? 34 : 14,
       // o gatilho do Storm já é uma linha de nível rotulada (planZonesStorm) — não
       // se traça o mesmo nível duas vezes
       trigger: null, fantasma: _stormEst === "invalidado", vetado: _stormEst === "vetado",

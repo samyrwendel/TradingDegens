@@ -150,7 +150,15 @@ def test_alvo_do_storm_e_verde_como_o_do_plano(base):
 def test_gatilho_continua_na_cor_do_storm(base):
     """O gatilho NÃO é ganho nem perda — é a entrada, e é o nível que o losango
     desenhado na vela representa. Pintá-lo de verde ou vermelho seria inventar um
-    significado que ele não tem; é aqui que a cor da família ainda serve."""
+    significado que ele não tem; é aqui que a cor da família ainda serve.
+
+    SUPERSEDE parcial da task 20260831-004: até ali o marcador TAMBÉM usava a cor da
+    família (mesma cor do gatilho, vínculo visual sem legenda). O Samyr pediu a
+    gramática do Setup123 pro Storm — cor do PONTO = direção, igual às duas famílias —
+    e isso aposenta o "marcador == cor do gatilho": o marcador agora muda com a
+    direção do padrão, o gatilho não (ele continua sendo a cor de PERTENCIMENTO, não
+    de ganho/perda). Quem liga o gatilho ao marcador na tela deixa de ser a cor e
+    passa a ser o RÓTULO ("Storm123 p2 · gatilho") e o traço (ponto-traço)."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
@@ -159,11 +167,13 @@ def test_gatilho_continua_na_cor_do_storm(base):
         c = page.evaluate(_CORES)
         for gat in _de(z, "storm", "gatilho"):
             assert gat["cor"] == c["storm"], gat
-        # e é a MESMA cor do marcador do padrão — o vínculo entre a figura e o preço
-        # que a aciona se lê sem legenda
+        # o marcador segue a DIREÇÃO do padrão (mesma regra do Setup123), não mais a
+        # cor de pertencimento da família — por isso já não é igual à cor do gatilho.
         marcador = page.evaluate(
             "() => stormColor(document.getElementById('priceChart')._actionable.storm.pattern)")
-        assert marcador == c["storm"], (marcador, c["storm"])
+        direcao_pat = page.evaluate(
+            "() => patColor(document.getElementById('priceChart')._actionable.storm.pattern)")
+        assert marcador == direcao_pat, (marcador, direcao_pat)
         browser.close()
 
 

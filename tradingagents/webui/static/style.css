@@ -1369,7 +1369,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    "opera". Chapado, sem degradê (DA-070). */
 .sc-storm { border-left: 3px solid #7cb0ff; }
 .sc-storm.sc-vetado { border-left-color: var(--muted); }
-.sc-storm .sc-dir { color: #7cb0ff; }
+/* A PALAVRA DA DIREÇÃO segue a DIREÇÃO, aqui como no gráfico (task 20260831-004): a
+   venda já saía laranja e só a compra ficava no azul da FAMÍLIA — a mesma regra
+   valendo pra metade dos casos é a inconsistência que a task veio tirar da tela. A
+   BORDA continua sendo o azul do método: ela é o portador de família do card, o
+   equivalente ao losango no marcador, e não está carregando significado nenhum. */
+.sc-storm .sc-dir { color: #6ea8fe; }
 .sc-storm.sc-venda .sc-dir { color: #ff9f43; }
 /* Cabeçalho de LEITURA dentro do card do Storm: são DUAS entradas do MESMO padrão
    (mesmos pontos, mesmo stop), e sem uma régua entre elas os dois gatilhos e os dois

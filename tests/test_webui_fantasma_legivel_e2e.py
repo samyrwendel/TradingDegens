@@ -248,7 +248,14 @@ def test_a_amostra_do_fantasma_na_legenda_nao_ofusca_a_do_vivo(base):
         }""")
         assert amostra, "a legenda tem de trazer a amostra do losango do Storm"
         morto = page.evaluate(_LUM, amostra)
-        vivo = page.evaluate(_LUM, "#7cb0ff")     # ZONE_COLORS.storm, o método vivo
+        # O VIVO SAI DA PÁGINA, não de um hex escrito aqui. Até a task 20260831-004 o
+        # marcador vivo do Storm era ``ZONE_COLORS.storm`` e este teste comparava com
+        # "#7cb0ff" literal; agora ele segue a DIREÇÃO (``patColor``), e um hex fixo
+        # mediria uma cor que a tela já não usa — a régua passaria a valer contra um
+        # fantasma do código.
+        vivo = page.evaluate(_LUM, page.evaluate(
+            "() => patColor({ direction: ((document.getElementById('priceChart')"
+            "._actionable || {}).storm.pattern || {}).direction })"))
         assert morto < vivo, (
             f"a amostra do morto ({amostra}, L={morto:.3f}) ficou mais luminosa que a "
             f"do vivo (L={vivo:.3f}) — na legenda o morto passaria a mandar", amostra)
