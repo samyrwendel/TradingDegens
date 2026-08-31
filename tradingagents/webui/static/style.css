@@ -1718,13 +1718,21 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
 /* O ticker é a âncora da tela: quem abre o histórico precisa saber em 1 olhada
    de qual ativo está lendo. Antes vinha em corpo 13 na linha de metadados. */
-/* Ticker-título do cabeçalho: título maior da escala (16/700), não fonte gigante. */
+/* Ticker-título do cabeçalho: título maior da escala (16/700), não fonte gigante —
+   a escala só tem 4 tamanhos e 2 pesos (task 036), e o ticker já usa o teto dos
+   dois. Pedido do Samyr foi "destaca mais", e nos métodos ESTRUTURAIS (Setup123 /
+   Storm123 / Padrão / Erick, a maioria das runs — sem LLM) o veredito ao lado
+   também sai no branco padrão: mesmo tamanho, mesmo peso, mesma cor, empatados.
+   Verde/vermelho são DIREÇÃO DE PREÇO (DA-078) — pintar o ticker deles faria
+   'ZEC-USD' parecer alta ou baixa. O accent azul já é o vocabulário de
+   identidade/estrutura no resto da tela (botões de método, links), nunca de
+   direção — dá o salto sem inventar tamanho novo nem confundir com o veredito. */
 .asset-name {
   font-size: var(--fs-16);
   font-weight: var(--fw-bold);
   letter-spacing: 0;
   line-height: var(--lh-16);
-  color: var(--fg, #e6e9f0);
+  color: var(--accent);
   margin-right: 2px;
   white-space: nowrap;
 }
