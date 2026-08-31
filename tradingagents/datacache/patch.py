@@ -265,18 +265,17 @@ def _make_stable_load_ohlcv(mod):
                         data = cached
 
             if data is None:
-                import yfinance as yf
-
                 try:
-                    downloaded = mod.yf_retry(lambda: yf.download(
-                        canonical,
-                        start=start_str,
-                        end=end_str,
-                        multi_level_index=False,
-                        progress=False,
-                        auto_adjust=True,
-                    ))
-                    downloaded = mod._ensure_date_column(downloaded.reset_index())
+                    # INCREMENTAL (DA-119) pela MESMA função do módulo original:
+                    # este wrapper existe pra estabilizar o NOME do arquivo, não
+                    # pra ter uma política de download própria. Uma segunda cópia
+                    # da emenda divergiria da primeira, e o remendo que diverge é
+                    # exatamente o que produz série errada sem dar erro.
+                    downloaded, modo, motivo = mod.busca_ohlcv(
+                        canonical, start_str, end_str, cached=usable_cache)
+                    if modo == "completo" and usable_cache is not None:
+                        logger.info("ta_datacache: OHLCV %s baixado completo — %s",
+                                    canonical, motivo)
                 except Exception:
                     # Fonte fora do ar: servir o cache degradado é melhor que ficar
                     # sem série. O guard de série vencida (#1021) segue matando o

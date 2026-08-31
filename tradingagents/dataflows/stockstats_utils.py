@@ -218,6 +218,109 @@ def _cache_covers(cached: pd.DataFrame, curr_date_dt) -> bool:
     return len(pd.bdate_range(latest + pd.Timedelta(days=1), requested)) == 0
 
 
+# ============================ BUSCA INCREMENTAL DO DIÁRIO (DA-119) ============
+#
+# Pedido do Samyr: *"sempre com dados incrementais, nada revalidar 123 pedindo
+# todo histórico que vc já tem em cache, vc tem os últimos dias e horas"*.
+#
+# O que havia: toda revalidação do diário rebaixava a JANELA DE 5 ANOS inteira
+# (~110 KB por ativo) para obter a barra do dia. Com 20 ativos e a revalidação
+# automática por fechamento de candle da DA-118, isso multiplicaria por 24 no dia,
+# contra um provedor cujo throttle já nos mordeu (o outlier de 75s que o
+# single-flight veio matar) e a partir do único IP disponível, que é o de
+# PRODUÇÃO. O intradiário já era incremental por dia (cache por ``day_key``,
+# história imutável) — esse lado não se toca.
+#
+# **A regra é integridade acima de economia.** Este produto inteiro é NÍVEL
+# calculado em cima de série; uma série remendada errada não dá erro, dá número
+# errado em todos os níveis. Então o remendo só acontece com PROVA de
+# continuidade, e na dúvida cai no download completo dizendo por quê.
+#
+# Como a prova é obtida: pede-se a partir do ÚLTIMO DIA QUE JÁ ESTÁ NO CACHE (não
+# do dia seguinte). O trecho novo tem então de COMEÇAR em cima do que já se tem —
+# essa sobreposição é a prova de que não há buraco entre os dois. Sem ela (feriado
+# longo mal calculado, símbolo que parou de negociar, cache velho demais, fonte
+# que repaginou o histórico) não se costura: baixa tudo.
+#
+# E a emenda substitui POR DATA, nunca concatena: a barra do dia corrente é
+# MUTÁVEL (o Yahoo publica candle parcial durante o pregão) e tem de ser
+# sobrescrita, senão duas leituras no mesmo dia deixariam a série com a linha
+# duplicada — uma congelada no valor da primeira leitura.
+
+
+def _ultimo_dia(frame) -> "pd.Timestamp | None":
+    """O último dia presente num frame de OHLCV, ou ``None``."""
+    if frame is None or getattr(frame, "empty", True):
+        return None
+    dates = _coerce_ohlcv_dates(frame)
+    return None if dates.empty else dates.max().normalize()
+
+
+def emenda_ohlcv(cached: pd.DataFrame, novo: pd.DataFrame) -> pd.DataFrame:
+    """Cola ``novo`` no fim de ``cached`` SUBSTITUINDO por data.
+
+    Tudo a partir do primeiro dia do trecho novo sai do cache antes da junção —
+    é isso que faz a barra do dia corrente ser atualizada em vez de duplicada.
+
+    **As duas pontas são normalizadas para datetime ANTES de juntar**, e isso não
+    é zelo: o cache vem de ``read_csv`` (``Date`` é *string*) e o trecho novo vem
+    do yfinance (``Date`` é ``Timestamp``). Concatenar os dois crus produz uma
+    coluna de tipos misturados, e o ``sort_values`` seguinte levanta
+    ``TypeError: '<' not supported between Timestamp and str`` — na produção, não
+    na suíte, porque um teste que monta o cache em memória nunca vê a string.
+    """
+    cached = cached.copy()
+    novo = novo.copy()
+    cached["Date"] = _coerce_ohlcv_dates(cached)
+    novo["Date"] = _coerce_ohlcv_dates(novo)
+    corte = novo["Date"].min()
+    base = cached[cached["Date"] < corte]
+    out = pd.concat([base, novo], ignore_index=True)
+    return out.sort_values("Date").reset_index(drop=True)
+
+
+def busca_ohlcv(canonical: str, start_str: str, end_str: str,
+                cached: pd.DataFrame | None = None) -> tuple[pd.DataFrame, str, str]:
+    """A série do símbolo — INCREMENTAL quando o cache permite provar continuidade.
+
+    Devolve ``(frame, modo, motivo)`` com ``modo`` em ``completo`` /
+    ``incremental`` / ``sem_novidade``. O ``motivo`` diz por que o completo foi
+    escolhido — é o que impede "caiu no completo" de virar mistério.
+
+    Nunca levanta por conta própria: quem chama decide o que fazer com um frame
+    vazio (hoje, ``NoMarketDataError``).
+    """
+    def _baixa(inicio: str) -> pd.DataFrame:
+        return _ensure_date_column(yf_retry(lambda: yf.download(
+            canonical, start=inicio, end=end_str, multi_level_index=False,
+            progress=False, auto_adjust=True,
+        )).reset_index())
+
+    fim = _ultimo_dia(cached)
+    if fim is None:
+        return _baixa(start_str), "completo", "não havia série em cache"
+    if fim < pd.to_datetime(start_str).normalize():
+        # O cache inteiro já saiu da janela de 5 anos: não há em que emendar.
+        return _baixa(start_str), "completo", "o cache é anterior à janela de 5 anos"
+
+    trecho = _baixa(fim.strftime("%Y-%m-%d"))
+    if trecho.empty or "Close" not in trecho.columns:
+        # Fora do pregão isto é o caso NORMAL: não há barra nova. O cache fica
+        # como está — e quem chama regrava o arquivo pra o TTL não pedir de novo
+        # a cada chamada.
+        return cached, "sem_novidade", "a fonte não devolveu barra nova"
+
+    inicio_novo = _coerce_ohlcv_dates(trecho).min()
+    if inicio_novo > fim:
+        # SEM SOBREPOSIÇÃO: entre o fim do cache e o começo do trecho novo há um
+        # intervalo que ninguém verificou. Costurar aqui inventaria continuidade.
+        return (_baixa(start_str), "completo",
+                f"buraco entre o cache (até {fim.date()}) e o trecho novo "
+                f"(desde {inicio_novo.date()})")
+
+    return emenda_ohlcv(cached, trecho), "incremental", ""
+
+
 def _needs_refresh(data_file, cached, curr_date_dt, today_date) -> bool:
     """Whether a cached frame must be refetched before being served.
 
@@ -289,15 +392,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
 
     if data is None:
         try:
-            downloaded = yf_retry(lambda: yf.download(
-                canonical,
-                start=start_str,
-                end=end_str,
-                multi_level_index=False,
-                progress=False,
-                auto_adjust=True,
-            ))
-            downloaded = _ensure_date_column(downloaded.reset_index())
+            # INCREMENTAL (DA-119): com série em cache pede-se só do último dia
+            # conhecido em diante, e emenda-se por data. Cai no completo sozinho
+            # quando não dá pra provar continuidade — e diz por quê.
+            downloaded, modo, motivo = busca_ohlcv(
+                canonical, start_str, end_str, cached=usable_cache)
+            if modo == "completo" and usable_cache is not None:
+                logger.info("OHLCV %s: download completo — %s", canonical, motivo)
         except Exception:
             # A revalidação virou obrigatória para o cache que não cobre o dia; se
             # a fonte estiver fora do ar não se pode perder um cache que antes era
@@ -324,6 +425,9 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
                 raise NoMarketDataError(
                     symbol, canonical, "Yahoo Finance returned no rows"
                 )
+            # A regravação acontece MESMO em `sem_novidade`: o `_needs_refresh` é
+            # por mtime, e sem tocar o arquivo toda chamada fora do pregão voltaria
+            # a bater na fonte pra receber o mesmo "não há barra nova".
             downloaded.to_csv(data_file, index=False, encoding="utf-8")
             data = downloaded
 
