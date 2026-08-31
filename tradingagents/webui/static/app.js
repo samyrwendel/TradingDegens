@@ -2981,6 +2981,16 @@ function chartLegendHtml(chart, actionable) {
   zones.forEach((z) => legend.push(
     `<span class="lg"><span class="sw band${z.familia === "storm" ? " storm" : ""}" ` +
     `style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
+  // As bolinhas verdes na mínima da vela (``chart.markers.buy_regions``) marcam
+  // TOQUES PASSADOS na média — nada delas está na legenda hoje, e círculo vivo sem
+  // rótulo ao lado do losango apagado do Storm lê como "onde estão os números do
+  // padrão?" (não são: não têm número, são histórico). A cor já é única (nenhum
+  // outro marcador usa este verde) — falta só a chave que liga cor a nome.
+  const nRegioes = (chart.markers && chart.markers.buy_regions || []).length;
+  if (nRegioes) {
+    legend.push(`<span class="lg"><span class="sw dot" style="background:${ZONE_COLORS.buy}">` +
+      `</span>recuo à média (histórico)</span>`);
+  }
   // A legenda carrega a FORMA do marcador, não só a cor: é ela que separa as duas
   // numerações no candle, e uma legenda que só mostra cor deixaria o leitor sem a
   // chave da desambiguação. "invalidado" entra no texto porque o cinza sozinho
