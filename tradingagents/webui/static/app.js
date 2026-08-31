@@ -2769,7 +2769,25 @@ const MA_COLORS = { "20": "#f5b445", "50": "#6ea8fe", "200": "#b48ef5" };
 // A EMA 80 é a LENTA do Éden (setup Storm) — só é desenhada nas runs Storm
 // (ver _chart_emas no backend), e ganha cor própria pra não se confundir com as
 // de timing (8/21/50).
-const EMA_COLORS = { "8": "#4be3a0", "21": "#e3894b", "50": "#e34bd0", "80": "#7cb0ff" };
+//
+// A MÉDIA NÃO É GANHO (task 20260831-005). A EMA8 era a única média pintada com uma
+// cor que SIGNIFICA: verde é ganho/alta na tela inteira (DA-078 regra 3), e uma média
+// é estrutura — o "todo o resto é branco e cinza em níveis" da mesma regra. O custo
+// disso não era só conceitual, e está medido: a distância CIELAB de cada média até a
+// COR DA VELA que ela atravessa —
+//
+//   EMA8 #4be3a0 × vela de alta ......... ΔE  16,0   ← some dentro do corpo verde
+//   EMA21 #e3894b × vela de baixa ....... ΔE  40,4
+//   MMS20 #f5b445 × vela de baixa ....... ΔE  64,3
+//   EMA80 #7cb0ff × vela de baixa ....... ΔE  91,4
+//   MMS50 #6ea8fe × vela de alta ........ ΔE 105,5
+//
+// — a EMA8 estava 2,5x mais perto da cor da vela que a segunda pior, e num gráfico de
+// alta ela cruza corpo verde o tempo todo. Em `#e6eaf2` (o `--text` da paleta, já usado
+// no canvas na pílula do preço atual) ela fica a ΔE 73,9 da vela de alta e 75,9 da de
+// baixa: é a única média com boa distância das DUAS cores de vela. Contra as irmãs o
+// mínimo é 45,6 (EMA80) — nenhuma colisão nova. Nenhuma cor nova entra.
+const EMA_COLORS = { "8": "#e6eaf2", "21": "#e3894b", "50": "#e34bd0", "80": "#7cb0ff" };
 // 1-2-3 marker colour by direction — distinct so compra (fundo) and venda (topo)
 // never read the same on the chart. Blue for compra, orange for venda; both stay
 // clear of the green/red candle bodies.
@@ -2889,9 +2907,17 @@ const TRACO_STORM = [7, 3, 2, 3];
 // onde o 1-2-3 deixa de existir) e stop (vermelho, tracejado: a invalidação com a
 // folga de ATR). O ALVO reusa o dourado da realização de propósito: é a mesma
 // função (onde se realiza), e quando os dois são o mesmo nível vira UMA faixa só.
+// UM SIGNIFICADO, UM VERDE (task 20260831-005). O alvo tinha verde PRÓPRIO
+// (``#26de81``) ao lado do verde de ganho/alta da tela inteira (``#2ecc71``, o
+// ``--green`` do CSS, que pinta o candle de alta, a faixa de compra, a bolinha de
+// recuo, o "ativo" do scan). Medido em CIELAB: **ΔE 7,2** entre os dois — 2,2° de
+// matiz de diferença, indistinguíveis a olho em qualquer tamanho, e mais ainda no
+// celular. Dois hexes para o MESMO significado (o alvo É ganho) não separam nada:
+// só fazem a tela ter dois verdes onde tem um conceito. O alvo passa a usar o verde
+// da paleta, e o canvas finalmente concorda com o CSS.
 const ZONE_COLORS = { buy: "#2ecc71", realize: "#f5b445", pullback: "#c084fc",
                       stop: "#ff5c6c", invalid: "#ff9aa6", resist: "#8b97ad",
-                      target: "#26de81", storm: "#7cb0ff", inativa: "#8b97ad",
+                      target: "#2ecc71", storm: "#7cb0ff", inativa: "#8b97ad",
                       projecao: "#9aa4b8" };
 // ``inativa`` é o cinza de quem NÃO é entrada agora. A faixa da média saía verde
 // com o rótulo "não ativa agora" escrito nela — a cor afirmando o contrário do
@@ -4294,7 +4320,10 @@ function drawPriceChart(canvas, chart, a) {
     canvas.dataset.rr = rrText;
     canvas.dataset.rrCor = "";
     if (rrText) {
-      const rrCol = rrTem && !rrRuim(rrPlan.rr) ? "#26de81" : "#e6e9ef";
+      // o chip verde diz "o retorno supera o risco" — é ganho, e ganho tem UMA cor
+      // na tela (ZONE_COLORS.buy == --green). Era o terceiro literal do verde do
+      // alvo solto no arquivo (task 20260831-005).
+      const rrCol = rrTem && !rrRuim(rrPlan.rr) ? ZONE_COLORS.buy : "#e6e9ef";
       // A cor do chip fica OBSERVÁVEL (mesmo padrão do dataset.levelLabels): "verde só
       // quando o retorno supera o risco" é regra de tela, e regra de tela que não se
       // mede volta sozinha na próxima mudança de layout.
