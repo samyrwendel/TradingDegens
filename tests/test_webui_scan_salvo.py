@@ -195,6 +195,40 @@ def test_endpoint_devolve_o_salvo_sem_varrer(servidor, monkeypatch):
     assert got["gerado_em"] == "2026-08-31T14:32:00-04:00"
 
 
+def test_servico_recem_reiniciado_responde_o_salvo_NA_HORA(tmp_path, monkeypatch):
+    """A abertura depois de um restart não espera varredura nenhuma.
+
+    O tamanho importa: a watchlist real gera ~98 KB de JSON, e a pergunta é se
+    ler isso do disco é "na hora" ou só "mais rápido que varrer". Aqui o
+    snapshot é inflado até essa ordem de grandeza e a leitura é MEDIDA numa
+    instância nova — a que um serviço recém-subido teria, sem memo nenhum.
+
+    DENTE: o teto de 0,5s é folgadíssimo pra um ``json.load`` e impossível pra
+    uma varredura (7s a 20s medidos no ar). Se alguém trocar a leitura por um
+    caminho que varre, o teste cai — e o ``scan_watchlist`` explosivo abaixo
+    diz na hora que foi isso.
+    """
+    import time as _t
+
+    grande = _resultado("MSFT")
+    frames = grande["ativos"][0]["frames"]
+    grande["ativos"] = [{"ticker": f"T{i:03d}", "melhor": frames[0],
+                         "frames": frames * 12} for i in range(60)]
+    r1 = _runner(tmp_path)
+    assert r1.scan_snapshot.save(grande) is True
+    assert r1.scan_snapshot.path.stat().st_size > 50_000, "o payload não ficou realista"
+
+    monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist",
+                        lambda tickers, date: pytest.fail("abrir não pode varrer"))
+    novo = _runner(tmp_path)                     # o serviço acabou de subir
+    assert novo._scan_memo is None
+    t0 = _t.perf_counter()
+    salvo = novo.scan_ultimo()
+    dt = _t.perf_counter() - t0
+    assert len(salvo["ativos"]) == 60
+    assert dt < 0.5, f"a leitura do salvo levou {dt:.3f}s — não é 'na hora'"
+
+
 def test_salvo_de_ontem_continua_sendo_servido_com_o_seu_carimbo(servidor):
     """Velho não se esconde nem se descarta: vai pra tela COM a data dele."""
     base, runner = servidor

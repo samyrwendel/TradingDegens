@@ -92,6 +92,14 @@ _REUSE_SCAN_LIMIT = 50
 # Janela do memo do scan: tempo em que um segundo pedido reaproveita a varredura
 # recém-terminada em vez de refazê-la. Curto de propósito — "Escanear" tem que
 # continuar parecendo fresco; isto só absorve o reclique e o pedido concorrente.
+#
+# **NÃO AUMENTE ISTO pra a tela abrir mais rápido.** Já houve quem lesse este memo
+# como "o cache do scan" e concluísse que bastava esticá-lo. São DUAS camadas com
+# propósitos opostos, e a segunda é que resolve a espera (ver
+# :meth:`AnalysisRunner.scan_portfolio`). Esticar esta aqui compra a abertura rápida
+# ao preço de "Escanear" devolver dado velho DENTRO da sessão — desfazendo o que a
+# preservação-durante-a-varredura construiu e deixando o usuário achar que atualizou
+# quando não atualizou.
 _SCAN_MEMO_TTL = 5.0
 
 # Teto da pergunta do Q&A ancorado (/api/ask): corta enrolação, segura o custo.
@@ -2631,13 +2639,34 @@ class AnalysisRunner:
         Todo ``em_gatilho`` é LOGADO (dedup por ticker+frame+gatilho: o mesmo
         setup não re-entrega) — é o insumo do track record do scan.
 
-        **Uma varredura por vez (single-flight).** O servidor é threaded e não sabe
-        que o cliente desistiu: um usuário que cansou de esperar e reclicou disparava
-        uma SEGUNDA varredura enquanto a primeira ainda batia no provedor, dobrando
-        as chamadas e cobrando throttle — a explicação mais provável pro outlier de
-        75s que a revisão mediu. Agora o segundo pedido ESPERA o primeiro e recebe o
-        resultado dele (se ainda fresco, :data:`_SCAN_MEMO_TTL`), em vez de somar
-        pressão em cima de uma fonte que já está reclamando.
+        **DUAS camadas, e elas NÃO são duplicação — respondem a perguntas
+        diferentes.** Parecem a mesma coisa ("guardar o resultado do scan") e quem
+        olhar de relance vai querer fundi-las numa só; o que segue existe pra que
+        isso não aconteça por engano.
+
+        1. **Single-flight — "já estou varrendo?"** (:data:`_SCAN_MEMO_TTL`, 5s, em
+           MEMÓRIA). Protege o **provedor**. O servidor é threaded e não sabe que o
+           cliente desistiu: quem cansou de esperar e reclicou disparava uma SEGUNDA
+           varredura enquanto a primeira ainda batia no yfinance, dobrando as chamadas
+           e cobrando throttle — a explicação mais provável pro outlier de 75s que a
+           revisão mediu. O segundo pedido espera o primeiro e recebe o resultado dele.
+           Cinco segundos bastam pra isso, e é por isso que é curto: passada a janela,
+           "Escanear" escaneia de verdade.
+        2. **Último resultado conhecido — "o que eu sabia da última vez?"**
+           (:class:`ScanSnapshotStore`, em DISCO, sem TTL). Protege o **usuário**. É o
+           que a tela pinta na ABERTURA, antes de a varredura nova terminar, e
+           sobrevive ao restart — que é justamente onde o memo não chega. Nunca se
+           passa por dado de agora: viaja com o ``gerado_em`` e a tela carimba a hora.
+
+        A segunda **não substitui** a primeira: um snapshot em disco não impede a
+        segunda rajada no provedor, e um memo de 5s em memória não tem o que mostrar
+        quando o processo acabou de subir.
+
+        A gravação do snapshot fica DENTRO do lock de propósito: assim o arquivo segue
+        a ordem em que as varreduras terminaram, e uma varredura mais lenta de outra
+        data não sobrescreve por cima da mais recente. O custo é o de um
+        ``os.replace`` (milissegundos) contra os segundos da varredura que já se
+        pagou.
         """
         with self._scan_lock:
             memo = self._scan_memo
@@ -2646,9 +2675,13 @@ class AnalysisRunner:
             tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
             result = scan_watchlist(tickers, date)
             self._registrar_gatilhos(result)
-            # Esta é a varredura COMPLETA (a watchlist inteira) — a única que pode
-            # virar "o último scan". A gravação é fail-open: disco cheio ou sem
-            # permissão não pode derrubar a varredura que o usuário está esperando.
+            # CAMADA 2 (disco). Só o caminho FRESCO grava: o retorno pelo memo
+            # acima já devolveu este mesmo objeto, e regravá-lo seria I/O à toa
+            # dentro do lock — sem mudar um byte do arquivo. Esta é também a
+            # varredura COMPLETA (a watchlist inteira), a única que pode virar "o
+            # último scan" (a passada agendada varre um subconjunto). Fail-open:
+            # disco cheio ou sem permissão não derruba a varredura que o usuário
+            # está esperando.
             try:
                 self.scan_snapshot.save(result)
             except OSError:
