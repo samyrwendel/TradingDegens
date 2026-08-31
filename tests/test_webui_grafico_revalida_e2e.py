@@ -270,22 +270,98 @@ def test_revalidacao_automatica_nao_se_empilha(base):
         browser.close()
 
 
+# A CLASSE do ativo não é decidida na tela (task 20260831-020): quem responde
+# "vale revalidar isto agora?" é o servidor, no campo `revalida` — cripto sempre,
+# ação só com pregão ativo, futuro/sem-classe seguindo a referência. A tela OBEDECE.
+# Parametrizar aqui prova que ela obedece nos dois sentidos, e que não há um
+# segundo julgamento de classe escondido no JavaScript.
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_pregao_fechado_nao_agenda_revalidacao_de_acao(base):
-    """Fora do pregão a ação repete o mesmo candle: revalidar é chamada sem informação.
+@pytest.mark.parametrize("classe,sessao,revalida,agenda_timer", [
+    pytest.param("crypto", "24h", True, True, id="cripto_24_7"),
+    pytest.param("stock", "regular", True, True, id="acao_pregao_aberto"),
+    pytest.param("stock", "fechada", False, False, id="acao_pregao_fechado"),
+    pytest.param("", "fechada", False, False, id="sem_classe_futuro_GOLD"),
+])
+def test_a_tela_OBEDECE_o_veredito_de_classe_do_servidor(base, classe, sessao,
+                                                         revalida, agenda_timer):
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        # A rota entra DEPOIS do `_abre`: ele registra um handler pra todo `/api/`,
+        # e o Playwright casa a rota mais RECENTE primeiro — registrada antes, esta
+        # aqui nunca seria consultada e o teste mediria a resposta real do servidor.
+        page.route(re.compile(r"/api/agenda/proxima"), lambda r: r.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"tf": "4h", "cadencia_min": 240, "em_segundos": 5,
+                             "sessao": sessao, "revalida": revalida})))
+        page.evaluate("() => agendaProximaRevalidacao()")
+        page.wait_for_timeout(400)
+        assert page.evaluate("() => !!_revalTimer") is agenda_timer, \
+            (classe, sessao, revalida)
+        browser.close()
 
-    A regra é a do servidor (`agenda.alvos_da_passada`), respondida em `revalida`;
-    a tela só obedece.
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_JavaScript_nao_tem_lista_de_ativos_nem_julga_classe(base):
+    """NADA de lista chumbada na tela (task 020).
+
+    DENTE: um `if (ticker.endsWith('-USD'))` no cliente passaria hoje e ficaria
+    errado no dia em que entrasse uma cripto sem esse sufixo — e ninguém veria,
+    porque o servidor continuaria respondendo certo.
     """
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
-        page.goto(base, wait_until="load")
+        _abre(page, base)
+        fonte = page.evaluate(
+            "() => [agendaProximaRevalidacao, disparaRevalidacaoDoCandle,"
+            " revalidaFrame, carregaFrame, switchTimeframe]"
+            ".map(function (f) { return f.toString(); }).join(' ')")
+        for nome in ("MSFT", "NVDA", "BTC", "GOLD", "crypto", "-USD"):
+            assert nome not in fonte, f"{nome} chumbado no caminho de revalidação"
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_pergunta_de_horario_SUPERADA_nao_arma_o_timer_da_anterior(base):
+    """Duas trocas depressa deixam duas perguntas no ar — e a velha pode responder
+    por último, armando um timer que a nova já tinha decidido não armar.
+
+    DENTE: sem o selo (`_revalAgendaSeq`), a resposta lenta do primeiro pedido
+    (revalida=true) sobrescrevia a decisão do segundo (revalida=false), e a tela
+    passava a revalidar uma ação com o pregão fechado. Mesma família do `_tfSeq`.
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        page.evaluate("() => cancelaRevalidacaoAgendada()")
+        # a 1ª resposta (revalida=true) demora; a 2ª (revalida=false) chega antes
         page.route(re.compile(r"/api/agenda/proxima"), lambda r: r.fulfill(
             status=200, content_type="application/json",
-            body=json.dumps({"tf": "4h", "cadencia_min": 240, "em_segundos": 5,
+            body=json.dumps({"tf": "4h", "cadencia_min": 240, "em_segundos": 600,
+                             "sessao": "regular", "revalida": True})))
+        page.evaluate("""() => {
+          window.__lenta = true;
+          const o = window.fetch;
+          window.fetch = async (u, x) => {
+            if (String(u).includes('/api/agenda/proxima') && window.__lenta) {
+              window.__lenta = false;                 // só a PRIMEIRA é lenta
+              await new Promise((r) => setTimeout(r, 500));
+            }
+            return o(u, x);
+          };
+        }""")
+        page.evaluate("() => agendaProximaRevalidacao()")     # a lenta, revalida=true
+        page.unroute(re.compile(r"/api/agenda/proxima"))
+        page.route(re.compile(r"/api/agenda/proxima"), lambda r: r.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"tf": "4h", "cadencia_min": 240, "em_segundos": 600,
                              "sessao": "fechada", "revalida": False})))
-        _abre(page, base)
-        page.wait_for_timeout(300)
-        assert page.evaluate("() => !!_revalTimer") is False, "agendou com pregão fechado"
+        page.evaluate("() => agendaProximaRevalidacao()")     # a nova, revalida=false
+        page.wait_for_timeout(900)                            # a lenta já respondeu
+
+        assert page.evaluate("() => !!_revalTimer") is False, \
+            "a resposta superada armou o timer por cima da decisão nova"
         browser.close()

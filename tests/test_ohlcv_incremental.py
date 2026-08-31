@@ -213,3 +213,101 @@ def test_o_nome_do_arquivo_de_cache_NAO_depende_da_data(tmp_path, monkeypatch):
     src = inspect.getsource(patch._make_stable_load_ohlcv)
     assert '-YFin-5y.csv' in src
     assert '-YFin-data-{' not in src and "-YFin-data-%s" not in src
+
+
+# ============ GENERALIDADE POR CLASSE, não por símbolo predileto (task 020) ====
+#
+# "o exemplo foi MSFT mas é pra valer pra todos os atuais e futuros". Um teste com
+# um ticker chumbado prova aquele ticker, e nada sobre o ativo que entrar amanhã.
+#
+# A amostra abaixo cobre as CLASSES que o produto tem hoje e as ordens de grandeza
+# em que elas vivem — que é onde a generalidade quebra de verdade num código que
+# compara datas e formata números:
+#
+#   AÇÃO       ~10²   (NVDA, MSFT: dezenas a centenas)
+#   CRIPTO     ~10⁴   (BTC-USD: dezenas de milhares; o diário dela também vem pelo
+#                      yfinance, no MESMO arquivo `-YFin-5y.csv` — conferido no
+#                      cache de produção)
+#   FUTURO     ~10³   (GC=F/GOLD: milhares, e sem `asset_type` na watchlist real)
+#   CENTAVOS   ~10⁰   (EOSE fecha a 3,27 — o extremo oposto da cripto)
+#
+# O caminho de download NÃO conhece classe: ele lê datas e emenda linhas. É por
+# isso que a parametrização é sobre MAGNITUDE e formato de símbolo, e não sobre
+# uma lista de nomes — lista de nomes no código é o que esta task veio proibir.
+CLASSES = [
+    pytest.param("NVDA", 180.0, id="acao"),
+    pytest.param("BTC-USD", 78_900.0, id="cripto"),
+    pytest.param("GC=F", 2_400.0, id="futuro"),
+    pytest.param("EOSE", 3.27, id="centavos"),
+]
+
+
+@pytest.mark.parametrize("simbolo,preco", CLASSES)
+def test_incremental_pede_so_o_novo_em_QUALQUER_classe(espia, simbolo, preco):
+    cache = _serie("2026-08-01", 20, base=preco)
+    fim = cache["Date"].iloc[-1]
+    espia["resposta"]["frame"] = _serie(fim, 2, base=preco * 1.01)
+
+    out, modo, _m = ssu.busca_ohlcv(simbolo, "2021-08-31", "2026-09-01", cached=cache)
+    assert modo == "incremental"
+    assert espia["chamadas"][0]["start"] == fim.strftime("%Y-%m-%d")
+    assert out["Date"].is_unique and out["Date"].is_monotonic_increasing
+
+
+@pytest.mark.parametrize("simbolo,preco", CLASSES)
+def test_a_barra_do_dia_e_substituida_em_QUALQUER_classe(espia, simbolo, preco):
+    cache = _serie("2026-08-01", 20, base=preco)
+    fim = cache["Date"].iloc[-1]
+    espia["resposta"]["frame"] = _serie(fim, 1, base=preco * 2)
+    f1, _m, _ = ssu.busca_ohlcv(simbolo, "2021-08-31", "2026-09-01", cached=cache)
+    espia["resposta"]["frame"] = _serie(fim, 1, base=preco * 3)
+    f2, _m, _ = ssu.busca_ohlcv(simbolo, "2021-08-31", "2026-09-01", cached=f1)
+
+    assert len(f2) == len(cache) and f2["Date"].is_unique
+    assert float(f2.loc[f2["Date"] == fim, "Close"].iloc[0]) == pytest.approx(preco * 3 + 0.5)
+
+
+@pytest.mark.parametrize("simbolo,preco", CLASSES)
+def test_SIMBOLO_NOVO_sem_cache_baixa_tudo_em_QUALQUER_classe(espia, simbolo, preco):
+    """Todo ativo FUTURO começa assim: sem uma linha em cache.
+
+    É o caminho que o Samyr terá na primeira vez que adicionar qualquer coisa à
+    watchlist — e o único em que o incremental não tem nada em que se apoiar.
+    """
+    espia["resposta"]["frame"] = _serie("2021-09-01", 300, base=preco)
+    out, modo, motivo = ssu.busca_ohlcv(simbolo, "2021-08-31", "2026-09-01", cached=None)
+    assert modo == "completo" and "não havia série" in motivo
+    assert espia["chamadas"][0]["start"] == "2021-08-31"
+    assert len(out) == 300
+
+
+@pytest.mark.parametrize("simbolo,preco", CLASSES)
+def test_simbolo_que_a_FONTE_NAO_RESOLVE_nao_vira_loop_de_retry(espia, simbolo, preco):
+    """Fonte que devolve vazio é resposta, não erro — e não se insiste nela.
+
+    O `yf_retry` só repete em rate-limit (429); frame vazio volta na hora. Com
+    cache, isso é o caso normal de fora-do-pregão e serve o cache; sem cache, quem
+    chama levanta `NoMarketDataError`. Nos dois, UMA chamada.
+    """
+    espia["resposta"]["frame"] = _serie("2026-01-01", 0)
+
+    cache = _serie("2026-08-01", 20, base=preco)
+    _f, modo, _m = ssu.busca_ohlcv(simbolo, "2021-08-31", "2026-09-01", cached=cache)
+    assert modo == "sem_novidade" and len(espia["chamadas"]) == 1
+
+    espia["chamadas"].clear()
+    out, modo2, _m = ssu.busca_ohlcv(simbolo, "2021-08-31", "2026-09-01", cached=None)
+    assert modo2 == "completo" and out.empty and len(espia["chamadas"]) == 1
+
+
+def test_o_caminho_de_download_nao_conhece_ticker_nenhum():
+    """NADA de lista chumbada de ativos: a decisão sai do DADO, não de nomes.
+
+    DENTE: um `if symbol in (...)` aqui passaria despercebido numa revisão e só
+    apareceria no dia em que o Samyr adicionasse o ativo que não está na lista.
+    """
+    import inspect
+
+    fonte = inspect.getsource(ssu.busca_ohlcv) + inspect.getsource(ssu.emenda_ohlcv)
+    for nome in ("MSFT", "NVDA", "AAPL", "BTC-USD", "GOLD", "GC=F", "crypto", "stock"):
+        assert nome not in fonte, f"{nome} chumbado no caminho de download"

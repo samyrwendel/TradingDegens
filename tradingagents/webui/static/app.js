@@ -4127,6 +4127,11 @@ function marcaRevalidando(on) {
 // caminho feliz; a volta da aba é a rede de segurança — mesma disciplina do
 // `onVisibleForeground` que já existia pro progresso e pros preços.
 let _revalAlvoMs = 0;
+// Selo do agendamento, na mesma disciplina do `_tfSeq`: trocar de frame duas vezes
+// depressa deixa duas perguntas de horário no ar, e a MAIS ANTIGA pode responder
+// por último — armando um timer que a mais nova já tinha decidido não armar. Só o
+// último pedido pode mexer no timer.
+let _revalAgendaSeq = 0;
 
 function cancelaRevalidacaoAgendada() {
   if (_revalTimer) { clearTimeout(_revalTimer); _revalTimer = null; }
@@ -4134,13 +4139,15 @@ function cancelaRevalidacaoAgendada() {
 }
 
 async function agendaProximaRevalidacao() {
+  const selo = ++_revalAgendaSeq;
   cancelaRevalidacaoAgendada();
   if (!_openTicker || !_tf) return;
   try {
     const q = new URLSearchParams({ tf: _tf, ticker: _openTicker, asset_type: _assetType || "" });
     const res = await fetch("/api/agenda/proxima?" + q.toString());
-    if (!res.ok) return;
+    if (selo !== _revalAgendaSeq || !res.ok) return;
     const a = await res.json();
+    if (selo !== _revalAgendaSeq) return;               // pergunta superada: é lixo
     if (!a || !a.revalida || !a.em_segundos) return;   // pregão fechado: não insiste
     const ms = Math.max(1000, Number(a.em_segundos) * 1000);
     _revalAlvoMs = Date.now() + ms;

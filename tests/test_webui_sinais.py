@@ -228,3 +228,122 @@ def test_o_minimo_de_RR_e_parametro_e_muda_o_resultado():
     com1 = sum(1 for o in _ops() if (o.get("janela") or {}).get("existe"))
     com05 = sum(1 for o in _ops(rr_min=0.5) if (o.get("janela") or {}).get("existe"))
     assert com05 > com1
+
+
+# ============ GENERALIDADE POR CLASSE E POR GRANDEZA (task 20260831-020) =======
+#
+# "o exemplo foi MSFT mas é pra valer pra todos os atuais e futuros". Os testes
+# acima usam o dataset REAL de 31/08 — é o que dá números de verdade —, mas um
+# ticker que só existe hoje não prova nada sobre o ativo de amanhã.
+#
+# ``sinais.oportunidades`` **não conhece classe de ativo**: ela lê direção, estado
+# e níveis. Então o que pode quebrar a generalidade aqui não é o mercado, é a
+# GRANDEZA do preço — a janela é aritmética sobre os níveis, e a chave do sinal
+# formata o gatilho. A amostra cobre as quatro ordens de grandeza que a watchlist
+# real tem hoje, e a asserção é a MESMA em todas:
+#
+#   ~10⁰  centavos (EOSE fecha a 3,27)     ~10²  ação (NVDA, MSFT)
+#   ~10³  futuro de ouro (GC=F)            ~10⁴  cripto (BTC-USD a 78,9 mil)
+GRANDEZAS = [
+    pytest.param(3.27, id="centavos"),
+    pytest.param(180.0, id="acao"),
+    pytest.param(2_400.0, id="futuro_ouro"),
+    pytest.param(78_900.0, id="cripto"),
+]
+
+
+def _frames_de(preco, direcao, estados, metodo="123"):
+    """Frames sintéticos de UM ativo, com R:R 3:1 no gatilho em qualquer grandeza."""
+    saida = []
+    for i, estado in enumerate(estados):
+        venda = direcao == "venda"
+        gat = preco
+        sl = preco * (1.10 if venda else 0.90)
+        tp = preco * (0.70 if venda else 1.30)
+        leitura = {"estado": estado, "direction": direcao, "trigger": gat,
+                   "sl": sl, "tp": tp, "dist_pct": 0.001 * (i + 1)}
+        f = {"frame": ["1d", "4h", "1h"][i], "price": preco, "estado": "sem_setup",
+             "storm": {"estado": "sem_setup"}}
+        if metodo == "123":
+            f.update(leitura)
+        else:
+            f["storm"] = {**leitura, "opera": True}
+        saida.append(f)
+    return saida
+
+
+def _um(preco, direcao, estados, ticker="X", metodo="123"):
+    return {"ativos": [{"ticker": ticker, "frames": _frames_de(preco, direcao, estados, metodo)}]}
+
+
+@pytest.mark.parametrize("preco", GRANDEZAS)
+@pytest.mark.parametrize("direcao", ["compra", "venda"])
+@pytest.mark.parametrize("metodo", ["123", "storm"])
+def test_CONFLUENCIA_de_tres_frames_em_qualquer_grandeza(preco, direcao, metodo):
+    ops = sinais.oportunidades(
+        _um(preco, direcao, ["em_gatilho", "em_gatilho", "formando"], metodo=metodo))
+    assert len(ops) == 1
+    o = ops[0]
+    assert o["direcao"] == direcao and o["confluencia"] == 3
+    assert o["frames"] == ["1d", "4h", "1h"]
+    assert o["metodo"] == metodo
+
+
+@pytest.mark.parametrize("preco", GRANDEZAS)
+def test_CONFLITO_entre_frames_em_qualquer_grandeza(preco):
+    scan = _um(preco, "compra", ["em_gatilho", "em_gatilho"])
+    scan["ativos"][0]["frames"] += _frames_de(preco, "venda", ["em_gatilho"])[:1]
+    scan["ativos"][0]["frames"][-1]["frame"] = "1h"
+    ops = sinais.oportunidades(scan)
+    assert [o["estado"] for o in ops] == ["conflito"]
+    assert "gatilho" not in ops[0] and "janela" not in ops[0]
+
+
+@pytest.mark.parametrize("preco", GRANDEZAS)
+@pytest.mark.parametrize("direcao", ["compra", "venda"])
+def test_a_JANELA_e_aritmetica_e_vale_em_qualquer_grandeza(preco, direcao):
+    """Mesmo R:R 3:1 nas quatro ordens de grandeza: mesma janela relativa.
+
+    DENTE: qualquer constante absoluta que alguém enfiasse na janela (um "±0,50"
+    de conveniência) passaria no teste da ação e quebraria no BTC e no EOSE.
+    """
+    ops = sinais.oportunidades(_um(preco, direcao, ["em_gatilho"]))
+    j = ops[0]["janela"]
+    assert j["existe"] and j["rr_gatilho"] == pytest.approx(3.0, rel=1e-6)
+    # o limite é o preço em que o R:R cai a 1:1 — recalculado, não decorado
+    ganho = abs(ops[0]["tp"] - j["limite"])
+    risco = abs(j["limite"] - ops[0]["sl"])
+    assert ganho / risco == pytest.approx(1.0, rel=1e-9)
+    # e a LARGURA relativa é a mesma em toda grandeza (é aritmética, não escala)
+    assert j["largura_pct"] == pytest.approx(0.1, rel=1e-6)
+
+
+@pytest.mark.parametrize("preco", GRANDEZAS)
+def test_a_CHAVE_do_sinal_distingue_gatilhos_em_qualquer_grandeza(preco):
+    """A chave carrega o gatilho com 6 algarismos significativos.
+
+    DENTE: arredondar para 2 casas colapsaria dois gatilhos distintos do BTC
+    (78.900,00 e 78.900,004 não, mas 78.900,12 e 78.900,13 sim) — e o sinal novo
+    nunca se anunciaria. Aqui os dois gatilhos diferem em 0,01% e têm de gerar
+    chaves diferentes em TODA grandeza.
+    """
+    a = sinais.oportunidades(_um(preco, "compra", ["em_gatilho"]))[0]["chave"]
+    b = sinais.oportunidades(_um(preco * 1.0001, "compra", ["em_gatilho"]))[0]["chave"]
+    assert a != b, (a, b)
+
+
+def test_o_modulo_de_SINAIS_nao_conhece_ticker_nem_classe():
+    """A oportunidade é sobre a LEITURA, não sobre o papel.
+
+    NADA de lista chumbada (task 020): o módulo não lê `asset_type` nem nome de
+    ativo — se lesse, a regra passaria a valer para os ativos de hoje e não para
+    os de amanhã.
+    """
+    import inspect
+
+    fonte = "".join(
+        inspect.getsource(f) for f in
+        (sinais.oportunidades, sinais._oportunidade, sinais._leitura,
+         sinais._conflito, sinais.janela_de_entrada, sinais._ordem))
+    for nome in ("MSFT", "NVDA", "AAPL", "BTC-USD", "GOLD", "GC=F", "asset_type"):
+        assert nome not in fonte, f"{nome} chumbado no motor de sinais"

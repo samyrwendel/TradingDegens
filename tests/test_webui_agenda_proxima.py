@@ -138,3 +138,71 @@ def test_endpoint_responde_e_nao_varre(tmp_path, monkeypatch):
             <= timedelta(minutes=240, seconds=61)
     finally:
         httpd.shutdown()
+
+
+# ============ GENERALIDADE POR CLASSE (task 20260831-020) ======================
+#
+# "o exemplo foi MSFT mas é pra valer pra todos os atuais e futuros". A watchlist
+# REAL de 31/08 tem 16 ``stock``, 3 ``crypto`` e **1 sem ``asset_type``** (GOLD,
+# "Gold Dec 26" — futuro de ouro). A amostra abaixo é essa realidade, e não uma
+# lista de símbolos preferidos: o que se parametriza é a CLASSE, porque é a classe
+# que muda o comportamento.
+#
+# **Consequência declarada, não escondida:** o produto tem hoje DUAS classes de
+# agendamento — cripto e todo-o-resto. ``agenda.alvos_da_passada`` diz isso por
+# escrito ("``asset_type`` ausente conta como AÇÃO — o erro seguro aqui é varrer de
+# menos"), então FUTURO e ativo SEM CLASSE seguem o pregão da referência. Para o
+# GOLD isso quer dizer não revalidar sozinho fora da sessão americana, mesmo que o
+# futuro de ouro negocie quase 24h. É decisão anterior a esta entrega e continua
+# valendo; o teste abaixo a PINA para que mudá-la seja uma escolha visível, e não
+# um efeito colateral.
+CLASSES_DE_ATIVO = [
+    pytest.param("crypto", True, id="cripto"),
+    pytest.param("stock", False, id="acao"),
+    pytest.param("", False, id="sem_classe_futuro_GOLD"),
+    pytest.param("commodity", False, id="classe_desconhecida"),
+]
+
+
+@pytest.mark.parametrize("classe,revalida_fora_do_pregao", CLASSES_DE_ATIVO)
+@pytest.mark.parametrize("tf", ["1h", "4h", "1d"])
+def test_pregao_fechado_por_CLASSE_e_por_frame(runner, monkeypatch, tf, classe,
+                                               revalida_fora_do_pregao):
+    monkeypatch.setattr("tradingagents.dataflows.live_price.fetch_live_price",
+                        lambda t: {"sessao": "fechada"})
+    a = runner.agenda_proxima(tf, "QUALQUER", classe)
+    assert a["revalida"] is revalida_fora_do_pregao, (classe, tf, a)
+    assert a["cadencia_min"] == agenda.cadencia_minutos((tf,))
+
+
+@pytest.mark.parametrize("classe,_r", CLASSES_DE_ATIVO)
+@pytest.mark.parametrize("tf", ["1h", "4h", "1d"])
+def test_com_o_pregao_ABERTO_toda_classe_revalida(runner, monkeypatch, tf, classe, _r):
+    monkeypatch.setattr("tradingagents.dataflows.live_price.fetch_live_price",
+                        lambda t: {"sessao": "regular"})
+    assert runner.agenda_proxima(tf, "QUALQUER", classe)["revalida"] is True
+
+
+@pytest.mark.parametrize("simbolo", ["NVDA", "BTC-USD", "GC=F", "^GSPC", "XAUUSD+"])
+def test_o_horario_nao_depende_do_SIMBOLO(runner, monkeypatch, simbolo):
+    """A hora do fechamento do candle é do FRAME, não do papel.
+
+    DENTE: se alguém enfiar um caso especial por símbolo aqui, dois ativos no
+    mesmo frame passariam a fechar candle em minutos diferentes.
+    """
+    monkeypatch.setattr("tradingagents.dataflows.live_price.fetch_live_price",
+                        lambda t: {"sessao": "regular"})
+    horas = {runner.agenda_proxima("1h", s, "stock")["proxima"]
+             for s in ["NVDA", simbolo]}
+    assert len(horas) == 1, horas
+
+
+def test_o_agendamento_nao_conhece_ticker_nenhum():
+    """NADA de lista chumbada: a classe vem do DADO (`asset_type` do payload)."""
+    import inspect
+
+    from tradingagents.webui.runner import AnalysisRunner as _AR
+
+    fonte = inspect.getsource(_AR.agenda_proxima)
+    for nome in ("MSFT", "NVDA", "AAPL", "BTC-USD", "GOLD", "GC=F"):
+        assert nome not in fonte, f"{nome} chumbado no agendamento"
