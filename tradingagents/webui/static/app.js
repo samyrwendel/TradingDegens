@@ -2764,6 +2764,21 @@ const PAT_COLORS = { compra: "#6ea8fe", venda: "#ff9f43" };
 // cinza apagado: continua na tela, porque a história explica onde o preço está, mas
 // para de competir com o que ainda vale.
 const COR_FANTASMA = "#6b7280";
+// ESMAECIDO NÃO É APAGADO. O fantasma era pintado a 0,45 de opacidade — e o painel do
+// gráfico é PRETO PURO, onde opacidade é multiplicação em direção ao fundo: o cinza
+// saía da tela valendo (78,82,93), 2,7:1 de contraste, abaixo do piso de 3:1 que a
+// WCAG 1.4.11 pede pra um objeto gráfico ser percebido. O preço ao lado do ponto,
+// mais fino, ficava em 2,1:1. No celular, no meio das velas, isso é sumir — e a nota
+// abaixo do gráfico prometia textualmente que "os pontos ficam em cinza como
+// história" (task 048).
+//
+// A subordinação do morto NÃO precisava daquela transparência: ela já é carregada
+// pela COR (este cinza rende 4,4:1 contra os 9,5:1 do azul do Storm — menos da metade
+// do peso), pela FORMA do marcador e pela palavra "invalidado". A opacidade que resta
+// é a mínima que ainda diz "menos" sem apagar, e o teste do módulo
+// ``test_webui_fantasma_legivel_e2e`` mede o pixel: 3:1 de piso, e o morto obrigado a
+// ficar abaixo de 70% do contraste do vivo.
+const ALFA_FANTASMA = 0.85;
 
 function ehFantasma(pat) {
   return !!(pat && pat.invalidado);
@@ -2795,7 +2810,10 @@ function stormColor(pat) {
 //                TRACEJADO e a palavra "não opera — Éden". SEM níveis: o gráfico é a
 //                figura operável, e traçar gatilho/alvo/stop de um trade que a regra
 //                proíbe é convidar a operá-lo
-//   invalidado — cinza, mais apagado ainda, e a palavra "invalidado" (DA-091)
+//   invalidado — CINZA (fora do vocabulário de cor dos vivos), e a palavra
+//                "invalidado" (DA-091). O cinza já pesa metade do azul do método na
+//                tela; o que ele não pode é cair abaixo do piso de legibilidade —
+//                ver ALFA_FANTASMA
 //
 // Precedência: morto ganha de vetado. Uma vez morto, morto — o veto descreve um setup
 // que ainda existe; a invalidação, um que não existe mais.
@@ -3846,10 +3864,12 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
   if (!pts || !pts.length) return;
   const { x, y, padL, plotW } = g;
   ctx.save();
-  // PESO = ESTADO. Vivo cheio, vetado a 0,7 (a estrutura é real e atual — só não se
-  // opera), morto a 0,45 (não existe mais). A palavra vai na etiqueta; a opacidade só
-  // ordena o que compete pela atenção.
-  if (fantasma) ctx.globalAlpha = 0.45;
+  // PESO = ESTADO, mas peso é CONTRASTE e não opacidade nominal. O vetado guarda a cor
+  // do método e por isso 0,7 ainda o deixa forte na tela; o morto já perdeu a cor, e
+  // multiplicá-lo por 0,45 sobre o preto o levava abaixo do piso de legibilidade —
+  // "não existe mais" tinha virado "não está aqui" (ver ALFA_FANTASMA). A ordem de
+  // leitura continua a mesma, medida no pixel: vivo > vetado > morto.
+  if (fantasma) ctx.globalAlpha = ALFA_FANTASMA;
   else if (vetado) ctx.globalAlpha = 0.7;
   ctx.strokeStyle = cor; ctx.setLineDash(dash); ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -3877,7 +3897,13 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
     // Contorno TRACEJADO no vetado: um anel quebrado se lê como "não vale operar"
     // antes de qualquer palavra, e não gasta cor nova (DA-078 regra 3).
     if (vetado) ctx.setLineDash([3, 2]);
-    ctx.stroke(); ctx.setLineDash([]);
+    // ANEL MAIS GROSSO NO MORTO. Um traço diagonal de 1px rende com cobertura PARCIAL
+    // por pixel na antialiasing, e o losango do fantasma media contraste pior que o
+    // número ao lado — que tem área sólida de glifo. Dois pixels devolvem a cobertura
+    // sem trocar a cor: a forma é portadora, e engrossá-la não devolve o morto ao
+    // vocabulário dos vivos.
+    if (fantasma) ctx.lineWidth = 2;
+    ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
     ctx.fillStyle = cor; ctx.fillText(p.lab, px, my);
     // O MARCADOR É OBSTÁCULO pro texto: sem isto o respaldo de um preço pousava em
     // cima do número de outro ponto e tampava justamente o que a task veio marcar.
@@ -3889,14 +3915,18 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
     const preco = fmtNum(p.price);
     rotulos.push({ x: px, y: my + lado * 16, text: preco, align: "centro", pilula: false,
                    cor: fantasma ? COR_FANTASMA : "#8b97ad",
-                   opaco: fantasma ? 0.45 : (vetado ? 0.7 : 1) });
-    // `naVista` é o que separa DESENHADO de VISÍVEL: com zoom, um ponto antigo cai
-    // centenas de pixels à esquerda do plot e continua sendo "pintado" — o canvas
-    // não recorta, então o comando de desenho ocorre e nada aparece. Sem esta marca
-    // a telemetria diz três pontos na tela enquanto a tela está vazia, e a suíte
-    // fica verde por cima do defeito que o usuário está olhando.
+                   opaco: fantasma ? ALFA_FANTASMA : (vetado ? 0.7 : 1) });
+    // O QUE SEPARA DESENHADO DE VISÍVEL, nas duas maneiras de um desenho não chegar
+    // aos olhos. `naVista`: com zoom, um ponto antigo cai centenas de pixels à
+    // esquerda do plot e continua sendo "pintado" — o canvas não recorta, então o
+    // comando ocorre e nada aparece. `px`/`py` (em pixels de CSS): ONDE ele foi
+    // pintado, pra que a suíte possa ir ao pixel e medir o CONTRASTE do que saiu, em
+    // vez de só afirmar que o desenho foi pedido. Sem as duas, a telemetria declara
+    // três pontos na tela enquanto a tela está vazia — e a suíte fica verde por cima
+    // do defeito que o usuário está olhando.
     if (saida) saida.push({ familia, nome, lab: p.lab, preco, forma, cor,
                             fantasma: !!fantasma, vetado: !!vetado,
+                            px: Math.round(px), py: Math.round(my),
                             naVista: px >= padL && px <= padL + plotW,
                             estado: estado || (fantasma ? "invalidado" : "") });
   });
@@ -3958,6 +3988,11 @@ function pintaRotulos123(ctx, rotulos, limites) {
   const passos = [0];
   for (let k = 1; k <= 12; k++) passos.push(k * ALT, -k * ALT);
   const pintados = [];
+  // A GEOMETRIA do que saiu, ao lado do texto. `pintados` é lido como lista de
+  // strings pela suíte inteira, então o onde viaja numa propriedade à parte (o
+  // JSON de um array ignora props) e sai em `dataset.rotulos123Geo`: é o que
+  // permite ir ao PIXEL do preço e medir se ele se lê, em vez de confiar que sim.
+  const geo = [];
   fila.forEach((r) => {
     ctx.font = r.pilula ? _FONTE_ROTULO.pilula : _FONTE_ROTULO.texto;
     const w = ctx.measureText(r.text).width + (r.pilula ? 10 : 4);
@@ -3984,6 +4019,7 @@ function pintaRotulos123(ctx, rotulos, limites) {
     if (yy == null) return;
     caixas.push({ x: x0, y: yy, w, h: ALT });
     pintados.push(r.text);
+    geo.push({ text: r.text, x: x0, y: yy, w, cor: r.cor, opaco: r.opaco });
     ctx.globalAlpha = r.opaco;
     // Fundo escuro em AMBOS: a etiqueta da família leva pílula com borda (ela nomeia
     // a leitura), o preço leva só o respaldo. Sem ele, "474,00" sobre pavio verde e
@@ -4000,6 +4036,7 @@ function pintaRotulos123(ctx, rotulos, limites) {
     ctx.fillText(r.text, x0 + (r.pilula ? 5 : 2), yy + 0.5);
   });
   ctx.restore();
+  pintados.geo = geo;
   return pintados;
 }
 
@@ -4324,10 +4361,21 @@ function drawPriceChart(canvas, chart, a) {
   const idx = {}; candles.forEach((c, i) => { idx[c.d] = i; });
 
   // buy-region dots (at the candle low)
+  //
+  // A NOTA CONTAVA A LISTA; A TELA DESENHAVA O QUE COUBE. A linha abaixo do gráfico diz
+  // "N região(ões) de recuo à média marcada(s) no período" a partir de
+  // ``markers.buy_regions``, e este laço pulava em SILÊNCIO toda marca cujo candle não
+  // está no período carregado deste tempo gráfico — ou que o zoom empurrou pra fora.
+  // No print da task 048 a nota prometia 12 e havia UMA bolinha na tela. É a mesma
+  // lição da DA-107, na outra marca: nunca sumir em silêncio.
   const regions = (chart.markers && chart.markers.buy_regions) || [];
+  const _marcas = [], _marcasPint = [];
   regions.forEach((r) => {
-    const i = idx[r.date]; if (i == null) return;
+    const i = idx[r.date];
+    _marcas.push({ lab: "marca", i, d: r.date });
+    if (i == null) return;
     const px = x(i), py = y(candles[i].l) + 7;
+    _marcasPint.push({ naVista: px >= padL && px <= padL + plotW });
     ctx.fillStyle = "#2ecc71";
     ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
   });
@@ -4396,12 +4444,18 @@ function drawPriceChart(canvas, chart, a) {
     _fora.push(resumoEnquadramento("Storm123", brutos, _pontos123.slice(_antes),
                                    { v0, v1, candles }));
   }
+  // As marcas de recuo à média entram na MESMA declaração dos padrões — o defeito é o
+  // mesmo, e um segundo mecanismo de aviso só daria uma segunda coisa pra esquecer.
+  _fora.push(resumoEnquadramento("recuo à média", _marcas, _marcasPint,
+                                 { v0, v1, candles }, "marcas"));
   canvas.dataset.pat123 = JSON.stringify(_pontos123);
   // Os rótulos são pintados DEPOIS de todos os marcadores das duas famílias, dentro
   // dos limites do plot — e o dataset guarda o que de fato saiu na tela, não o que se
   // pretendia (é o que deixa "nada foi coberto nem cortado" ser medido).
-  canvas.dataset.rotulos123 = JSON.stringify(
-    pintaRotulos123(ctx, _rotulos123, { topo: padT + 8, base: padT + plotH - 8 }));
+  const _saiu123 = pintaRotulos123(ctx, _rotulos123,
+                                   { topo: padT + 8, base: padT + plotH - 8 });
+  canvas.dataset.rotulos123 = JSON.stringify(_saiu123);
+  canvas.dataset.rotulos123Geo = JSON.stringify(_saiu123.geo || []);
 
   // linha fina do preço atual cruzando o gráfico até a régua direita (o número
   // vira pílula no eixo, logo abaixo — nada de caixa sobre as velas).
@@ -4501,7 +4555,7 @@ function drawPriceChart(canvas, chart, a) {
 //     fora; tem volta, e a volta é um clique;
 //   * sem VELA — a data do ponto não está no período carregado deste tempo gráfico;
 //     não há zoom que traga, e prometer um gesto que não resolve é pior que calar.
-function resumoEnquadramento(nome, brutos, pintados, janela) {
+function resumoEnquadramento(nome, brutos, pintados, janela, termo) {
   const semVela = brutos.filter((p) => p.i == null);
   const foraJanela = pintados.filter((p) => !p.naVista);
   if (!semVela.length && !foraJanela.length) return null;
@@ -4515,6 +4569,9 @@ function resumoEnquadramento(nome, brutos, pintados, janela) {
     semVela: semVela.map((p) => p.d), foraJanela: foraJanela.length,
     lado: antes ? "esquerda" : (depois ? "direita" : null), velas,
     periodo: [janela.candles[0].d, janela.candles[janela.candles.length - 1].d],
+    // "pontos" de um 1-2-3, "marcas" de recuo à média: a frase tem de nomear o que o
+    // usuário está procurando, senão manda procurar a coisa errada.
+    termo: termo || "pontos",
   };
 }
 
@@ -4528,20 +4585,27 @@ function diaMes(d) {
 function frasesForaDaVista(dados) {
   const fs = [];
   (dados.padroes || []).forEach((f) => {
+    // "os pontos" / "as marcas": artigo casado com o termo, senão a frase que veio
+    // desfazer a confusão chega torta.
+    const termo = f.termo || "pontos", art = termo === "marcas" ? "as" : "os";
     if (f.semVela.length === f.total) {
-      fs.push(`<b>${escapeHtml(f.nome)}</b> não cabe neste tempo gráfico — os ` +
-        `${f.total} pontos são de ${diaMes(f.semVela[0])} a ` +
+      fs.push(`<b>${escapeHtml(f.nome)}</b> não cabe neste tempo gráfico — ${art} ` +
+        `${f.total} ${termo} são de ${diaMes(f.semVela[0])} a ` +
         `${diaMes(f.semVela[f.semVela.length - 1])}, e o gráfico carregou de ` +
         `${diaMes(f.periodo[0])} a ${diaMes(f.periodo[1])}.`);
     } else if (f.semVela.length) {
-      fs.push(`<b>${escapeHtml(f.nome)}</b> entrou pela metade — ` +
-        `${f.total - f.semVela.length} dos ${f.total} pontos estão no período ` +
-        `carregado (${diaMes(f.periodo[0])} a ${diaMes(f.periodo[1])}).`);
+      // "entrou pela metade" descreve um PADRÃO, que é uma figura só; um punhado de
+      // marcas independentes não entra pela metade — dele se diz quantas couberam.
+      const abre = termo === "marcas" ? ":" : " entrou pela metade —";
+      fs.push(`<b>${escapeHtml(f.nome)}</b>${abre} ` +
+        `${f.total - f.semVela.length} ${art === "as" ? "das" : "dos"} ${f.total} ` +
+        `${termo} estão no período carregado (${diaMes(f.periodo[0])} a ` +
+        `${diaMes(f.periodo[1])}).`);
     }
     if (f.foraJanela) {
       const quantos = f.foraJanela === f.total
-        ? `os ${f.total} pontos estão`
-        : `${f.foraJanela} dos ${f.total} pontos estão`;
+        ? `${art} ${f.total} ${termo} estão`
+        : `${f.foraJanela} ${art === "as" ? "das" : "dos"} ${f.total} ${termo} estão`;
       // A CONTA DE VELAS é o "quanto" que transforma "está fora" em "está ali": sem
       // ela o aviso manda procurar sem dizer onde. Quando o padrão fica a cavaleiro
       // das duas bordas não há um lado só — aí a distância não significa nada e a

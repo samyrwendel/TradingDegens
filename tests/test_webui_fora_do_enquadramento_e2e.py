@@ -71,10 +71,12 @@ def _pat(pontos, **extra):
             "trigger": 440.0, "state": "formando", "direction": "venda", **extra}
 
 
-def _abre(page, base_url, *, plano_pts=None, storm_pts=None, invalidado=True):
+def _abre(page, base_url, *, plano_pts=None, storm_pts=None, invalidado=True,
+          regioes=None):
     """Abre uma run com o 1-2-3 do PLANO e/ou o do STORM nas posições pedidas."""
     act = dict(_PLANO)
-    chart = dict(_CHART, markers={**_CHART["markers"], "pattern_123": None})
+    chart = dict(_CHART, markers={**_CHART["markers"], "pattern_123": None,
+                                  "buy_regions": regioes or []})
     if plano_pts is not None:
         pat = _pat(plano_pts, invalidado=invalidado,
                    invalidado_em="2026-08-27" if invalidado else None)
@@ -274,4 +276,63 @@ def test_com_tudo_enquadrado_a_linha_nao_aparece(base):
         assert m["aviso"] == "", m
         assert m["naVista"] == 3, m
         assert page.is_hidden("#chartFora")
+        browser.close()
+
+
+# ────── (6) a MESMA regra vale pras marcas de recuo à média (task 048) ─────────
+#
+# No print da task 048 a nota abaixo do gráfico dizia "12 região(ões) de recuo à média
+# marcada(s) no período" e havia UMA bolinha verde na tela. A nota conta a LISTA; o
+# desenho pulava em silêncio toda marca cujo candle não está no período carregado —
+# exatamente o defeito que esta task veio matar, na outra marca do gráfico.
+_REGIOES_FORA = [{"date": f"2026-07-{d:02d}"} for d in (10, 11, 12, 13)]
+_REGIOES_DENTRO = [{"date": "2026-08-20"}, {"date": "2026-08-21"}]
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_marca_de_recuo_sem_vela_no_periodo_e_DECLARADA(base):
+    """DENTE: a nota prometia 12 marcas e a tela tinha 1 — e nada declarava a
+    diferença."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=TELEFONE)
+        _abre(page, base, plano_pts=_ESQUERDA, invalidado=False,
+              regioes=_REGIOES_FORA + _REGIOES_DENTRO)
+        m = page.evaluate(_LE)
+        assert "recuo à média" in m["aviso"], ("a marca que não coube tem de se "
+                                               "declarar", m["aviso"])
+        assert "2 das 6 marcas" in m["aviso"], ("quantas couberam, e o termo certo — "
+                                                "são marcas, não pontos", m["aviso"])
+        assert "01/08" in m["aviso"] and "28/08" in m["aviso"], ("de que período é o "
+                                                                 "gráfico", m["aviso"])
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_marca_de_recuo_empurrada_pelo_zoom_e_DECLARADA(base):
+    """A outra causa: a marca tem vela, e foi o dedo que a empurrou pra fora."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=TELEFONE)
+        _abre(page, base, plano_pts=_ESQUERDA, invalidado=False,
+              regioes=_REGIOES_DENTRO)
+        assert "recuo à média" not in page.evaluate(_LE)["aviso"]
+        _zoom(page, 0, 12)          # as marcas (20 e 21) ficam à direita da janela
+        m = page.evaluate(_LE)
+        assert "recuo à média" in m["aviso"], m["aviso"]
+        assert "as 2 marcas estão" in m["aviso"], m["aviso"]
+        assert "à direita" in m["aviso"], ("onde procurar", m["aviso"])
+        assert m["temBotao"], ("aqui o gesto resolve", m)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_marcas_todas_enquadradas_nao_geram_linha(base):
+    """O outro lado da régua: sem isto, qualquer aviso constante passaria."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=TELEFONE)
+        _abre(page, base, plano_pts=_ESQUERDA, invalidado=False,
+              regioes=_REGIOES_DENTRO)
+        assert page.evaluate(_LE)["aviso"] == ""
         browser.close()
