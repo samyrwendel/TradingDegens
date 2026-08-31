@@ -662,6 +662,16 @@ details.section.erick > summary { color: #9cc7f5; }
 .hp-ref:first-child { border-left: 0; padding-left: 0; }
 .hp-ref b { font-family: var(--mono); font-size: var(--fs-14); line-height: var(--lh-14);
   font-weight: var(--fw-bold); color: var(--text); }
+/* DISTÂNCIA entre a cotação agora e o preço em que a análise foi lida (task 037):
+   antes o usuário tinha que subtrair de cabeça. Mesma gramática de cor do
+   histórico (.pchg up/down/flat), aplicada aqui porque a régua da .hp-ref já
+   separa visualmente — não precisa da borda de novo. */
+.hp-diff { border-left: 1px solid var(--border); padding-left: 14px; }
+.hp-diff b { font-family: var(--mono); font-size: var(--fs-14); line-height: var(--lh-14);
+  font-weight: var(--fw-bold); color: inherit; }
+.hp-diff.up { color: var(--green); }
+.hp-diff.down { color: var(--red); }
+.hp-diff.flat { color: var(--muted); }
 .head-price { font-family: var(--mono); color: var(--text); }
 /* Veredito SEM PÍLULA (task 036): só o TEXTO na cor da função — sem fundo, sem
    borda, sem cápsula. 16/700 na escala. O qualificador (Hold/Buy/Overweight) fica
@@ -690,6 +700,18 @@ details.section.erick > summary { color: #9cc7f5; }
 }
 .result-meta { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12); }
 .result-meta b { color: var(--text); font-family: var(--mono); }
+/* Metadado de produção: fechado por padrão (task 037), mesmo padrão visual das
+   seções de relatório (▸/▾, sem marcador nativo) pra não inventar um segundo
+   idioma de "isto abre" na tela. */
+.result-meta-detail { margin: 0 0 8px; }
+.result-meta-detail > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px;
+  color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.result-meta-detail > summary::-webkit-details-marker { display: none; }
+.result-meta-detail > summary::before { content: "▸"; color: var(--muted); }
+.result-meta-detail[open] > summary::before { content: "▾"; }
+.result-meta-detail .result-meta { margin-top: 6px; }
 
 .section-title { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-med); color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin: 12px 0 8px; }
 .theses { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }

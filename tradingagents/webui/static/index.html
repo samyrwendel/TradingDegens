@@ -311,27 +311,32 @@
             <button type="button" class="export-pdf-btn hidden" id="exportPdfBtn" title="Exportar esta análise como PDF (imprimir → salvar como PDF)">⤓ Exportar PDF</button>
           </div>
         </div>
-        <!-- META + MERCADO na MESMA fileira (DA-078 regra 11). Eram duas linhas: a
-             meta à esquerda e a cotação encostada à DIREITA, com um vão enorme no
-             meio — e o preço ainda cortando na borda. O conteúdo se agrupa e o
-             espaço livre sobra numa PONTA; quando falta largura, a fileira quebra
-             (e a quebra é entre unidades, que é o contrato da task 018). -->
-        <div class="result-info">
-          <div class="result-meta" id="resultMeta"></div>
-        <!-- Rodapé do cabeçalho: o MERCADO — a cotação agora e o preço da análise,
-             cada um com a SESSÃO declarada (fechamento × pré × pós são preços
-             diferentes) e o seu carimbo de hora. Ver renderHeadPrice.
+        <!-- MERCADO logo abaixo do veredito (task 037): é o dado que decide se o
+             plano ainda vale — cotação agora × preço da análise × a distância entre
+             os dois, explícita. Cada um com a SESSÃO declarada (fechamento × pré ×
+             pós são preços diferentes) e o seu carimbo de hora. Ver renderHeadPrice.
 
-             Aqui fica SÓ o mercado (task 021). A linha do PLANO (gatilho · SL · TP ·
-             R:R) que morava embaixo desta desceu pro card da análise que a produz —
-             o Setup123 —, na coluna de contexto: aquela fila de níveis nunca foi um
-             assunto do cabeçalho, era o conteúdo de UMA das duas leituras que a tela
-             desenha. A cotação continua aqui porque é a ÂNCORA contra a qual as duas
-             leituras se medem: não pertence a nenhuma delas. -->
+             A linha do PLANO (gatilho · SL · TP · R:R) que morava embaixo desta
+             desceu pro card da análise que a produz — o Setup123 —, na coluna de
+             contexto: aquela fila de níveis nunca foi um assunto do cabeçalho, era o
+             conteúdo de UMA das duas leituras que a tela desenha. A cotação continua
+             aqui porque é a ÂNCORA contra a qual as duas leituras se medem: não
+             pertence a nenhuma delas. -->
+        <div class="result-info">
           <div class="head-levels hidden" id="headLevels">
             <div class="head-price hidden" id="headPrice"></div>
           </div>
         </div>
+        <!-- Metadado de PRODUÇÃO (data · tipo · método por extenso · custo · tempo):
+             não decide nada, é rastro de execução — quem opera não repete o método
+             já grande no badge acima nem confere o custo (é sempre $0 nos métodos
+             estruturais). Fica num detalhe fechado por padrão (task 037): nenhum
+             dado é perdido, só sai do caminho até o gráfico — o que mais dói no
+             celular, onde esta fileira comia a dobra inteira. -->
+        <details class="result-meta-detail" id="resultMetaDetail">
+          <summary class="result-meta-summary">Detalhes da execução</summary>
+          <div class="result-meta" id="resultMeta"></div>
+        </details>
         <!-- Carimbo do veredito (task 016): quando os insumos tinham inconsistência
              na hora da decisão, o juiz recebeu os DADOS VERIFICADOS e decidiu com
              eles — e o veredito sai avisado, com a lista. -->

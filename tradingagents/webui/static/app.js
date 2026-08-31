@@ -935,14 +935,17 @@ function _hasAnyReport(r) {
     "trader_plan", "risk_decision"].some((k) => (r[k] || "").toString().trim());
 }
 
-// Linha de metadados (data · tipo · custo · tempo · conclusão) — mesma do sucesso.
+// Linha de metadados (data+conclusão · tipo · custo · tempo) — mesma do sucesso.
+// Data da análise e o carimbo de quando parou são quase o mesmo dado (task 037):
+// viram UMA unidade em vez de duas quase-iguais competindo por atenção.
 function resultMetaHtml(snap) {
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
-  return `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
+  return `<span>Análise <b>${escapeHtml(snap.date || "")}</b>` +
+      (finished ? ` · interrompida <b>${fmtStamp(finished, true)}</b>` : "") +
+    `</span>` +
     `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
-    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
-    (finished ? `<span>Interrompido <b>${fmtStamp(finished, true)}</b></span>` : "");
+    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>`;
 }
 
 // Banner do erro PARCIAL: nomeia a etapa que falhou, diz que o resto está preservado
@@ -1153,16 +1156,19 @@ function renderResult(snap) {
   $("verdictBadge").innerHTML = estrutural
     ? escapeHtml(methodLabel(_openMethod)) : verdictHtml(r.verdict);
   renderVerdictCaveat(r.verdict_caveat, r.pre_judge_findings);
+  // Data da análise + carimbo de conclusão viram UMA unidade (task 037: eram duas
+  // quase-iguais). O nome do método some daqui pros estruturais — já está grande
+  // no badge do veredito acima; a explicação longa fica só pra quem abre o detalhe.
   const finished = snap.finished_at || (snap.result && snap.result.finished_at);
   $("resultMeta").innerHTML =
-
-    `<span>Data da análise <b>${escapeHtml(snap.date || "")}</b></span>` +
+    `<span>Análise <b>${escapeHtml(snap.date || "")}</b>` +
+      (finished ? ` · concluída <b>${fmtStamp(finished, true)}</b>` : "") +
+    `</span>` +
     `<span>Tipo <b>${escapeHtml(assetPt(snap.asset_type))}</b></span>` +
     (r.storm123 ? `<span>Método <b>Storm123 + Éden — leitura estrutural, sem LLM</b></span>` : "") +
     (r.setup123 ? `<span>Método <b>Setup123 — leitura estrutural, sem LLM</b></span>` : "") +
     `<span>Custo <b>${fmtCost(snap.cost)}</b></span>` +
-    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>` +
-    (finished ? `<span>Concluído <b>${fmtStamp(finished, true)}</b></span>` : "");
+    `<span>Tempo <b>${snap.elapsed || 0}s</b></span>`;
 
   // Estado do seletor de timeframe do ativo aberto. Operabilidade é propriedade do
   // ATIVO HOJE, não um congelado da run: ação e cripto têm a escada intradiária
@@ -2040,13 +2046,29 @@ function renderHeadPrice(a, live) {
       (live.as_of ? `<span class="hp-when">${escapeHtml(live.as_of)}</span>` : "") +
       `</span>`
     : "";
+  // DISTÂNCIA entre as duas (task 037): a cotação agora contra o preço em que a
+  // análise foi lida decide se o plano ainda vale — o usuário não deveria ter que
+  // subtrair de cabeça. Só existe quando as DUAS unidades acima existem de verdade
+  // (senão não há o que distanciar) e o preço da análise não é zero.
+  const diff = (live && live.price != null && a && a.price != null && a.price)
+    ? (() => {
+        const d = live.price - a.price;
+        const pct = (d / a.price) * 100;
+        const cls = d > 0 ? "up" : (d < 0 ? "down" : "flat");
+        const arrow = d > 0 ? "▲" : (d < 0 ? "▼" : "·");
+        const sign = d > 0 ? "+" : (d < 0 ? "−" : "");
+        return `<span class="hp-unit hp-diff ${cls}"><span class="hp-k">distância</span>` +
+          `<b>${arrow} ${sign}${fmtNum(Math.abs(d))} (${sign}${pctBR(Math.abs(pct))}%)</b></span>`;
+      })()
+    : "";
   if (!analise && !atual) {
     el.classList.add("hidden"); el.innerHTML = "";
   } else {
-    // Sem separador de texto entre as duas: quem separa é a régua da .hp-ref, que
-    // tem peso visual de verdade — o "análise" solto tinha o mesmo peso do resto e
-    // por isso não separava nada, virava mais um item da lista (defeito 4).
-    el.innerHTML = atual + analise;
+    // Sem separador de texto entre as unidades: quem separa é a régua da .hp-ref/
+    // .hp-diff, que tem peso visual de verdade — o "análise" solto tinha o mesmo
+    // peso do resto e por isso não separava nada, virava mais um item da lista
+    // (defeito 4). A distância entra ENTRE agora e análise: é o que liga as duas.
+    el.innerHTML = atual + diff + analise;
     el.classList.remove("hidden");
   }
   if (box) box.classList.toggle("hidden", !el.innerHTML);
