@@ -69,12 +69,19 @@ def base(tmp_path):
 
 def _abre_scan(page, base):
     def handler(route):
-        if "/api/scan" in route.request.url and "verdicts" not in route.request.url:
+        url = route.request.url
+        if "/api/scan" in url and "verdicts" not in url and "/salvo" not in url:
             route.fulfill(status=200, content_type="application/json", body=json.dumps(_SCAN))
         else:
             route.continue_()
     page.route(re.compile(r"/api/"), handler)
     page.goto(base, wait_until="networkidle")
+    # A visão padrão passou a ser SINAIS (DA-117). Estes testes medem a visão de
+    # DADO (Cards/Lista), então ela é escolhida explicitamente — como um usuário
+    # que clicou em "Cards" faria. O `/api/scan/salvo` não é mockado: vai ao
+    # servidor de verdade, cujo results_dir é um tmp_path sem nada salvo.
+    page.evaluate("() => localStorage.setItem('td_scan_view', 'cards')")
+    page.reload(wait_until="networkidle")
     page.click("#scanOpenBtn")
     page.click("#scanRunBtn")
     page.wait_for_selector("#scanList li")
@@ -254,7 +261,8 @@ def test_rr_residual_vira_texto_honesto_e_nao_zero_cru(base):
         rr_basis="preço atual (padrão já acionado)")]
 
     def handler(route):
-        if "/api/scan" in route.request.url and "verdicts" not in route.request.url:
+        url = route.request.url
+        if "/api/scan" in url and "verdicts" not in url and "/salvo" not in url:
             route.fulfill(status=200, content_type="application/json", body=json.dumps(scan))
         else:
             route.continue_()
@@ -264,6 +272,8 @@ def test_rr_residual_vira_texto_honesto_e_nao_zero_cru(base):
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         page.route(re.compile(r"/api/"), handler)
         page.goto(base, wait_until="networkidle")
+        page.evaluate("() => localStorage.setItem('td_scan_view', 'cards')")
+        page.reload(wait_until="networkidle")
         page.click("#scanOpenBtn")
         page.click("#scanRunBtn")
         page.wait_for_selector("#scanList li")
@@ -279,7 +289,8 @@ def test_rr_residual_vira_texto_honesto_e_nao_zero_cru(base):
         page.unroute(re.compile(r"/api/"))
         page.route(re.compile(r"/api/"), lambda r: (
             r.fulfill(status=200, content_type="application/json", body=json.dumps(scan2))
-            if "/api/scan" in r.request.url and "verdicts" not in r.request.url else r.continue_()))
+            if "/api/scan" in r.request.url and "verdicts" not in r.request.url
+               and "/salvo" not in r.request.url else r.continue_()))
         page.click("#scanRunBtn")
         page.wait_for_timeout(400)
         txt2 = page.inner_text("#scanList")

@@ -7509,10 +7509,16 @@ function renderScanFilters(s) {
 // assim que se procura um papel numa lista de 20 × 3 frames. O modo fica guardado
 // no navegador: quem prefere a lista densa não escolhe de novo a cada scan.
 const _SCAN_VIEW_KEY = "td_scan_view";
+const _SCAN_VIEWS = ["sinais", "cards", "lista"];
 let _scanBusca = "";
+// SINAIS é a entrada padrão (DA-117). Quem já escolheu um modo mantém o dele — a
+// escolha do usuário é dele (mesma disciplina da DA-089); quem nunca escolheu
+// cai na visão de DECISÃO em vez da de dado.
 let _scanView = (() => {
-  try { return localStorage.getItem(_SCAN_VIEW_KEY) === "lista" ? "lista" : "cards"; }
-  catch (e) { return "cards"; }
+  try {
+    const v = localStorage.getItem(_SCAN_VIEW_KEY);
+    return _SCAN_VIEWS.indexOf(v) >= 0 ? v : "sinais";
+  } catch (e) { return "sinais"; }
 })();
 
 // Timeframe no INÍCIO da linha, na MESMA gramática da barra de controle: pill
@@ -7773,6 +7779,206 @@ function scanActionsHtml(ticker, f) {
     `</div>`;
 }
 
+
+// ================= SINAIS DE ENTRADA (DA-117) ==================================
+// A unidade é a OPORTUNIDADE — ativo + método + direção, com os frames que
+// concordam agregados —, não o par ativo×frame da tabela. O cálculo inteiro
+// (confluência, conflito, janela derivada do R:R mínimo) vive no servidor
+// (`webui/sinais.py`) e chega pronto em `data.oportunidades`: reimplementá-lo aqui
+// criaria duas definições de "vale entrar", e a que o usuário lê seria a errada.
+
+// SEÇÕES na ordem em que se decide. O conflito fica por último de propósito: ele
+// não é entrada, e não pode competir por atenção com quem é.
+const SINAL_SECOES = [
+  { key: "entrada", titulo: "Entrada agora",
+    nota: "o preço está DENTRO da janela em que o retorno ainda paga o risco" },
+  { key: "a_caminho", titulo: "A caminho",
+    nota: "o padrão existe e o preço ainda não chegou no gatilho" },
+  { key: "passou", titulo: "Fora da janela",
+    nota: "acionou, mas entrar agora não paga o risco — ou nunca pagou" },
+  { key: "conflito", titulo: "Conflito entre frames",
+    nota: "os frames do mesmo método discordam da direção — não é entrada" },
+];
+
+const SINAL_DIR_PT = { compra: "COMPRA", venda: "VENDA" };
+
+// NOVO DESDE A ÚLTIMA VISITA. O sinal que apareceu agora é a informação mais
+// perecível da tela — e a que se perde num painel que se repinta igual.
+//
+// A memória é do NAVEGADOR (localStorage), não do servidor: "desde a última vez
+// que EU olhei" é por pessoa, e o scan é público. A chave carrega o GATILHO
+// (mesma família da de-duplicação do ledger): um padrão que morreu e outro que
+// nasceu no mesmo ativo e direção são sinais diferentes, e sem o gatilho na chave
+// o segundo nunca se anunciaria.
+const _SINAIS_VISTOS_KEY = "td_sinais_vistos";
+const _SINAIS_VALIDADE_MS = 7 * 24 * 3600 * 1000;
+let _sinaisNovos = new Set();
+
+function _lerVistos() {
+  try { return JSON.parse(localStorage.getItem(_SINAIS_VISTOS_KEY) || "{}") || {}; }
+  catch (e) { return {}; }
+}
+
+// Calcula o que é novo E registra a visita. Roda UMA vez por payload: repintar
+// (filtro, busca, troca de modo) não pode apagar as marcas do que acabou de
+// chegar — foi para isso que a marcação saiu do render.
+function marcarSinaisNovos(ops) {
+  const vistos = _lerVistos();
+  const primeira = Object.keys(vistos).length === 0;
+  const agora = Date.now();
+  const novos = new Set();
+  (ops || []).forEach((o) => {
+    // PRIMEIRA visita não marca nada: com a memória vazia, "novo" seria a lista
+    // inteira — um alarme que não distingue nada de nada.
+    if (!primeira && !(o.chave in vistos)) novos.add(o.chave);
+    vistos[o.chave] = agora;
+  });
+  Object.keys(vistos).forEach((k) => {
+    if (agora - vistos[k] > _SINAIS_VALIDADE_MS) delete vistos[k];
+  });
+  try { localStorage.setItem(_SINAIS_VISTOS_KEY, JSON.stringify(vistos)); }
+  catch (e) { /* quota: perde-se a memória, não a tela */ }
+  _sinaisNovos = novos;
+}
+
+function sinalPreco(v) {
+  return v == null ? "—" : Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+// A JANELA em palavras. O limite não vai sozinho: um número sem o porquê vira
+// mais um nível pra decorar, e o porquê é a coisa nova que esta tela traz.
+function sinalJanelaHtml(o) {
+  const j = o.janela;
+  if (!j) {
+    return `<div class="sn-janela sem"><span class="sn-rot">janela</span>` +
+      `<span class="sn-motivo">sem alvo publicado — não dá pra medir até onde ainda paga</span></div>`;
+  }
+  if (!j.existe) {
+    return `<div class="sn-janela sem"><span class="sn-rot">janela</span>` +
+      `<span class="sn-motivo">${escapeHtml(j.motivo)}</span></div>`;
+  }
+  const cls = (j.estado === "aberta" ? "aberta" : j.estado === "fechada" ? "fechada" : "espera") +
+    ` ${escapeHtml(o.direcao || "")}`;
+  // O LADO ruim do limite depende da direção, e trocá-lo inverte o conselho: na
+  // compra entrar mais CARO piora o R:R; na venda, entrar mais BARATO. Uma frase
+  // só, com "acima"/"abaixo" fixo, dizia o contrário do certo em metade dos cards.
+  const venda = o.direcao === "venda";
+  const ladoRuim = venda ? "abaixo" : "acima";
+  const nota = j.estado === "aberta"
+    ? `${ladoRuim} de <b>${sinalPreco(j.limite)}</b> o retorno não paga o risco`
+    : j.estado === "fechada"
+      ? `o preço ${venda ? "caiu abaixo" : "passou"} de <b>${sinalPreco(j.limite)}</b> — ` +
+        `entrar agora não paga o risco`
+      : `abre quando o preço tocar <b>${sinalPreco(j.gatilho)}</b>`;
+  const larg = j.largura_pct != null
+    ? `<span class="sn-larg" title="largura da janela em % do gatilho">${pctBR(j.largura_pct * 100)}%</span>`
+    : "";
+  return `<div class="sn-janela ${cls}"><span class="sn-rot">janela</span>` +
+    `<b class="sn-faixa">${sinalPreco(j.de)} a ${sinalPreco(j.ate)}</b>${larg}` +
+    `<span class="sn-motivo">${nota}</span></div>`;
+}
+
+function sinalNiveisHtml(o) {
+  if (o.gatilho == null) return "";
+  return `<div class="sn-niveis">` +
+    `<span>gatilho <b>${sinalPreco(o.gatilho)}</b></span>` +
+    (o.sl != null ? `<span>SL <b>${sinalPreco(o.sl)}</b></span>` : "") +
+    (o.tp != null ? `<span>TP <b>${sinalPreco(o.tp)}</b></span>` : "") +
+    (o.rr_gatilho != null
+      ? `<span title="R:R de quem entra exatamente no gatilho">R:R no gatilho <b>${o.rr_gatilho.toFixed(2)}</b></span>`
+      : "") +
+    (o.preco != null ? `<span class="sn-agora">preço <b>${sinalPreco(o.preco)}</b></span>` : "") +
+    `</div>`;
+}
+
+// CONFLUÊNCIA de relance: os frames que concordam, escritos, e quantos são. É o
+// cruzamento de linhas que a tabela obrigava a fazer com o olho.
+function sinalFramesHtml(o) {
+  const chips = (o.frames || []).map(
+    (f) => `<span class="sn-frame">${escapeHtml(tfCurto(f) || f)}</span>`).join("");
+  const n = o.confluencia || 0;
+  const quantos = n > 1
+    ? `<span class="sn-conf forte">${n} frames concordam</span>`
+    : `<span class="sn-conf">1 frame</span>`;
+  return `<div class="sn-frames">${chips}${quantos}</div>`;
+}
+
+function sinalDissidentesHtml(o) {
+  const d = o.dissidentes || [];
+  if (!d.length) return "";
+  const txt = d.map((x) => `${escapeHtml(tfCurto(x.frame) || x.frame)} tinha ` +
+    `${escapeHtml(SINAL_DIR_PT[x.direcao] || x.direcao)}, invalidado`).join(" · ");
+  return `<div class="sn-dissidente">${txt}</div>`;
+}
+
+function sinalOutroMetodoHtml(o) {
+  const m = o.outro_metodo;
+  if (!m || !m.direcao || m.direcao === o.direcao) return "";
+  return `<div class="sn-outro">o <b>${escapeHtml(m.metodo_rotulo)}</b> lê ` +
+    `${escapeHtml(SINAL_DIR_PT[m.direcao] || m.direcao)} neste ativo</div>`;
+}
+
+function sinalConflitoHtml(o) {
+  const lados = (o.lados || []).map((l) =>
+    `<div class="sn-lado"><b>${escapeHtml(SINAL_DIR_PT[l.direcao] || l.direcao)}</b>` +
+    `<span class="sn-lado-frames">${(l.frames || []).map(
+      (f) => `<span class="sn-frame">${escapeHtml(tfCurto(f) || f)}</span>`).join("")}</span></div>`).join("");
+  return `<div class="sn-conflito">${lados}` +
+    `<div class="sn-motivo">os frames do mesmo método apontam para lados opostos — ` +
+    `sem níveis aqui, porque não há um lado a operar</div></div>` +
+    sinalDissidentesHtml(o);
+}
+
+function sinalCardHtml(o) {
+  const novo = _sinaisNovos.has(o.chave)
+    ? `<span class="sn-novo" title="apareceu desde a última vez que você olhou">NOVO</span>` : "";
+  const dir = o.direcao
+    ? `<span class="sn-dir ${escapeHtml(o.direcao)}">${escapeHtml(SINAL_DIR_PT[o.direcao] || o.direcao)}</span>`
+    : `<span class="sn-dir conflito">CONFLITO</span>`;
+  const corpo = o.estado === "conflito"
+    ? sinalConflitoHtml(o)
+    : sinalFramesHtml(o) + sinalJanelaHtml(o) + sinalNiveisHtml(o) +
+      sinalDissidentesHtml(o) + sinalOutroMetodoHtml(o) +
+      (o.aviso ? `<div class="sn-aviso">${escapeHtml(o.aviso)}</div>` : "") +
+      (o.estado === "entrada" ? sinalAcoesHtml(o) : "");
+  return `<li class="sn-card ${escapeHtml(o.estado)} ${escapeHtml(o.direcao || "")}">` +
+    `<div class="sn-head">` +
+    `<b class="sn-tk" data-open="${escapeHtml(o.ticker)}|${escapeHtml(o.frame_lider || "")}">${escapeHtml(o.ticker)}</b>` +
+    dir +
+    `<span class="sn-metodo">${escapeHtml(o.metodo_rotulo)}</span>` + novo +
+    `</div>` + corpo + `</li>`;
+}
+
+function sinalAcoesHtml(o) {
+  const f = o.frame_lider || "";
+  return `<div class="scan-actions-row">` +
+    `<button type="button" class="scan-go" data-go="${escapeHtml(o.ticker)}|${escapeHtml(f)}|padrao">Analisar Padrão</button>` +
+    `<button type="button" class="scan-go erick" data-go="${escapeHtml(o.ticker)}|${escapeHtml(f)}|erick">Analisar Erick</button>` +
+    `</div>`;
+}
+
+// A lista de SINAIS, em seções. Seção vazia não aparece — cabeçalho sem conteúdo
+// embaixo é ruído, e a ausência já está dita pelo que sobrou na tela.
+function renderSinais(ul, ops) {
+  const busca = _scanBusca;
+  const vis = (ops || []).filter((o) => !busca || (o.ticker || "").toUpperCase().includes(busca));
+  if (!vis.length) {
+    ul.innerHTML = `<li class="scan-vazio">` + (ops && ops.length
+      ? `nada casa com <b>${escapeHtml(busca)}</b>`
+      : `nenhuma leitura viva na watchlist — todos os padrões invalidados, sem setup ou sem dado`) +
+      `</li>`;
+    return;
+  }
+  ul.innerHTML = SINAL_SECOES.map((sec) => {
+    const doGrupo = vis.filter((o) => o.estado === sec.key);
+    if (!doGrupo.length) return "";
+    return `<li class="sn-secao"><span class="sn-secao-tit">${escapeHtml(sec.titulo)}</span>` +
+      `<span class="sn-secao-n">${doGrupo.length}</span>` +
+      `<span class="sn-secao-nota">${escapeHtml(sec.nota)}</span></li>` +
+      doGrupo.map(sinalCardHtml).join("");
+  }).join("");
+}
+
 // Liga a busca e o alternador de modo UMA vez (a lista é repintada a cada filtro).
 let _scanToolsBound = false;
 function bindScanTools() {
@@ -7784,7 +7990,7 @@ function bindScanTools() {
     if (_scanData) paintScan(_scanData);
   });
   document.querySelectorAll(".scan-view").forEach((b) => b.addEventListener("click", () => {
-    _scanView = b.dataset.view === "lista" ? "lista" : "cards";
+    _scanView = _SCAN_VIEWS.indexOf(b.dataset.view) >= 0 ? b.dataset.view : "sinais";
     try { localStorage.setItem(_SCAN_VIEW_KEY, _scanView); } catch (e) { /* quota */ }
     if (_scanData) paintScan(_scanData);
   }));
@@ -7795,7 +8001,12 @@ function paintScan(data) {
   // re-pintam com a MESMA referência e não podem rejuvenescer o carimbo. E o
   // carimbo é o do SERVIDOR (`gerado_em`), não o relógio de quando chegou —
   // senão o scan lido do disco na abertura nasceria com a hora de agora.
-  if (data !== _scanData) _scanAt = scanQuando(data);
+  const dadoNovo = data !== _scanData;
+  if (dadoNovo) _scanAt = scanQuando(data);
+  // O "novo desde a última visita" é calculado UMA vez por payload. Fazê-lo no
+  // render apagaria as marcas ao trocar de filtro ou de modo — e a marca some
+  // justamente quando o usuário está olhando.
+  if (dadoNovo) marcarSinaisNovos(data.oportunidades);
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
   const s = data.resumo || {};
   $("scanSummary").innerHTML =
@@ -7816,6 +8027,22 @@ function paintScan(data) {
     b.classList.toggle("is-active", b.dataset.view === _scanView));
   const ul = $("scanList");
   ul.classList.toggle("is-lista", _scanView === "lista");
+  ul.classList.toggle("is-sinais", _scanView === "sinais");
+  if (_scanView === "sinais") {
+    // Os chips de estado são do DADO (em gatilho / formando / invalidou). Deixá-los
+    // ligados aqui daria dois jeitos de esconder a mesma linha, com vocabulários
+    // diferentes — o das seções e o dos chips.
+    const chips = $("scanFilters");
+    if (chips) { chips.classList.add("hidden"); }
+    // A visão de DECISÃO não usa o filtro por estado do gatilho (que é do dado):
+    // aqui a organização é por seção — entrada, a caminho, fora da janela,
+    // conflito —, e um segundo filtro por cima dela só criaria dois jeitos de
+    // esconder a mesma linha.
+    renderSinais(ul, data.oportunidades);
+    scanLegenda(false);
+    ligaAcoesDoScan(ul);
+    return;
+  }
   // Filtro de estado (chips) + busca por sigla. Os dois se somam.
   const ativos = (data.ativos || []).filter((a) =>
     (!_scanEstadoFilter || (a.melhor || {}).estado === _scanEstadoFilter) &&
@@ -7865,6 +8092,13 @@ function paintScan(data) {
       `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;
     scanLegenda(false);   // a legenda é do marcador da TABELA; em cards não há tabela
   }
+  ligaAcoesDoScan(ul);
+}
+
+// Os cliques de "abrir a análise" — os mesmos nas três visões. Extraído porque a
+// visão de SINAIS retorna antes do corpo da tabela e precisava do mesmo comportamento;
+// uma segunda cópia divergiria no dia em que o atalho mudasse.
+function ligaAcoesDoScan(ul) {
   ul.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", (ev) => {
     ev.stopPropagation();   // não dispara o data-open do frame-row pai
     const [tk, frame, method] = b.dataset.go.split("|");

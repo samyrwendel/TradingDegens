@@ -26,7 +26,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
-from tradingagents.webui import agenda, ask as ask_module, execucao, timeutil
+from tradingagents.webui import agenda, ask as ask_module, execucao, sinais, timeutil
 from tradingagents.webui.compare import (
     build_column,
     confront_pair_valid,
@@ -2687,6 +2687,11 @@ class AnalysisRunner:
             # dentro do lock — sem mudar um byte do arquivo. Esta varredura é
             # COMPLETA (a watchlist inteira), e é isso que ``completa=True`` afirma.
             self._guardar_ultimo(result, universo=tickers, completa=True)
+            # As OPORTUNIDADES (a leitura de DECISÃO da varredura) são derivadas,
+            # não guardadas: o último conhecido mistura passadas e precisa
+            # recalculá-las sobre o conjunto mesclado. Aqui elas viajam no memo
+            # junto do resultado — é aritmética pura sobre ~60 linhas.
+            result["oportunidades"] = sinais.oportunidades(result)
             self._scan_memo = (date, time.time(), result)
             return result
 
@@ -2846,7 +2851,13 @@ class AnalysisRunner:
         comportamento de primeira carga, que diz "varrendo…" em vez de mostrar
         uma lista vazia que se leria como "não há nada em gatilho".
         """
-        return self.scan_snapshot.get()
+        salvo = self.scan_snapshot.get()
+        if salvo.get("ativos"):
+            # Derivadas na SAÍDA, nunca no arquivo: o último conhecido funde
+            # passadas diferentes, e uma lista de oportunidades gravada junto
+            # descreveria o conjunto de quando foi gravada, não o de agora.
+            salvo["oportunidades"] = sinais.oportunidades(salvo)
+        return salvo
 
     def scan_track_record(self, date: str) -> dict[str, Any]:
         """Re-avalia os gatilhos logados contra o preço da data dada.

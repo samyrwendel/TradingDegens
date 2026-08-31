@@ -145,6 +145,11 @@ _ESTADO = """() => ({
 
 def _abre_com_portao(page, url):
     page.goto(url, wait_until="networkidle")
+    # A visão padrão passou a ser SINAIS (DA-117). Este arquivo mede o CARIMBO e a
+    # cobertura por ativo, que vivem na visão de DADO (o ticker é `.scan-tk`), então
+    # ela é escolhida explicitamente.
+    page.evaluate("() => localStorage.setItem('td_scan_view', 'cards')")
+    page.reload(wait_until="networkidle")
     page.evaluate(_PORTAO)
     page.click("#scanOpenBtn")
 
@@ -268,6 +273,8 @@ def test_no_celular_o_carimbo_cabe_e_nao_estoura(base):
                                   timezone_id="America/Manaus")
         page = ctx.new_page()
         page.goto(url, wait_until="networkidle")
+        page.evaluate("() => localStorage.setItem('td_scan_view', 'cards')")
+        page.reload(wait_until="networkidle")
         page.evaluate(_PORTAO)
         # No celular a lista de observação nasce RECOLHIDA (syncHistoryCollapse
         # fecha o <details> abaixo de 900px), e o botão do scan mora dentro dela.

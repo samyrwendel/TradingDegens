@@ -96,6 +96,12 @@ def _abre(page, base, payload=_SCAN):
             route.continue_()
     page.route(re.compile(r"/api/"), handler)
     page.goto(base, wait_until="networkidle")
+    # A visão padrão passou a ser SINAIS (DA-117). Este arquivo mede a
+    # preservação do resultado na visão de DADO, então ela é escolhida
+    # explicitamente — o assunto do teste é o dado que fica na tela, não
+    # qual apresentação está ativa.
+    page.evaluate("() => localStorage.setItem('td_scan_view', 'cards')")
+    page.reload(wait_until="networkidle")
     page.click("#scanOpenBtn")
     page.click("#scanRunBtn")
     page.wait_for_selector("#scanList li")
@@ -214,6 +220,8 @@ def test_primeira_carga_sem_anterior_mostra_a_varredura_e_nao_inventa_lista(base
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         page.goto(base, wait_until="networkidle")
+        page.evaluate("() => localStorage.setItem('td_scan_view', 'cards')")
+        page.reload(wait_until="networkidle")
         # O portão entra ANTES de abrir o painel: `openScanPanel` já dispara o
         # primeiro `runScan`, então é ELE a primeira carga — abrir e só depois
         # represar já teria um "anterior" na mão e o teste testaria outra coisa.

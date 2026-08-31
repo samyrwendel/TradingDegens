@@ -516,7 +516,12 @@
           <input type="search" id="scanSearch" class="scan-search" autocomplete="off"
                  placeholder="filtrar por ativo (ex.: NVDA, BTC)" aria-label="Filtrar os resultados do scan" />
           <div class="scan-views" role="group" aria-label="Modo de apresentação do scan">
-            <button type="button" class="scan-view is-active" data-view="cards" title="Agrupado por ativo">Cards</button>
+            <!-- SINAIS é a entrada padrão (DA-117): a unidade é a OPORTUNIDADE
+                 (ativo + método + direção, com os frames que concordam), não o par
+                 ativo×frame. Cards e Lista continuam: são a visão de DADO, e
+                 alguém vai querer conferir linha por linha. -->
+            <button type="button" class="scan-view is-active" data-view="sinais" title="Oportunidades: confluência de frames, conflito e janela de entrada">Sinais</button>
+            <button type="button" class="scan-view" data-view="cards" title="Agrupado por ativo">Cards</button>
             <button type="button" class="scan-view" data-view="lista" title="Uma linha por ativo e frame">Lista</button>
           </div>
         </div>

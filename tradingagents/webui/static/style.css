@@ -2782,3 +2782,112 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .scan-go:hover { color: #fff; border-color: var(--accent); background: var(--panel); }
 .scan-track { margin-top: 10px; }
 .ghost-btn { opacity: .8; }
+
+/* ============ SINAIS DE ENTRADA (DA-117) ====================================
+   A visão de DECISÃO. Card QUADRADO, superfície chapada, hairline de 1px
+   (DA-078 regras 1 e 2). Cor SÓ semântica: verde = compra/alta, vermelho =
+   venda/baixa; conflito, aviso e "novo" se resolvem com PALAVRA e peso, não com
+   cor nova (regra 3). Rótulo pequeno e cinza, valor proeminente (regra 5).
+   Números tabulares (regra 6). O conteúdo agrupa à esquerda; espaço livre sobra
+   na ponta, nunca um rasgo no meio (regra 11). */
+.scan-list.is-sinais { grid-template-columns: 1fr; gap: 0; }
+@container (min-width: 900px) {
+  .scan-list.is-sinais { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* O cabeçalho de seção atravessa as duas colunas: é ele que separa os grupos, e
+     meio cabeçalho por coluna quebraria a leitura de cima pra baixo. */
+  .scan-list.is-sinais .sn-secao { grid-column: 1 / -1; }
+}
+
+/* Cabeçalho de seção: TÍTULO grande, contagem, e a NOTA que diz o que o grupo
+   significa — a organização é o produto aqui, e um título sozinho não organiza. */
+.sn-secao {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 14px 0 6px; padding: 0 0 5px; border-bottom: 1px solid var(--border);
+}
+.sn-secao:first-child { margin-top: 2px; }
+.sn-secao-tit {
+  font-size: var(--fs-14); font-weight: var(--fw-bold); color: var(--text);
+  text-transform: uppercase; letter-spacing: .6px;
+}
+.sn-secao-n { font-size: var(--fs-14); font-weight: var(--fw-bold); color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.sn-secao-nota { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+
+.sn-card {
+  padding: 10px; margin: 0 0 6px; border-radius: 0;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+}
+/* Só a ENTRADA ganha a cor da direção na borda: é a única linha em que a cor
+   afirma algo acionável. "A caminho" e "fora da janela" ficam em cinza — colorir
+   tudo faria a cor deixar de significar. */
+.sn-card.entrada.compra { border-left-color: var(--green); }
+.sn-card.entrada.venda { border-left-color: var(--red); }
+.sn-card.conflito { border-left-color: var(--muted); }
+
+.sn-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.sn-tk {
+  font-size: var(--fs-16); line-height: var(--lh-16); font-weight: var(--fw-bold);
+  color: var(--text); cursor: pointer;
+}
+.sn-tk:hover { color: var(--accent); }
+.sn-dir { font-size: var(--fs-12); font-weight: var(--fw-bold); letter-spacing: .5px; color: var(--muted); }
+.sn-dir.compra { color: var(--green); }
+.sn-dir.venda { color: var(--red); }
+.sn-dir.conflito { color: var(--text); }
+.sn-metodo { font-size: var(--fs-12); color: var(--muted); }
+/* NOVO desde a última visita: palavra em caixa alta com moldura hairline. Sem cor
+   nova — o destaque vem de ser a única coisa emoldurada na linha. */
+.sn-novo {
+  margin-left: auto; font-size: var(--fs-10); line-height: 1; font-weight: var(--fw-bold);
+  letter-spacing: .8px; color: var(--text); border: 1px solid var(--border);
+  padding: 3px 5px; border-radius: 0;
+}
+
+/* CONFLUÊNCIA: os frames que concordam, e quantos são. */
+.sn-frames { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
+.sn-frame {
+  font-family: var(--mono); font-size: var(--fs-10); line-height: 1;
+  color: var(--text); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 0; padding: 3px 5px;
+}
+.sn-conf { font-size: var(--fs-12); color: var(--muted); }
+.sn-conf.forte { color: var(--text); font-weight: var(--fw-bold); }
+
+/* A JANELA. O rótulo é pequeno e cinza; a faixa é o valor grande; o motivo vai
+   embaixo, em palavras — o número sozinho vira mais um nível pra decorar. */
+.sn-janela { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  padding: 6px 0; border-top: 1px solid var(--border); }
+.sn-rot { font-size: var(--fs-10); line-height: 1; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--muted); }
+.sn-faixa { font-size: var(--fs-14); font-weight: var(--fw-bold); color: var(--text);
+  font-variant-numeric: tabular-nums; }
+/* A faixa aberta ganha a cor da DIREÇÃO (verde compra, vermelho venda) — a mesma
+   gramática do resto da tela (DA-078 regra 3). A classe da direção vai NO
+   elemento da janela, não no card: sem ela toda janela saía verde, inclusive as
+   de venda. */
+.sn-janela.aberta.compra .sn-faixa { color: var(--green); }
+.sn-janela.aberta.venda .sn-faixa { color: var(--red); }
+.sn-larg { font-size: var(--fs-10); color: var(--muted); font-variant-numeric: tabular-nums; }
+.sn-motivo { flex: 1 1 100%; font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+.sn-motivo b { color: var(--text); font-variant-numeric: tabular-nums; }
+.sn-janela.sem .sn-motivo, .sn-janela.fechada .sn-motivo { color: var(--muted); }
+
+.sn-niveis { display: flex; gap: 10px; flex-wrap: wrap; font-size: var(--fs-12);
+  line-height: var(--lh-12); color: var(--muted); padding-top: 4px; }
+.sn-niveis b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: var(--fw-bold); }
+.sn-agora b { color: var(--text); }
+
+.sn-dissidente, .sn-outro, .sn-aviso {
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); padding-top: 5px;
+}
+.sn-outro b { color: var(--text); }
+.sn-aviso { color: var(--text); }
+
+/* CONFLITO: os dois lados, um por linha, com os frames de cada um. Sem níveis —
+   não há um lado a operar, e publicar números aqui convidaria a escolher um. */
+.sn-conflito { padding-top: 4px; border-top: 1px solid var(--border); }
+.sn-lado { display: flex; align-items: center; gap: 6px; padding: 3px 0;
+  font-size: var(--fs-12); }
+.sn-lado b { color: var(--text); letter-spacing: .5px; }
+.sn-lado-frames { display: inline-flex; gap: 4px; }
