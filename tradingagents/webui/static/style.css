@@ -1369,6 +1369,163 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    Card QUADRADO e CHAPADO (DA-070): o raio é o token único de card do projeto e
    não existe degradê nenhum — a cor que aparece aqui é ESTADO, não textura.
    =========================================================================== */
+/* ═══════════════════ A ESCADA — OS CINCO FRAMES DE UMA VEZ ══════════════════
+   (task 20260831-012) Uma TABELA, não cinco cards: o pedido é COMPARAR, e comparar
+   é descer a coluna. Mesma decisão (e mesma técnica) da lista do scan — grade com
+   template FIXO em todas as linhas, `minmax` guardando o piso, e a linha voltando a
+   quebrar quando a largura não comporta a coluna de verdade.
+
+   O peso visual é o que separa as três coisas que a tela costumava embaralhar:
+   VEREDITO (contraste cheio + barra azul de identidade), ABERTO (contorno, é
+   navegação) e EXPLORATÓRIO (apagado). A cor de PREÇO (verde/vermelho) fica
+   reservada pra direção do setup, como manda a DA-078 — gastar verde em "este é o
+   oficial" faria a tela dizer alta onde queria dizer autoridade. */
+.escada {
+  container-type: inline-size;
+  grid-column: 1 / -1;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); padding: 9px 11px 11px; margin: 0; min-width: 0;
+}
+.es-topo { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.es-topo .section-title { margin: 0; }
+.es-custo {
+  margin-left: auto; color: var(--muted);
+  font-size: var(--fs-10); line-height: var(--lh-10); font-variant-numeric: tabular-nums;
+}
+/* O RESUMO: tese × timing, e se estão de acordo. É a única linha que AGREGA — e
+   agrega direções já computadas, não um sexto veredito. */
+.es-resumo { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin: 7px 0 5px; }
+.es-grupo { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.es-gk {
+  font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase;
+  letter-spacing: .5px; color: var(--muted); font-weight: var(--fw-bold);
+}
+.es-gf { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--dim); }
+.es-gv { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text); }
+.es-gv.compra { color: var(--green); }
+.es-gv.venda { color: var(--red); }
+.es-acordo {
+  font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase;
+  letter-spacing: .5px; font-weight: var(--fw-bold); color: var(--text);
+  border: 1px solid var(--border); padding: 1px 6px; border-radius: var(--radius);
+}
+/* "em conflito" NÃO é vermelho: vermelho é queda de preço nesta tela. O conflito é
+   um fato sobre as leituras, e quem o carrega é a palavra + a borda mais forte. */
+.es-acordo.conflito { border-color: var(--text); }
+.es-acordo.ok { color: var(--muted); border-color: var(--border); }
+.es-nota {
+  margin: 0 0 7px; color: var(--muted);
+  font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.es-nota b { color: var(--text); }
+/* A GRADE. Pisos somam 44+78+104+52+64+64+72+52 = 530 + 7 gaps de 10 + 16 de
+   padding = 616: abaixo disso a tabela deixa de ser tabela (regra embaixo). */
+.es-head-row, .es-row {
+  display: grid; align-items: center; gap: 0 10px;
+  grid-template-columns:
+    44px                     /* frame   */
+    minmax(78px, 0.9fr)      /* papel   */
+    minmax(104px, 1.1fr)     /* estado  */
+    minmax(52px, 0.7fr)      /* dist    */
+    minmax(64px, 1fr)        /* gatilho */
+    minmax(64px, 1fr)        /* SL      */
+    minmax(72px, 1.2fr)      /* TP      */
+    minmax(52px, 0.8fr);     /* R:R     */
+}
+.es-head-row {
+  padding: 2px 8px 4px; font-size: var(--fs-10); line-height: var(--lh-10);
+  text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+  border-left: 3px solid transparent;
+}
+.es-head-row .es-col:nth-child(n+4) { text-align: right; }
+.es-rows { display: flex; flex-direction: column; gap: 2px; }
+.es-row {
+  width: 100%; text-align: left; cursor: pointer; font: inherit;
+  padding: 6px 8px; border: 0; border-left: 3px solid var(--border);
+  border-radius: 0; background: var(--panel-2); color: var(--text);
+  font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.es-row:hover { background: #202020; }
+.es-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.es-cell {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.es-cell.num { text-align: right; }
+.es-cell.num b { font-variant-numeric: tabular-nums; }
+.es-tf { display: flex; align-items: baseline; gap: 4px; }
+.es-tf b { font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-bold); }
+/* O nome por extenso só aparece quando a linha quebra (lá o "S" sozinho não diz
+   nada); na tabela quem o traz é a coluna. */
+.es-tf-nome { display: none; color: var(--muted); font-size: var(--fs-10); }
+.es-estado .scan-chip { white-space: nowrap; }
+/* O nome da coluna DENTRO da célula: escondido (mas legível por leitor de tela —
+   isto é uma grade de `span`, não uma `table`, então não há associação automática
+   entre cabeçalho e célula) enquanto o cabeçalho existe; visível quando ele sai. */
+.es-ck {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+.es-motivo { color: var(--muted); }
+.es-motivo b { color: var(--text); margin-left: 4px; }
+/* Linha sem níveis: o motivo toma as quatro colunas de número (gatilho→R:R) em vez
+   de ser espremido em uma. O início é EXPLÍCITO (linha 5 da grade de 8 colunas):
+   com `grid-column-end: -1` e início automático o item ganharia span 1 e cairia na
+   ÚLTIMA coluna — foi o que jogou "invalidação 0,79" pra debaixo do cabeçalho TP. */
+.es-cell.es-fim { grid-column: 5 / -1; text-align: left; white-space: normal; }
+/* R:R abaixo de 1 fora do peso do número bom — nunca verde (invariante 7). */
+.es-rr-baixo b { color: var(--muted); font-weight: var(--fw-med); }
+
+/* O PAPEL de cada linha, escrito. É o campo que a spec chama de "qual tupla é o
+   veredito" — e ele é TEXTO, não só cor, porque a cor já trabalha pro preço. */
+.es-papel {
+  font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase;
+  letter-spacing: .5px; font-weight: var(--fw-bold); white-space: nowrap;
+}
+.es-papel.es-vered { color: var(--accent); }
+.es-papel.es-aberto { color: var(--text); }
+.es-papel.es-explor { color: var(--dim); font-weight: var(--fw-med); }
+
+/* VEREDITO: contraste cheio e a barra da identidade (azul). Uma linha só na tabela
+   pode ter isto — é o que impede as cinco leituras de competirem. */
+.es-row.es-veredito {
+  border-left-color: var(--accent); background: #1e1e1e;
+}
+.es-row.es-veredito .es-cell b { font-weight: var(--fw-bold); }
+/* ABERTO: o frame que o gráfico desenha agora. Contorno, não preenchimento — é
+   posição de navegação, e ela não pode se parecer com autoridade de decisão. */
+.es-row.es-aberto { box-shadow: inset 0 0 0 1px var(--border); }
+/* EXPLORATÓRIO: apagado o bastante pra não competir e legível o bastante pra ser
+   lido — o mesmo tratamento que os cards já usam quando o frame não é o do veredito
+   (`.setup-cards.is-exploratorio`). */
+.es-row.es-explor { opacity: .72; }
+.es-row.es-explor:hover { opacity: 1; }
+/* PENDENTE: clicou e a resposta não chegou. O degrau se marca na hora (o clique não
+   se perde) sem que a tabela afirme que já mudou de frame. */
+.es-row.es-pendente { box-shadow: inset 0 0 0 1px var(--accent); }
+/* Sem dado: a linha FICA (frame ausente é informação), apagada e sem número. */
+.es-row.sem_dado, .es-row.sem_setup { opacity: .55; }
+.es-row.sem_dado:hover, .es-row.sem_setup:hover { opacity: .85; }
+
+/* Estreito demais pra oito colunas: a tabela vira lista de linhas quebradas, o
+   cabeçalho some (cabeçalho sem coluna embaixo mente) e o frame ganha o nome por
+   extenso. O limiar é a soma dos pisos, não gosto — ver o cálculo acima.
+   No telefone é aqui que a escada cai, e ela ENCOLHE pra caber: nada vai pra
+   trás de menu e nenhuma linha é escondida (DA-101). */
+@container (max-width: 620px) {
+  .es-head-row { display: none; }
+  .es-row { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: baseline; }
+  .es-cell { overflow: visible; text-align: left; }
+  .es-cell:empty { display: none; }
+  .es-tf-nome { display: inline; }
+  .es-row .es-cell.num { text-align: left; }
+  .es-ck {
+    position: static; width: auto; height: auto; margin: 0 3px 0 0;
+    clip-path: none; color: var(--muted); font-size: var(--fs-10);
+  }
+  .es-custo { margin-left: 0; width: 100%; }
+}
+
 /* FILEIRA de cards, não coluna (task 024). Empilhados numa coluna de 340px, os três
    cards (Storm com as duas entradas dentro, 1-2-3 e recuo à média) somavam ~870px de
    rolagem — a parede que o pedido proíbe. Lado a lado eles ficam COMPARÁVEIS de
@@ -1847,6 +2004,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* no palco o cartão do gráfico não precisa de margem própria — o gap cuida */
 .stage-main .chart-card { margin: 0; }
 .result-stage > .setup-cards { margin: 0; }
+.result-stage > .escada { margin: 0; }
 .rail-theses .section-title { margin: 4px 0 8px; }
 
 /* Telas largas: gráfico protagonista à esquerda, contexto fixo à direita.
@@ -1859,7 +2017,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
      na coluna estreita e eles voltariam a empilhar. */
   .stage-main { grid-column: 1; grid-row: 1; }
   .stage-rail { grid-column: 2; grid-row: 1; }
-  .result-stage > .setup-cards { grid-column: 1 / -1; grid-row: 2; }
+  /* A ESCADA fica na fileira INTEIRA logo abaixo do gráfico: ela é a comparação
+     entre frames E o navegador de frame, então mora colada em quem ela controla.
+     Os cards do frame aberto descem uma fileira. */
+  .result-stage > .escada { grid-column: 1 / -1; grid-row: 2; }
+  .result-stage > .setup-cards { grid-column: 1 / -1; grid-row: 3; }
   /* teses empilhadas na coluna estreita (lado a lado só quando full-width) */
   .stage-rail .theses { grid-template-columns: 1fr; }
   /* gráfico como protagonista: mais alto do que os 380px padrão */

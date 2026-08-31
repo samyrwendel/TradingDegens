@@ -1081,6 +1081,9 @@ function renderResult(snap) {
     const hasPartial = er.partial === true || _hasAnyReport(er);
     $("chartCard").classList.add("hidden");
     $("setupCards").classList.add("hidden");
+    // A ESCADA some junto: ela pertence ao resultado, e o resultado anterior ainda
+    // estar na tela sob um erro faria a análise que FALHOU parecer ter cinco leituras.
+    renderEscada(null);
     $("headPrice").classList.add("hidden");
     $("headLevels").classList.add("hidden");   // run com erro não tem gatilho nem cotação a mostrar
     $("verdictTf").classList.add("hidden");
@@ -1195,6 +1198,10 @@ function renderResult(snap) {
   _openLive = r.live_price || null;
   renderHeadPrice(r.actionable, _openLive);
   renderSetupCards(r.actionable);
+  // A ESCADA vem do RESULTADO da run (foi computada junto da análise, $0 de LLM):
+  // uma análise antiga, sem o campo, simplesmente não a mostra — nada de escada
+  // vazia nem de recomputar por trás pra fingir que sempre existiu.
+  renderEscada(r.multiframe);
   renderChartCard(r.price_chart, snap.ticker, r.actionable);
   renderTfSelector();
   carregaExecCard();
@@ -2585,6 +2592,282 @@ function renderSetupCards(a) {
   el.classList.remove("hidden");
 }
 
+// ─────────────────── A ESCADA: OS CINCO FRAMES DE UMA VEZ ───────────────────
+//
+// *"Preciso que a análise do Storm123 e Setup123 seja mais ampla e na análise
+// inicial já faça os timeframes de 15m, 1h, 4h, D e S."* É como o método funciona:
+// o frame MAIOR manda na TESE, o MENOR manda no TIMING. Até aqui a análise nascia
+// num frame só e comparar era trocar de chip cinco vezes guardando o resto na
+// cabeça — e os planos DISCORDAM de verdade entre frames (mesmo ativo, mesmo dia:
+// venda no semanal, invalidado no diário, compra no 1h).
+//
+// O QUE ISTO NÃO É: cinco cards empilhados. Cinco leituras com o mesmo peso na tela
+// é ruído, e pior — cria cinco vereditos onde há um. Aqui é uma TABELA: uma linha
+// por frame, colunas alinhadas, pra o olho DESCER a coluna e comparar (o mesmo
+// motivo pelo qual a lista do scan virou grade). Três estados de linha, e eles são
+// três coisas diferentes que a tela costumava embaralhar:
+//
+//   • VEREDITO   — a tupla que o motor elegeu. Uma só, marcada, em contraste cheio.
+//   • ABERTO     — o frame que o gráfico está desenhando AGORA. Pode não ser o do
+//                  veredito (o usuário clicou pra explorar), e por isso tem marca
+//                  PRÓPRIA: confundir "o que estou vendo" com "o que decidiu" é
+//                  exatamente o defeito que a spec de apresentação nomeia.
+//   • EXPLORATÓRIO — os demais. Legítimos de ver, ilegítimos de operar como plano.
+//
+// Frame sem candle não some e não inventa: a linha fica, o estado diz "sem dado" e
+// o motivo vai no title. Custa $0 de LLM e 1,3–1,9s a frio / 0,25–0,4s quente — os
+// cinco em paralelo (ver ``runner.leitura_multiframe``, onde a medida está inteira).
+let _escada = null;             // payload multiframe da run aberta (null = não há)
+
+// Faixa declarada em ALL_TFS (macro × intra) virando os DOIS grupos de leitura do
+// método: o macro é onde a TESE se decide, o intra é onde o TIMING se decide. Não é
+// classificação nova — é a mesma que o seletor já usa pra separar as linhas.
+const ESCADA_GRUPOS = [
+  ["macro", "Tese", "os frames maiores mandam na direção do trade"],
+  ["intra", "Timing", "os frames menores mandam na hora de entrar"],
+];
+
+// Uma linha da escada, NORMALIZADA para o método aberto. O gráfico desenha a
+// leitura que dá nome ao método (DA-088) e a escada segue a mesma regra: numa run
+// Storm123 as colunas são as do Storm; numa Setup123, as do 1-2-3 deste projeto.
+// Somar os dois na mesma coluna misturaria setups diferentes no mesmo número — o
+// que a task 008 já provou não descrever trade nenhum.
+function escadaLeitura(f, metodo) {
+  const tf = f.frame;
+  if (f.estado === "sem_dado") {
+    return { tf, estado: "sem_dado", motivo: f.motivo || "a fonte não tem candle deste ativo neste frame" };
+  }
+  if (metodo === "storm123") {
+    const st = f.storm || {};
+    return {
+      tf, estado: st.estado || "sem_setup", direction: st.direction,
+      trigger: st.trigger, sl: st.sl, tp: st.tp, rr: st.rr, rr_note: st.rr_note,
+      dist_pct: st.dist_pct, opera: st.opera, veto: st.veto,
+      entrada: st.entrada, eden: st.eden_rotulo, leituras: st.leituras,
+    };
+  }
+  return {
+    tf, estado: f.estado || "sem_setup", direction: f.direction,
+    trigger: f.trigger, sl: f.sl, tp: f.tp, rr: f.rr, rr_note: f.rr_note,
+    dist_pct: f.dist_pct, andado: f.andado_pct, invalidacao: f.invalidacao,
+    pattern_state: f.pattern_state,
+  };
+}
+
+// Uma leitura CONTA para a direção do grupo? Só quando existe padrão com direção
+// OPERÁVEL. "sem setup" e "sem dado" não votam pelo motivo óbvio; o VETADO não vota
+// pelo motivo que importa: o Éden proibiu, e o padrão continua tendo direção no
+// detector. Deixá-lo votar faria o resumo dizer "2 de 2 de venda" sobre uma tese em
+// que metade dos frames o método recusa operar — a mesma mentira de publicar o
+// gatilho dele na linha. Por isso o resumo declara de quantos frames está falando.
+function escadaVota(L) {
+  return !!L.direction && L.estado !== "sem_dado" && L.estado !== "sem_setup"
+    && L.estado !== "vetado";
+}
+
+// O RESUMO — a única coisa que a escada AFIRMA além de repetir os números. Ele só
+// agrega direções já computadas (não é um sexto veredito): diz para onde apontam os
+// frames de tese e os de timing, e se estão de acordo. Quando um grupo não tem
+// leitura nenhuma, ele DIZ isso — grupo vazio é dado ausente, não empate.
+function escadaResumoHtml(leituras) {
+  const porFaixa = {};
+  for (const [tf, , , faixa] of ALL_TFS) porFaixa[tf] = faixa || "intra";
+  const blocos = [];
+  for (const [faixa, nome, ajuda] of ESCADA_GRUPOS) {
+    const doGrupo = leituras.filter((L) => porFaixa[L.tf] === faixa);
+    if (!doGrupo.length) continue;
+    const frames = doGrupo.map((L) => tfCurto(L.tf)).join(" · ");
+    const votos = doGrupo.filter(escadaVota);
+    const compra = votos.filter((L) => L.direction === "compra").length;
+    const venda = votos.filter((L) => L.direction === "venda").length;
+    let txt;
+    let dir = null;
+    if (!votos.length) {
+      txt = `sem leitura em ${doGrupo.length === 1 ? "1 frame" : `nenhum dos ${doGrupo.length}`}`;
+    } else if (compra && venda) {
+      txt = `${compra} de compra × ${venda} de venda`;
+    } else {
+      dir = compra ? "compra" : "venda";
+      txt = `${votos.length} de ${doGrupo.length} ${compra ? "de compra" : "de venda"}`;
+    }
+    blocos.push(
+      `<span class="es-grupo" title="${escapeHtml(ajuda)}">` +
+      `<span class="es-gk">${escapeHtml(nome)}</span>` +
+      `<span class="es-gf">${escapeHtml(frames)}</span>` +
+      `<b class="es-gv${dir ? " " + dir : ""}">${escapeHtml(txt)}</b></span>`
+    );
+  }
+  // O ACORDO fala da ESCADA INTEIRA, não do par de grupos: um grupo rachado por
+  // dentro (4h de venda × 1h de compra) é discordância tanto quanto tese contra
+  // timing, e uma frase que só olhasse os dois grupos chamaria isso de nada.
+  // Exige DUAS leituras pra existir — com uma só não há o que alinhar — e some
+  // quando nenhum frame vota, porque aí a conclusão seria sobre dado ausente.
+  const votos = leituras.filter(escadaVota);
+  const lados = new Set(votos.map((L) => L.direction));
+  let acordo = "";
+  if (votos.length >= 2 && lados.size) {
+    const ok = lados.size === 1;
+    acordo = `<span class="es-acordo ${ok ? "ok" : "conflito"}" title="${escapeHtml(ok
+      ? `os ${votos.length} frames com leitura apontam para o mesmo lado — é o caso em `
+        + "que o método pede para operar a favor da tese e do timing juntos"
+      : "os frames apontam para lados opostos: a leitura de um tempo gráfico contradiz "
+        + "a de outro, e operar as duas é operar contra si mesmo")}">` +
+      `${ok ? "alinhados" : "em conflito"}</span>`;
+  }
+  return `<div class="es-resumo">${blocos.join("")}${acordo}</div>`;
+}
+
+const ESCADA_COLUNAS = [
+  ["frame", "Tempo gráfico da leitura"],
+  ["papel", "Se esta leitura é a que decidiu (veredito) ou uma leitura exploratória"],
+  ["estado", "Estado do setup naquele frame"],
+  ["dist", "Distância do preço até o gatilho"],
+  ["gatilho", "Nível que aciona a entrada"],
+  ["SL", "Stop loss"],
+  ["TP", "Alvo publicável — ou o motivo de não haver"],
+  ["R:R", "Risco/retorno"],
+];
+
+function escadaCabecalhoHtml() {
+  return `<div class="es-head-row">` + ESCADA_COLUNAS.map(([nome, ajuda]) =>
+    `<span class="es-col" title="${escapeHtml(ajuda)}">${escapeHtml(nome)}</span>`).join("") + `</div>`;
+}
+
+// O PAPEL da linha, escrito. A cor sozinha não podia carregar isto: a paleta é
+// semântica de PREÇO (verde/vermelho = alta/baixa, DA-078) e gastar verde em
+// "este é o veredito" faria a tela dizer "alta" onde queria dizer "oficial".
+function escadaPapelHtml(tf, veredito, aberto) {
+  if (tf === veredito) {
+    return `<span class="es-papel es-vered" title="${escapeHtml(
+      "o veredito desta análise foi computado neste frame — é a leitura que decidiu")}">veredito</span>`;
+  }
+  if (tf === aberto) {
+    return `<span class="es-papel es-aberto" title="${escapeHtml(
+      "o gráfico acima está desenhando este frame agora — mas quem decidiu foi o frame do veredito")}">no gráfico</span>`;
+  }
+  return `<span class="es-papel es-explor" title="${escapeHtml(
+    "leitura exploratória: legítima de ver, não é o plano da decisão")}">exploratório</span>`;
+}
+
+// Uma linha SEM níveis publicáveis (sem candle, sem padrão, invalidada, vetada pelo
+// Éden) não deixa quatro células vazias na grade: o motivo ocupa o resto da fileira
+// (`es-fim` termina na última coluna). Espremer "sem candle neste frame" na coluna
+// de 52px da distância era truncar a única informação que aquela linha tem.
+function escadaMotivoHtml(txt, title) {
+  return `<span class="es-cell es-motivo es-fim"${title ? ` title="${escapeHtml(title)}"` : ""}>` +
+    txt + `</span>`;
+}
+
+// O nome da coluna viaja DENTRO da célula (mesma técnica do `scan-ck` da lista):
+// invisível enquanto a tabela é tabela — quem nomeia a coluna ali é o cabeçalho —,
+// e visível quando a linha quebra no telefone. Número solto sem nome em cima não
+// diz nada, e é exatamente isso que acontece quando o cabeçalho sai de cena.
+function esCk(nome) {
+  return `<span class="es-ck">${escapeHtml(nome)}</span>`;
+}
+
+function escadaCelulasHtml(L) {
+  const vazia = `<span class="es-cell"></span>`;
+  const dist = L.dist_pct != null
+    ? `<span class="es-cell num">${esCk("dist")}${escapeHtml(fmtPctEscada(L.dist_pct))}</span>`
+    : vazia;
+  if (L.estado === "sem_dado") {
+    // A célula da distância sai VAZIA (não há gatilho de que se medir distância),
+    // mas EXISTE: é ela que ancora o motivo na coluna certa da grade.
+    return vazia + escadaMotivoHtml(
+      "sem candle neste frame — a fonte não cobre este tempo gráfico", L.motivo);
+  }
+  // VETADO pelo Éden: o nível existe no detector, mas a regra proíbe operar. Publicar
+  // gatilho/SL/TP aqui seria oferecer um trade que o próprio método recusa.
+  if (L.estado === "vetado") {
+    // O nome do Éden vem PRONTO do produtor (`rotulo_curto`) e às vezes já traz a
+    // palavra — "Éden de Alta" prefixado virava "Éden Éden de Alta". Prefixa só o
+    // que precisa ("armadilha"), e nunca reescreve o rótulo (DA-095: um vocabulário).
+    const nome = L.eden || "";
+    const quem = !nome ? "Éden desalinhado"
+      : /éden/i.test(nome) ? nome : `Éden ${nome}`;
+    return dist + escadaMotivoHtml(`não opera — ${escapeHtml(quem)}`,
+                                   L.veto || "o filtro Éden veta este lado");
+  }
+  if (L.estado === "sem_setup") {
+    return dist + escadaMotivoHtml("sem padrão neste frame");
+  }
+  if (L.estado === "invalidou") {
+    return dist + escadaMotivoHtml(
+      L.invalidacao != null
+        ? `invalidação <b>${scanFmt(L.invalidacao)}</b>` : "premissa rompida",
+      "premissa rompida — o preço passou do nível de invalidação");
+  }
+  const tp = L.tp != null
+    ? `<span class="es-cell num">${esCk("TP")}<b>${scanFmt(L.tp)}</b></span>`
+    : `<span class="es-cell es-motivo" title="${escapeHtml("sem alvo — " + (L.rr_note || "nível de alvo indefinido"))}">sem alvo</span>`;
+  return dist +
+    `<span class="es-cell num">${esCk("gatilho")}<b>${scanFmt(L.trigger)}</b></span>` +
+    `<span class="es-cell num">${esCk("SL")}<b>${scanFmt(L.sl)}</b></span>` + tp +
+    `<span class="es-cell num${L.rr != null && L.rr < 1 ? " es-rr-baixo" : ""}">${esCk("R:R")}` +
+    // R:R < 1 NUNCA em verde e sempre com a conta legível (invariante 7): aqui a
+    // marca é a palavra no title, porque a célula tem largura de número.
+    `${L.rr != null ? `<b title="${escapeHtml(L.rr < 1
+      ? `abaixo de 1: o risco é maior que o retorno projetado neste frame`
+      : "risco/retorno projetado do gatilho ao alvo")}">${scanFmt(L.rr)}</b>` : "—"}</span>`;
+}
+
+// Percentual da distância ao gatilho, na mesma forma que o scan usa (`_fmt_pct` no
+// backend manda `dist_txt` pronto lá; aqui a escada recebe a fração crua e escreve
+// com o mesmo desenho, pra as duas telas não terem dois jeitos de dizer "0,4%").
+function fmtPctEscada(frac) {
+  if (frac == null) return "—";
+  return (frac * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%";
+}
+
+function renderEscada(mf) {
+  const el = $("escada");
+  if (!el) return;
+  _escada = mf && Array.isArray(mf.frames) && mf.frames.length ? mf : null;
+  if (!_escada) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const metodo = mf.metodo || _openMethod || "setup123";
+  const veredito = mf.veredito || _verdictTf;
+  const leituras = mf.frames.map((f) => escadaLeitura(f, metodo));
+  const linhas = leituras.map((L) => {
+    const papel = L.tf === veredito ? "veredito" : L.tf === _tf ? "aberto" : "explor";
+    const cls = ["es-row", `es-${papel}`, L.estado || "", L.direction || "",
+                 L.tf === _tfPendente ? "es-pendente" : ""].filter(Boolean).join(" ");
+    const chip = (L.estado === "sem_dado")
+      ? `<span class="scan-chip">sem dado</span>`
+      : metodo === "storm123"
+      ? `<span class="scan-chip es-storm ${escapeHtml(L.estado)}">${escapeHtml(SCAN_STORM_ESTADO[L.estado] || L.estado)}</span>`
+      : scanEstadoChip(L.estado, L.direction, L.andado);
+    return `<button type="button" class="${cls}" data-es-tf="${escapeHtml(L.tf)}" ` +
+      `title="${escapeHtml(`Recalcular o gráfico e os cards no ${tfNome(L.tf)}`)}">` +
+      `<span class="es-cell es-tf"><b>${escapeHtml(tfCurto(L.tf))}</b>` +
+      // "S" e "D" precisam do nome por extenso quando a linha quebra e não há
+      // cabeçalho; "4h"/"1h"/"15m" já SÃO o nome — repeti-los saía "4h 4h".
+      (tfNome(L.tf) !== tfCurto(L.tf)
+        ? `<span class="es-tf-nome">${escapeHtml(tfNome(L.tf))}</span>` : "") +
+      `</span>` +
+      `<span class="es-cell es-papel-cell">${escadaPapelHtml(L.tf, veredito, _tf)}</span>` +
+      `<span class="es-cell es-estado">${chip}</span>` +
+      escadaCelulasHtml(L) + `</button>`;
+  }).join("");
+  const custo = mf.ms != null
+    ? `<span class="es-custo" title="${escapeHtml(
+        "os cinco frames vão em paralelo e leem a mesma série cacheada da análise — $0 de LLM")}">` +
+      `os ${mf.frames.length} frames em ${(mf.ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}s · $0</span>`
+    : "";
+  el.innerHTML =
+    `<div class="es-topo"><h2 class="section-title">A escada — ${escapeHtml(methodLabel(metodo))} ` +
+      `nos ${mf.frames.length} tempos gráficos</h2>${custo}</div>` +
+    escadaResumoHtml(leituras) +
+    `<p class="es-nota">O veredito é <b>um</b> frame — o ${escapeHtml(tfNome(veredito))}. ` +
+    `Os outros são leituras exploratórias do mesmo método: legítimas de ver, ` +
+    `não são o plano da decisão. Clique num degrau para o gráfico e os cards abaixo ` +
+    `passarem para ele.</p>` +
+    escadaCabecalhoHtml() + `<div class="es-rows">${linhas}</div>`;
+  el.querySelectorAll("[data-es-tf]").forEach((b) =>
+    b.addEventListener("click", () => switchTimeframe(b.dataset.esTf)));
+  el.classList.remove("hidden");
+}
+
 // ───────────────────────── CARD DE EXECUÇÃO (task 012) ──────────────────────
 //
 // "Quero um card explicando as entradas alvos como inserir as ordens e onde colocar
@@ -3436,10 +3719,13 @@ async function switchTimeframe(tf) {
   const selo = ++_tfSeq;
   _tfPendente = tf;
   renderTfSelector();                       // marca o clicado como pendente
+  renderEscada(_escada);                    // e o degrau clicado também
   hideDegrade();
   const note = $("chartNote");
   if (note) note.textContent = `Recalculando no ${tfNome(tf)}…`;
-  const encerra = () => { if (selo === _tfSeq) { _tfPendente = null; renderTfSelector(); } };
+  const encerra = () => {
+    if (selo === _tfSeq) { _tfPendente = null; renderTfSelector(); renderEscada(_escada); }
+  };
   try {
     const q = new URLSearchParams({ ticker: _openTicker, date: _openDate || "", tf, method: _openMethod || "padrao" });
     const res = await fetch("/api/chart?" + q.toString());
@@ -3461,6 +3747,10 @@ async function switchTimeframe(tf) {
     // ao trocar de frame e voltar ao trocar de novo. Ela é lembrada da run aberta.
     renderHeadPrice(data.actionable, data.live_price || _openLive);
     renderSetupCards(data.actionable);
+    // A escada NÃO se recalcula ao trocar de frame — as cinco leituras são as
+    // mesmas. O que muda é qual degrau está ABERTO, e essa marca é diferente da
+    // do veredito: "o que estou vendo" e "o que decidiu" são duas coisas.
+    renderEscada(_escada);
     renderChartCard(data.price_chart, _openTicker, data.actionable);
     carregaExecCard();          // outro frame, outro plano: o card acompanha
     if (data.degraded && data.notice) showDegrade(data.notice);

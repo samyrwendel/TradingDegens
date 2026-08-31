@@ -560,6 +560,59 @@ def fetch_storm_plan(ticker: str, date: str,
         return {}
 
 
+def leitura_multiframe(ticker: str, date: str, asset_type: str, method: str,
+                      veredito_tf: str) -> dict[str, Any]:
+    """A ESCADA — a mesma leitura estrutural nos CINCO frames, de uma passada só.
+
+    *"preciso que a análise do Storm123 e Setup123 seja mais ampla e na análise
+    inicial já faça os timeframes de 15m, 1h, 4h, D e S"*. É como o método funciona:
+    o frame MAIOR manda na tese, o MENOR no timing — e até aqui, para comparar, o
+    usuário trocava de chip cinco vezes e guardava o resto na cabeça.
+
+    Custa **$0 de LLM** (nenhum agente entra nisto). MEDIDO em símbolo nunca lido
+    (31/08): a run estrutural inteira sai de **2,5–2,7s para 3,8–4,5s** — a escada
+    em si custa 1,27–1,87s; com a série já em cache, **0,25–0,40s**. O barato vem de
+    os cinco frames irem em PARALELO e lerem a MESMA série cacheada e date-guarded
+    que o plano do frame do veredito acabou de ler (em série seriam ~5,6s).
+
+    Reusa o SCANNER de propósito: ``_frame_row`` já classifica um frame nos estados
+    que a watchlist e o track record falam (``em_gatilho``/``em_movimento``/
+    ``formando``/``invalidou``/``sem_setup``/``sem_dado``) e já traz o 1-2-3 e o
+    Storm em células separadas (DA-081). Um segundo classificador aqui daria à mesma
+    leitura dois nomes na mesma tela — o defeito que a spec de apresentação nomeia.
+
+    O ``veredito_tf`` viaja no payload mas NÃO muda a leitura de frame nenhum: ele
+    só diz qual das cinco é a tupla que decidiu (invariante 3 — o veredito tem que
+    ser distinguível de relance das exploratórias).
+
+    Frame sem candle volta ``sem_dado`` com o motivo (a fonte não tem aquele
+    símbolo/janela) — declarado, nunca inventado. Fail-open: ``{}`` em qualquer
+    erro, porque a escada é enriquecimento e não pode derrubar a análise.
+    """
+    try:
+        from tradingagents.webui.scanner import ESCADA_FRAMES, scan_symbol_frames
+
+        # A escada não inventa frame que o ativo não opera: sai da MESMA fonte de
+        # verdade do seletor e do /api/chart (``timeframes_for_asset``), na ordem
+        # canônica do maior pro menor.
+        operaveis = set(timeframes_for_asset(asset_type))
+        frames = tuple(tf for tf in ESCADA_FRAMES if tf in operaveis)
+        t0 = time.time()
+        escada = scan_symbol_frames(ticker, date, frames=frames)
+        return {
+            "veredito": veredito_tf,
+            "metodo": method,
+            "frames": escada.get("frames") or [],
+            # Tempo REAL desta passada, no payload: a decisão de manter cinco frames
+            # (em vez de três, ou sob demanda) é de quem vê o custo, não de quem
+            # promete que é barato.
+            "ms": int((time.time() - t0) * 1000),
+        }
+    except Exception:  # noqa: BLE001 — a escada nunca derruba a análise
+        logger.exception("escada multiframe falhou para %s", ticker)
+        return {}
+
+
 def plano_com_storm(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
                     method: str = "padrao") -> dict[str, Any]:
     """O plano da tela: família Padrão/Erick + a leitura do Storm SEMPRE ao lado.
@@ -1055,6 +1108,14 @@ class AnalysisRunner:
                 "setup123": not storm,
                 "storm123": storm,
                 "timeframes": timeframes_for_asset(run.asset_type),
+                # A ESCADA: a mesma leitura nos CINCO frames, já na análise inicial
+                # (ver :func:`leitura_multiframe`). Vem DEPOIS do plano do frame do
+                # veredito de propósito — a série daquele frame já está no cache, e
+                # os avisos de dado (``data_notices``, thread-local) da run
+                # continuam sendo só os da leitura que decidiu.
+                "multiframe": leitura_multiframe(
+                    run.ticker, run.date, run.asset_type, run.method, run.timeframe
+                ),
             }
             run.status = "done"
         except Exception as exc:  # noqa: BLE001 — erro vira run errada honesta

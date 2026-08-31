@@ -393,6 +393,62 @@ def scan_symbol(ticker: str, date: str, frames: tuple = SCAN_FRAMES) -> dict[str
     return {"ticker": ticker, "frames": rows, "melhor": best}
 
 
+# A ESCADA COMPLETA de UM ativo (task 20260831-012): os cinco frames que o método
+# de fato usa — o maior manda na TESE, o menor no TIMING. É a MESMA leitura do
+# scan (mesmo detector, mesmo vocabulário de estado, mesmo par 1-2-3 × Storm),
+# só que num ativo só e na escada inteira, pra a análise já nascer comparável em
+# vez de o usuário trocar de chip cinco vezes e guardar na cabeça.
+ESCADA_FRAMES = ("1w", "1d", "4h", "1h", "15m")
+
+# Paralelismo da escada de UM ativo. É I/O-bound (uma série por frame), e cinco
+# frames em série somam a latência de todos. MEDIDO (31/08, símbolo frio, mediana):
+#
+#   ============  =========  ===============
+#   cenário       em série   em paralelo (5)
+#   ============  =========  ===============
+#   frio           ~5,6s      **~2,2–3,1s**
+#   quente         ~0,5s        ~0,5s
+#   ============  =========  ===============
+#
+# Cinco workers = um por frame: não há fila, e o teto vira o frame mais lento em
+# vez da soma. Diferente do ``_SCAN_WORKERS`` (que paraleliza ATIVOS e por isso
+# tem throttle do provedor a considerar): aqui são 5 requisições de um símbolo só.
+_ESCADA_WORKERS = 5
+
+
+def scan_symbol_frames(ticker: str, date: str,
+                       frames: tuple = ESCADA_FRAMES,
+                       workers: int = _ESCADA_WORKERS) -> dict[str, Any]:
+    """A escada de UM ativo — os frames pedidos, **em paralelo**, na ordem pedida.
+
+    Irmã de :func:`scan_symbol`, com duas diferenças que só fazem sentido no caso
+    de um ativo só:
+
+    * os frames rodam **concorrentes** (o gargalo é rede, não CPU) — em
+      :func:`scan_watchlist` isso seria aninhar pool dentro de pool e multiplicar
+      o throttle, então lá o paralelismo continua sendo por ATIVO;
+    * não há ``melhor``: a escada não elege frame nenhum. Quem tem o veredito é a
+      análise que a chamou, e o resto é EXPLORATÓRIO — deixar o scanner apontar um
+      "melhor" aqui criaria um segundo veredito na mesma tela.
+
+    O preço LIVE é buscado UMA vez e compartilhado (a cotação é do ativo, não do
+    frame). Fail-open por frame, como o scan: um frame sem candle volta
+    ``sem_dado`` com o motivo, nunca um nível inventado.
+
+    ``ex.map`` preserva a ordem de entrada, então a escada sai sempre do frame
+    maior pro menor — determinística apesar do paralelismo.
+    """
+    ticker = (ticker or "").strip().upper()
+    frames = tuple(frames or ())
+    if not ticker or not frames:
+        return {"ticker": ticker, "frames": []}
+    live = _live_price(ticker)
+    n = max(1, min(workers, len(frames)))
+    with ThreadPoolExecutor(max_workers=n, thread_name_prefix="escada") as ex:
+        rows = list(ex.map(lambda tf: _frame_row(ticker, date, tf, live_price=live), frames))
+    return {"ticker": ticker, "frames": rows}
+
+
 def scan_watchlist(tickers: list[str], date: str,
                    frames: tuple = SCAN_FRAMES,
                    workers: int = _SCAN_WORKERS) -> dict[str, Any]:
