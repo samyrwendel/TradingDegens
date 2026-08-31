@@ -137,7 +137,14 @@ def test_no_telefone_os_niveis_do_plano_ficam_um_por_linha_e_nada_vaza(base, sna
 def test_no_telefone_cada_preco_tem_a_sua_linha_e_o_rotulo_vem_na_frente(base, snap, w, h):
     """Item 2: "cotação agora" e "análise" viravam sopa. No telefone o que se procura
     primeiro é QUAL é o de agora — então o rótulo lidera, uma unidade por linha, e as
-    duas encostam na ESQUERDA (à direita, cada linha começava num lugar)."""
+    duas encostam na ESQUERDA (à direita, cada linha começava num lugar).
+
+    TRÊS unidades desde o commit 185ba75 (task 037), não duas: a DISTÂNCIA entre
+    cotação e análise — antes implícita, o usuário tinha que subtrair de cabeça —
+    ganhou linha própria ENTRE as outras duas. É a mesma unidade de informação que
+    a 020 já tratava (número · o que é · alinhado à esquerda), só que agora são três
+    ao invés de duas; o contrato original (cada uma na sua linha, rótulo primeiro,
+    sem sopa) continua valendo e é o que este teste segue medindo."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = _celular(browser, w, h)
@@ -154,15 +161,18 @@ def test_no_telefone_cada_preco_tem_a_sua_linha_e_o_rotulo_vem_na_frente(base, s
             textos: un.map(e => e.innerText.replace(/\\n/g, ' ')),
           };
         }""")
-        assert len(set(m["tops"])) == 2, ("uma unidade por linha", m)
-        assert len(m["esquerdas"]) == 1, ("as duas alinhadas pela esquerda", m)
+        assert len(set(m["tops"])) == 3, ("uma unidade por linha (cotação/distância/análise)", m)
+        assert len(m["esquerdas"]) == 1, ("as três alinhadas pela esquerda", m)
         assert m["rotuloAntesDoNumero"], ("no telefone o rótulo lidera", m)
-        # a régua separava duas unidades LADO A LADO; empilhadas, ela não separa nada
+        # a régua separava as unidades LADO A LADO; empilhadas, ela não separa nada
         assert m["regua"] == "0px", m
         assert "COTAÇÃO AGORA" in m["textos"][0].upper() and "835,37" in m["textos"][0], m
-        assert "ANÁLISE" in m["textos"][1].upper() and "834,74" in m["textos"][1], m
+        # a unidade do meio é a distância explícita entre as duas (task 037): sem
+        # ela o usuário tinha que subtrair 835,37 − 834,74 de cabeça
+        assert "DISTÂNCIA" in m["textos"][1].upper() and "0,63" in m["textos"][1], m
+        assert "ANÁLISE" in m["textos"][2].upper() and "834,74" in m["textos"][2], m
         # cada carimbo continua com o SEU preço (nada foi amputado pra caber)
-        assert "29/08 20:42" in m["textos"][0] and "29/08 20:00" in m["textos"][1], m
+        assert "29/08 20:42" in m["textos"][0] and "29/08 20:00" in m["textos"][2], m
         browser.close()
 
 
@@ -311,7 +321,10 @@ def test_rr_maior_que_um_nao_vira_alarme(base, snap):
 @pytest.mark.parametrize("largura", [1500, 1280])
 def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
     """Nada do arranjo de telefone pode vazar pro desktop: a legenda continua ACIMA do
-    gráfico, a régua entre as duas unidades de preço fica e elas seguem lado a lado.
+    gráfico, a régua entre as unidades de preço fica e elas seguem lado a lado — hoje
+    TRÊS (cotação, distância, análise) desde o commit 185ba75/task 037, que deu à
+    distância uma unidade própria em vez de deixar o usuário subtrair de cabeça;
+    o empilhamento é coisa de telefone, no desktop as três continuam numa fileira só.
     (O "encostada à direita" saiu com a regra 11 da DA-078 — a tira agora flui junto
     da meta e a sobra de espaço fica no fim da fileira, não num buraco no meio.)"""
     with sync_playwright() as p:
@@ -334,8 +347,8 @@ def test_o_desktop_nao_pagou_a_conta_do_telefone(base, snap, largura):
             // outra, não o topo coincidir.
             unidadesLadoALado: (() => {
               const u = [...document.querySelectorAll('#headPrice .hp-unit')];
-              return u.length === 2
-                && u[0].getBoundingClientRect().right <= u[1].getBoundingClientRect().left + 1;
+              return u.length === 3 && u.every((el, i) => i === 0 ||
+                u[i - 1].getBoundingClientRect().right <= el.getBoundingClientRect().left + 1);
             })(),
           };
         }""")
