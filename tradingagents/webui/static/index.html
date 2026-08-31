@@ -379,6 +379,14 @@
               <!-- Reavaliar o VEREDITO no timeframe escolhido: roda uma análise real
                    com o analista de mercado lendo esse frame (o veredito pode mudar). -->
               <button type="button" class="reeval-btn hidden" id="reevalBtn"></button>
+              <!-- REVALIDAÇÃO AUTOMÁTICA (task 20260831-013): trocar de frame passa a
+                   buscar a cotação de AGORA junto dos níveis — antes ela ficava
+                   congelada no instante da run e a "distância até a análise" era
+                   calculada contra um número velho. Quando o preço andou ≥0,5% desde
+                   a análise, esta linha DIZ que revalidou e de quando é a leitura;
+                   silêncio faria o usuário achar que a tela travou. O interruptor
+                   fica aqui, ao lado — quem não quer, desliga. -->
+              <div class="reval-linha hidden" id="revalLinha"></div>
               <p class="chart-degrade hidden" id="chartDegrade"></p>
               <div class="chart-wrap">
                 <span class="chart-zoom-hint">roda = zoom · régua direita = zoom vertical · régua de baixo = zoom horizontal · arrasta = move 2 eixos · 2 cliques = reseta</span>

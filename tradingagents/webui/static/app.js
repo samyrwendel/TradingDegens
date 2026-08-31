@@ -1084,6 +1084,10 @@ function renderResult(snap) {
     // A ESCADA some junto: ela pertence ao resultado, e o resultado anterior ainda
     // estar na tela sob um erro faria a análise que FALHOU parecer ter cinco leituras.
     renderEscada(null);
+    // …e a nota de revalidação também: ela descreve uma leitura que existia.
+    _revalNota = null;
+    _openDegraded = null;       // …e a lista degradada, que é da run que não existe mais
+    $("revalLinha").classList.add("hidden");
     $("headPrice").classList.add("hidden");
     $("headLevels").classList.add("hidden");   // run com erro não tem gatilho nem cotação a mostrar
     $("verdictTf").classList.add("hidden");
@@ -1195,6 +1199,11 @@ function renderResult(snap) {
   // daí em diante (a 009 zerava a cada análise — o Samyr pediu o contrário, e ele
   // está certo: reconfigurar a cada tela é transformar preferência em tarefa).
   iniciaCamadas(r.actionable);
+  // Análise NOVA na tela: a nota de revalidação e o memo da cotação são da anterior.
+  // Manter qualquer um deles faria a tela carimbar uma hora que não é desta leitura.
+  _revalNota = null;
+  _revalCota = null;
+  _revalVoo = null;
   _openLive = r.live_price || null;
   renderHeadPrice(r.actionable, _openLive);
   renderSetupCards(r.actionable);
@@ -3465,6 +3474,9 @@ function renderTfSelector() {
   }).join("");
   bindTfSelector();
   renderReevalBtn();
+  // A linha da revalidação acompanha o seletor: onde há frame pra trocar, há o
+  // interruptor do que acontece ao trocar.
+  renderRevalLinha();
 }
 
 // Nome humano de uma entrada degradada. O backend SEMPRE manda label (os dois
@@ -3482,9 +3494,15 @@ function degradedName(d) {
 //     pelo verificador de sanidade. Dizer "feito sem" aqui seria mentira.
 // Em ambos os casos a fonte é nomeada e o motivo vai na lista. Some quando nada
 // degradou.
+// A lista degradada da run ABERTA. O banner precisa ser redesenhado quando o frame
+// muda (o rótulo do botão nomeia o frame), e o payload do /api/chart não a carrega —
+// ela é da ANÁLISE, não do timeframe.
+let _openDegraded = null;
+
 function renderDegraded(list) {
   const el = $("degradedBanner");
   if (!el) return;
+  _openDegraded = Array.isArray(list) && list.length ? list : null;
   if (!Array.isArray(list) || !list.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   const items = list.filter(Boolean);
   const suspect = items.filter((d) => d.kind === "suspect");
@@ -3515,18 +3533,26 @@ function renderDegraded(list) {
     .join("");
   // Reavaliar faz sentido nos dois casos (a fonte que caiu tende a voltar; o turno
   // sinalizado tende a sair limpo numa nova geração) — só o texto do botão muda.
-  const btnLabel = missing.length
+  //
+  // E O RÓTULO DIZ O FRAME. *"Sempre mando revalidar em um timeframe ele tá voltando
+  // para o Diário."* Estava certo: este botão rodava no frame do VEREDITO enquanto o
+  // outro rodava no da TELA — duas semânticas para a mesma palavra, e o usuário só
+  // descobria qual era pelo resultado. Agora os dois seguem o frame que está na tela
+  // e AMBOS o nomeiam, então não há o que descobrir.
+  const noFrame = ` no ${tfNome(_tf)}`;
+  const btnLabel = (missing.length
     ? `⟳ Reavaliar com ${missing.length > 1 ? "essas fontes" : "essa fonte"}`
-    : "⟳ Refazer a análise";
+    : "⟳ Refazer a análise") + noFrame;
   el.innerHTML =
     heads.join("") +
     (reasons ? `<ul class="dg-list">${reasons}</ul>` : "") +
     `<button type="button" class="dg-btn" id="reevalSourcesBtn">${btnLabel}</button>`;
   el.classList.remove("hidden");
   const btn = $("reevalSourcesBtn");
-  // Reavaliar = rodar a análise inteira de novo (mesmo TF do veredito): a fonte
-  // que caiu por transitório tende a voltar; o usuário decide pedir isso.
-  if (btn) btn.addEventListener("click", () => reevaluate(_verdictTf));
+  // Reavaliar = rodar a análise inteira de novo NO FRAME DA TELA: a fonte que caiu
+  // por transitório tende a voltar, e o frame é o que o usuário está olhando — não
+  // o do veredito anterior. Uma regra só para os dois botões (ver o rótulo acima).
+  if (btn) btn.addEventListener("click", () => reevaluate(_tf));
 }
 
 // Carimbo do cabeçalho: "veredito no <frame>". Deixa explícito em qual timeframe
@@ -3699,6 +3725,164 @@ function hideDegrade() {
   if (el) { el.textContent = ""; el.classList.add("hidden"); }
 }
 
+// ─────────── REVALIDAÇÃO AUTOMÁTICA AO TROCAR DE FRAME (task 013) ────────────
+//
+// *"Se durante a mudança do tempo gráfico houver atualização de preço, quero a
+// revalidação automática."*
+//
+// O DEFEITO CONCRETO: `switchTimeframe` recalculava os NÍVEIS a cada troca, mas a
+// COTAÇÃO ficava congelada no momento em que a run foi desenhada — o `/api/chart`
+// não devolve preço live, e o código caía em `_openLive`. Resultado: o usuário
+// trocava de frame cinco vezes ao longo de dez minutos e a tira do cabeçalho
+// continuava mostrando o mesmo "cotação agora", com a DISTÂNCIA até o preço da
+// análise calculada contra um número velho. A tela afirmava "agora" sobre um
+// instante que já tinha passado.
+//
+// Agora a troca dispara a busca da cotação FRESCA e, quando o preço andou o bastante
+// desde a análise, DIZ que revalidou e de quando é a leitura.
+//
+// FORA DO CAMINHO DA TROCA, e isto foi medido: a primeira versão pedia níveis e
+// cotação num `Promise.all`, e com isso a ação primária (trocar de frame) passou a
+// esperar o enriquecimento dela — o teste da escada quebrou por causa disso. A troca
+// desenha com o que tem; o preço entra por cima quando chega. Se nunca chegar, a
+// tela fica exatamente como era antes desta entrega, sem anunciar nada.
+//
+// O LIMIAR é 0,5%, e não é número novo: é o mesmo `_GATILHO_TOL` que o scanner usa
+// para dizer que o preço "chegou no gatilho" (scanner.py: *"0,5% absorve o ruído
+// intradiário de um toque iminente"*). Se 0,5% é o que separa ruído de movimento
+// para acionar um trade, é o mesmo corte para dizer que o preço da análise
+// envelheceu. Um número só no produto para a mesma pergunta — e PROVISÓRIO pelo
+// mesmo motivo que lá: a calibrar com o track record.
+const REVAL_LIMIAR = 0.005;
+
+// Janela em que a cotação buscada aqui é reaproveitada sem ir à rede. Igual ao TTL
+// do servidor (`_PRICE_TTL`, ~45s): trocar de chip cinco vezes seguidas não pode
+// virar cinco requisições, e o número já está certo pelos 45s de qualquer jeito.
+// É a primeira das TRÊS travas contra cascata — as outras duas são a busca em voo
+// compartilhada (`_revalVoo`, pros toques que chegam antes da primeira resposta) e
+// o selo `_tfSeq`, que faz só a troca VENCEDORA pintar o que voltou.
+const REVAL_COTACAO_TTL_MS = 45000;
+
+
+const REVAL_CHAVE = "td_reval_auto";
+let _revalCota = null;      // {quando, dado} — memo da cotação fresca (já resolvida)
+let _revalVoo = null;       // a busca EM VOO, compartilhada por quem chegar durante ela
+let _revalNota = null;      // {tf, hora, driftTxt} — o que a tela deve anunciar
+
+// Ligada por padrão, e a escolha dele fica: quem desliga não quer buscar cotação a
+// cada troca, e no desligado a tela volta a se comportar como antes (a cotação da
+// run, congelada) — dito no title, nunca descoberto pelo resultado.
+function revalLigado() {
+  try { return localStorage.getItem(REVAL_CHAVE) !== "0"; } catch (e) { return true; }
+}
+
+function setRevalLigado(v) {
+  try { localStorage.setItem(REVAL_CHAVE, v ? "1" : "0"); } catch (e) { /* modo privado */ }
+}
+
+// A cotação vale como ATUAL só numa run de HOJE (DA-073): numa análise de data
+// passada o preço de agora não pertence àquela leitura, então não se busca nada e
+// não se revalida nada. Fail-open: qualquer erro devolve null e a troca de frame
+// segue com o que já tinha — a revalidação nunca pode quebrar a troca.
+function cotacaoFresca() {
+  if (!_openTicker) return Promise.resolve(null);
+  const hoje = _todayManaus || "";
+  if (hoje && _openDate && _openDate !== hoje) return Promise.resolve(null);
+  const agora = Date.now();
+  if (_revalCota && (agora - _revalCota.quando) < REVAL_COTACAO_TTL_MS) {
+    return Promise.resolve(_revalCota.dado);
+  }
+  // O TTL sozinho não segura a cascata: ele só existe DEPOIS que a resposta chega, e
+  // três toques em meio segundo acontecem todos ANTES disso — três buscas para a
+  // mesma pergunta. Quem chega com uma busca em voo entra NELA. É o mesmo antídoto
+  // do selo `_tfSeq` visto do outro lado: lá se descarta a resposta de uma troca
+  // superada, aqui não se chega a pedir duas vezes o que já está sendo pedido.
+  if (_revalVoo) return _revalVoo;
+  const voo = (async () => {
+    try {
+      const res = await fetch("/api/prices?tickers=" + encodeURIComponent(_openTicker));
+      const data = await res.json();
+      const p = ((data || {}).prices || {})[_openTicker.toUpperCase()] || null;
+      // O carimbo do DIA é o que deixa a tira tratar a cotação como atual (o mesmo que
+      // `_cotacao_da_run` grava no backend). Sem ele a unidade sumiria da tela.
+      const dado = p && p.price != null ? Object.assign({}, p, { em: hoje }) : null;
+      _revalCota = { quando: Date.now(), dado };
+      return dado;
+    } catch (e) {
+      return null;               // fail-open: a troca de frame acontece sem cotação
+    } finally {
+      _revalVoo = null;
+    }
+  })();
+  _revalVoo = voo;
+  return voo;
+}
+
+// A linha do controle: o interruptor e, quando houve, o que a revalidação encontrou.
+// O usuário TEM que perceber que revalidou — silêncio faz ele achar que a tela
+// travou, e pior: faz um número novo parecer o mesmo de antes.
+function renderRevalLinha() {
+  const el = $("revalLinha");
+  if (!el) return;
+  if (!_openTicker) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const on = revalLigado();
+  const tit = on
+    ? "Ao trocar de tempo gráfico, busca a cotação de agora e recalcula os níveis "
+      + "daquele frame contra ela. Desligado, a tela usa a cotação de quando a "
+      + "análise foi feita (o comportamento antigo)."
+    : "Desligada: ao trocar de frame a tela mostra a cotação de quando a análise "
+      + "foi feita, e a distância até o preço da análise não se atualiza.";
+  const nota = (on && _revalNota)
+    ? `<span class="rv-nota">revalidado no <b>${escapeHtml(tfNome(_revalNota.tf))}</b> ` +
+      `às <b>${escapeHtml(_revalNota.hora)}</b> — o preço andou ` +
+      `<b>${escapeHtml(_revalNota.driftTxt)}</b> desde a análise</span>`
+    : "";
+  el.innerHTML =
+    `<button type="button" class="rv-btn${on ? " is-on" : ""}" id="revalToggle" ` +
+    `aria-pressed="${on}" title="${escapeHtml(tit)}">` +
+    `revalidar sozinho ao trocar de frame: <b>${on ? "ligado" : "desligado"}</b></button>` + nota;
+  el.classList.remove("hidden");
+  const b = $("revalToggle");
+  if (b) b.addEventListener("click", () => {
+    setRevalLigado(!revalLigado());
+    _revalNota = null;      // a nota descreve uma revalidação que aconteceu; desligar não a preserva
+    renderRevalLinha();
+  });
+}
+
+// Decide e REGISTRA a revalidação de uma troca que vingou. Devolve a cotação a usar
+// na tira (a fresca, ou a da run quando não há fresca).
+function revalidaAoTrocar(tf, cota, actionable) {
+  if (!revalLigado() || !cota || cota.price == null) return _openLive;
+  const base = actionable && actionable.price;
+  if (!base) { _openLive = cota; return cota; }
+  const drift = (cota.price - base) / base;
+  // Abaixo do limiar não há o que anunciar: a tira do cabeçalho já mostra a
+  // distância, e um aviso que aparece em toda troca é aviso que ninguém lê.
+  _revalNota = Math.abs(drift) >= REVAL_LIMIAR
+    ? { tf, hora: horaCurta(), driftTxt: (drift > 0 ? "+" : "−") + pctBR(Math.abs(drift) * 100) + "%" }
+    : null;
+  _openLive = cota;          // a run aberta passa a carregar a cotação nova
+  return cota;
+}
+
+// A revalidação DEPOIS da troca: chega quando chegar, e só pinta se a troca que a
+// pediu ainda for a da tela (o mesmo selo `_tfSeq` que descarta níveis superados —
+// três toques rápidos revalidam UMA vez, no frame que vingou). Sem cotação nova não
+// se repinta nada: repintar o mesmo número faria a tela piscar sem dizer nada.
+function aplicaRevalidacao(selo, tf, actionable) {
+  if (!revalLigado()) return;
+  cotacaoFresca().then((cota) => {
+    if (selo !== _tfSeq || !cota) return;
+    renderHeadPrice(actionable, revalidaAoTrocar(tf, cota, actionable));
+    renderRevalLinha();
+  });
+}
+
+function horaCurta() {
+  return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 // TROCA DE FRAME É ATÔMICA: o realce só se move quando os NÍVEIS chegam.
 //
 // Antes o `_tf` mudava no clique e o seletor se repintava na hora, enquanto o
@@ -3718,6 +3902,9 @@ async function switchTimeframe(tf) {
   if (!_openTicker || tf === _tf) return;
   const selo = ++_tfSeq;
   _tfPendente = tf;
+  // A nota nomeia o frame em que se revalidou. Sobrevivendo à troca ela passaria a
+  // apontar um frame que não está mais na tela — a próxima revalidação a reescreve.
+  _revalNota = null;
   renderTfSelector();                       // marca o clicado como pendente
   renderEscada(_escada);                    // e o degrau clicado também
   hideDegrade();
@@ -3743,9 +3930,14 @@ async function switchTimeframe(tf) {
     if (Array.isArray(data.timeframes) && data.timeframes.length) _timeframes = data.timeframes;
     renderTfSelector();
     // A COTAÇÃO não é do frame — é do ativo AGORA. O /api/chart não a devolve, e
-    // passar `undefined` fazia a unidade "último fechamento 465,58" sumir da tira
-    // ao trocar de frame e voltar ao trocar de novo. Ela é lembrada da run aberta.
+    // passar `undefined` fazia a unidade "último fechamento 465,58" sumir da tira ao
+    // trocar de frame e voltar ao trocar de novo. Ela é lembrada da run aberta, e a
+    // busca fresca (logo abaixo) a substitui QUANDO chegar — nunca antes.
     renderHeadPrice(data.actionable, data.live_price || _openLive);
+    renderRevalLinha();
+    // O rótulo do "reavaliar com essa fonte" NOMEIA o frame da tela — trocar de
+    // frame sem redesenhar o banner deixaria ele prometendo o frame anterior.
+    if (_openDegraded) renderDegraded(_openDegraded);
     renderSetupCards(data.actionable);
     // A escada NÃO se recalcula ao trocar de frame — as cinco leituras são as
     // mesmas. O que muda é qual degrau está ABERTO, e essa marca é diferente da
@@ -3754,6 +3946,11 @@ async function switchTimeframe(tf) {
     renderChartCard(data.price_chart, _openTicker, data.actionable);
     carregaExecCard();          // outro frame, outro plano: o card acompanha
     if (data.degraded && data.notice) showDegrade(data.notice);
+    // E SÓ AGORA a cotação, FORA do caminho da troca. Medido: pendurar a troca na
+    // busca de preço (um `Promise.all` com o /api/chart) fez o frame demorar a
+    // trocar — a ação primária esperando o enriquecimento dela. A troca desenha com
+    // o que tem; quando o preço chega, a tira e a nota se atualizam por cima.
+    aplicaRevalidacao(selo, _tf, data.actionable);
   } catch (err) {
     if (selo !== _tfSeq) return;
     encerra();

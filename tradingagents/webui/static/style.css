@@ -1073,6 +1073,28 @@ details.section[open] > summary::before { content: "▾"; }
 .reeval-btn:hover:not(:disabled) { color: #fff; border-color: var(--accent); background: var(--panel-2); }
 .reeval-btn:disabled { opacity: .6; cursor: default; color: var(--muted); border-color: var(--border); }
 
+/* REVALIDAÇÃO AUTOMÁTICA — o interruptor e o que ela encontrou (task 013).
+   Peso BAIXO de propósito: é estado e configuração, não a ação primária da tela
+   (o reavaliar acima é que é). Seleção dita por TEXTO, não por cor (DA-078 regra 9):
+   o botão escreve "ligado"/"desligado" em vez de depender de um verde que aqui
+   significaria alta de preço. */
+.reval-linha {
+  display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap;
+  margin: 0 0 8px; font-size: var(--fs-12); line-height: var(--lh-12);
+}
+.rv-btn {
+  font: inherit; color: var(--muted); background: none;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 3px 9px; cursor: pointer; white-space: nowrap;
+}
+.rv-btn b { color: var(--text); font-weight: var(--fw-bold); }
+.rv-btn:hover { border-color: var(--accent); color: var(--text); }
+.rv-btn.is-on { border-color: #2e5c7d; }
+/* A nota da revalidação: aconteceu, e a hora diz de quando é o que está na tela.
+   Sem cor de preço — o que ela informa é FRESCOR, não direção. */
+.rv-nota { color: var(--muted); }
+.rv-nota b { color: var(--text); font-variant-numeric: tabular-nums; }
+
 /* (A faixa de reanálise separada — .reanalyze-bar / .re-* — foi absorvida pela barra
    ÚNICA do launcher na task 029; os estilos vivem agora em .launch-bar / .lb-*.) */
 
@@ -1334,6 +1356,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
      declarado ele vai pro 0 e sobe pro topo do card, longe do gráfico de que fala.
      Aqui ele vem COLADO embaixo do canvas: é ali que o olho para depois de varrer o
      gráfico e não achar o padrão que a tela anuncia. */
+  /* A linha da revalidação acompanha o reavaliar (ordem 7): os dois falam da mesma
+     coisa — o frescor do que está na tela — e o empate de `order` preserva a ordem
+     do DOM entre eles. Sem `order` declarado ela iria pro 0 e subiria pro topo do
+     card, longe do controle a que pertence (o alçapão que o #chartFora já pegou). */
+  .reval-linha { order: 7; margin: 6px 0 0; }
   #chartFora { order: 8; }
   #chartLegend { order: 9; margin-top: 10px; }
   .chart-note { order: 10; }
