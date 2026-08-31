@@ -156,16 +156,24 @@ def test_no_telefone_cada_preco_tem_a_sua_linha_e_o_rotulo_vem_na_frente(base, s
           return {
             tops: un.map(e => Math.round(r(e).top)),
             esquerdas: [...new Set(un.map(e => Math.round(r(e).left)))],
+            // onde o CONTEÚDO começa, não onde a caixa começa: com width:100% as
+            // três caixas encostam na esquerda mesmo quando uma delas empurra o
+            // texto pra dentro com borda + recuo, e o alinhamento que o olho vê é
+            // este. Foi por aqui que a régua solta da .hp-diff passou batida.
+            conteudo: [...new Set(un.map(e => { const c = getComputedStyle(e);
+              return Math.round(r(e).left + parseFloat(c.borderLeftWidth) + parseFloat(c.paddingLeft)); }))],
             rotuloAntesDoNumero: r(live.querySelector('.hp-tag')).left < r(live.querySelector('b')).left,
-            regua: getComputedStyle(document.querySelector('.hp-ref')).borderLeftWidth,
+            reguas: [...un].map(e => getComputedStyle(e).borderLeftWidth),
             textos: un.map(e => e.innerText.replace(/\\n/g, ' ')),
           };
         }""")
         assert len(set(m["tops"])) == 3, ("uma unidade por linha (cotação/distância/análise)", m)
         assert len(m["esquerdas"]) == 1, ("as três alinhadas pela esquerda", m)
+        assert len(m["conteudo"]) == 1, ("e alinhadas pelo TEXTO, não só pela caixa", m)
         assert m["rotuloAntesDoNumero"], ("no telefone o rótulo lidera", m)
-        # a régua separava as unidades LADO A LADO; empilhadas, ela não separa nada
-        assert m["regua"] == "0px", m
+        # a régua separava as unidades LADO A LADO; empilhadas, ela não separa nada —
+        # vale pras duas que a carregam no desktop (.hp-diff e .hp-ref)
+        assert m["reguas"] == ["0px", "0px", "0px"], m
         assert "COTAÇÃO AGORA" in m["textos"][0].upper() and "835,37" in m["textos"][0], m
         # a unidade do meio é a distância explícita entre as duas (task 037): sem
         # ela o usuário tinha que subtrair 835,37 − 834,74 de cabeça

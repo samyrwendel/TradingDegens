@@ -2066,12 +2066,23 @@ function renderHeadPrice(a, live) {
   // análise foi lida decide se o plano ainda vale — o usuário não deveria ter que
   // subtrair de cabeça. Só existe quando as DUAS unidades acima existem de verdade
   // (senão não há o que distanciar) e o preço da análise não é zero.
-  const diff = (live && live.price != null && a && a.price != null && a.price)
+  //
+  // O gatilho é a unidade `atual` RENDERIZADA, não `live.price`: a cotação carrega
+  // a guarda de dia (DA-073) e some quando a run é reaberta amanhã. Repetir só o
+  // `live.price != null` aqui deixava a distância na tela contra um preço que a
+  // tela não mostra mais — distância de quê? — e ainda empurrava a régua da
+  // .hp-ref pra dentro de uma linha de uma unidade só (ela vive do :first-child).
+  const diff = (atual && a && a.price != null && a.price)
     ? (() => {
         const d = live.price - a.price;
         const pct = (d / a.price) * 100;
         const cls = d > 0 ? "up" : (d < 0 ? "down" : "flat");
-        const arrow = d > 0 ? "▲" : (d < 0 ? "▼" : "·");
+        // ↑ ↓ · — a MESMA gramática da variação do histórico (.pchg, `linhaPreco`),
+        // e o que a DA-076 deixa ficar: seta de direção é tipográfica. O triângulo
+        // cheio que estava aqui é pictograma geométrico e cai no portão de
+        // varredura Unicode — que lê o arquivo INTEIRO, comentário incluído, então
+        // nem citá-lo aqui dá.
+        const arrow = d > 0 ? "↑" : (d < 0 ? "↓" : "·");
         const sign = d > 0 ? "+" : (d < 0 ? "−" : "");
         return `<span class="hp-unit hp-diff ${cls}"><span class="hp-k">distância</span>` +
           `<b>${arrow} ${sign}${fmtNum(Math.abs(d))} (${sign}${pctBR(Math.abs(pct))}%)</b></span>`;

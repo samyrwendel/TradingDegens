@@ -261,8 +261,16 @@ def test_as_duas_familias_ficam_em_superficies_separadas_e_com_nome(base):
     """A 018 separou MERCADO e PLANO em duas linhas da mesma tira; a 021 os separa em
     duas SUPERFÍCIES, porque nunca foram duas famílias do mesmo assunto — um é o chão
     comum (a cotação) e o outro é o conteúdo de uma das leituras. O que se prova aqui
-    é que a tira ficou só com o mercado, em duas unidades fechadas, e que o plano tem
-    caixa própria com título."""
+    é que a tira ficou só com o mercado, em unidades fechadas, e que o plano tem
+    caixa própria com título.
+
+    TRÊS unidades desde o 185ba75 (task 037), não duas: a DISTÂNCIA entre a cotação e
+    o preço da análise ganhou unidade própria. Ela não é uma família nova — é o mesmo
+    MERCADO, derivado das duas que já estavam aqui, e é justamente o que dizia se o
+    plano ainda vale (antes o usuário subtraía de cabeça). O contrato que este teste
+    guarda é OUTRO: a tira não hospeda o PLANO, e cada unidade é fechada. Ele segue
+    inteiro; o que mudou foi a contagem, e por isso ela vem fixada uma a uma abaixo —
+    3 solto passaria com qualquer coisa no meio."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -277,10 +285,12 @@ def test_as_duas_familias_ficam_em_superficies_separadas_e_com_nome(base):
         # a tira carrega SÓ o mercado — a linha do plano saiu daqui
         assert m["filhosDaTira"] == ["headPrice"], m
         assert "PLANO" not in m["txtTira"].upper(), m
-        # e a linha de mercado são DUAS unidades fechadas (cotação | análise)
-        assert len(m["unidades"]) == 2, m
+        # e a linha de mercado são TRÊS unidades fechadas (cotação | distância | análise)
+        assert len(m["unidades"]) == 3, m
         assert "835,37" in m["unidades"][0] and "COTAÇÃO AGORA" in m["unidades"][0].upper(), m
-        assert "834,74" in m["unidades"][1] and "ANÁLISE" in m["unidades"][1].upper(), m
+        # a do meio LIGA as outras duas: 835,37 − 834,74 = 0,63, dito na tela
+        assert "0,63" in m["unidades"][1] and "DISTÂNCIA" in m["unidades"][1].upper(), m
+        assert "834,74" in m["unidades"][2] and "ANÁLISE" in m["unidades"][2].upper(), m
         # o plano ganhou caixa E nome: "Padrão 1-2-3 de compra"
         assert "Setup123" in m["titulo123"] and "compra" in m["titulo123"], m
         browser.close()
@@ -333,11 +343,13 @@ def test_com_a_coluna_espremida_a_tira_quebra_sem_perder_nada(base):
         # a falta de espaço vira ALTURA (empilhou), não sumiço: 43px → 83px medidos
         assert m["tiraH"] > alt, ("com o card espremido a tira empilha", alt, m)
         assert not m["rola"], m
-        # e a quebra preferida é ENTRE unidades: com o card em 394px as duas ainda
-        # cabem inteiras, cada uma numa linha só.
+        # e a quebra preferida é ENTRE unidades: com o card em 394px as três ainda
+        # cabem inteiras, cada uma numa linha só. (Três desde o 185ba75 — a
+        # distância entrou entre cotação e análise; o invariante medido aqui não é
+        # o número, é NENHUMA delas partir ao meio quando não precisa.)
         rects = page.evaluate("""() => [...document.querySelectorAll('#headLevels .hp-unit')]
             .map(u => u.getClientRects().length)""")
-        assert rects == [1, 1], ("unidade partida ao meio sem necessidade", rects)
+        assert rects == [1, 1, 1], ("unidade partida ao meio sem necessidade", rects)
         txt = page.inner_text("#headLevels")
         assert "834,74" in txt and "29/08 20:00" in txt, txt
         browser.close()
@@ -362,13 +374,17 @@ def test_cada_carimbo_de_hora_mora_dentro_da_sua_unidade(base):
           return {un, tag: est('#headPrice .hp-tag'), quando: est('#headPrice .hp-when'),
                   num: est('#headPrice .hp-live b')};
         }""")
-        # cada unidade carrega UM carimbo — o seu
-        assert [u["quando"] for u in m["un"]] == [["29/08 20:42"], ["29/08 20:00"]], m
+        # cada unidade carrega UM carimbo — o seu. A DISTÂNCIA (185ba75) não carrega
+        # NENHUM, e é o certo: ela não tem momento próprio, é derivada das outras
+        # duas. Carimbo emprestado ali seria exatamente o defeito 3 de volta — hora
+        # ao lado de um número que não é dela.
+        assert [u["quando"] for u in m["un"]] == [["29/08 20:42"], [], ["29/08 20:00"]], m
         assert m["un"][0]["tags"] == ["COTAÇÃO AGORA · 24H"], m
+        assert m["un"][1]["tags"] == ["DISTÂNCIA"], m
         # a unidade da ANÁLISE ganhou o mesmo molde da cotação (task 20260830-006):
         # número · O QUE ELE É · de quando. O horário dela muda por frame (é o último
         # candle daquele frame) e, sem rótulo, parecia dado inconsistente.
-        assert m["un"][1]["tags"] == ["ANÁLISE", "ÚLTIMO CANDLE"], m
+        assert m["un"][2]["tags"] == ["ANÁLISE", "ÚLTIMO CANDLE"], m
         # e o carimbo NÃO se veste de rótulo: mono, e não a caixa-alta de 10px
         assert m["quando"]["fam"] != m["tag"]["fam"], m
         assert m["quando"]["fam"] == m["num"]["fam"], ("hora é número, fonte de número", m)

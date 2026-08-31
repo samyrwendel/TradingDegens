@@ -1322,9 +1322,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
      frente — no telefone o que se procura primeiro é "qual desses é o de agora". */
   .hp-unit { width: 100%; }
   .hp-live .hp-tag { order: -1; }
-  /* a régua separava duas unidades LADO A LADO; empilhadas, ela abriria a linha
-     sem separar nada (o rótulo "análise" já faz esse trabalho aqui) */
-  .hp-ref { border-left: 0; padding-left: 0; }
+  /* a régua separava as unidades LADO A LADO; empilhadas, ela abriria a linha
+     sem separar nada (o rótulo "análise"/"distância" já faz esse trabalho aqui).
+     Vale pras DUAS que a carregam: a .hp-diff nasceu no 185ba75 sem esta contra-
+     parte e ficava com régua solta + 14px de recuo, desalinhada das irmãs. */
+  .hp-ref, .hp-diff { border-left: 0; padding-left: 0; }
 
   /* LEGENDA depois do GRÁFICO: com 11 itens ela comia 4 linhas ANTES do gráfico
      aparecer — no telefone isso é meia tela de rolagem pra chegar no que interessa.
