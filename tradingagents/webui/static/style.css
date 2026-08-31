@@ -1310,17 +1310,26 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
      que é onde se olha DEPOIS de ver as cores no gráfico. */
   .chart-card { display: flex; flex-direction: column; }
   .chart-head { order: 1; }
-  .tf-selector { order: 2; }
+  .tf-selector { order: 2; margin-bottom: 6px; }
   /* O SELETOR DE CAMADAS E O AVISO ficavam ANTES do título do bloco: sem `order`
      declarado eles caíam no 0 e subiam pro topo por acidente de flex, o que fazia a
      tela abrir por um controle solto em vez de dizer do que ela trata. Agora eles
      ficam onde pertencem — logo ACIMA do gráfico, que é o que eles controlam e o que
      o aviso fala sobre. */
-  #camadasSelector { order: 3; }
+  #camadasSelector { order: 3; margin-bottom: 6px; }
   #camadasAviso { order: 4; }
-  .reeval-btn { order: 5; }
-  .chart-degrade { order: 6; }
-  .chart-wrap { order: 7; }
+  .chart-degrade { order: 5; }
+  .chart-wrap { order: 6; }
+  /* REAVALIAR não é controle do que o gráfico MOSTRA (isso é tf-selector/camadas) —
+     é uma AÇÃO sobre o veredito, e o que ela diz ("veredito já é neste TF" / "pode
+     reavaliar") só faz sentido depois que o usuário já olhou o gráfico daquele
+     frame. Desceu pra logo abaixo do canvas (task 20260831-009: "desce tudo que
+     não controla o desenho"), com a mesma escala 12/500 do resto do rodapé em vez
+     do 14/700 de botão principal — ele reavalia, não é a ação primária da tela. */
+  .reeval-btn {
+    order: 7; margin: 8px 0 0; font-size: var(--fs-12); line-height: var(--lh-12);
+    font-weight: var(--fw-med); padding: 5px 11px;
+  }
   /* O AVISO DE ENQUADRAMENTO cai na MESMA armadilha do bloco acima — sem `order`
      declarado ele vai pro 0 e sobe pro topo do card, longe do gráfico de que fala.
      Aqui ele vem COLADO embaixo do canvas: é ali que o olho para depois de varrer o
