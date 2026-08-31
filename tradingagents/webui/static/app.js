@@ -2215,6 +2215,22 @@ function edenAjuda(eden) {
   return d ? `${edenNome(eden)} — na doutrina do Stormer, ${d}` : edenNome(eden);
 }
 
+// O CONTRASTE do Éden ALINHADO na direção CONTRÁRIA ao padrão vetado — só esse caso:
+// "Éden de Alta" sozinho, num rótulo de veto, lê como se ELE fosse o defeito, e é o
+// oposto: é regime bom, só que contra a direção deste padrão específico. Alinhado na
+// MESMA direção do padrão não devia estar vetado por este motivo (é outro veto, tipo
+// zona neutra) — mas por segurança só troca quando as direções de fato divergem, nunca
+// por só ver `alinhado`. "sem Éden" e "armadilha" já soam ruins por conta própria (não
+// entram aqui). Troca "Éden de " pela direção — MESMO TAMANHO de texto (a pílula do
+// gráfico é a largura de uma vela, sem sobra pra crescer), então quem já cabia
+// continua cabendo.
+function edenContraste(eden, direction, nome) {
+  if (!eden || !eden.alinhado || !direction) return nome;
+  if (eden.direcao === direction) return nome;
+  if (!nome.includes("Éden de ")) return nome;
+  return nome.replace("Éden de ", `${direction} × `);
+}
+
 function stormCardHtml(st, frameDoBloco) {
   const pat = st.pattern;
   const frameProprio = (st.timeframe && frameDoBloco && st.timeframe !== frameDoBloco)
@@ -2828,12 +2844,17 @@ function stormEstado(storm) {
 //
 // No VETADO ela diz QUAL Éden vetou — "não opera — armadilha" e "não opera — Éden de
 // Baixa" são vetos diferentes, e o segundo é o único que se resolve esperando. O nome
-// vem do vocabulário único (forma CURTA: aqui o espaço é a largura de uma vela).
+// vem do vocabulário único (forma CURTA: aqui o espaço é a largura de uma vela) e,
+// alinhado, ganha o CONTRASTE de :func:`edenContraste` — ver ali o porquê.
 function stormEstadoTexto(estado, storm) {
   if (estado === "invalidado") return "invalidado";
   if (estado !== "vetado") return "";
-  const nome = edenCurto((storm || {}).eden);
-  return nome ? `não opera — ${nome}` : "não opera — Éden";
+  const st = storm || {};
+  const eden = st.eden || {};
+  const nome = edenCurto(eden);
+  if (!nome) return "não opera — Éden";
+  const dir = st.pattern && st.pattern.direction;
+  return `não opera — ${edenContraste(eden, dir, nome)}`;
 }
 
 // FORMA DO MARCADOR = FAMÍLIA. Os dois métodos numeram 1-2-3 pontos DIFERENTES (no
@@ -3543,8 +3564,10 @@ function rrDoGrafico(a) {
   let edenNomeVeto = "", edenCurtoVeto = "";
   if (camadaVisivel("storm") && stormEstado(a.storm) === "vetado") {
     vetado = true;
-    edenNomeVeto = edenNome((a.storm || {}).eden);
-    edenCurtoVeto = edenCurto((a.storm || {}).eden);
+    const edenSt = (a.storm || {}).eden;
+    const dirSt = (a.storm.pattern || {}).direction;
+    edenNomeVeto = edenContraste(edenSt, dirSt, edenNome(edenSt));
+    edenCurtoVeto = edenContraste(edenSt, dirSt, edenCurto(edenSt));
   }
   if (camadaVisivel("storm") && a.storm && a.storm.opera === true) {
     if (ehFantasma(a.storm.pattern)) {
