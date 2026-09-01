@@ -3143,3 +3143,26 @@ body.chart-max-aberto { overflow: hidden; }
   clip-path: inset(50%); white-space: nowrap;
 }
 .chart-card.is-max .chart-head { justify-content: flex-end; margin-bottom: 6px; }
+
+/* ============ A LEGENDA RECOLHE O QUE O DESENHO JÁ DIZ (DA-135) =============
+   O botão fica DENTRO da legenda, e isso é a regra de posição dos controles do
+   gráfico, agora declarada: **o controle mora no bloco que ele governa.** A dica
+   dos gestos (DA-128) fica sobre o canvas porque governa o desenho; este fica na
+   legenda porque governa a legenda; e o maximizar (DA-134) fica na fileira do
+   título porque é o único que governa o CARD inteiro. Um controle longe do que ele
+   controla é o que faz "três botõezinhos parecidos" virarem adivinhação.
+
+   A gramática VISUAL é a mesma dos outros dois: quadrado, chapado, borda de 1px,
+   sem raio (DA-078 regras 1 e 2). Este carrega número + palavra em vez de ícone
+   porque o QUANTO é a informação que decide se vale abrir. */
+.lg-toggle {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  padding: 0 5px; height: 17px; border-radius: 0; background: transparent;
+  border: 1px solid var(--border); color: var(--muted);
+  font-size: 12px; font-family: inherit; line-height: 1;
+}
+.lg-toggle:hover { border-color: var(--muted); color: var(--text); }
+.lg-toggle .lg-n { font-variant-numeric: tabular-nums; font-weight: var(--fw-bold);
+                   color: var(--text); }
+.lg-niveis { display: contents; }
+.lg-niveis.is-off { display: none; }

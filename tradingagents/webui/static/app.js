@@ -3709,7 +3709,12 @@ function chartLegendHtml(chart, actionable) {
   const wins = (chart.ma_windows || [20, 50, 200]).map(String).filter((w) => med.ma.has(w));
   const ewins = (chart.ema_windows || []).map(String).filter((w) => med.ema.has(w));
   const pat = camadaVisivel("plano") ? (chart.markers && chart.markers.pattern_123) : null;
+  // DUAS LISTAS, e a divisória é MEDIDA (DA-135): `legend` é a CHAVE — o que só a
+  // legenda diz —, e `niveis` é o que o DESENHO já rotula na linha do preço, com as
+  // mesmas palavras. Medido na run real do TSM com as duas famílias ligadas: 17
+  // itens, dos quais 10 (59%) eram os rótulos das zonas, repetidos verbatim.
   const legend = [];
+  const niveis = [];
   wins.forEach((w) => {
     if (MA_COLORS[w]) legend.push(`<span class="lg"><span class="sw" style="background:${MA_COLORS[w]}"></span>MMS${w}</span>`);
   });
@@ -3721,7 +3726,7 @@ function chartLegendHtml(chart, actionable) {
   // verde (cor = significado), duas linhas da legenda passam a ter a mesma cor de
   // duas do plano; é o ponto-traço que diz de quem é cada uma, e ele precisa estar
   // AQUI, onde se decodifica o gráfico, e não só no gráfico.
-  zones.forEach((z) => legend.push(
+  zones.forEach((z) => niveis.push(
     `<span class="lg"><span class="sw band${z.familia === "storm" ? " storm" : ""}" ` +
     `style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
   // NÍVEL RECUSADO ENTRA NA LEGENDA (DA-123). A legenda descreve o desenho, e a
@@ -3767,7 +3772,61 @@ function chartLegendHtml(chart, actionable) {
     const txt = stormEstadoTexto(est, actionable.storm);
     legend.push(`<span class="lg"><span class="sw dia" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${txt ? ` (${escapeHtml(txt)})` : ""}</span>`);
   }
-  return legend.join("");
+  // O RECOLHÍVEL É SÓ O QUE O DESENHO JÁ DIZ. A chave fica sempre — recolher o que
+  // não tem rótulo nenhum no gráfico seria esconder informação sem destino.
+  if (!niveis.length) return legend.join("");
+  const aberto = niveisDaLegendaAbertos();
+  return legend.join("") +
+    `<button type="button" class="lg-toggle" id="chartNiveisBtn" ` +
+    `aria-expanded="${aberto ? "true" : "false"}" aria-controls="chartNiveisLg" ` +
+    `title="${escapeHtml(aberto
+      ? "Recolher os níveis — eles continuam rotulados no próprio gráfico"
+      : `Mostrar os ${niveis.length} níveis do plano (já rotulados no gráfico)`)}">` +
+    `<span class="lg-n">${niveis.length}</span> níveis</button>` +
+    `<span class="lg-niveis${aberto ? "" : " is-off"}" id="chartNiveisLg">` +
+    niveis.join("") + `</span>`;
+}
+
+// ============ A LEGENDA RECOLHE O QUE O DESENHO JÁ DIZ (DA-135) ==============
+//
+// Medido na run REAL do TSM com as duas famílias ligadas: **17 itens de legenda,
+// 109px no desktop e 156px no telefone antes de o gráfico começar** — e **10 dos 17
+// (59%) eram os rótulos das zonas do plano, repetidos VERBATIM** do que já está
+// escrito na linha do preço, no próprio gráfico ("Setup123 · stop (SL)" está nos
+// dois lugares, com as mesmas palavras).
+//
+// POR QUE NASCE RECOLHIDO, ao contrário da dica dos gestos (DA-128): lá recolher
+// custava o ensino do gesto a quem chega; aqui não custa nada, porque a informação
+// continua na tela — no desenho, no preço exato, com o mesmo texto. E o botão diz
+// QUANTOS são, então a ausência é declarada em vez de silenciosa.
+//
+// A CHAVE — médias, marca de recuo histórico e os dois marcadores 1-2-3 — NÃO
+// recolhe: essas são as únicas coisas do gráfico que não têm rótulo nenhum ao lado
+// do traço, então esconder seria remover sem destino.
+const _LEGENDA_KEY = "td_chart_niveis";
+
+function niveisDaLegendaAbertos() {
+  try { return localStorage.getItem(_LEGENDA_KEY) === "on"; } catch (e) { return false; }
+}
+
+function bindNiveisDaLegenda() {
+  const btn = document.getElementById("chartNiveisBtn");
+  if (!btn || btn._bound) return;
+  btn._bound = true;
+  btn.addEventListener("click", () => {
+    const alvo = !niveisDaLegendaAbertos();
+    try { localStorage.setItem(_LEGENDA_KEY, alvo ? "on" : "off"); } catch (e) { /* privado */ }
+    const cv = document.getElementById("priceChart");
+    // re-render pela MESMA função que monta a legenda: um toggle que mexesse na
+    // classe à mão passaria a divergir dela no dia em que ela mudasse.
+    if (cv && cv._chart) {
+      $("chartLegend").innerHTML = chartLegendHtml(cv._chart, cv._actionable);
+      bindNiveisDaLegenda();
+      // maximizado, a altura do canvas é medida a partir do que está ACIMA dele —
+      // e a legenda acabou de mudar de tamanho (DA-134).
+      if (typeof ajustaAlturaMaximizada === "function") ajustaAlturaMaximizada();
+    }
+  });
 }
 
 // Desenha o gráfico. Devolve **true se desenhou** — quem chama precisa saber, e
@@ -3813,6 +3872,7 @@ function renderChartCard(chart, ticker, actionable, tf) {
   renderCamadasSelector(actionable);
   renderCamadasAviso(actionable);
   $("chartLegend").innerHTML = chartLegendHtml(chart, actionable);
+  bindNiveisDaLegenda();
 
   // NOTA DO GRÁFICO — o que está DESENHADO, e só isso (task 021).
   //
