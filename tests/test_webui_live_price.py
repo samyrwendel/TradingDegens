@@ -68,8 +68,13 @@ def test_prices_endpoint_shape(tmp_path, monkeypatch):
         got = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/prices?tickers=MCD,BTC"))
     finally:
         httpd.shutdown()
+    # A VIGILÂNCIA DE NÍVEL VIAJA JUNTO (DA-138), e por decisão: a cotação já foi
+    # buscada aqui, então comparar contra níveis já calculados não custa chamada
+    # nenhuma — um endpoint próprio dobraria as requisições da tela pra não
+    # descobrir nada de novo. Vazia quando não há scan salvo, que é este caso.
     assert got == {"prices": {"MCD": {"price": 267.12, "change_pct": -0.37, "currency": "USD"},
-                              "BTC": None}}
+                              "BTC": None},
+                   "vigilancia": []}
 
 
 def _fake_info(monkeypatch, info):

@@ -42,8 +42,25 @@ from tradingagents.webui import timeutil
 
 logger = logging.getLogger(__name__)
 
-# Frames do scan: o swing (1d), o posicionamento (4h) e o fino (1h).
-SCAN_FRAMES = ("1d", "4h", "1h")
+# Frames do scan (DA-138): o contexto (1w), o swing (1d), o posicionamento (4h) e o
+# fino (1h). Decisão do Samyr: *"a cada quinze minutos vamos ter muito ruído, vamos
+# mudar pra a cada uma hora, [varrer] uma hora, quatro horas, diário e semanal"*.
+#
+# O 15m fica de fora por RUÍDO, não por limitação de capacidade — registre-se assim,
+# porque a diferença importa no dia em que alguém quiser reabrir a decisão: varrer o
+# 15m é tecnicamente possível (o loader intradiário o atende), e o que o desaconselha
+# é o que ele faria com a leitura, não o custo.
+#
+# O SEMANAL É QUASE DE GRAÇA, e isto foi MEDIDO: ele é REAMOSTRADO da mesma série
+# diária que o frame `1d` já carrega (`_serie_do_frame` → `load_ohlcv` →
+# `_resample_weekly`), e `load_ohlcv` guarda por símbolo em disco. Custo por ativo:
+# uma leitura de disco a mais e a reamostragem — 3,0 → 4,0 chamadas ao carregador,
+# com o tempo de passada INALTERADO (6,5s → 6,4s em 5 ativos, processos frios).
+# Rede: zero a mais.
+#
+# A CADÊNCIA continua saindo daqui sozinha: `agenda.cadencia_minutos` usa o candle
+# mais rápido do conjunto, que segue sendo o 1h = 60 minutos.
+SCAN_FRAMES = ("1w", "1d", "4h", "1h")
 
 # Distância do preço ao gatilho que caracteriza "em gatilho" (ponto de entrada).
 # PROVISÓRIO e declarado: 0,5% absorve o ruído intradiário de um toque iminente.

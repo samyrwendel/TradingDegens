@@ -3206,3 +3206,25 @@ body.chart-max-aberto { overflow: hidden; }
                    color: var(--text); }
 .lg-niveis { display: contents; }
 .lg-niveis.is-off { display: none; }
+
+/* ============ VIGILÂNCIA DE NÍVEL no card (DA-138) ==========================
+   Fato com HORA e com a FONTE declarada — nunca veredito. A palavra "preço" no
+   fim de cada aviso é o que o separa do estado estrutural do padrão, que sai do
+   FECHAMENTO do candle: sem ela, as duas leituras se confundiriam, e uma segunda
+   fonte de verdade que discorda da primeira é como esta ideia daria errado.
+
+   Cor SEMÂNTICA (DA-078 regra 3): stop perfurado é perda, alvo tocado é ganho,
+   gatilho é o neutro de "aconteceu". */
+.h-vig { grid-row: 5; grid-column: 1 / -1; display: flex; flex-wrap: wrap;
+         gap: 4px 8px; margin-top: 3px; }
+.vig-i { display: inline-flex; align-items: baseline; gap: 4px;
+         font-size: .68rem; color: var(--muted);
+         border-left: 2px solid var(--border); padding-left: 5px; }
+.vig-i > i { font-style: normal; font-variant-numeric: tabular-nums; }
+.vig-i > em { font-style: normal; font-size: .6rem; opacity: .75;
+              border: 1px solid var(--border); padding: 0 3px; }
+.vig-stop { border-left-color: var(--red); }
+.vig-stop, .vig-stop > i { color: var(--red); }
+.vig-alvo { border-left-color: var(--green); }
+.vig-alvo, .vig-alvo > i { color: var(--green); }
+.vig-gatilho { border-left-color: var(--muted); }

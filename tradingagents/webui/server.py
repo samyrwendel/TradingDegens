@@ -617,7 +617,14 @@ class _Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 raw = (qs.get("tickers", [""])[0] or "").strip()
                 tickers = [t for t in (x.strip() for x in raw.split(",")) if t][:50]
-                self._send_json({"prices": self.runner.live_prices(tickers)})
+                precos = self.runner.live_prices(tickers)
+                # A VIGILÂNCIA VIAJA JUNTO (DA-138): a cotação já foi buscada aqui,
+                # e comparar contra níveis já calculados não custa chamada nenhuma.
+                # Pedi-la num endpoint próprio dobraria o número de requisições da
+                # tela pra não descobrir nada de novo.
+                self._send_json({"prices": precos,
+                                 "vigilancia": self.runner.vigilancia_de_nivel(
+                                     tickers, precos)})
             elif path == "/api/names":
                 # Resolução em lote símbolo -> nome pros chips do histórico/cabeçalho.
                 qs = parse_qs(urlparse(self.path).query)

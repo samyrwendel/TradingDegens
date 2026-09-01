@@ -12,6 +12,7 @@ run analyses at once.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import os
 import threading
@@ -922,6 +923,11 @@ class AnalysisRunner:
         # Cache TTL curto do preço LIVE da watchlist (sym -> (monotonic_ts, payload)).
         # Serve o /api/prices sem martelar a fonte nem rodar o pipeline.
         self._price_cache: dict[str, Any] = {}
+        # A ÚLTIMA cotação VISTA por símbolo — é o que transforma "o preço está além
+        # do nível" em "o preço ATRAVESSOU o nível agora" (DA-138). Sem ela, o mesmo
+        # stop perfurado viraria um aviso novo a cada janela de 40s enquanto o preço
+        # ficasse lá.
+        self._preco_visto: dict[str, float] = {}
         self._price_lock = threading.Lock()
         # Descritores das runs em voo (checkpoint/resume): gravados no start,
         # apagados no terminal — o que sobra num boot é a fila de retomada.
@@ -2594,6 +2600,60 @@ class AnalysisRunner:
         lateral é por ativo). Runs em andamento (em memória) não são tocados —
         eles voltam à lista ao terminar. Retorna quantas foram removidas."""
         return self.store.delete_ticker(ticker)
+
+    def vigilancia_de_nivel(self, tickers: list[str],
+                            precos: dict[str, Any]) -> list[dict[str, Any]]:
+        """Os níveis cruzados PELO PREÇO, para os tickers que a tela já consultou.
+
+        CUSTO ZERO EM CHAMADAS (DA-138), e isto é a decisão, não um detalhe: ela
+        recebe as cotações que o ``/api/prices`` **acabou de buscar** para a lista
+        visível, e as compara contra os níveis que o **último scan já calculou**.
+        Não busca cotação, não carrega série, não roda detector — se ela precisasse
+        de qualquer uma dessas coisas, seria uma segunda varredura disfarçada.
+
+        Ela AVISA; o fechamento DECIDE. O que sai daqui é fato com hora e com a
+        fonte declarada ("preço"), nunca estado de padrão — o veredito estrutural
+        continua saindo do fechamento do candle, e as duas leituras convivem na tela
+        sem se sobrepor.
+        """
+        from tradingagents.webui.vigilancia import cruzamentos
+
+        snap = self.scan_snapshot.get() or {}
+        porTicker = {(a.get("ticker") or "").upper(): a
+                     for a in (snap.get("ativos") or [])}
+        agora = timeutil.stamp()
+        fora: list[dict[str, Any]] = []
+        for raw in tickers:
+            key = (raw or "").strip().upper()
+            ativo = porTicker.get(key)
+            payload = precos.get(key) or {}
+            preco = payload.get("price") if isinstance(payload, dict) else None
+            if not ativo or preco is None:
+                continue
+            with self._price_lock:
+                anterior = self._preco_visto.get(key)
+                self._preco_visto[key] = float(preco)
+            for c in cruzamentos(ativo.get("frames") or [], float(preco),
+                                 anterior, quando=agora):
+                fora.append({**c, "ticker": key})
+        if fora:
+            self._registra_vigilancia(fora)
+        return fora
+
+    def _registra_vigilancia(self, avisos: list[dict[str, Any]]) -> None:
+        """Grava os avisos — append-only, arquivo PRÓPRIO.
+
+        Não é o `scans.jsonl`: aquele é o track record, e um toque de preço não é um
+        gatilho logado. Misturá-los faria a taxa de acerto passar a contar eventos
+        de natureza diferente — exatamente o que a DA-129 mediu e manteve limpo.
+        """
+        try:
+            caminho = self.store.base / "vigilancia.jsonl"
+            with open(caminho, "a", encoding="utf-8") as fh:
+                for a in avisos:
+                    fh.write(json.dumps(a, ensure_ascii=False) + "\n")
+        except OSError as exc:   # noqa: BLE001 — registro é best-effort
+            logger.info("vigilância não pôde ser registrada: %s", exc)
 
     def live_prices(self, tickers: list[str]) -> dict[str, Any]:
         """Preço LIVE por ticker pra 3ª linha da watchlist: ``sym -> {price,

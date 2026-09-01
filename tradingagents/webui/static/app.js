@@ -6506,6 +6506,52 @@ let _allRuns = [];
 // currency} | null. Persistido entre repinturas da lista pra a linha NÃO piscar
 // "—" a cada refresh de 5s — o cache guarda o último preço e a lista repinta com
 // ele; o poller de preço atualiza só os spans no lugar (sem dança).
+// ============ VIGILÂNCIA DE NÍVEL: o preço avisa, o fechamento decide ==========
+//
+// O buraco que o Samyr achou: "deu um setup e durante a próxima hora ele invalidou;
+// a gente só vai ver 45 minutos depois". A invalidação ESTRUTURAL não tem esse
+// buraco (ela é medida por FECHAMENTO, então não existe antes de o candle fechar) —
+// mas o STOP é executado no PREÇO, intrabar, e o ALVO pode ser tocado e devolvido
+// dentro da hora. Foi exatamente o LINK-USD da DA-125.
+//
+// O QUE APARECE AQUI É FATO COM HORA E FONTE DECLARADA, nunca veredito: "stop
+// perfurado às 15:20 (preço)" convive com "padrão invalidado no fechamento das
+// 16:00" sem se sobrepor a ele. A tela diz qual é qual — e é por isso que o rótulo
+// carrega a palavra "preço": sem ela, as duas leituras se confundiriam, e uma
+// segunda fonte de verdade que discorda da primeira é o único jeito de esta ideia
+// dar errado.
+const _vigilancia = new Map();      // TICKER -> [{nivel, metodo, frame, quando}]
+const _VIG_MAX = 3;                 // por ativo: o card mostra os últimos
+
+function registraVigilancia(avisos) {
+  if (!Array.isArray(avisos) || !avisos.length) return;
+  for (const a of avisos) {
+    const t = (a.ticker || "").toUpperCase();
+    if (!t) continue;
+    const lista = _vigilancia.get(t) || [];
+    lista.unshift(a);
+    _vigilancia.set(t, lista.slice(0, _VIG_MAX));
+  }
+  paintHistory();
+}
+
+const _VIG_PT = { stop: "stop perfurado", alvo: "alvo tocado", gatilho: "gatilho tocado" };
+
+function vigilanciaHtml(ticker) {
+  const lista = _vigilancia.get((ticker || "").toUpperCase()) || [];
+  if (!lista.length) return "";
+  return `<span class="h-vig">` + lista.map((a) => {
+    const quando = (a.quando || "").slice(11, 16);
+    const txt = `${_VIG_PT[a.nivel] || a.nivel} ${fmtNum(a.preco_nivel)}`;
+    const tit = `${a.metodo} · ${tfNome(a.frame)} — ${a.texto} às ${quando}. ` +
+      `Isto é o PREÇO cruzando um nível já calculado (intrabarra): o veredito do ` +
+      `padrão continua saindo do FECHAMENTO do candle.`;
+    return `<span class="vig-i vig-${escapeHtml(a.nivel)}" title="${escapeHtml(tit)}">` +
+      `${escapeHtml(txt)} <i>${escapeHtml(quando)}</i> ` +
+      `<em>preço</em></span>`;
+  }).join("") + `</span>`;
+}
+
 const _priceCache = new Map();
 let _priceTimer = null;
 let _priceFetching = false;
@@ -6574,6 +6620,8 @@ async function refreshPrices(tickers) {
       const t = (el.getAttribute("data-price-for") || "").toUpperCase();
       if (_priceCache.has(t)) el.innerHTML = priceLineHtml(_priceCache.get(t));
     });
+    // A VIGILÂNCIA VEIO NA MESMA RESPOSTA (DA-138) — nenhuma requisição a mais.
+    registraVigilancia(data.vigilancia);
   } catch (e) { /* fonte fora do ar: mantém "—" ou o último preço em cache */ }
   finally { _priceFetching = false; }
 }
@@ -6927,6 +6975,7 @@ function paintHistory() {
       // mesma fileira, e a regra 11 da DA-078 (vão no meio, truncado nas pontas) é
       // exatamente o que acontece quando se faz isso com `justify-self`.
       `<span class="h-linha-preco">` + priceHtml + faixaDeFramesHtml(t) + `</span>` +
+      vigilanciaHtml(t) +
       // marcador "pronto/erro" na LINHA DO PREÇO (não mais espremido no ticker,
       // que quebrava — task 007): irmão de .h-price (o poller reescreve .h-price,
       // então o flag não pode ser filho dele), alinhado à direita onde há espaço.
