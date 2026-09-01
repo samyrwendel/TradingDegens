@@ -20,12 +20,15 @@ OPORTUNIDADE agregada. Colapsá-las jogaria fora distinção que o dado tem (o
 diferentes de se esperar).
 
 **O que elas compartilham é o EIXO TEMPORAL, e é ele que passa a ser único.**
-Quatro fases, quatro palavras, as MESMAS em toda superfície:
+Cinco fases, cinco palavras, as MESMAS em toda superfície (a quinta, ``encerrado``,
+entrou na DA-125, quando se descobriu que um trade que já tinha chegado ao alvo
+saía rotulado "invalidado" — veredito invertido em relação ao dinheiro):
 
 ======================  ===================================================
 ``agora``               o preço está no ponto de entrar — é a hora de agir
 ``esperando``           o gatilho ainda não veio
 ``andou``               acionou e o preço já passou da entrada
+``encerrado``           o trade terminou — chegou ao alvo ou ao stop (DA-125)
 ``morreu``              a premissa rompeu; não há trade
 ======================  ===================================================
 
@@ -51,15 +54,18 @@ taxonomias apareceram.
 """
 from __future__ import annotations
 
-# As quatro fases, na ordem do tempo. A ordem importa: é ela que a tela usa para
-# empilhar as seções, e uma ordem por gosto faria "já andou" aparecer antes de
-# "na entrada" em alguma superfície.
-ORDEM = ("agora", "esperando", "andou", "morreu", "sem_leitura")
+# As fases, na ordem do TEMPO. A ordem importa: é ela que a tela usa para empilhar
+# as seções, e uma ordem por gosto faria "já andou" aparecer antes de "na entrada"
+# em alguma superfície. `encerrado` vem depois de `andou` e ANTES de `morreu`,
+# porque é isso que ele é: o trade chegou ao fim — e um trade encerrado não se
+# invalida depois (DA-125).
+ORDEM = ("agora", "esperando", "andou", "encerrado", "morreu", "sem_leitura")
 
 FASE_PT = {
     "agora": "NA ENTRADA",
     "esperando": "AGUARDANDO",
     "andou": "JÁ ANDOU",
+    "encerrado": "ENCERRADO",
     "morreu": "INVALIDADO",
     "sem_leitura": "SEM LEITURA",
 }
@@ -70,6 +76,7 @@ FASE_AJUDA = {
     "agora": "o preço está no ponto de entrar — é a hora de agir",
     "esperando": "o gatilho ainda não veio",
     "andou": "acionou e o preço já passou da entrada",
+    "encerrado": "o trade terminou — chegou ao alvo ou ao stop",
     "morreu": "a premissa rompeu — não há trade",
     "sem_leitura": "não há leitura para este ativo neste frame",
 }
@@ -91,6 +98,7 @@ DO_SCAN_ESTADO = {
     "em_gatilho": "agora",
     "formando": "esperando",
     "em_movimento": "andou",
+    "concluido": "encerrado",
     "invalidou": "morreu",
     "sem_setup": "sem_leitura",
     "sem_dado": "sem_leitura",
@@ -118,6 +126,7 @@ MECANISMO_PT = {
     "ativo": "recuo à média",
     "em_gatilho": "gatilho rompido",
     "em_movimento": "gatilho ficou para trás",
+    "concluido": "trade encerrado",
     "invalidou": "premissa rompida",
 }
 

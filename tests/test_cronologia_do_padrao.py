@@ -182,3 +182,98 @@ def test_nivel_ausente_nao_vira_evento():
     c = _cronologia_do_padrao(_LINK, _pat("2026-08-30 09:00", 11.52, "2026-08-30 23:00"),
                               None, {"price": 11.27}, _FMT)
     assert [e["nome"] for e in c["eventos"]] == ["gatilho", "stop (SL)"]
+
+
+# ============ O DESFECHO ENCERRA O TRADE (DA-125) =============================
+#
+# O defeito grave que isto mata, com o dado REAL da run 20260830-232525-ca31d7
+# (LINK-USD 1h): gatilho 11,52 rompido às 13:00, ALVO 11,63 ATINGIDO às 15:00, e
+# às 23:00 o preço desabou para 10,99 fechando além do ponto 3. O detector marcou
+# `invalidado=True` e a tela disse "INVALIDADO" sobre um trade que tinha GANHO
+# oito horas antes — o veredito INVERTIDO em relação ao dinheiro.
+
+from tradingagents.dataflows.price_structure import _desfecho_do_padrao  # noqa: E402
+
+
+def test_ALVO_apos_o_gatilho_ENCERRA_o_trade_e_a_invalidacao_posterior_NAO_vale():
+    """O caso real. DENTE: antes, `invalidado` saía True e o trade ganho virava perda."""
+    pat = _pat("2026-08-30 09:00", 11.52, "2026-08-30 23:00")
+    c = _crono(_LINK, pat, 11.63, 11.27)
+    d = _desfecho_do_padrao(c)
+    assert d and d["tipo"] == "alvo"
+    assert d["em"] == "2026-08-30 15:00" and d["price"] == 11.63
+    assert d["entrada_em"] == "2026-08-30 13:00" and d["entrada"] == 11.52
+
+    pat.desfecho = d
+    saiu = pat.as_dict()
+    assert saiu["encerrado"] is True
+    assert saiu["invalidado"] is False, "trade encerrado no alvo NÃO se invalida depois"
+    # o FATO estrutural continua registrado — ele aconteceu, só não decide mais
+    assert saiu["invalidado_em"] == "2026-08-30 23:00"
+
+
+def test_o_INVERSO_stop_antes_do_alvo_encerra_no_STOP():
+    serie = _serie([
+        ("2026-08-30 09:00", 11.30, 11.40),
+        ("2026-08-30 13:00", 11.45, 11.55),   # gatilho
+        ("2026-08-30 17:00", 11.20, 11.35),   # stop 11,27
+        ("2026-08-30 21:00", 11.55, 11.70),   # o alvo, DEPOIS do stop
+    ])
+    d = _desfecho_do_padrao(_crono(serie, _pat("2026-08-30 09:00", 11.52), 11.63, 11.27))
+    assert d["tipo"] == "stop" and d["em"] == "2026-08-30 17:00"
+
+
+def test_alvo_e_stop_na_MESMA_barra_conta_o_STOP_e_declara_o_empate():
+    """Sem tick não dá pra saber a ordem dentro da barra — a leitura pessimista é
+    a mesma do ``_primeiro_toque`` do ledger, e o empate é DECLARADO."""
+    serie = _serie([
+        ("2026-08-30 09:00", 11.30, 11.40),
+        ("2026-08-30 13:00", 11.45, 11.55),   # gatilho
+        ("2026-08-30 17:00", 11.20, 11.70),   # a barra toca alvo E stop
+    ])
+    d = _desfecho_do_padrao(_crono(serie, _pat("2026-08-30 09:00", 11.52), 11.63, 11.27))
+    assert d["tipo"] == "stop" and d["empate_na_barra"] is True
+
+
+def test_SEM_gatilho_rompido_nao_ha_desfecho():
+    """Sem entrada não há trade a encerrar — e um alvo roçado por preço que nunca
+    acionou o setup não pode virar vitória."""
+    serie = _serie([
+        ("2026-08-30 09:00", 11.30, 11.40),
+        ("2026-08-30 15:00", 11.60, 11.70),   # tocou o alvo sem passar pelo gatilho
+    ])
+    assert _desfecho_do_padrao(_crono(serie, _pat("2026-08-30 09:00", 99.0), 11.63, 11.27)) is None
+
+
+def test_padrao_que_MORRE_SEM_ter_acionado_continua_invalidado():
+    """A invalidação não perdeu força — ela só deixou de valer DEPOIS do desfecho.
+
+    DENTE do exagero oposto: se a correção zerasse o `invalidado` sempre, um padrão
+    que perdeu o ponto 3 sem nunca ter acionado passaria a parecer vivo.
+    """
+    serie = _serie([
+        ("2026-08-30 09:00", 11.30, 11.40),
+        ("2026-08-30 15:00", 11.10, 11.20),   # nunca tocou o gatilho
+    ])
+    pat = _pat("2026-08-30 09:00", 11.52, "2026-08-30 15:00")
+    pat.desfecho = _desfecho_do_padrao(_crono(serie, pat, 11.63, 11.27))
+    saiu = pat.as_dict()
+    assert saiu["encerrado"] is False
+    assert saiu["invalidado"] is True, "sem desfecho, a invalidação continua valendo"
+
+
+def test_desfecho_DEPOIS_da_invalidacao_nao_encerra_nada():
+    """Se o padrão morreu ANTES de o preço chegar ao alvo, não houve desfecho de
+    trade nenhum — quem entrou já tinha sido encerrado no stop.
+
+    (A ordem é medida pela cronologia; aqui o stop vem antes e é ELE o desfecho.)
+    """
+    serie = _serie([
+        ("2026-08-29 03:00", 11.30, 11.40),
+        ("2026-08-29 07:00", 11.45, 11.55),   # gatilho
+        ("2026-08-29 11:00", 11.20, 11.35),   # stop → o trade fecha aqui
+        ("2026-08-30 15:00", 11.55, 11.70),   # o alvo, muito depois
+    ])
+    d = _desfecho_do_padrao(_crono(serie, _pat("2026-08-29 03:00", 11.52, "2026-08-29 11:00"),
+                                   11.63, 11.27))
+    assert d["tipo"] == "stop", "o PRIMEIRO desfecho manda — o alvo posterior não conta"

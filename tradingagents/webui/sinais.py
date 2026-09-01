@@ -76,9 +76,13 @@ from typing import Any
 RR_MINIMO = 1.0
 
 # Estados de leitura que contam como VIVOS para confluência e conflito. Fora
-# ficam ``invalidou`` (a premissa rompeu — o padrão não existe mais), ``sem_setup``
-# e ``sem_dado`` (não há leitura). Ver "leitura MORTA não entra na conta".
+# ficam ``invalidou`` (a premissa rompeu — o padrão não existe mais), ``concluido``
+# (o trade TERMINOU, no alvo ou no stop — DA-125), ``sem_setup`` e ``sem_dado``
+# (não há leitura). Ver "leitura MORTA não entra na conta": um trade encerrado não
+# é oportunidade de entrada, e contá-lo como voto de direção inventaria convicção
+# a partir de um setup que já acabou.
 _VIVOS = ("em_gatilho", "em_movimento", "formando")
+_TERMINADOS = ("invalidou", "concluido")
 
 # Quem já acionou (ou está no ponto) contra quem ainda vai. Decide se a
 # oportunidade sem janela aberta é "já passou" ou "ainda não chegou".
@@ -174,7 +178,7 @@ def _leitura(f: dict[str, Any], metodo: str) -> dict[str, Any] | None:
                  "mais perigosa") if src.get("zona_neutra") else None
         if estado == "zona_neutra":
             estado = "em_gatilho"
-    if estado not in _VIVOS and estado != "invalidou":
+    if estado not in _VIVOS and estado not in _TERMINADOS:
         return None
     direcao = src.get("direction")
     if not direcao:
@@ -285,7 +289,7 @@ def oportunidades(scan: dict[str, Any], rr_min: float = RR_MINIMO) -> list[dict[
             lidas = [L for L in (_leitura(f, metodo) for f in frames) if L]
             vivas = [L for L in lidas if L["estado"] in _VIVOS]
             mortas = [{"frame": L["frame"], "direcao": L["direcao"], "estado": L["estado"]}
-                      for L in lidas if L["estado"] == "invalidou"]
+                      for L in lidas if L["estado"] in _TERMINADOS]
             if not vivas:
                 continue
             por_direcao: dict[str, list] = {}

@@ -2966,3 +2966,16 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text);
 }
+
+/* ENCERRADO NO ALVO (DA-125): a única linha do card que anuncia um trade GANHO —
+   e aí o verde é semântico de verdade (ganho), que é o que a DA-078 regra 3 pede.
+   O encerrado no STOP reusa o `.sc-morto`, que já é o vocabulário da perda. */
+.sc-row.sc-ganho .sc-k { color: var(--green); font-weight: var(--fw-bold); }
+.sc-row.sc-ganho .sc-v { color: var(--green); }
+
+/* ENCERRADO no chip do scan (DA-125): o trade terminou. Cinza como o invalidado —
+   os dois são "não se opera mais" —, e o que os separa é a PALAVRA, que é a mesma
+   disciplina do resto do eixo (DA-121). Se ganhou ou perdeu está no desfecho, no
+   card: um chip de lista não é lugar de resultado. */
+.scan-chip.concluido { color: var(--muted); border-color: var(--border); }
+.scan-filter.concluido { color: var(--muted); }

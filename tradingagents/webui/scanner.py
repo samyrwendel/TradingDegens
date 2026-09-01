@@ -88,7 +88,10 @@ _live_lock = threading.Lock()
 
 # Ordem de urgência pro sort (menor = mais urgente). Entradas vivas primeiro;
 # em_movimento (já passou) e invalidou (morreu) ficam após os opportunities vivos.
-_URGENCIA = {"em_gatilho": 0, "formando": 1, "em_movimento": 2, "invalidou": 3, "sem_setup": 4, "sem_dado": 5}
+# `concluido` fica com `invalidou`: os dois são trades que não se opera mais. A
+# diferença entre eles (ganhou × morreu) está no DESFECHO, não na urgência.
+_URGENCIA = {"em_gatilho": 0, "formando": 1, "em_movimento": 2, "invalidou": 3,
+             "concluido": 3, "sem_setup": 4, "sem_dado": 5}
 
 
 def _resto(r: dict) -> float:
@@ -208,7 +211,13 @@ def _frame_row(ticker: str, date: str, frame: str,
     # EM GATILHO = preço no ponto de entrada AGORA (≤ tol), independente de o
     # padrão já ter acionado (recém-rompido ainda no ponto ainda entra). Acionado
     # e preço além da entrada → em_movimento (buscando alvo, não é entrada).
-    if invalidated:
+    # ENCERRADO manda em tudo (DA-125): um trade que já chegou ao alvo ou ao stop
+    # terminou, e nada posterior o reabre. Antes, o LINK-USD saía "invalidou" oito
+    # horas DEPOIS de ter atingido o alvo — veredito invertido em relação ao
+    # dinheiro. O desfecho vem do plano, que é onde padrão e níveis coexistem.
+    if pat.get("encerrado"):
+        estado = "concluido"
+    elif invalidated:
         estado = "invalidou"
     elif dist is not None and dist <= _GATILHO_TOL:
         estado = "em_gatilho"
@@ -255,6 +264,9 @@ def _frame_row(ticker: str, date: str, frame: str,
         "dist_pct": dist,
         "dist_txt": _fmt_pct(dist),
         "invalidacao": (plan.get("invalidation") or {}).get("price"),
+        # O DESFECHO viaja na linha (DA-125): sem ele a lista diz "concluído" e não
+        # diz se ganhou ou perdeu — que é a única coisa que importa num encerrado.
+        "desfecho": pat.get("desfecho"),
         "sl": stop.get("price"),
         "tp": None if tp_incoerente else target.get("price"),
         "tp_faixa": (None if tp_incoerente else

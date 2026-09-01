@@ -229,13 +229,25 @@ class Pattern123:
     # acionado e depois perdido o ponto 3, que são fatos independentes.
     invalidado: bool = False
     invalidado_em: str | None = None   # a data da barra que fechou além do ponto 3
+    # DESFECHO do trade (DA-125): ``{tipo: alvo|stop, em, price, entrada_em, ...}``
+    # quando o gatilho rompeu e o preço chegou a um dos dois. A partir dele o setup
+    # está ENCERRADO — e um setup encerrado não se invalida: não há o que invalidar
+    # num trade que já terminou. Sem isto, o LINK-USD do dia 30/08 saía "INVALIDADO"
+    # oito horas depois de ter ATINGIDO O ALVO.
+    desfecho: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "p1": self.p1, "p2": self.p2, "p3": self.p3,
             "trigger": self.trigger, "state": self.state,
             "direction": self.direction,
-            "invalidado": self.invalidado, "invalidado_em": self.invalidado_em,
+            # `invalidado` é o estado EFETIVO: falso quando o trade encerrou antes.
+            # O fato estrutural cru (o fechamento além do ponto 3) continua em
+            # `invalidado_em` — ele aconteceu, só não decide mais o veredito.
+            "invalidado": self.invalidado and self.desfecho is None,
+            "invalidado_em": self.invalidado_em,
+            "desfecho": self.desfecho,
+            "encerrado": self.desfecho is not None,
         }
 
 
@@ -620,6 +632,57 @@ def _primeiro_toque_na_serie(df: pd.DataFrame, nivel: float, fmt: str) -> str | 
     if not bool(tocou.any()):
         return None
     return df["Date"].iloc[int(tocou.values.argmax())].strftime(fmt)
+
+
+# ── O DESFECHO ENCERRA O TRADE, e nada posterior o reabre (DA-125) ───────────
+#
+# O defeito que isto mata, com o dado real (LINK-USD 1h, run 20260830-232525):
+# gatilho 11,52 rompido às 13:00, **alvo 11,63 ATINGIDO às 15:00**, e às 23:00 o
+# preço desabou para 10,99 — fechando além do ponto 3. O detector marcou
+# ``invalidado=True`` às 23:00, e a tela disse "INVALIDADO" sobre um trade que
+# tinha GANHO oito horas antes. **O veredito ficou invertido em relação ao
+# dinheiro.**
+#
+# A regra: **invalidação só vale enquanto o trade está VIVO** — entre o rompimento
+# do gatilho e o primeiro desfecho (alvo ou stop, o que vier primeiro). Depois do
+# desfecho não há o que invalidar: o setup terminou. É a mesma disciplina do
+# ``_primeiro_toque`` do ledger (task 008), onde "um trade que tocou o alvo e
+# voltou fica ``bateu_tp`` pra sempre" — só que ali ela já valia e aqui não.
+#
+# **Antes do gatilho a invalidação continua valendo integralmente**: um padrão que
+# perde o ponto 3 sem nunca ter acionado morreu mesmo, e não houve trade nenhum.
+
+
+def _desfecho_do_padrao(cronologia: dict[str, Any] | None) -> dict[str, Any] | None:
+    """O primeiro desfecho do trade — ``None`` quando não houve.
+
+    Derivado da CRONOLOGIA (uma medição só, DA-124): exige o gatilho rompido e,
+    depois dele, o primeiro toque em alvo ou stop. Sem entrada não há trade a
+    encerrar, e um alvo roçado por um preço que nunca acionou o setup não é
+    desfecho de coisa nenhuma.
+
+    Empate na mesma barra resolve pelo STOP — a leitura pessimista, a mesma do
+    ledger: sem tick não dá pra saber a ordem dentro da barra, e acerto inflado é
+    o pior erro possível num painel que existe pra dizer a taxa real.
+    """
+    if not cronologia:
+        return None
+    ev = {e["nome"]: e for e in (cronologia.get("eventos") or [])}
+    gat = ev.get("gatilho")
+    if not gat:
+        return None
+    alvo, stop = ev.get("alvo (TP)"), ev.get("stop (SL)")
+    cands = [(e["quando"], tipo, e) for tipo, e in (("alvo", alvo), ("stop", stop))
+             if e and e["quando"] > gat["quando"]]
+    if not cands:
+        return None
+    # ordena por data e, no empate, o stop vem primeiro (pessimista)
+    cands.sort(key=lambda c: (c[0], 0 if c[1] == "stop" else 1))
+    quando, tipo, e = cands[0]
+    empate = any(c[0] == quando and c[1] != tipo for c in cands)
+    return {"tipo": tipo, "em": quando, "price": e["price"],
+            "entrada_em": gat["quando"], "entrada": gat["price"],
+            "empate_na_barra": empate}
 
 
 def _cronologia_do_padrao(df, pattern, target, stop, fmt) -> dict[str, Any] | None:
@@ -1678,6 +1741,14 @@ def build_actionable_plan(
     )
     realize_zone = _reconcile_realize(realize_zone, struct.pattern, target)
 
+    # A CRONOLOGIA primeiro, o DESFECHO dela (DA-124 + DA-125). O desfecho volta
+    # PARA O PADRÃO: é ele que decide se a invalidação posterior ainda vale, e o
+    # `as_dict` do padrão já sabe disso. Só aqui os dois lados existem juntos — o
+    # detector não conhece alvo nem stop, e por isso não podia decidir sozinho.
+    cronologia = _cronologia_do_padrao(df, struct.pattern, target, stop, fmt)
+    if struct.pattern is not None:
+        struct.pattern.desfecho = _desfecho_do_padrao(cronologia)
+
     return ActionablePlan(
         symbol=symbol, as_of=as_of, price=price, timeframe=tf_ref,
         horizon=_HORIZON[setup_state], setup_state=setup_state,
@@ -1686,7 +1757,7 @@ def build_actionable_plan(
         invalidation=invalidation, stop=stop, target=target, risk_reward=risk_reward,
         setup_source=setup_source,
         projecao_p3=_projecao_p3(df, lows, highs, price, struct.pattern, fmt),
-        cronologia=_cronologia_do_padrao(df, struct.pattern, target, stop, fmt),
+        cronologia=cronologia,
     )
 
 

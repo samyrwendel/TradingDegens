@@ -189,6 +189,7 @@ const FASE_PT = {
   agora: "NA ENTRADA",
   esperando: "AGUARDANDO",
   andou: "JÁ ANDOU",
+  encerrado: "ENCERRADO",
   morreu: "INVALIDADO",
   sem_leitura: "SEM LEITURA",
 };
@@ -196,6 +197,7 @@ const FASE_AJUDA = {
   agora: "o preço está no ponto de entrar — é a hora de agir",
   esperando: "o gatilho ainda não veio",
   andou: "acionou e o preço já passou da entrada",
+  encerrado: "o trade terminou — chegou ao alvo ou ao stop",
   morreu: "a premissa rompeu — não há trade",
   sem_leitura: "não há leitura para este ativo neste frame",
 };
@@ -211,6 +213,7 @@ const FASE_DO_SCAN_ESTADO = {
   em_gatilho: "agora",
   formando: "esperando",
   em_movimento: "andou",
+  concluido: "encerrado",
   invalidou: "morreu",
   sem_setup: "sem_leitura",
   sem_dado: "sem_leitura",
@@ -227,6 +230,7 @@ const MECANISMO_PT = {
   ativo: "recuo à média",
   em_gatilho: "gatilho rompido",
   em_movimento: "gatilho ficou para trás",
+  concluido: "trade encerrado",
   invalidou: "premissa rompida",
 };
 function faseDoSetupState(st) { return FASE_DO_SETUP_STATE[st] || null; }
@@ -2624,9 +2628,32 @@ function renderSetupCards(a) {
     // O DETALHE DA MORTE vem PRIMEIRO — antes dos níveis, porque muda o sentido de
     // todos eles. Qual nível foi perdido, QUANDO, e o que significa pra quem estava
     // posicionado: um selo "invalidado" sozinho não deixa conferir nada.
-    if (morto) {
+    // ENCERRADO manda (DA-125): um trade que chegou ao alvo ou ao stop TERMINOU, e
+    // nada posterior o reabre. Antes, o LINK-USD saía "INVALIDADO" oito horas
+    // depois de ter ATINGIDO O ALVO — o veredito invertido em relação ao dinheiro.
+    if (pat.encerrado && pat.desfecho) {
+      const d = pat.desfecho;
+      const ganhou = d.tipo === "alvo";
+      rows.push(scRow(
+        ganhou ? "ENCERRADO NO ALVO" : "ENCERRADO NO STOP",
+        `${fmtNum(d.price)} em ${fmtDataHora(d.em)}`,
+        `entrada no gatilho ${fmtNum(d.entrada)} em ${fmtDataHora(d.entrada_em)} — ` +
+        (ganhou
+          ? "o alvo foi atingido e o trade fechou no lucro. O que o preço fez DEPOIS " +
+            "não pertence a este setup: ele já tinha terminado."
+          : "o stop foi atingido e o trade fechou no prejuízo.") +
+        (d.empate_na_barra
+          ? " Alvo e stop caíram na MESMA barra: sem tick não dá pra saber a ordem " +
+            "dentro dela, então conta o stop — a leitura pessimista, a mesma do ledger."
+          : "") +
+        (pat.invalidado_em
+          ? ` O ponto 3 só foi perdido em ${fmtDataHora(pat.invalidado_em)}, com o ` +
+            "trade já fechado — por isso este setup NÃO está invalidado."
+          : ""),
+        ganhou ? "sc-ganho" : "sc-morto"));
+    } else if (morto) {
       const inv0 = a.invalidation || {};
-      const quando = pat.invalidado_em ? ` em ${fmtDate(pat.invalidado_em)}` : "";
+      const quando = pat.invalidado_em ? ` em ${fmtDataHora(pat.invalidado_em)}` : "";
       rows.push(scRow("INVALIDADO", `perdeu ${fmtNum(inv0.price != null ? inv0.price : pat.p3.price)}${quando}`,
         (pat.direction === "venda"
           ? "o preço FECHOU acima do ponto 3: os topos deixaram de ser descendentes e este 1-2-3 de venda não existe mais."
@@ -2689,7 +2716,10 @@ function renderSetupCards(a) {
     // INVALIDADO manda no rótulo de estado: "em formação" num padrão morto é a tela
     // descrevendo um setup que não existe mais. O estado nativo continua ao lado —
     // ele é a história, e é ela que explica onde o preço está.
-    const pstate = morto
+    const pstate = (pat.encerrado && pat.desfecho)
+      ? `encerrado no ${pat.desfecho.tipo === "alvo" ? "alvo" : "stop"} · era ` +
+        `${PAT_STATE[pat.state] || pat.state || ""}`
+      : morto
       ? `invalidado · era ${PAT_STATE[pat.state] || pat.state || ""}`
       : (PAT_STATE[pat.state] || pat.state || "")
         + (andado != null ? ` · andou ${fmtPct0(andado)} do caminho` : "");
@@ -3342,6 +3372,11 @@ const COR_FANTASMA = "#6b7280";
 // ficar abaixo de 70% do contraste do vivo.
 const ALFA_FANTASMA = 0.85;
 
+// FANTASMA é o padrão MORTO. Um padrão ENCERRADO não é fantasma (DA-125): ele
+// terminou — no alvo ou no stop —, e pintá-lo com o cinza de "a premissa rompeu"
+// diria que o trade não existiu. O `invalidado` que chega aqui já é o EFETIVO (o
+// `as_dict` do padrão o zera quando houve desfecho), então esta função continua
+// sendo uma linha; o comentário existe pra ninguém "consertar" trocando o campo.
 function ehFantasma(pat) {
   return !!(pat && pat.invalidado);
 }
@@ -7638,6 +7673,7 @@ let _scanAt = null;          // QUANDO o scan que está na tela foi tirado (task
 const SCAN_ESTADO_PT = {
   em_gatilho: { compra: ["COMPRA"], venda: ["VENDA"] },
   em_movimento: ["JÁ ANDOU"],
+  concluido: ["ENCERRADO"],
   invalidou: ["INVALIDADO"],
   formando: ["AGUARDANDO"],
   sem_setup: ["sem setup", "·"],
@@ -7658,6 +7694,7 @@ function scanEstadoChip(estado, direction, andado) {
   const [pt] = entry;
   const cls = estado === "em_movimento" ? "scan-chip movimento"
     : estado === "invalidou" ? "scan-chip invalidou"
+    : estado === "concluido" ? "scan-chip concluido"
     : "scan-chip";
   // O MECANISMO desceu pro title (DA-121): a célula mostra a FASE, e o que
   // exatamente se espera (ou o que ficou para trás) fica a um hover — sem que a
@@ -7932,7 +7969,7 @@ async function runScan() {
 
 // Chips de filtro por estado do gatilho. Reusa SCAN_ESTADO_PT pra cor/emoji.
 // Clicar um chip seleciona o filtro; clicar de novo (ou o "Todos") desliga.
-const SCAN_FILTER_ORDER = ["em_gatilho", "em_movimento", "invalidou", "formando", "sem_setup", "sem_dado"];
+const SCAN_FILTER_ORDER = ["em_gatilho", "em_movimento", "concluido", "invalidou", "formando", "sem_setup", "sem_dado"];
 function renderScanFilters(s) {
   const host = $("scanFilters");
   if (!host) return;
@@ -8378,8 +8415,12 @@ function sinalFramesHtml(o) {
 function sinalDissidentesHtml(o) {
   const d = o.dissidentes || [];
   if (!d.length) return "";
+  // O dissidente diz o SEU estado (DA-125): "invalidado" e "encerrado" são coisas
+  // diferentes, e chamar um trade que chegou ao alvo de invalidado é exatamente o
+  // veredito invertido que esta DA veio matar.
   const txt = d.map((x) => `${escapeHtml(tfCurto(x.frame) || x.frame)} tinha ` +
-    `${escapeHtml(SINAL_DIR_PT[x.direcao] || x.direcao)}, invalidado`).join(" · ");
+    `${escapeHtml(SINAL_DIR_PT[x.direcao] || x.direcao)}, ` +
+    `${x.estado === "concluido" ? "encerrado" : "invalidado"}`).join(" · ");
   return `<div class="sn-dissidente">${txt}</div>`;
 }
 

@@ -94,11 +94,20 @@ def test_a_oportunidade_tambem_espelha_e_o_conflito_NAO_tem_fase():
 
 
 # ------------------------------------------------------------- o eixo temporal --
-def test_as_quatro_fases_cobrem_o_eixo_e_nada_mais():
+def test_as_fases_cobrem_o_eixo_e_nada_mais():
     assert list(fases.FASE_PT) == list(fases.ORDEM)
     assert set(fases.FASE_PT) == set(fases.FASE_AJUDA)
-    # a ordem é a do TEMPO, e é ela que a tela usa pra empilhar as seções
-    assert fases.ORDEM[:4] == ("agora", "esperando", "andou", "morreu")
+    # A ordem é a do TEMPO. `encerrado` entrou na DA-125 e vem depois de `andou` e
+    # ANTES de `morreu`, porque é isso que ele é: o trade chegou ao fim — e um
+    # trade encerrado não se invalida depois.
+    assert fases.ORDEM[:5] == ("agora", "esperando", "andou", "encerrado", "morreu")
+
+
+def test_ENCERRADO_e_uma_fase_e_nao_um_tipo_de_invalidacao():
+    """DENTE da DA-125: um trade que chegou ao alvo saía "INVALIDADO"."""
+    assert fases.de_scan_estado("concluido") == "encerrado"
+    assert fases.rotulo("encerrado") == "ENCERRADO"
+    assert fases.de_scan_estado("concluido") != fases.de_scan_estado("invalidou")
 
 
 @pytest.mark.parametrize("tabela", [fases.DO_SETUP_STATE, fases.DO_SCAN_ESTADO])

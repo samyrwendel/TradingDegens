@@ -104,6 +104,12 @@ _CAMPOS_DO_123 = (
     # mas a CHAVE existe sempre — a tela não pode ter que adivinhar se o campo
     # sumiu porque não se aplica ou porque o scan esqueceu.
     "andado_pct", "sobra_pct", "rr_gatilho", "rr_motivo",
+    # DESFECHO do trade (DA-125): {tipo: alvo|stop, em, price, entrada_em, ...}
+    # quando o gatilho rompeu e o preço chegou a um dos dois. Sem ele a lista diz
+    # "encerrado" e não diz se ganhou ou perdeu — a única coisa que importa num
+    # trade que terminou. Mesma disciplina das chaves acima: existe sempre, mesmo
+    # vazia, pra "não se aplica" não se confundir com "o scan esqueceu".
+    "desfecho",
 )
 
 
