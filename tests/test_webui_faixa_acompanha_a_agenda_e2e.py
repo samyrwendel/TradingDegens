@@ -1,4 +1,4 @@
-"""A FAIXA DE FRAMES do card ACOMPANHA a agenda — sem F5 (DA-141).
+"""OS LEITORES DA AGENDA ACOMPANHAM a passada — sem F5 (DA-141, ampliada na DA-142).
 
 O Samyr: *"no gráfico temos o setup atualizado e na watchlist só quando atualiza a
 página, exemplo AAPL"*. Era isso mesmo: :func:`carregaFaixaDoScan` tinha UMA
@@ -24,7 +24,10 @@ Os dentes:
   calculada e dada por vista antes de o painel existir);
 * a releitura NÃO varre: é a mesma leitura de arquivo que o painel já fazia;
 * aba em segundo plano: o navegador afrouxa o timer, então o retorno ao primeiro
-  plano relê se a passada aconteceu enquanto ninguém olhava.
+  plano relê se a passada aconteceu enquanto ninguém olhava;
+* e o ciclo é UM SÓ para N leitores (DA-142): a faixa foi o primeiro, o card de
+  execução é o segundo, e um timer por leitor multiplicaria por N as perguntas de
+  horário e as maneiras de os dois divergirem.
 """
 
 import json
@@ -231,7 +234,7 @@ def test_voltar_pro_primeiro_plano_RELE_se_a_passada_aconteceu_atras_da_aba(base
         assert "fx-agora" in page.evaluate(_MARCA_D), "o timer longo já releu sozinho"
 
         # o navegador engoliu o timer: o alvo venceu enquanto a aba estava atrás
-        page.evaluate("() => { _faixaAlvoMs = 1; }")
+        page.evaluate("() => { _agendaAlvoMs = 1; }")
         page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
         page.wait_for_function(
             """() => {
@@ -284,7 +287,123 @@ def test_agenda_fora_do_ar_RETENTA_a_pergunta_em_vez_de_encerrar_o_ciclo(base):
         page.goto(base, wait_until="domcontentloaded")
         page.wait_for_selector(".h-faixa", state="attached", timeout=15000)
         # o ciclo ficou ARMADO (um timer de re-pergunta), não morto
-        armado = page.evaluate("() => !!_faixaTimer && _faixaAlvoMs === 0")
+        armado = page.evaluate("() => !!_agendaTimer && _agendaAlvoMs === 0")
         assert armado, "a pergunta falhou e o ciclo morreu junto"
         assert page.evaluate("() => window.__agenda") >= 1
+        browser.close()
+
+
+# ─────────── O SEGUNDO LEITOR: o card de execução (DA-142) ───────────────────
+#
+# A CONFIABILIDADE dele vem do ledger (`scan_verdicts`), que a passada alimenta de
+# hora em hora com gatilhos e fechamentos. Ele JÁ se recarregava no fechamento do
+# candle — a DA-118 chama `revalidaFrame`, que o recarrega —, mas isso é a cadência
+# do FRAME ABERTO: no diário, uma vez por dia; no semanal, uma vez por semana; e com
+# o pregão fechado, nenhuma. O ledger anda de hora em hora, e o índice exibido
+# envelhecia sem nada na tela dizer.
+
+from tests.test_webui_exec_card_e2e import _card, _snap  # noqa: E402
+
+# O MESMO setup, antes e depois de a passada fechar mais gatilhos no ledger. É só
+# isto que muda entre as duas cartas — o plano é função de barras FECHADAS e não se
+# move entre dois fechamentos.
+_LEDGER_ANTES = {"123": {"n": 9, "n_fechados": 3, "taxa_acerto": 1.0}}
+_LEDGER_DEPOIS = {"123": {"n": 30, "n_fechados": 12, "taxa_acerto": 0.75,
+                          "expectativa_r": 0.8, "rr_medio": 2.0}}
+
+
+def _abre_run_com_exec(page, base_url, estado, ler_em_segundos=1):
+    """Abre uma análise (o card de execução só existe com ativo aberto) e serve o
+    `/api/execucao` a partir de um estado MUTÁVEL."""
+    snap = _snap("setup123")
+
+    def handler(route):
+        u = route.request.url
+        if "/api/agenda/scan" in u:
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"cadencia_min": 60, "atraso_s": 60,
+                                           "margem_s": 0, "em_segundos": 1,
+                                           "ler_em_segundos": ler_em_segundos}))
+        elif "/api/execucao" in u:
+            estado["pedidos"] = estado.get("pedidos", 0) + 1
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(_card(None, estado["ledger"])))
+        elif "/api/agenda/proxima" in u:
+            # sem revalidação de candle no meio: o que este teste mede é o CICLO DA
+            # AGENDA, e um segundo relógio disparando aqui mediria o outro.
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"tf": "1d", "revalida": False,
+                                           "em_segundos": 0}))
+        elif "/api/scan/salvo" in u or "/api/scan" in u:
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(_ANTES))
+        elif "/api/status/" in u or re.search(r"/api/run/[^/]+$", u):
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(snap))
+        elif "/api/history" in u:
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"runs": _HIST}))
+        else:
+            route.continue_()
+    page.route(re.compile(r"/api/"), handler)
+    page.goto(base_url, wait_until="domcontentloaded")
+    page.evaluate("() => watchRun('R-009')")
+    page.wait_for_selector("#execCard:not(.hidden)", timeout=20000)
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_CARD_DE_EXECUCAO_acompanha_o_ledger_sem_F5(base):
+    """DENTE: com a página ABERTA e o ledger mudando no servidor, a confiabilidade
+    exibida muda. Nenhum `reload` aqui, e a revalidação por candle está DESLIGADA de
+    propósito (`revalida: False`) — o que move o card é o ciclo da agenda.
+
+    A âncora vem primeiro: com 3 fechados o gate de N cala a taxa (é a regra da
+    DA do card), então "acerto" não pode estar na tela ANTES.
+    """
+    estado = {"ledger": _LEDGER_ANTES, "pedidos": 0}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre_run_com_exec(page, base, estado)
+        assert "acerto 75%" not in page.inner_text("#execCard"), page.inner_text("#execCard")
+
+        # a passada rodou e o ledger ganhou fechados: o servidor tem dado novo
+        estado["ledger"] = _LEDGER_DEPOIS
+        page.wait_for_function(
+            """() => /acerto 75%/.test(
+                 (document.getElementById('execCard') || {}).innerText || '')""",
+            timeout=20000)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_um_RELOGIO_para_os_dois_leitores(base):
+    """DA-142: um timer por leitor multiplicaria por N as perguntas de horário e as
+    maneiras de os dois divergirem. Uma pergunta por passada, dois leitores servidos.
+
+    DENTE: se alguém der um ciclo próprio ao card de execução, as contagens deixam
+    de andar juntas.
+    """
+    estado = {"ledger": _LEDGER_ANTES, "pedidos": 0}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        page.add_init_script("""
+          window.__agenda = 0; window.__salvo = 0;
+          window.__f0 = window.fetch;
+          window.fetch = function (u, x) {
+            const s = String(u);
+            if (s.indexOf('/api/agenda/scan') >= 0) window.__agenda++;
+            if (s.indexOf('/api/scan/salvo') >= 0) window.__salvo++;
+            return window.__f0(u, x);
+          };
+        """)
+        _abre_run_com_exec(page, base, estado)
+        page.wait_for_function("() => window.__agenda >= 3", timeout=25000)
+        n = page.evaluate("() => ({agenda: window.__agenda, salvo: window.__salvo})")
+        # os dois leitores andam JUNTOS: cada volta do ciclo serve os dois, então as
+        # contagens ficam a no máximo uma volta de distância uma da outra. (O card
+        # tem UMA leitura a mais, a da abertura da run, que não vem do ciclo.)
+        assert abs(n["salvo"] - (estado["pedidos"] - 1)) <= 1, (n, estado["pedidos"])
+        assert abs(n["agenda"] - n["salvo"]) <= 1, (n, estado["pedidos"])
         browser.close()

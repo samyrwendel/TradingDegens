@@ -6875,16 +6875,10 @@ async function carregaFaixaDoScan() {
     if (!data || !(data.ativos || []).length || !data.gerado_em) return;
     _faixaScan = data;
     paintHistory();
-  } catch (e) { /* sem salvo: o card fica como era */
-  } finally {
-    // Leu (ou tentou), agenda a próxima. No `finally` de propósito: uma leitura que
-    // falhou não pode ENCERRAR o ciclo — seria um blecaute de rede de 2s deixando a
-    // faixa congelada até o próximo F5, que é o defeito que isto veio consertar.
-    agendaProximaLeituraDaFaixa();
-  }
+  } catch (e) { /* sem salvo: o card fica como era */ }
 }
 
-// A FAIXA ACOMPANHA A AGENDA (DA-141) — e o relógio é o do SERVIDOR.
+// OS LEITORES DA AGENDA — UM RELÓGIO, N LEITORES (DA-141, ampliada na DA-142).
 //
 // O defeito: `carregaFaixaDoScan` tinha UMA chamada em todo o front, dentro do
 // `init`. Depois do boot ninguém mais a chamava, e `_faixaScan` ficava com o que
@@ -6912,21 +6906,57 @@ async function carregaFaixaDoScan() {
 // documenta — a marca calculada e dada por vista antes de o painel existir).
 //
 // **Aba em segundo plano:** o navegador afrouxa `setTimeout` (no celular, chega a
-// parar). Por isso o horário-alvo fica em `_faixaAlvoMs` e é conferido ao voltar
+// parar). Por isso o horário-alvo fica em `_agendaAlvoMs` e é conferido ao voltar
 // pro primeiro plano — o timer é o caminho feliz, a volta da aba é a rede de
 // segurança, como no `revalidaSeOCandleFechouEnquantoEuNaoOlhava`.
-let _faixaTimer = null;
-let _faixaAlvoMs = 0;
-// Entre TENTATIVAS de perguntar — e isto não é a cadência da faixa. Quem decide
+//
+// **UM RELÓGIO, N LEITORES (DA-142).** A faixa não é a única superfície que lê o
+// que a agenda mantém, e um timer por leitor multiplicaria por N tanto as perguntas
+// de horário quanto as maneiras de divergir. O ciclo é da AGENDA; quem lê se
+// registra em `_LEITORES_DA_AGENDA` e diz ali qual é a sua política. A regra vale
+// como checklist pra superfície nova: leitor de fonte viva declara como se atualiza,
+// ou nasce congelado em silêncio.
+// A LISTA DE LEITORES, num lugar só. Cada superfície que mostra dado mantido pela
+// AGENDA entra aqui e declara a sua política ao entrar (DA-142) — um leitor sem
+// política declarada é um leitor que congela em silêncio, que é exatamente como os
+// dois primeiros nasceram.
+//
+//   `carregaFaixaDoScan` — a faixa de frames do card lê o último scan SALVO, que a
+//       passada grava. Era o caso original: uma chamada no `init` e mais nada.
+//   `carregaExecCard` — a CONFIABILIDADE do card de execução vem do ledger
+//       (`scan_verdicts`), que a passada alimenta com gatilhos e fechamentos. Ele já
+//       se atualizava no fechamento do candle (a DA-118 chama `revalidaFrame`, que o
+//       recarrega) — mas isso é a cadência do FRAME ABERTO: no diário, uma vez por
+//       dia; no semanal, uma vez por semana; e com o pregão fechado, nunca. O ledger
+//       anda de hora em hora. O resto do card não desliza junto porque o plano é
+//       função de barras FECHADAS: entre dois fechamentos ele devolve o mesmo.
+//
+// O leitor que não tem o que ler sai barato: `carregaExecCard` sem ativo aberto
+// devolve na primeira linha, e a faixa sem scan salvo não pinta nada.
+const _LEITORES_DA_AGENDA = [carregaFaixaDoScan, carregaExecCard];
+
+let _agendaTimer = null;
+let _agendaAlvoMs = 0;
+// Entre TENTATIVAS de perguntar — e isto não é a cadência dos leitores. Quem decide
 // quando ler continua sendo o servidor; se a pergunta não foi respondida (rede
 // oscilou, processo reiniciando), o que se repete é a PERGUNTA. Sem isto, um
-// blecaute de dois segundos no instante errado encerrava o ciclo e devolvia a faixa
+// blecaute de dois segundos no instante errado encerrava o ciclo e devolvia a tela
 // ao congelamento até o próximo F5 — o defeito, entrando pela porta do erro.
-const _FAIXA_RETENTA_MS = 60000;
+const _AGENDA_RETENTA_MS = 60000;
 
-async function agendaProximaLeituraDaFaixa() {
-  if (_faixaTimer) { clearTimeout(_faixaTimer); _faixaTimer = null; }
-  _faixaAlvoMs = 0;
+// Relê TODOS os leitores e reagenda. `allSettled` de propósito: um leitor que falha
+// não pode levar os outros junto nem encerrar o ciclo — é a mesma razão do
+// `finally` que estava aqui antes, agora valendo pra lista inteira.
+async function releLeitoresDaAgenda() {
+  try {
+    await Promise.allSettled(_LEITORES_DA_AGENDA.map((ler) => ler()));
+  } catch (e) { /* nenhum leitor pode derrubar o ciclo */ }
+  agendaProximaLeitura();
+}
+
+async function agendaProximaLeitura() {
+  if (_agendaTimer) { clearTimeout(_agendaTimer); _agendaTimer = null; }
+  _agendaAlvoMs = 0;
   let ms = 0;
   try {
     const res = await fetch("/api/agenda/scan");
@@ -6935,25 +6965,25 @@ async function agendaProximaLeituraDaFaixa() {
     if (s && isFinite(s)) ms = Math.max(1000, s * 1000);
   } catch (e) { /* sem agenda agora: retenta a pergunta abaixo */ }
   if (ms) {
-    _faixaAlvoMs = Date.now() + ms;
-    _faixaTimer = setTimeout(() => { _faixaTimer = null; carregaFaixaDoScan(); }, ms);
+    _agendaAlvoMs = Date.now() + ms;
+    _agendaTimer = setTimeout(() => { _agendaTimer = null; releLeitoresDaAgenda(); }, ms);
   } else {
-    _faixaTimer = setTimeout(
-      () => { _faixaTimer = null; agendaProximaLeituraDaFaixa(); }, _FAIXA_RETENTA_MS);
+    _agendaTimer = setTimeout(
+      () => { _agendaTimer = null; agendaProximaLeitura(); }, _AGENDA_RETENTA_MS);
   }
 }
 
 // Chamado pelo `onVisibleForeground`: se a passada aconteceu enquanto a aba estava
 // atrás (e o navegador engoliu o timer), relê agora. Se não aconteceu, só garante
 // que o timer existe.
-function leFaixaSeAPassadaAconteceuEnquantoEuNaoOlhava() {
-  if (_faixaAlvoMs && Date.now() >= _faixaAlvoMs) {
-    _faixaAlvoMs = 0;
-    if (_faixaTimer) { clearTimeout(_faixaTimer); _faixaTimer = null; }
-    carregaFaixaDoScan();          // relê e reagenda no `finally`
+function leAgendaSeAPassadaAconteceuEnquantoEuNaoOlhava() {
+  if (_agendaAlvoMs && Date.now() >= _agendaAlvoMs) {
+    _agendaAlvoMs = 0;
+    if (_agendaTimer) { clearTimeout(_agendaTimer); _agendaTimer = null; }
+    releLeitoresDaAgenda();        // relê e reagenda no fim
     return;
   }
-  if (!_faixaTimer) agendaProximaLeituraDaFaixa();
+  if (!_agendaTimer) agendaProximaLeitura();
 }
 
 // De ONDE a faixa lê, num lugar só: o scan da TELA tem precedência sobre o salvo —
@@ -9500,9 +9530,10 @@ function init() {
   // era buscado ao abrir o painel de varredura — com a lista de observação na tela
   // desde o boot, a faixa não apareceria nunca. É UMA leitura do disco do servidor
   // (`/api/scan/salvo`), a mesma que o painel já fazia: não dispara varredura, não
-  // custa LLM, e não é por card. Daqui em diante ela se REAGENDA sozinha, pela
-  // agenda do servidor (DA-141) — sem isso a faixa congelava no boot.
-  carregaFaixaDoScan();
+  // custa LLM, e não é por card. Daqui em diante o CICLO DA AGENDA a relê sozinha,
+  // junto com os outros leitores da mesma fonte (DA-141/142) — sem isso ela
+  // congelava no boot.
+  releLeitoresDaAgenda();
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();
   // Ao abrir: se havia um run vivo sendo acompanhado, reengata o progresso; senão,
@@ -9582,7 +9613,7 @@ function onVisibleForeground() {
   else resumeActiveRun();                                    // timer morreu: reengata o vivo
   refreshPrices();                                           // preços live ao voltar pra aba
   revalidaSeOCandleFechouEnquantoEuNaoOlhava();              // candle que fechou atrás da aba
-  leFaixaSeAPassadaAconteceuEnquantoEuNaoOlhava();           // passada que gravou atrás da aba
+  leAgendaSeAPassadaAconteceuEnquantoEuNaoOlhava();          // passada que gravou atrás da aba
 }
 
 // A lista de fundo se atualiza devagar (5s), independente do run assistido: é o
