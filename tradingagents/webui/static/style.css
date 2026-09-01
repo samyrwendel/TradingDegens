@@ -1135,6 +1135,11 @@ details.section[open] > summary::before { content: "▾"; }
    em vez de disputar espaço com o dado permanente. */
 .history li .h-price  { grid-row: 2; grid-column: 1 / -1; min-width: 0; }
 .history li .h-flag   { grid-row: 3; grid-column: 1 / -1; justify-self: end; align-self: center; }
+/* A FAIXA DE FRAMES na fileira 4, largura inteira (DA-131): embaixo do preço, que
+   com o ticker continua sendo o que se lê primeiro. Grade explícita porque o
+   `.h-flag` acima já ocupa a 3 — sem a linha própria, a faixa disputaria a fileira
+   com um marcador transitório e o card mudaria de altura quando ele sumisse. */
+.history li .h-faixa  { grid-row: 4; grid-column: 1 / -1; }
 .history li:hover { background: var(--panel-2); }
 
 /* esquerda: ticker em negrito SOBRE o nome da empresa em cinza (duas linhas) */
@@ -3023,3 +3028,62 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
    card: um chip de lista não é lugar de resultado. */
 .scan-chip.concluido { color: var(--muted); border-color: var(--border); }
 .scan-filter.concluido { color: var(--muted); }
+
+/* ============ FAIXA DE FRAMES NO CARD DA LISTA (DA-131) =====================
+   Um marcador por frame VARRIDO, lido de relance. A cor diz a direção (verde
+   compra / vermelho venda — a mesma gramática da lista do scan, que é de quem
+   esta faixa é a projeção compacta), e a FORMA diz a fase — então a faixa se lê
+   sem depender de enxergar cor, que é requisito e não enfeite.
+
+   O frame vai ESCRITO dentro do marcador, minúsculo mas em caixa alta e com
+   `letter-spacing`: "D/4H/1H" são duas ou três letras, e sem elas a faixa exigiria
+   contar posições da esquerda pra direita pra saber de qual frame é cada quadrado.
+
+   Quadrada e chapada (DA-078 regras 1 e 2). Cresce sozinha se o scan ganhar
+   frames: é `flex`, sem largura fixa e sem posição codificada. */
+.h-faixa { display: flex; gap: 3px; margin-top: 4px;
+           align-items: center; }
+.fx-m { display: inline-flex; align-items: center; justify-content: center;
+        min-width: 22px; height: 13px; padding: 0 3px; border-radius: 0;
+        border: 1px solid var(--border); box-sizing: border-box; }
+.fx-m > i { font-style: normal; font-size: .58rem; line-height: 1;
+            letter-spacing: .04em; font-weight: var(--fw-bold);
+            font-variant-numeric: tabular-nums; }
+
+/* NA ENTRADA: preenchido — é o único estado em que há o que fazer AGORA, e é o
+   único que ganha peso de fundo cheio. */
+.fx-agora.compra { background: var(--green); border-color: var(--green); color: #0b0b0b; }
+.fx-agora.venda  { background: var(--red);   border-color: var(--red);   color: #0b0b0b; }
+/* AGUARDANDO: vazado — a estrutura existe, o gatilho não veio. */
+.fx-esperando.compra { color: var(--green); border-color: var(--green); background: transparent; }
+.fx-esperando.venda  { color: var(--red);   border-color: var(--red);   background: transparent; }
+/* JÁ ANDOU: vazado com a base grossa — acionou (por isso a barra) e o preço já
+   passou da entrada (por isso não é cheio). */
+.fx-andou.compra { color: var(--green); border-color: var(--green);
+                   border-bottom-width: 4px; background: transparent; }
+.fx-andou.venda  { color: var(--red); border-color: var(--red);
+                   border-bottom-width: 4px; background: transparent; }
+/* HISTÓRIA: cinza nos dois, porque nos dois "já não se opera" — o que separa é a
+   forma. O ENCERRADO é chapado (terminou); o INVALIDADO leva o risco, o mesmo
+   `line-through` que o chip da lista já usa pra ele. Se ganhou ou perdeu NÃO vai
+   aqui: vai no card do ativo (DA-125) — faixa de lista não é lugar de resultado. */
+/* O ENCERRADO É TRACEJADO, e isso NÃO é gosto: com fundo cheio ele tinha a mesma
+   assinatura do NA ENTRADA fora do eixo da cor (preenchido · borda sólida · 1px ·
+   sem risco), e quem não distingue verde de cinza leria um trade TERMINADO como
+   "entre agora" — a pior troca possível. Tracejado o separa de tudo: o sólido é de
+   quem ainda vale, o pontilhado é do que não foi lido, e o tracejado fica sendo o
+   que existiu e acabou. Foi o teste que mede o ESTILO COMPUTADO que pegou. */
+.fx-encerrado { color: var(--muted); border-color: var(--border);
+                border-style: dashed; background: transparent; }
+.fx-morreu { color: var(--muted); border-color: var(--border);
+             text-decoration: line-through; background: transparent; }
+/* SEM LEITURA: pontilhado e apagado — "não há leitura" não pode ter a mesma cara
+   de "li e não achei". */
+.fx-sem { color: var(--muted); border-style: dotted; opacity: .6;
+          background: transparent; }
+
+/* No TELEFONE a faixa ENCOLHE, não some (DA-101): ela é o motivo do card. */
+@media (max-width: 720px) {
+  .fx-m { min-width: 20px; height: 12px; }
+  .fx-m > i { font-size: .55rem; }
+}

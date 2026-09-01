@@ -6504,6 +6504,102 @@ async function loadHistory() {
 
 // Pinta a lista lateral a partir de `_allRuns` (sem re-buscar): usada pelo refresh,
 // pela troca de aba e pela re-pintura quando os nomes resolvem async.
+// ============ A FAIXA DE FRAMES NO CARD DA LISTA (DA-131) ====================
+//
+// Pedido do Samyr: uma faixa "|15M | 1H | 4H | D | S|" no card, pra ler a
+// CONFLUÊNCIA de relance sem abrir o ativo. Três decisões que a proposta não
+// trazia fechadas, e cada uma tem teste:
+//
+// 1. OS FRAMES SÃO OS QUE O SCAN REALMENTE VARRE — hoje 1d, 4h e 1h, e a LISTA vem
+//    do próprio scan (`data.frames`), nunca escrita à mão aqui. O 15m e o semanal
+//    existem na análise individual, não na varredura: mostrá-los como "sem setup"
+//    seria afirmar o que não se mediu. Frame não varrido não aparece — e o dia em
+//    que o scan crescer, a faixa cresce sozinha.
+//
+// 2. A COR NÃO É O ÚNICO PORTADOR. Cada fase tem uma FORMA própria (preenchimento,
+//    contorno, meia-barra, risco), então a faixa se lê sem depender de enxergar
+//    cor — e o `title` diz em palavras: frame, direção e fase.
+//
+// 3. VERDE/VERMELHO AQUI É DIREÇÃO, e isso é DELIBERADO: é a gramática que a
+//    LISTA DO SCAN já usa (`.scan-chip.compra` verde, `.venda` vermelho), e a
+//    faixa é a projeção compacta dessa mesma lista — as duas na mesma tela têm de
+//    concordar. O gráfico usa azul/laranja para direção pelo motivo dele (sobre
+//    candles, verde e vermelho já são alta e baixa); superfícies diferentes,
+//    convenções documentadas, e nenhuma delas inventada aqui.
+//
+// A TAXONOMIA é a da DA-121, lida da MESMA tabela do resto da tela: nenhuma fase
+// nova, nenhum sinônimo. Um estado que não conheço vira "sem leitura" — nunca um
+// marcador mudo.
+const FAIXA_FASE_CLS = {
+  agora: "fx-agora", esperando: "fx-esperando", andou: "fx-andou",
+  encerrado: "fx-encerrado", morreu: "fx-morreu", sem_leitura: "fx-sem",
+};
+
+// A DIREÇÃO só colore as fases VIVAS. Num encerrado ou num invalidado a cor da
+// direção seria o dado errado em destaque: não há trade a fazer, e o que importa
+// ali é que já não se opera (a mesma razão pela qual o chip da lista fica cinza).
+const _FAIXA_VIVAS = new Set(["agora", "esperando", "andou"]);
+
+function faixaMarcaHtml(frame, linha) {
+  const estado = (linha || {}).estado || "sem_dado";
+  const fase = FASE_DO_SCAN_ESTADO[estado] || "sem_leitura";
+  const dir = (linha || {}).direction === "venda" ? "venda"
+            : (linha || {}).direction === "compra" ? "compra" : "";
+  const viva = _FAIXA_VIVAS.has(fase) && dir;
+  const cls = ["fx-m", FAIXA_FASE_CLS[fase] || "fx-sem", viva ? dir : ""]
+    .filter(Boolean).join(" ");
+  // O TÍTULO É A LEITURA COMPLETA, em palavras: sem ele a faixa seria um código de
+  // cores a decorar — e quem usa leitor de tela não teria nada.
+  const tit = `${tfNome(frame)} — ${faseRotulo(fase).toLowerCase()}` +
+    (viva ? ` de ${dir}` : "") +
+    (FASE_AJUDA[fase] ? `: ${FASE_AJUDA[fase]}` : "");
+  return `<span class="${cls}" title="${escapeHtml(tit)}" role="img" ` +
+    `aria-label="${escapeHtml(tit)}"><i>${escapeHtml(tfCurto(frame))}</i></span>`;
+}
+
+// A FONTE DA FAIXA É PRÓPRIA, e isso NÃO é duplicação — é separação de ciclo de
+// vida. Na primeira versão o boot chamava `paintScan` com o scan salvo, e isso
+// CONSUMIA o "novo desde a última visita": a marca era calculada e dada por vista
+// antes de o painel existir na tela, então o sinal novo nunca chegava a ser
+// mostrado como novo. A faixa precisa só do DADO; o painel tem estado (marcas,
+// filtros, carimbo) que só faz sentido quando ele está aberto.
+let _faixaScan = null;
+
+async function carregaFaixaDoScan() {
+  try {
+    const res = await fetch("/api/scan/salvo");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !(data.ativos || []).length || !data.gerado_em) return;
+    _faixaScan = data;
+    paintHistory();
+  } catch (e) { /* sem salvo: o card fica como era */ }
+}
+
+// De ONDE a faixa lê, num lugar só: o scan da TELA tem precedência sobre o salvo —
+// com o painel aberto e uma varredura nova pintada, o card não pode continuar
+// mostrando a de ontem. Função (e não expressão repetida) porque é isto que o teste
+// de acordo entre card e tabela consulta: duas cópias da precedência seria a porta
+// para as duas discordarem, que é justamente o que ele existe pra impedir.
+function faixaFonte() {
+  return _scanData || _faixaScan;
+}
+
+function faixaDeFramesHtml(ticker) {
+  // SEM SCAN, SEM FAIXA. Uma faixa de marcadores mudos ao lado do preço se leria
+  // como "varri e não achei nada" — que é diferente de "ainda não varri".
+  const d = faixaFonte();
+  const frames = (d && d.frames) || [];
+  if (!frames.length) return "";
+  const ativo = (d.ativos || []).find(
+    (a) => (a.ticker || "").toUpperCase() === (ticker || "").toUpperCase());
+  if (!ativo) return "";
+  const porFrame = new Map((ativo.frames || []).map((f) => [f.frame, f]));
+  const marcas = frames.map((f) => faixaMarcaHtml(f, porFrame.get(f))).join("");
+  return `<span class="h-faixa" data-faixa-for="${escapeHtml(ticker)}">${marcas}</span>`;
+}
+
+
 function paintHistory() {
   const ul = $("history");
   if (!ul) return;
@@ -6584,6 +6680,10 @@ function paintHistory() {
       // que quebrava — task 007): irmão de .h-price (o poller reescreve .h-price,
       // então o flag não pode ser filho dele), alinhado à direita onde há espaço.
       flagHtml +
+      // A FAIXA por último no HTML e embaixo no layout: o ticker e o preço
+      // continuam sendo o que se lê primeiro (a lição da task 20260830-002, onde o
+      // veredito esmagava o ticker). Ela é leitura de RELANCE, não manchete.
+      faixaDeFramesHtml(t) +
       `</li>`;
   };
   const filtered = runs.filter((r) => {
@@ -8739,6 +8839,15 @@ function paintScan(data) {
   // justamente quando o usuário está olhando.
   if (dadoNovo) marcarSinaisNovos(data.oportunidades);
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
+  // A LISTA DE OBSERVAÇÃO tem a faixa de frames (DA-131) e ela sai daqui: sem este
+  // repintar, o card fica sem faixa até a próxima vez que a lista se redesenhar
+  // sozinha — e na abertura isso é "nunca", porque o histórico pinta ANTES de o
+  // scan salvo chegar. Só quando o dado é NOVO: filtro e busca não mexem na faixa.
+  if (dadoNovo) {
+    // a varredura NOVA manda na faixa do card também — as duas na mesma tela têm
+    // de concordar, e é o que o teste de acordo verifica.
+    try { paintHistory(); } catch (e) { /* a lista pode nem estar montada ainda */ }
+  }
   const s = data.resumo || {};
   // O RESUMO também fala o eixo (DA-121). Era a linha mais visível da tela e a
   // última a manter o vocabulário antigo — "em gatilho · em movimento · invalidou
@@ -8952,6 +9061,12 @@ function init() {
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-128)
+  // A FAIXA DE FRAMES do card (DA-131) lê o ÚLTIMO SCAN SALVO, e até aqui ele só
+  // era buscado ao abrir o painel de varredura — com a lista de observação na tela
+  // desde o boot, a faixa não apareceria nunca. É UMA leitura do disco do servidor
+  // (`/api/scan/salvo`), a mesma que o painel já fazia: não dispara varredura, não
+  // custa LLM, e não é por card.
+  carregaFaixaDoScan();
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();
   // Ao abrir: se havia um run vivo sendo acompanhado, reengata o progresso; senão,
