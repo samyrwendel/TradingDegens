@@ -62,8 +62,11 @@ _SCAN = {"date": "2026-08-31", "frames": ["1d", "4h", "1h"],
          "oportunidades": [], "resumo": {}}
 
 _LONGO = "Compra especulativa com risco elevado"
+# `verdict_timeframe` vem do payload real do `/api/history` — é ele que diz de QUAL
+# frame é o veredito da lista (DA-144).
 _HIST = [{"run_id": f"R-{a['ticker']}", "ticker": a["ticker"], "date": "2026-08-31",
           "asset_type": "stock", "status": "done", "verdict": _LONGO,
+          "verdict_timeframe": "1d",
           "elapsed": 1, "cost": {"usd": 0.0}, "finished_at": "2026-08-31 20:00"}
          for a in _ATIVOS]
 
@@ -248,4 +251,41 @@ def test_no_TELEFONE_as_duas_linhas_continuam_legiveis(base):
         assert len(m["linhas"]) == 2, m["linhas"]
         assert all(len(x["marcas"]) == 3 for x in m["linhas"]), m["linhas"]
         assert m["tickerCortado"] is False and m["precoCortado"] is False, m
+        browser.close()
+
+
+# ══════════ DUAS LEITURAS DE FRAMES DIFERENTES NÃO SÃO CONTRADIÇÃO (DA-144) ═══
+#
+# O caso real do SNDK: a lista marcava o ativo como "NA ENTRADA" e o card aberto
+# dizia "ENCERRADO NO ALVO em 30/07". As duas afirmações são VERDADEIRAS e falam de
+# frames diferentes — mas nada na tela dizia isso, e lado a lado elas se contradizem
+# aos olhos. O Samyr chegou a supor que o trade "ainda pode ir no alvo novamente":
+# leu um registro histórico como oportunidade aberta, que num produto de trading é o
+# erro mais caro que a tela pode induzir.
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_veredito_da_lista_DIZ_de_qual_frame_ele_e(base):
+    """DENTE: sem o frame, "NA ENTRADA" é uma afirmação sobre o ativo — e aí ela
+    contradiz o card. Com o frame, as duas se qualificam e viram complementares."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        m = page.evaluate("""() => [...document.querySelectorAll('.history li')]
+          .filter((li) => li.dataset.id)
+          .map((li) => ({
+            ticker: li.dataset.ticker,
+            selo: (li.querySelector('.h-tf') || {}).textContent || null,
+            seloTitle: (li.querySelector('.h-tf') || {}).title || '',
+            vtitle: (li.querySelector('.h-verdict') || {}).title || '',
+          }))""")
+        assert m, "a lista tem de ter itens"
+        com = [x for x in m if x["selo"]]
+        assert com, ("nenhum veredito diz de qual frame é", m)
+        assert len(com) == len(m), ("todo veredito com frame conhecido se qualifica", m)
+        for x in com:
+            assert x["selo"].strip() == "D", x
+            assert x["seloTitle"] == "leitura do Diário", x
+            assert x["vtitle"].endswith("— leitura do Diário"), x
         browser.close()

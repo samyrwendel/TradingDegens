@@ -7209,8 +7209,21 @@ function paintHistory() {
       // DATA à direita sem espremer o nome. Só a DATA (dd/mm, sem hora) — o horário
       // e custo/tempo seguem no cabeçalho da análise aberta.
       const dm = (r.date || "").match(/^\d{4}-(\d{2})-(\d{2})/);
-      meta = r.finished_at ? fmtStamp(r.finished_at).split(" ")[0]
-                           : (dm ? `${dm[2]}/${dm[1]}` : escapeHtml(r.date || ""));
+      const quando = r.finished_at ? fmtStamp(r.finished_at).split(" ")[0]
+                                   : (dm ? `${dm[2]}/${dm[1]}` : escapeHtml(r.date || ""));
+      // DE QUAL FRAME É ESTE VEREDITO (DA-144). Sem isto, "NA ENTRADA" na lista ao
+      // lado de "ENCERRADO NO ALVO" no card aberto se lê como contradição — e não é:
+      // são DUAS LEITURAS LEGÍTIMAS de frames diferentes do mesmo ativo. Foi
+      // exatamente a pergunta do Samyr no SNDK. O carimbo é curto porque a coluna é
+      // estreita, e o `title` diz o frame por extenso.
+      const rtf = r.verdict_timeframe || r.timeframe || "";
+      const tfSelo = rtf
+        ? `<span class="h-tf" title="${escapeHtml(`leitura do ${tfNome(rtf)}`)}">` +
+          `${escapeHtml(tfCurto(rtf) || rtf)}</span>` : "";
+      meta = tfSelo + quando;
+      // e o veredito diz de qual frame ele fala, na mesma frase que já explica o que
+      // ele é: a contradição aparente some quando as duas afirmações se qualificam.
+      if (rtf) vTitle = `${vTitle} — leitura do ${tfNome(rtf)}`;
     }
     // watchlist: ticker em negrito + nome cinza (2 linhas) à esquerda; veredito +
     // meta empilhados à direita; × discreto pra remover (só em run já concluído —

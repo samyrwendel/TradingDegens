@@ -1238,6 +1238,16 @@ details.section[open] > summary::before { content: "▾"; }
 .history .h-verdict.sem_dado,
 .history .h-verdict.intradiario_indisponivel { color: var(--muted); background: none; border: none; }
 .history .h-meta { color: var(--muted); font-size: var(--fs-10); line-height: var(--lh-10); font-family: var(--mono); white-space: nowrap; }
+/* DE QUAL FRAME É O VEREDITO (DA-144). "NA ENTRADA" na lista ao lado de "ENCERRADO
+   NO ALVO" no card aberto se lia como contradição — e são duas leituras legítimas de
+   frames diferentes. O selo qualifica a da lista, e fica no peso do rótulo (não do
+   dado): contorno de 1px e a mesma família mono da data ao lado, sem cor própria —
+   cor é estado (DA-078), e frame não é estado. */
+.history .h-tf {
+  display: inline-block; margin-right: 5px; padding: 0 3px;
+  border: 1px solid var(--border); color: var(--muted);
+  font-size: var(--fs-10); line-height: 13px; letter-spacing: .03em;
+}
 .history .empty { grid-template-columns: 1fr; color: var(--muted); border: none; background: none; cursor: default; padding: 8px 2px; }
 
 /* run EM ANDAMENTO na lateral: borda viva + pastilha com ponto pulsando. O run
