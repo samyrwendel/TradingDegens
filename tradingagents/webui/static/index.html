@@ -389,7 +389,12 @@
               <div class="reval-linha hidden" id="revalLinha"></div>
               <p class="chart-degrade hidden" id="chartDegrade"></p>
               <div class="chart-wrap">
-                <span class="chart-zoom-hint">roda = zoom · régua direita = zoom vertical · régua de baixo = zoom horizontal · arrasta = move 2 eixos · 2 cliques = reseta</span>
+                <!-- A dica descreve o gesto REAL (DA-122). Ela prometia "arrasta =
+                     move 2 eixos" quando arrastar não fazia nada sem zoom prévio, e
+                     chamava o duplo-clique de "reseta", que não diz o que se ganha.
+                     Agora arrastar vale desde o começo, e o duplo-clique é o
+                     "ajustar à tela" que traz velas E níveis do plano de volta. -->
+                <span class="chart-zoom-hint">roda = zoom · régua direita = zoom vertical · régua de baixo = zoom horizontal · arrasta = move o gráfico · 2 cliques = ajusta à tela (velas + níveis do plano)</span>
                 <canvas id="priceChart"></canvas>
               </div>
               <!-- O QUE A TELA ANUNCIA E NÃO ESTÁ ENQUADRADO. Fica ENTRE o canvas e a

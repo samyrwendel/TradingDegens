@@ -1373,7 +1373,12 @@ function compareColumn(c, slot) {
     ? `<div class="cmp-chart-card">` +
         `<div class="chart-legend cmp-chart-legend">${chartLegendHtml(ch, c.actionable)}</div>` +
         `<div class="chart-wrap">` +
-          `<span class="chart-zoom-hint">roda=zoom · régua direita=zoom vertical · régua de baixo=zoom horizontal · arrasta=move 2 eixos · 2 cliques=reseta</span>` +
+          // A dica descreve o gesto REAL (DA-122). Ela prometia "arrasta = move 2
+          // eixos" quando arrastar não fazia nada sem zoom prévio, e chamava o
+          // duplo-clique de "reseta" — que não diz o que se ganha com ele. Agora
+          // arrastar vale desde o começo, e o duplo-clique é o "ajustar à tela"
+          // que traz velas E níveis do plano de volta ao enquadramento.
+          `<span class="chart-zoom-hint">roda=zoom · régua direita=zoom vertical · régua de baixo=zoom horizontal · arrasta=move o gráfico · 2 cliques=ajusta à tela (velas + níveis do plano)</span>` +
           `<canvas id="cmpChart${slot}" class="cmp-canvas"></canvas>` +
         `</div></div>`
     : "";
@@ -5525,8 +5530,13 @@ function avisoForaDaVista(canvas) {
   // O BOTÃO só aparece quando existe zoom pra desfazer: oferecer "ver a série
   // inteira" quando a série inteira JÁ está na tela manda o usuário num gesto que
   // não muda nada — e um conselho que não resolve gasta a confiança do próximo.
+  // O botão NOMEIA o que traz de volta (DA-122). "ver a série inteira" falava só do
+  // eixo do TEMPO, e o caso que mais dói é o do PREÇO: o alvo acima do topo
+  // visível — o número que sustenta o R:R ficando invisível. A autoescala inclui
+  // as faixas do plano (ver `grow(z.price)` em `drawPriceChart`), então o reset é,
+  // de fato, o "ajustar à tela" que enquadra velas e níveis juntos.
   const botao = dados.temZoom
-    ? `<button type="button" class="cav-btn" id="foraResetBtn">ver a série inteira</button>`
+    ? `<button type="button" class="cav-btn" id="foraResetBtn">ajustar à tela — velas e níveis do plano</button>`
     : "";
   el.innerHTML = fs.map((f) => `<span class="cn-line">${f}</span>`).join("") + botao;
   el.classList.remove("hidden");
@@ -5540,6 +5550,9 @@ function avisoForaDaVista(canvas) {
 function bindChartZoom(canvas) {
   if (!canvas || canvas._zoomBound) return;
   canvas._zoomBound = true;
+  // O corpo do gráfico é arrastável desde o primeiro instante (DA-122) — e o
+  // cursor diz isso antes de o usuário tentar.
+  canvas.style.cursor = "grab";
   // Todo o estado (janela h/v, geometria) mora no próprio canvas — assim cada
   // gráfico (o principal e os dois da comparação) tem zoom/pan independentes.
   const N = () => (canvas._chart && canvas._chart.candles ? canvas._chart.candles.length : 0);
@@ -5619,12 +5632,27 @@ function bindChartZoom(canvas) {
         hzoom = { x: e.clientX, v0, v1 };
         canvas.style.cursor = "ew-resize";
         drag = null;
-      } else if (canvas._view || canvas._vview) {
-        // corpo do gráfico com algum zoom ativo = PAN livre 2D (h e/ou v juntos, mantendo o zoom).
+      } else {
+        // CORPO DO GRÁFICO = PAN, SEMPRE (DA-122).
+        //
+        // Era `else if (canvas._view || canvas._vview)`: o arrasto só existia DEPOIS
+        // de um zoom. No estado inicial arrastar não fazia nada — e a dica da tela
+        // anunciava "arrasta = move 2 eixos" sem dizer que dependia de um passo que
+        // ninguém tem como adivinhar. O pedido do Samyr ("deslocar o gráfico
+        // arrastando pra baixo pra ver os alvos pra cima") é exatamente o gesto que
+        // a dica prometia e o código não entregava.
+        //
+        // O PAN VERTICAL parte da janela DESENHADA (`_yGeom`), que sem zoom é a
+        // autoescala: arrastar passa a criar o `_vview` a partir dela, em vez de
+        // exigir que ele já exista. O horizontal continua condicionado ao `_view` —
+        // com a série inteira na tela não há janela a deslizar, e fabricar uma
+        // faria o gesto "funcionar" andando para o vazio nos dois eixos.
+        const g = canvas._yGeom;
         drag = {
-          x: e.clientX, y: e.clientY,
+          x: e.clientX, y: e.clientY, moveu: false,
           v: canvas._view ? { v0: canvas._view.v0, v1: canvas._view.v1 } : null,
-          vv: canvas._vview ? { lo: canvas._vview.lo, hi: canvas._vview.hi } : null,
+          vv: canvas._vview ? { lo: canvas._vview.lo, hi: canvas._vview.hi }
+                            : (g && g.hi > g.lo ? { lo: g.lo, hi: g.hi } : null),
         };
         canvas.style.cursor = "grabbing";
       }
@@ -5681,6 +5709,14 @@ function bindChartZoom(canvas) {
       return;
     }
     if (drag) {
+      // LIMIAR DE 3px: sem ele, um CLIQUE (que sempre carrega um pixel de tremor)
+      // congelaria a autoescala — porque o pan vertical grava `_vview`, e a partir
+      // daí a janela de preço deixa de se reajustar sozinha ao dado novo. Um
+      // clique não pode ter esse efeito colateral.
+      if (!drag.moveu) {
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
+        drag.moveu = true;
+      }
       const rect = canvas.getBoundingClientRect();
       // PAN horizontal: desliza a janela de candles (só quando há zoom h ativo)
       if (drag.v) {
@@ -5689,8 +5725,9 @@ function bindChartZoom(canvas) {
         const nv0 = Math.max(0, Math.min(drag.v.v0 - dC, N() - vis));
         canvas._view = { v0: nv0, v1: nv0 + vis };
       }
-      // PAN vertical: desliza a janela de preço (só quando há zoom v ativo). dy>0
-      // (arrasta pra baixo) sobe a janela → o preço agarrado acompanha o cursor.
+      // PAN vertical: desliza a janela de preço. dy>0 (arrasta pra baixo) sobe a
+      // janela → o preço agarrado acompanha o cursor. Sem zoom prévio, `drag.vv`
+      // já vem semeado da autoescala (DA-122), então o gesto vale desde o começo.
       if (drag.vv) {
         const plotH = Math.max(1, rect.height - PAD_T - PAD_B);
         const range = drag.vv.hi - drag.vv.lo;
@@ -5703,7 +5740,9 @@ function bindChartZoom(canvas) {
   const drop = (e) => {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
-    if (pts.size === 0) { drag = null; vzoom = null; hzoom = null; canvas.style.cursor = (canvas._view || canvas._vview) ? "grab" : "default"; }
+    // O cursor volta a "grab" SEMPRE: o corpo do gráfico é arrastável no estado
+    // inicial, e um cursor "default" ali ensinaria de novo que não é (DA-122).
+    if (pts.size === 0) { drag = null; vzoom = null; hzoom = null; canvas.style.cursor = "grab"; }
   };
   canvas.addEventListener("pointerup", drop);
   canvas.addEventListener("pointercancel", drop);
