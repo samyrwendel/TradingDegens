@@ -477,8 +477,10 @@ def test_os_cards_nao_usam_pictograma(base):
         })""")
         pictos = [c for c in m["txt"] if ord(c) >= 0x2190]
         assert pictos == [], ("pictograma no card (DA-076)", pictos, m["txt"])
-        # a cor é a MESMA que o gráfico usa (azul do 1-2-3 de compra, verde do recuo)
-        assert m["borda123"] == "rgb(110, 168, 254)", m
+        # a cor é a MESMA que o gráfico usa — e desde a DA-140 ela diz DIREÇÃO:
+        # verde na compra (era o azul do método), verde também no recuo à média,
+        # que é uma faixa de COMPRA.
+        assert m["borda123"] == "rgb(46, 204, 113)", m
         assert m["bordaRecuo"] == "rgb(46, 204, 113)", m
         assert m["dir"].strip() == "de compra", ("a direção vai por escrito", m)
         browser.close()
@@ -499,7 +501,7 @@ def test_venda_muda_a_cor_do_card_porque_o_emoji_nao_esta_mais_la(base):
           dir: document.querySelector('.sc-123 .sc-dir').innerText,
           base: [...document.querySelectorAll('.sc-123 .sc-basis')].map(e => e.innerText),
         })""")
-        assert m["borda"] == "rgb(255, 159, 67)", ("laranja do 1-2-3 de venda", m)
+        assert m["borda"] == "rgb(255, 92, 108)", ("vermelho do 1-2-3 de venda", m)
         assert m["dir"].strip() == "de venda", m
         assert any("perda da mínima do ponto 2" in b for b in m["base"]), m
         browser.close()

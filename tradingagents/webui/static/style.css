@@ -41,8 +41,15 @@
   --fs-14: 14px; --lh-14: 20px;
   --fs-16: 16px; --lh-16: 24px;
   --fw-med: 500; --fw-bold: 700;
-  /* cinza apagado do qualificador (Hold/Buy/Overweight) ao lado do veredito */
+  /* cinza apagado do qualificador (Hold/Buy/Overweight) ao lado do veredito — e,
+     desde a DA-140, o CINZA DO FANTASMA INVALIDADO. É o mesmo valor de propósito:
+     "branco rebaixado sobre o fundo", nas palavras do dono, e não uma cor nova
+     (DA-078). O canvas usa o mesmo número em `COR_FANTASMA`. */
   --dim: #6b7280;
+  /* OPACIDADE DE FANTASMA — uma definição, os dois tipos de história (invalidado e
+     encerrado) a usam. "Já aconteceu" é o que a opacidade diz; a matiz continua
+     dizendo direção, e a palavra continua dizendo o resultado (DA-140). */
+  --alfa-fantasma: .82;
   /* Raio ÚNICO de botões e cards (task 009): menos arredondado e uniforme. Um
      token só — sem pílula em botão nem canto gordo em card. Dots redondos, barras
      de progresso e micro-pílulas de STATUS ficam de fora. */
@@ -780,6 +787,11 @@ details.section[open] > summary::before { content: "▾"; }
    é ela que separa as duas numerações 1-2-3 quando as duas camadas estão
    ligadas, e uma legenda só com cor deixaria o leitor sem essa chave. */
 .chart-legend .sw.dia { width: 9px; height: 9px; border-radius: 1px; transform: rotate(45deg); }
+/* A CHAVE ESMAECE COM O DESENHO (DA-140): o marcador de uma leitura ENCERRADA guarda
+   a matiz da direção e perde a opacidade — uma amostra cheia ao lado dele diria
+   "vivo", e a legenda existe pra decodificar o que está na tela, não pra contradizê-la.
+   Mesmo token do card: uma definição de fantasma, não três. */
+.chart-legend .sw.sw-fantasma { opacity: var(--alfa-fantasma); }
 /* PONTO-TRAÇO = STORM123 nos níveis. Depois que stop e alvo do Storm passaram a ser
    vermelho e verde (cor = significado, DA-078 regra 3), a cor deixou de dizer de quem
    é a linha — quem diz é o ritmo do traço, e a legenda tem de mostrá-lo, senão ela
@@ -1611,27 +1623,32 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 }
 /* A borda-esquerda dá a cor da LEITURA — e é ela que carrega o que o pictograma
    carregava antes (DA-076: estado é cor + palavra, nunca emoji). São exatamente as
-   cores que o gráfico já usa: azul e laranja do 1-2-3 por direção (PAT_COLORS em
-   app.js) e verde da faixa do recuo, então o olho liga o card à marcação sem
-   legenda extra. Sólida, nunca degradê (DA-070). */
-.sc-123 { border-left: 3px solid #6ea8fe; }
-.sc-123.sc-venda { border-left-color: #ff9f43; }
-.sc-123 .sc-dir { color: #6ea8fe; }
-.sc-123.sc-venda .sc-dir { color: #ff9f43; }
-.sc-recuo { border-left: 3px solid #2ecc71; }
+   cores que o gráfico já usa (PAT_COLORS em app.js), então o olho liga o card à
+   marcação sem legenda extra. Sólida, nunca degradê (DA-070).
+
+   VERDE COMPRA, VERMELHO VENDA (DA-140). Eram azul e laranja — a paleta que a
+   decisão do dono tirou de cena, porque a cor passou a carregar UM eixo só:
+   direção. O método, que o azul separava aqui, continua dito pelo TÍTULO do card
+   ("Setup123" × "Storm123"), que é o equivalente em DOM da forma do marcador. */
+.sc-123 { border-left: 3px solid var(--green); }
+.sc-123.sc-venda { border-left-color: var(--red); }
+.sc-123 .sc-dir { color: var(--green); }
+.sc-123.sc-venda .sc-dir { color: var(--red); }
+.sc-recuo { border-left: 3px solid var(--green); }
 /* STORM: a lenta do Éden (MME 80) é desenhada no gráfico nesta cor, então o card
    da leitura sai na mesma — o olho liga um ao outro sem legenda. Vetado pelo Éden,
    ele vira ÂMBAR: a cor é o estado (DA-076), e "não opera" não pode se parecer com
    "opera". Chapado, sem degradê (DA-070). */
-.sc-storm { border-left: 3px solid #7cb0ff; }
+/* O STORM SEGUE A MESMA GRAMÁTICA (DA-140). A borda era o azul da MME 80 do Éden —
+   portador de FAMÍLIA — enquanto a do Setup123 ao lado carregava DIREÇÃO: duas
+   gramáticas de cor na mesma tela, que é exatamente o defeito que esta decisão veio
+   fechar. Agora as duas bordas dizem a mesma coisa (direção do setup vivo) e a
+   família continua no TÍTULO do card. */
+.sc-storm { border-left: 3px solid var(--green); }
+.sc-storm.sc-venda { border-left-color: var(--red); }
 .sc-storm.sc-vetado { border-left-color: var(--muted); }
-/* A PALAVRA DA DIREÇÃO segue a DIREÇÃO, aqui como no gráfico (task 20260831-004): a
-   venda já saía laranja e só a compra ficava no azul da FAMÍLIA — a mesma regra
-   valendo pra metade dos casos é a inconsistência que a task veio tirar da tela. A
-   BORDA continua sendo o azul do método: ela é o portador de família do card, o
-   equivalente ao losango no marcador, e não está carregando significado nenhum. */
-.sc-storm .sc-dir { color: #6ea8fe; }
-.sc-storm.sc-venda .sc-dir { color: #ff9f43; }
+.sc-storm .sc-dir { color: var(--green); }
+.sc-storm.sc-venda .sc-dir { color: var(--red); }
 /* Cabeçalho de LEITURA dentro do card do Storm: são DUAS entradas do MESMO padrão
    (mesmos pontos, mesmo stop), e sem uma régua entre elas os dois gatilhos e os dois
    R:R viram uma lista de seis números sem dono. A régua é sólida de 1px (DA-070). */
@@ -1756,16 +1773,31 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .ex-ordem, .ex-row, .ex-prot, .ex-conf { grid-template-columns: auto auto 1fr; }
   .ex-preco, .ex-v { grid-column: 1 / -1; text-align: left; }
 }
-/* FANTASMA (task 20260830-013): o card de um padrão que MORREU. Ele não some — a
-   história explica onde o preço está —, mas para de competir com o que está vivo:
-   a borda de identidade perde a cor do método e o card inteiro esmaece um pouco.
-   O texto NÃO esmaece junto: a explicação da morte é justamente o que se precisa
-   ler, e apagá-la seria trocar um defeito por outro. */
-.setup-card.sc-fantasma { border-left-color: #6b7280; opacity: .82; }
+/* FANTASMA (task 20260830-013; generalizado na DA-140): o card de uma leitura que
+   JÁ ACONTECEU — encerrada no alvo, encerrada no stop ou invalidada. Ele não some —
+   a história explica onde o preço está —, mas para de competir com o que está vivo.
+   O texto NÃO esmaece junto: a explicação do desfecho é justamente o que se precisa
+   ler, e apagá-la seria trocar um defeito por outro.
+
+   UMA definição de opacidade de fantasma, usada pelos DOIS tipos: se um dia mudar,
+   muda aqui. (No canvas o valor é outro e tem medida própria — ver ALFA_FANTASMA em
+   app.js: lá o substrato é preto puro e o piso de contraste é outro.) */
+.setup-card.sc-fantasma { opacity: var(--alfa-fantasma); }
 .setup-card.sc-fantasma .sc-title { color: var(--muted); }
+/* O INVALIDADO é o único que abandona a direção: ele nunca chegou a ser um trade,
+   não há lado a lembrar. Vai pro cinza do tema — `--dim`, o primeiro plano
+   rebaixado contra o fundo, e não branco pleno, que competiria com o texto vivo
+   (DA-140, palavra do dono). O ENCERRADO fica de fora deste seletor de propósito:
+   ele guarda a matiz da direção original, e quem o separa do vivo é a opacidade
+   acima — o resultado (alvo × stop) vive na PALAVRA, nunca na cor. */
+.setup-card.sc-fantasma.sc-invalidado { border-left-color: var(--dim); }
+.setup-card.sc-fantasma.sc-invalidado .sc-dir { color: var(--dim); }
 /* a LINHA DA MORTE é a manchete do card fantasma: rótulo em caixa alta e o texto
-   inteiro legível, porque "invalidou" sem o detalhe não deixa conferir nada */
-.sc-row.sc-morto .sc-k { color: var(--red); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .4px; }
+   inteiro legível, porque "invalidou" sem o detalhe não deixa conferir nada.
+   SEM O VERMELHO (DA-140): ele dizia "perdeu" numa tela onde vermelho quer dizer
+   VENDA — o mesmo eixo dobrado do verde de ganho, do outro lado. O peso segura a
+   manchete sozinho. */
+.sc-row.sc-morto .sc-k { color: var(--text); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: .4px; }
 .sc-row.sc-morto .sc-v { color: var(--text); }
 .sc-row.sc-morto .sc-basis { color: var(--text); }
 /* a PREPARAÇÃO é espera, não ação: peso menor que os níveis operáveis, pra não ser
@@ -1856,6 +1888,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   color: var(--text); background: var(--panel-2); border-color: var(--border);
 }
 .sc-state.sem_setup, .sc-state.sem_dado, .sc-state.intradiario_indisponivel { color: var(--muted); }
+/* O SELO DE UM TRADE QUE TERMINOU (DA-140). Ele reusava o `.ativo` quando o alvo
+   era batido — pílula VERDE dizendo "ENCERRADO NO ALVO" —, e verde nesta tela quer
+   dizer duas coisas que essa pílula juntava: "compra" e "opera". Um trade fechado
+   não é nenhuma das duas. Vocabulário de fantasma, igual pros dois desfechos: o que
+   os separa é a palavra dentro da pílula. */
+.sc-state.encerrado { color: var(--muted); background: transparent; border-color: var(--border); }
 .sc-hz { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
 /* NÍVEIS: grade de duas colunas — nome à esquerda, número à direita — pra os
    números alinharem entre si em vez de cada linha começar onde o texto acaba. A
@@ -2740,13 +2778,26 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
   text-transform: uppercase; letter-spacing: .3px; overflow: hidden; text-overflow: ellipsis; }
 .scan-storm .ss-p { font-size: var(--fs-10); line-height: var(--lh-10); color: #7cb0ff; font-weight: var(--fw-bold); }
 .scan-storm .ss-rr { font-variant-numeric: tabular-nums; }
-.scan-storm.em_gatilho .ss-e { color: var(--green); font-weight: var(--fw-bold); }
-.scan-storm.em_movimento .ss-e { color: var(--accent); }
+/* A PALAVRA DO ESTADO SAI NA COR DA DIREÇÃO (DA-140). "gatilho" saía SEMPRE verde e
+   "movimento" SEMPRE no azul de destaque — dois estados pintados por ESTADO, numa
+   tela onde a cor passou a dizer DIREÇÃO. Num setup de VENDA aquele verde repetia,
+   em miniatura, o erro que o dono pegou no gráfico ("pq está verde se é 123 de
+   venda?") — e aqui é pior por densidade: são 4 frames × 20 ativos numa tela só, e a
+   cor é praticamente tudo que o olho processa antes de ler.
+   Qual estado é continua na PALAVRA ("gatilho" × "movimento") e no `title` da
+   célula, que traz a leitura inteira — cor nunca é o único portador (DA-078). */
+.scan-storm.em_gatilho .ss-e { font-weight: var(--fw-bold); }
+.scan-storm.em_gatilho.compra .ss-e, .scan-storm.em_movimento.compra .ss-e { color: var(--green); }
+.scan-storm.em_gatilho.venda .ss-e,  .scan-storm.em_movimento.venda .ss-e  { color: var(--red); }
 .scan-storm.vetado .ss-e { color: var(--text); }
 .scan-storm.vetado .ss-rr, .scan-storm.vetado .ss-p { opacity: .55; }
 /* ENCERRADO e INVALIDADO na coluna do Storm (DA-129): os dois são "não se opera
    mais", e ficam CINZA como o invalidado do 1-2-3 — a cor aqui não diz ganho nem
    perda (DA-078 regra 3: verde/vermelho é resultado, e resultado mora no card). */
+/* HISTÓRIA NA LISTA TAMBÉM É FANTASMA (DA-140): "encerrado" e "invalidado" não
+   voltam à cor viva em hipótese nenhuma — nem o encerrado no alvo, que no gráfico
+   guarda a matiz. Aqui a célula tem a largura de uma palavra e o vizinho de cima é
+   um setup vivo da mesma direção: manter a matiz faria os dois se lerem iguais. */
 .scan-storm.concluido .ss-e, .scan-storm.invalidou .ss-e { color: var(--muted); }
 .scan-storm.concluido .ss-rr, .scan-storm.concluido .ss-p,
 .scan-storm.invalidou .ss-rr, .scan-storm.invalidou .ss-p { opacity: .55; }
@@ -2785,7 +2836,12 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 .scan-line-row:hover { background: var(--panel); }
 .scan-line-row.em_gatilho { border-left-color: var(--green); background: var(--green-dim); }
 .scan-line-row.em_gatilho.venda { border-left-color: var(--red); background: var(--red-dim); }
-.scan-line-row.em_movimento { border-left-color: #60a5fa; }
+/* JÁ ANDOU também é setup VIVO (DA-140): a borda saía num AZUL que não dizia
+   direção nem existia em mais lugar nenhum da paleta — era estado pintado. Ela passa
+   a dizer a direção, como a do gatilho; o que separa os dois continua sendo o FUNDO,
+   que só a linha em gatilho recebe (é a que pede decisão agora). */
+.scan-line-row.em_movimento { border-left-color: var(--green); }
+.scan-line-row.em_movimento.venda { border-left-color: var(--red); }
 .scan-line-row.invalidou { border-left-color: var(--muted); opacity: .75; }
 .scan-line-row.formando { border-left-color: var(--border); }
 .scan-tk-inline { min-width: 78px; color: var(--text); }
@@ -2800,7 +2856,8 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 .scan-row { padding: 8px 10px; border-radius: 0; background: var(--panel-2); border: 1px solid var(--border); }
 .scan-row.em_gatilho { border-color: var(--green-dim); }
 .scan-row.em_gatilho.venda { border-color: var(--red-dim); }
-.scan-row.em_movimento { border-color: rgba(96, 165, 250, .3); }
+.scan-row.em_movimento { border-color: var(--green-dim); }
+.scan-row.em_movimento.venda { border-color: var(--red-dim); }
 .scan-row.invalidou { border-color: rgba(139, 151, 173, .35); }
 /* Cabeça: ticker do ativo (agrupa os frames). */
 .scan-tk { display: block; cursor: pointer; margin-bottom: 4px; }
@@ -2813,7 +2870,8 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
    venda) + fundo chapado. Era um degradê que esmaecia pra direita (DA-070). */
 .scan-frame-row.em_gatilho { border-left-color: var(--green); background: var(--green-dim); }
 .scan-frame-row.em_gatilho.venda { border-left-color: var(--red); background: var(--red-dim); }
-.scan-frame-row.em_movimento { border-left-color: #60a5fa; }
+.scan-frame-row.em_movimento { border-left-color: var(--green); }
+.scan-frame-row.em_movimento.venda { border-left-color: var(--red); }
 .scan-frame-row.invalidou { border-left-color: var(--muted); opacity: .75; }
 .scan-frame-row.formando { border-left-color: var(--border); }
 .scan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .88rem; }
@@ -3042,11 +3100,17 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text);
 }
 
-/* ENCERRADO NO ALVO (DA-125): a única linha do card que anuncia um trade GANHO —
-   e aí o verde é semântico de verdade (ganho), que é o que a DA-078 regra 3 pede.
-   O encerrado no STOP reusa o `.sc-morto`, que já é o vocabulário da perda. */
-.sc-row.sc-ganho .sc-k { color: var(--green); font-weight: var(--fw-bold); }
-.sc-row.sc-ganho .sc-v { color: var(--green); }
+/* O DESFECHO É MANCHETE, E É PALAVRA — NÃO COR (DA-140). Esta linha saía em VERDE
+   quando o trade ganhou, na mesma tela em que verde quer dizer COMPRA: num setup de
+   VENDA encerrado no alvo, a linha mais visível do card dizia "compra" ao olho antes
+   de qualquer leitura. Era o eixo dobrado, dentro do card.
+   O que ela perde em cor recupera em PESO: caixa alta, negrito e o texto pleno —
+   continua sendo a primeira coisa que se lê, e agora diz uma coisa só. */
+.sc-row.sc-ganho .sc-k {
+  color: var(--text); font-weight: var(--fw-bold);
+  text-transform: uppercase; letter-spacing: .4px;
+}
+.sc-row.sc-ganho .sc-v { color: var(--text); }
 
 /* ENCERRADO no chip do scan (DA-125): o trade terminou. Cinza como o invalidado —
    os dois são "não se opera mais" —, e o que os separa é a PALAVRA, que é a mesma

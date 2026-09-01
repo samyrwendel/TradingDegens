@@ -2605,7 +2605,10 @@ function stormCardHtml(st, frameDoBloco) {
   // Em lugar dele, o card diz o que de fato aconteceu.
   const selo = encerradoSt
     ? `<div class="sc-verdict"><span class="sc-vk">${escapeHtml(edenNome(eden) || "filtro Éden")}</span>` +
-      `<span class="sc-state ${pat.desfecho.tipo === "alvo" ? "ativo" : "sem_setup"}">` +
+      // UMA classe pros DOIS desfechos (DA-140): a pílula verde de "ativo" num trade
+      // que terminou dizia "compra" e "opera" ao mesmo tempo, e ele não é nem um nem
+      // outro. Quem separa alvo de stop é a palavra que vem dentro dela.
+      `<span class="sc-state encerrado">` +
       `${pat.desfecho.tipo === "alvo" ? "ENCERRADO NO ALVO" : "ENCERRADO NO STOP"}` +
       `</span></div>` +
       `<div class="sc-hz">o trade terminou — o filtro do Éden decide entrada, e ` +
@@ -2619,8 +2622,7 @@ function stormCardHtml(st, frameDoBloco) {
       (st.veto ? `<div class="sc-veto">${escapeHtml(st.veto)}</div>`
                : (st.motivo ? `<div class="sc-hz">${escapeHtml(st.motivo)}</div>` : ""))
     : "";
-  const mortoSt = ehFantasma(pat);
-  return `<section class="setup-card sc-storm${mortoSt ? " sc-fantasma" : ""}${opera ? "" : " sc-vetado"}` +
+  return `<section class="setup-card sc-storm${classeDeHistoria(pat)}${opera ? "" : " sc-vetado"}` +
     `${pat && pat.direction === "venda" ? " sc-venda" : ""}">` +
     `<div class="sc-head"><span class="sc-title">Storm123` +
     (dir ? ` <span class="sc-dir">${escapeHtml(dir)}</span>` : "") + "</span>" +
@@ -2790,7 +2792,7 @@ function renderSetupCards(a) {
           `<span class="sc-basis">${escapeHtml(pj0.motivo || "")}</span></div>`);
     }
     cards.push(
-      `<section class="setup-card sc-123${morto ? " sc-fantasma" : ""}${pat.direction === "venda" ? " sc-venda" : ""}">` +
+      `<section class="setup-card sc-123${classeDeHistoria(pat)}${pat.direction === "venda" ? " sc-venda" : ""}">` +
       `<div class="sc-head"><span class="sc-title">Setup123` +
       (pdir ? ` <span class="sc-dir">${escapeHtml(pdir)}</span>` : "") + "</span>" +
       (pstate ? `<span class="sc-now">${escapeHtml(pstate)}</span>` : "") +
@@ -3401,15 +3403,38 @@ const MA_COLORS = { "20": "#f5b445", "50": "#6ea8fe", "200": "#b48ef5" };
 // baixa: é a única média com boa distância das DUAS cores de vela. Contra as irmãs o
 // mínimo é 45,6 (EMA80) — nenhuma colisão nova. Nenhuma cor nova entra.
 const EMA_COLORS = { "8": "#e6eaf2", "21": "#e3894b", "50": "#e34bd0", "80": "#7cb0ff" };
-// 1-2-3 marker colour by direction — distinct so compra (fundo) and venda (topo)
-// never read the same on the chart. Blue for compra, orange for venda; both stay
-// clear of the green/red candle bodies.
-const PAT_COLORS = { compra: "#6ea8fe", venda: "#ff9f43" };
+// COR = ESTADO E DIREÇÃO. FORMA = MÉTODO. Um eixo por canal (DA-140).
+//
+// Até aqui o marcador do 1-2-3 era AZUL na compra e LARANJA na venda, escolhidos
+// justamente por ficarem longe do verde/vermelho das velas. Só que a tela passou a
+// ter dois eixos disputando a mesma paleta: o verde dizia DIREÇÃO na faixa do card
+// (compra) e DESFECHO no padrão encerrado (ganhou) — e o Samyr leu um pelo outro
+// num Storm123 de VENDA pintado de verde ("pq está verde se é 123 de venda?"). Cor
+// é lida ANTES da palavra: enquanto os dois eixos dividirem a paleta, o rótulo
+// chega tarde.
+//
+// A decisão dele fecha a colisão pelo lado da DIREÇÃO: verde = compra, vermelho =
+// venda, os mesmos `--green`/`--red` do resto da tela — e o azul e o laranja saem
+// de cena. Quem separa os MÉTODOS é a FORMA do marcador (círculo = Setup123,
+// losango = Storm123, `FORMA_DA_FAMILIA`), que já existia e não carregava
+// significado nenhum.
+//
+// E A VELA NÃO COLIDE: o marcador é um disco/losango de miolo PRETO com anel e
+// número na cor — sobre um corpo de vela verde, o que se vê é o preto do miolo
+// separando o anel do fundo. A cor da vela diz "esta barra subiu"; a do marcador,
+// "este 1-2-3 é de compra" — e nunca ocupam o mesmo pixel.
+const PAT_COLORS = { compra: "#2ecc71", venda: "#ff5c6c" };
 // PADRÃO MORTO É FANTASMA. Um 1-2-3 que perdeu o ponto 3 continuava desenhado com a
 // MESMA cor e o mesmo peso de um vivo — e a cor é a primeira coisa que se lê. O morto
-// sai do vocabulário de cor dos vivos (azul de compra / laranja de venda) e vira
-// cinza apagado: continua na tela, porque a história explica onde o preço está, mas
-// para de competir com o que ainda vale.
+// sai do vocabulário de cor dos vivos e vira cinza apagado: continua na tela, porque
+// a história explica onde o preço está, mas para de competir com o que ainda vale.
+//
+// O CINZA É "BRANCO REBAIXADO", e não uma cor nova (DA-140, palavra do Samyr:
+// *"branco foi maneira de falar, na verdade um branco reduzido no fundo preto, são
+// tons de cinza"*). Este valor É o token `--dim` do tema — o primeiro plano da tela
+// rebaixado contra o fundo. Branco pleno competiria com o texto vivo e inverteria a
+// hierarquia da DA-078: o dado é que tem peso, o registro morto não. Um token só,
+// aqui e no CSS (`var(--dim)`), pra o dia em que mudar mudar num lugar.
 const COR_FANTASMA = "#6b7280";
 // ESMAECIDO NÃO É APAGADO. O fantasma era pintado a 0,45 de opacidade — e o painel do
 // gráfico é PRETO PURO, onde opacidade é multiplicação em direção ao fundo: o cinza
@@ -3427,21 +3452,27 @@ const COR_FANTASMA = "#6b7280";
 // ficar abaixo de 70% do contraste do vivo.
 const ALFA_FANTASMA = 0.85;
 
-// HISTÓRIA DE VITÓRIA E HISTÓRIA DE DERROTA NÃO SÃO A MESMA COISA (DA-130).
+// HISTÓRIA É FANTASMA, E O RESULTADO VIVE NA PALAVRA (DA-140 — revisa a DA-130).
 //
-// A pintura inteira pendia de UM booleano (`invalidado`), e um booleano só sabe
-// dizer duas coisas. Com o ciclo de vida (DA-129) são quatro os significados que
-// disputam a mesma tela, e colapsá-los custa caro nos dois sentidos: pintar de
-// CINZA um trade que bateu o alvo diz que ele não existiu; pintá-lo com o AZUL de
-// um vivo diz que ainda há o que fazer com ele.
+// A DA-130 tinha dado uma COR a cada desfecho: verde = ganhou, vermelho = perdeu,
+// cinza = invalidado. Resolvia um problema real (pintar de cinza um trade que bateu
+// o alvo diz que ele não existiu) e criava outro maior: o verde passou a significar
+// DIREÇÃO num lugar e DESFECHO noutro. Foi assim que um Storm123 de VENDA apareceu
+// verde na tela, e o dono leu — corretamente, pela regra que a tela ensina em todo
+// o resto — "compra".
 //
-// A gramática é a que a tela já ensina (DA-078 regra 3), sem cor nova:
-//   verde   = ganho ....... encerrado no ALVO
-//   vermelho= perda ....... encerrado no STOP
-//   cinza   = nunca chegou a valer ....... invalidado
-//   azul/laranja por direção = ainda vale ....... vivo ou por acionar
-const COR_GANHO = "#2ecc71";   // o mesmo verde de "ganho/alta" do resto da tela
-const COR_PERDA = "#ff5c6c";   // o mesmo vermelho de perda
+// A decisão do dono desfaz aquilo e deixa a cor com UM eixo só:
+//
+//   verde / vermelho CHEIOS ......... setup VIVO, e a matiz diz a DIREÇÃO
+//   cinza (--dim) ................... fantasma INVALIDADO: nunca chegou a valer
+//   verde / vermelho ESMAECIDOS ..... fantasma ENCERRADO: a matiz preserva a
+//                                     DIREÇÃO ORIGINAL, a opacidade diz "já foi"
+//
+// ALVO E STOP TÊM A MESMA COR, de propósito: se o desfecho voltasse pra matiz, o
+// eixo dobrado voltava junto. O que separa "encerrado no alvo" de "encerrado no
+// stop" é a PALAVRA — que já está escrita na legenda, no rótulo da vela e no card
+// (`FASE_PALAVRA`). E o invalidado é o único que abandona a direção porque ele é o
+// único que nunca chegou a ser um trade: não há lado a lembrar.
 
 // A FASE DA PINTURA: quatro valores, lidos do ESTADO e não de um sim/não. Este é o
 // único lugar que decide o que a cor significa — quem pinta consulta, não recombina.
@@ -3478,13 +3509,31 @@ function ehFantasma(pat) {
   return patFase(pat) === "morto";
 }
 
+// A CLASSE DE HISTÓRIA DO CARD, num lugar só (DA-140).
+//
+// Antes o card só virava fantasma quando o padrão MORRIA (`ehFantasma`), e um trade
+// encerrado ficava com a cara de um vivo: mesma borda cheia, mesmo peso. Era o
+// segundo defeito que o Samyr apontou na mesma conversa — ele leu um Setup123
+// encerrado em 30/07 como oportunidade ainda aberta ("e pq ainda aparece se já
+// atingiu o alvo?"). Agora TODA história é fantasma; o que muda entre os dois tipos
+// é só de onde a cor vem:
+//
+//   `sc-fantasma`   — o tratamento comum: opacidade de fantasma e título rebaixado;
+//   `sc-invalidado` — além disso, abandona a direção e vai pro cinza (`--dim`).
+//
+// Duas classes e não duas cópias da regra: o CSS decide a aparência, o JS decide o
+// ESTADO. Quem quiser mudar o fantasma mexe num seletor, não em dois `if`.
+function classeDeHistoria(pat) {
+  if (!ehHistoria(pat)) return "";
+  return " sc-fantasma" + (ehFantasma(pat) ? " sc-invalidado" : "");
+}
+
 function patColor(pat) {
-  switch (patFase(pat)) {
-    case "morto": return COR_FANTASMA;
-    case "ganho": return COR_GANHO;
-    case "perda": return COR_PERDA;
-  }
-  return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
+  // O MORTO é o único que sai da paleta direcional. Ganho e perda ficam na matiz da
+  // direção ORIGINAL — quem os separa dos vivos é a OPACIDADE (ALFA_FANTASMA,
+  // aplicada por quem desenha), não a cor.
+  if (patFase(pat) === "morto") return COR_FANTASMA;
+  return (pat && PAT_COLORS[pat.direction]) || PAT_COLORS.compra;
 }
 
 // A PALAVRA da fase, pra etiqueta na vela e pra legenda. Vazia no vivo: o normal não
@@ -3568,11 +3617,12 @@ function stormEstadoTexto(estado, storm) {
 
 // FORMA DO MARCADOR = FAMÍLIA. Os dois métodos numeram 1-2-3 pontos DIFERENTES (no
 // Setup123 o ponto 2 é o topo do repique e o 3 um fundo ascendente; no Storm o 2 é
-// o EXTREMO do movimento e o 3 a tentativa que falha), e as cores não separam: o
-// azul de compra do Setup123 (#6ea8fe) e o azul do Storm (#7cb0ff) são o mesmo azul
-// a um palmo de distância. Com as duas camadas ligadas, ①②③ de um viraria ①②③ do
-// outro. A FORMA separa antes da cor — círculo é Setup123, losango é Storm123 — e a
-// legenda carrega a mesma forma, então o vínculo se lê sem decorar nada.
+// o EXTREMO do movimento e o 3 a tentativa que falha), e a COR NUNCA os separa —
+// hoje menos que nunca: desde a DA-140 os dois usam a MESMA paleta, porque a cor
+// diz direção e a direção não conhece método. Com as duas camadas ligadas, ①②③ de
+// um viraria ①②③ do outro. A FORMA separa antes da cor — círculo é Setup123,
+// losango é Storm123 — e a legenda carrega a mesma forma, então o vínculo se lê sem
+// decorar nada. É por isso que ela é o único portador de método: um eixo por canal.
 const FORMA_DA_FAMILIA = { plano: "circulo", storm: "losango" };
 // TRAÇO = FAMÍLIA nos NÍVEIS, pelo mesmo motivo que a forma separa os marcadores.
 // Os níveis do Storm eram TODOS azuis (a cor dizia de quem era a linha) e o traço
@@ -3766,7 +3816,11 @@ function chartLegendHtml(chart, actionable) {
     // que bateu o alvo é a legenda mentindo sobre o que a cor mostra.
     const _fp = patFasePalavra(pat);
     const morto = _fp ? ` (${_fp})` : "";
-    legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
+    // A AMOSTRA ESMAECE JUNTO COM O DESENHO (DA-140). O encerrado guarda a matiz da
+    // direção e perde a OPACIDADE — se a chave saísse cheia, ela diria "vivo" ao
+    // lado de um marcador esmaecido, e a legenda existe justamente pra decodificar o
+    // que está desenhado. É a única coisa que separa os dois na cor.
+    legend.push(`<span class="lg"><span class="sw dot${ehHistoria(pat) ? " sw-fantasma" : ""}" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
   }
   const est = camadaVisivel("storm") && actionable ? stormEstado(actionable.storm) : null;
   if (est) {
@@ -3774,7 +3828,7 @@ function chartLegendHtml(chart, actionable) {
     const [, dlabel] = PAT_DIR[sp.direction] || ["", ""];
     const q = familiasNaTela(actionable).length > 1 ? "Storm123 " : "";
     const txt = stormEstadoTexto(est, actionable.storm);
-    legend.push(`<span class="lg"><span class="sw dia" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${txt ? ` (${escapeHtml(txt)})` : ""}</span>`);
+    legend.push(`<span class="lg"><span class="sw dia${ehHistoria(sp) ? " sw-fantasma" : ""}" style="background:${stormColor(sp)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${txt ? ` (${escapeHtml(txt)})` : ""}</span>`);
   }
   // O RECOLHÍVEL É SÓ O QUE O DESENHO JÁ DIZ. A chave fica sempre — recolher o que
   // não tem rótulo nenhum no gráfico seria esconder informação sem destino.
@@ -3898,15 +3952,16 @@ function renderChartCard(chart, ticker, actionable, tf) {
     notes.push(`${mortos.join(" e ")} <b>invalidado</b> — os pontos ficam em cinza como ` +
       `história, e os níveis dele saem do gráfico: descrevem um trade que não existe mais.`);
   }
-  // ENCERRADO tem nota PRÓPRIA (DA-130). A de cima promete "cinza", e repetir a
-  // mesma frase sobre um trade que bateu o alvo contradiria o verde que está na tela
-  // — a nota existe justamente pra dizer o que a cor significa.
+  // ENCERRADO tem nota PRÓPRIA. A de cima promete "cinza", e o encerrado NÃO está em
+  // cinza: ele guarda a matiz da direção e perde é a opacidade (DA-140). A nota
+  // existe justamente pra dizer o que a cor significa — e aqui ela diz também o que
+  // a cor NÃO significa mais: o desfecho está na palavra, não na matiz.
   encerradosNaTela(chart, actionable).forEach(({ nome, fase }) => {
     const ganhou = fase === "ganho";
     notes.push(`${nome} <b>${ganhou ? "encerrado no alvo" : "encerrado no stop"}</b> — ` +
-      `os pontos ficam ${ganhou ? "em verde" : "em vermelho"} como história ` +
-      `${ganhou ? "de ganho" : "de perda"}, e o gatilho sai do gráfico: o trade ` +
-      `terminou, e o preço passando por ali de novo não o reabre.`);
+      `os pontos ficam <b>esmaecidos</b>, na cor da direção do trade, como história; ` +
+      `o resultado está nesta palavra, não na cor. E o gatilho sai do gráfico: o ` +
+      `trade terminou, e o preço passando por ali de novo não o reabre.`);
   });
   if (stormVetadoNaTela(actionable)) {
     const st = actionable.storm || {};
@@ -4812,10 +4867,10 @@ function fantasmasNaTela(chart, a) {
   return nomes;
 }
 
-// OS ENCERRADOS NA TELA (DA-130) — o irmão de `fantasmasNaTela`, separado porque a
-// nota que eles pedem é OUTRA: a do fantasma promete cinza, e estes estão em verde
-// ou vermelho. Devolve a fase junto, senão a nota teria de reabrir o padrão pra
-// descobrir se ganhou.
+// OS ENCERRADOS NA TELA — o irmão de `fantasmasNaTela`, separado porque a nota que
+// eles pedem é OUTRA: a do fantasma promete CINZA, e estes guardam a matiz da
+// direção, esmaecida (DA-140). Devolve a fase junto, senão a nota teria de reabrir o
+// padrão pra descobrir qual palavra escrever.
 function encerradosNaTela(chart, a) {
   const fora = [];
   const pat = chart && chart.markers && chart.markers.pattern_123;
@@ -8874,6 +8929,11 @@ function scanStormCellHtml(f) {
   const ent = st.entrada === "ponto3" ? "p3" : st.entrada === "ponto2" ? "p2" : "p2/3";
   const rr = st.rr != null ? `${scanFmt(st.rr)}` : "—";
   const detalhe = [
+    // A DIREÇÃO EM PALAVRA, primeiro (DA-140). A célula passou a dizer a direção pela
+    // COR, e cor nunca é o único portador: quem não distingue as matizes (ou lê por
+    // leitor de tela) tem de conseguir recuperar de que lado é o setup — e o rótulo
+    // visível ali é o ESTADO ("gatilho"), não o lado.
+    st.direction ? `1-2-3 Storm de ${st.direction}` : "",
     // O rótulo vem PRONTO do scanner (mesmo vocabulário do card): a célula não
     // reescreve nome de estado. Sem ele (linha antiga em cache), degrada pro que
     // aquela linha sempre mostrou em vez de inventar um nome.

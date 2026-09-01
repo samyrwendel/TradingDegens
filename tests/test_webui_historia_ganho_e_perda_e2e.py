@@ -1,18 +1,27 @@
-"""HISTÓRIA DE VITÓRIA ≠ HISTÓRIA DE DERROTA ≠ NUNCA CHEGOU A VALER (DA-130).
+"""HISTÓRIA É FANTASMA, E O RESULTADO VIVE NA PALAVRA (DA-140 — revisa a DA-130).
 
-A pintura inteira do padrão pendia de UM booleano (`invalidado`), e um booleano só
-sabe dizer duas coisas. Com o ciclo de vida (DA-129) são quatro os significados na
-mesma tela, e colapsá-los custa nos DOIS sentidos:
+A DA-130 tinha dado uma COR a cada desfecho: **verde = ganhou, vermelho = perdeu,
+cinza = invalidado**, e azul/laranja por direção no vivo. Resolvia um problema real
+(pintar de cinza um trade que bateu o alvo diz que ele não existiu) e criava outro
+maior: **o verde passou a significar DIREÇÃO num lugar e DESFECHO noutro.**
 
-* pintar de **cinza** um trade que bateu o alvo diz que ele não existiu;
-* pintá-lo com o **azul de um vivo** — que é o que acontecia depois da DA-125, porque
-  `invalidado` efetivo virou falso — diz que ainda há o que fazer com ele.
+Foi assim que um Storm123 de **VENDA** encerrado no alvo apareceu **verde**, e o dono
+leu — corretamente, pela regra que a tela ensina em todo o resto — "compra":
+*"pq está verde se é 123 de venda?"*. Na pergunta seguinte, leu um trade encerrado em
+30/07 como oportunidade ainda aberta. **Cor é lida ANTES da palavra**: enquanto dois
+eixos dividirem a paleta, o rótulo chega tarde.
 
-A gramática é a que a tela já ensina (DA-078 regra 3), sem cor nova:
-**verde = ganho · vermelho = perda · cinza = nunca chegou a valer · azul/laranja por
-direção = ainda vale.** O peso NÃO separa os três primeiros: "já não se opera" é a
-mesma informação nos três, e hierarquizar por resultado faria a tela ordenar por
-quem ganhou em vez de por o que é acionável.
+A gramática que fica, com UM eixo na cor:
+
+* **verde/vermelho CHEIOS** — setup VIVO, e a matiz diz a **direção**;
+* **cinza (`--dim`)** — fantasma INVALIDADO: nunca chegou a ser um trade, não há lado
+  a lembrar;
+* **verde/vermelho ESMAECIDOS** — fantasma ENCERRADO: a matiz preserva a direção
+  ORIGINAL, a opacidade diz "já foi".
+
+**Alvo e stop têm a MESMA cor, de propósito** — se o desfecho voltasse pra matiz, o
+eixo dobrado voltava junto. O que os separa é a PALAVRA, que já está na legenda, no
+rótulo da vela e no card.
 """
 
 import contextlib
@@ -45,8 +54,9 @@ _DESF = {"tipo": "alvo", "em": "2026-08-28 15:00", "price": 414.0,
          "empate_na_barra": False}
 
 
-def _pat(ciclo, **over):
-    p = {**_PAT, "ciclo": ciclo, "invalidado": ciclo.startswith("invalidado"),
+def _pat(ciclo, direcao="venda", **over):
+    p = {**_PAT, "direction": direcao,
+         "ciclo": ciclo, "invalidado": ciclo.startswith("invalidado"),
          "invalidado_em": "2026-08-28 23:00" if "invalid" in ciclo else None,
          "encerrado": ciclo.startswith("concluido"),
          "desfecho": ({**_DESF, "tipo": "stop", "price": 470.0}
@@ -59,8 +69,9 @@ def _pat(ciclo, **over):
 
 def _abre(page, base_url, pattern, viewport=None):
     chart = {**_CHART, "markers": {**_CHART["markers"], "pattern_123": pattern}}
+    plano = {**_PLANO, "pattern": pattern}
     r = {"verdict": None, "final_decision": "", "timeframe": "1d",
-         "as_of_price": 465.58, "actionable": {**_PLANO, "pattern": pattern},
+         "as_of_price": 465.58, "actionable": plano,
          "live_price": None, "price_chart": chart, "degraded": [],
          "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
          "trader_plan": "", "risk_decision": "", "market_report": "",
@@ -101,41 +112,94 @@ _LE = """() => ({
 })"""
 
 _VERDE, _VERMELHO, _CINZA = "#2ecc71", "#ff5c6c", "#6b7280"
+# A cor da DIREÇÃO — a única coisa que a matiz diz, viva ou morta.
+_DA_DIRECAO = {"compra": _VERDE, "venda": _VERMELHO}
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-@pytest.mark.parametrize("ciclo,cor,palavra", [
-    ("concluido_alvo", _VERDE, "encerrado no alvo"),
-    ("concluido_stop", _VERMELHO, "encerrado no stop"),
-    ("invalidado_sem_acionar", _CINZA, "invalidado"),
-    ("invalidado_operando", _CINZA, "invalidado"),
+@pytest.mark.parametrize("direcao", ["compra", "venda"])
+@pytest.mark.parametrize("ciclo,palavra", [
+    ("vivo", ""),
+    ("concluido_alvo", "encerrado no alvo"),
+    ("concluido_stop", "encerrado no stop"),
 ])
-def test_cada_fase_tem_a_SUA_cor_e_a_SUA_palavra(base, ciclo, cor, palavra):
-    """As três histórias, distintas na cor E no texto. DENTE: antes desta DA as
-    quatro linhas caíam em duas — cinza+invalidado ou azul+silêncio."""
+def test_a_MATIZ_diz_a_DIRECAO_e_so(base, ciclo, palavra, direcao):
+    """O DENTE CENTRAL desta DA, e o caso exato que o dono pegou: um 1-2-3 de VENDA
+    encerrado no ALVO **não pode sair verde**. Antes saía — verde era "ganhou" —, e
+    a mesma tela ensinava, na faixa do card ao lado, que verde é compra.
+
+    A matiz é a mesma nos três ciclos de propósito: quem diz que o trade terminou é
+    a OPACIDADE (e a palavra), não a cor.
+    """
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
-        _abre(page, base, _pat(ciclo))
+        _abre(page, base, _pat(ciclo, direcao))
         m = page.evaluate(_LE)
-        assert m["cor"].lower() == cor, (ciclo, m["cor"])
-        assert m["historia"] is True, ciclo
-        assert palavra in m["legenda"], ("na LEGENDA", m["legenda"])
-        assert any(palavra in r for r in m["rotulos"]), ("na VELA", m["rotulos"])
-        assert all(d["cor"].lower() == cor for d in m["pontos"]), m["pontos"]
+        assert m["cor"].lower() == _DA_DIRECAO[direcao], (ciclo, direcao, m["cor"])
+        assert all(d["cor"].lower() == _DA_DIRECAO[direcao] for d in m["pontos"]), m["pontos"]
+        if palavra:
+            assert m["historia"] is True, ciclo
+            assert palavra in m["legenda"], ("na LEGENDA", m["legenda"])
+            assert any(palavra in r for r in m["rotulos"]), ("na VELA", m["rotulos"])
+        else:
+            assert m["historia"] is False, ciclo
         browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_ENCERRADO_no_alvo_NAO_e_fantasma_e_o_invalidado_E(base):
-    """`ehFantasma` deixou de ser o booleano do backend e passou a ler a FASE — o
-    cinza e a palavra "invalidado" continuam sendo só do morto (DA-091)."""
+@pytest.mark.parametrize("direcao", ["compra", "venda"])
+@pytest.mark.parametrize("ciclo", ["invalidado_sem_acionar", "invalidado_operando"])
+def test_o_INVALIDADO_e_o_unico_que_larga_a_direcao(base, ciclo, direcao):
+    """Ele nunca chegou a ser um trade: não há lado a lembrar. Vai pro cinza do tema
+    (`--dim`), que é o primeiro plano REBAIXADO contra o fundo — nunca branco pleno,
+    que competiria com o texto vivo (DA-078)."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, _pat(ciclo, direcao))
+        m = page.evaluate(_LE)
+        assert m["cor"].lower() == _CINZA, (ciclo, direcao, m["cor"])
+        assert m["fantasma"] is True and m["historia"] is True, m
+        assert "invalidado" in m["legenda"], m["legenda"]
+        # cinza de verdade: sem canal dominante
+        r, g, b = (int(m["cor"][i:i + 2], 16) for i in (1, 3, 5))
+        assert max(r, g, b) - min(r, g, b) < 40, ("cinza, não uma matiz", m["cor"])
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_ALVO_e_STOP_saem_na_MESMA_cor_e_se_separam_pela_PALAVRA(base):
+    """DENTE do exagero oposto: devolver o desfecho à matiz (verde ganhou / vermelho
+    perdeu) reabre o eixo dobrado que esta DA fechou. Os dois têm de ser
+    indistinguíveis na COR e distinguíveis no TEXTO."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        cores, palavras = {}, {}
+        for ciclo in ("concluido_alvo", "concluido_stop"):
+            _abre(page, base, _pat(ciclo, "compra"))
+            m = page.evaluate(_LE)
+            cores[ciclo] = m["cor"].lower()
+            palavras[ciclo] = m["legenda"]
+        assert cores["concluido_alvo"] == cores["concluido_stop"] == _VERDE, cores
+        assert "encerrado no alvo" in palavras["concluido_alvo"], palavras
+        assert "encerrado no stop" in palavras["concluido_stop"], palavras
+        assert "encerrado no stop" not in palavras["concluido_alvo"], palavras
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_ENCERRADO_NAO_e_invalidado_e_nao_recebe_a_palavra_dele(base):
+    """`ehFantasma` continua sendo só do MORTO: é ele que carrega o cinza e a palavra
+    "invalidado" (DA-091). O encerrado é história — `ehHistoria` —, e chamá-lo de
+    invalidado seria a tela mentindo sobre um trade que chegou ao alvo."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, _pat("concluido_alvo"))
         m = page.evaluate(_LE)
-        assert m["fase"] == "ganho" and m["fantasma"] is False, m
+        assert m["fase"] == "ganho" and m["fantasma"] is False and m["historia"] is True, m
         assert "invalidado" not in m["legenda"], m["legenda"]
         assert "invalidado" not in m["nota"], m["nota"]
         _abre(page, base, _pat("invalidado_sem_acionar"))
@@ -146,34 +210,20 @@ def test_o_ENCERRADO_no_alvo_NAO_e_fantasma_e_o_invalidado_E(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_a_NOTA_do_encerrado_e_OUTRA_e_diz_a_cor_certa(base):
-    """A nota do fantasma promete "cinza" — repeti-la sobre um trade que bateu o
-    alvo contradiria o verde que está na tela."""
+def test_a_NOTA_do_encerrado_NAO_promete_cor_de_desfecho(base):
+    """A nota diz o que a cor significa — e agora tem de dizer o que ela NÃO significa
+    mais. Prometer "verde" num trade que terminou reabriria, em palavras, o eixo que a
+    DA-140 fechou nos pixels."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
-        _abre(page, base, _pat("concluido_alvo"))
-        n = page.evaluate(_LE)["nota"]
-        assert "encerrado no alvo" in n and "verde" in n, n
-        assert "o trade terminou" in n, n
-        _abre(page, base, _pat("concluido_stop"))
-        n = page.evaluate(_LE)["nota"]
-        assert "encerrado no stop" in n and "vermelho" in n, n
-        browser.close()
-
-
-@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_VIVO_continua_com_a_cor_da_DIRECAO(base):
-    """DENTE do exagero oposto: sem isto, gastar verde/vermelho no padrão vivo
-    apagaria a gramática de DIREÇÃO (azul compra / laranja venda) que a tela usa."""
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(viewport=DESKTOP)
-        _abre(page, base, _pat("vivo"))
-        m = page.evaluate(_LE)
-        assert m["fase"] == "vivo" and m["historia"] is False, m
-        assert m["cor"].lower() == "#ff9f43", ("venda = laranja", m["cor"])
-        assert "invalidado" not in m["legenda"] and "encerrado" not in m["legenda"], m
+        for ciclo, palavra in (("concluido_alvo", "encerrado no alvo"),
+                               ("concluido_stop", "encerrado no stop")):
+            _abre(page, base, _pat(ciclo))
+            n = page.evaluate(_LE)["nota"]
+            assert palavra in n and "esmaecidos" in n, (ciclo, n)
+            assert "em verde" not in n and "em vermelho" not in n, (ciclo, n)
+            assert "não na cor" in n, (ciclo, n)
         browser.close()
 
 
@@ -207,9 +257,48 @@ def test_a_gramatica_vale_igual_no_TELEFONE(base, viewport):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=viewport)
-        _abre(page, base, _pat("concluido_alvo"), viewport=viewport)
+        _abre(page, base, _pat("concluido_alvo", "venda"), viewport=viewport)
         m = page.evaluate(_LE)
-        assert m["cor"].lower() == _VERDE and "encerrado no alvo" in m["legenda"], m
+        assert m["cor"].lower() == _VERMELHO, ("venda encerrada não vira verde", m)
+        assert "encerrado no alvo" in m["legenda"], m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_CARD_da_historia_esmaece_e_so_o_invalidado_larga_a_direcao(base):
+    """A mesma gramática um andar acima, que é onde a decisão de operar se lê. O card
+    de uma leitura ENCERRADA tinha a cara de um vivo — foi por isso que o dono leu um
+    trade fechado em 30/07 como oportunidade aberta ("e pq ainda aparece se já
+    atingiu o alvo?")."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _ler = """() => {
+          const c = document.querySelector('#setupCards .sc-123');
+          if (!c) return null;
+          const cs = getComputedStyle(c);
+          return {classes: [...c.classList], opacidade: cs.opacity,
+                  borda: cs.borderLeftColor,
+                  dir: getComputedStyle(c.querySelector('.sc-dir')).color};
+        }"""
+        _abre(page, base, _pat("vivo", "compra"))
+        vivo = page.evaluate(_ler)
+        assert "sc-fantasma" not in vivo["classes"], vivo
+        assert float(vivo["opacidade"]) == 1.0, vivo
+
+        _abre(page, base, _pat("concluido_alvo", "compra"))
+        fim = page.evaluate(_ler)
+        assert "sc-fantasma" in fim["classes"], ("encerrado tem de ser fantasma", fim)
+        assert "sc-invalidado" not in fim["classes"], fim
+        assert float(fim["opacidade"]) < 1.0, fim
+        assert fim["borda"] == vivo["borda"] and fim["dir"] == vivo["dir"], (
+            "o encerrado guarda a MATIZ da direção — quem o separa é a opacidade",
+            vivo, fim)
+
+        _abre(page, base, _pat("invalidado_sem_acionar", "compra"))
+        mortoc = page.evaluate(_ler)
+        assert {"sc-fantasma", "sc-invalidado"} <= set(mortoc["classes"]), mortoc
+        assert mortoc["borda"] != vivo["borda"], ("o invalidado larga a direção", mortoc)
         browser.close()
 
 
@@ -260,7 +349,8 @@ def test_o_LINK_USD_REAL_reaberto_diz_o_desfecho_de_CADA_metodo(tmp_path):
                 fase123: patFase(mk), desf123: (mk || {}).desfecho,
                 faseStorm: patFase(sp), desfStorm: (sp || {}).desfecho,
                 estadoStorm: stormEstado(a.storm),
-                corStorm: patColor(sp),
+                corStorm: patColor(sp), dirStorm: (sp || {}).direction,
+                cor123: patColor(mk), dir123: (mk || {}).direction,
                 legenda: document.getElementById('chartLegend').innerText.replace(/\s+/g, ' '),
                 card: (document.querySelector('.setup-card') || {}).innerText || '',
               };
@@ -275,10 +365,20 @@ def test_o_LINK_USD_REAL_reaberto_diz_o_desfecho_de_CADA_metodo(tmp_path):
             assert m["desfStorm"]["em"] == "2026-08-30 04:00", m["desfStorm"]
             assert m["desfStorm"]["em"] < m["desf123"]["em"], (
                 "o Storm perdeu ANTES de o 1-2-3 ganhar", m)
-            # e é o Storm que está na tela (esta run é storm123): vermelho, com a
-            # palavra certa, e em lugar nenhum "invalidado"
+            # e é o Storm que está na tela (esta run é storm123): a cor é a da
+            # DIREÇÃO, a palavra é a do desfecho, e em lugar nenhum "invalidado".
+            #
+            # ESTE É O CASO REAL QUE PROVA A DA-140 INTEIRA: o Storm é de COMPRA e
+            # PERDEU. Pela DA-130 ele saía VERMELHO — a cor de "perdeu" — na mesma
+            # tela onde vermelho quer dizer VENDA. Um trade de compra pintado com a
+            # cor de venda, e nada dizendo qual dos dois sentidos estava em jogo.
             assert m["estadoStorm"] == "encerrado", m["estadoStorm"]
-            assert m["corStorm"].lower() == _VERMELHO, m["corStorm"]
+            assert m["dirStorm"] == "compra" and m["faseStorm"] == "perda", m
+            assert m["corStorm"].lower() == _DA_DIRECAO[m["dirStorm"]], (
+                "a matiz voltou a dizer o desfecho", m["corStorm"], m["dirStorm"])
+            # e o 1-2-3 da MESMA tela, que GANHOU, sai na cor da SUA direção — dois
+            # desfechos opostos, e a cor não os separa: quem separa é a palavra
+            assert m["cor123"].lower() == _DA_DIRECAO[m["dir123"]], m
             assert "encerrado no stop" in m["legenda"], m["legenda"]
             assert "invalidado" not in m["legenda"], m["legenda"]
             card = " ".join(m["card"].split())
