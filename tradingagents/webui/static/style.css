@@ -1123,9 +1123,26 @@ details.section[open] > summary::before { content: "▾"; }
   background: none;
   transition: background .12s;
 }
-/* linha 1 (topo): ticker/nome à esquerda · veredito/data à direita · × */
-.history li .h-ticker { grid-row: 1; grid-column: 1; }
-.history li .h-right  { grid-row: 1; grid-column: 2; }
+/* O VEREDITO GANHA A LINHA DELE (DA-137). Ele dividia a fileira 1 com o ticker, e é
+   dele que vinha o esmagamento da task 20260830-002 ("AMI…", "A…", "…"): veredito é
+   texto de comprimento imprevisível, e numa lateral estreita ele roubava a largura
+   do vizinho. Truncar o veredito (a saída de então) tratava o sintoma; tirá-lo da
+   fileira resolve na RAIZ — sem vizinho, não há de quem roubar.
+
+   Fileira 1: ticker/nome + o × · fileira 2: veredito e data, sozinhos. */
+.history li .h-ticker { grid-row: 1; grid-column: 1 / 3; }
+.history li .h-right  { grid-row: 2; grid-column: 1 / -1;
+                        flex-direction: row; align-items: baseline; gap: 8px;
+                        justify-content: flex-start; flex-wrap: nowrap; }
+/* Com a fileira inteira à disposição, o veredito PARA DE TRUNCAR: a reticência da
+   task 20260830-002 existia porque ele dividia a linha com o ticker e era ele quem
+   cedia. Aqui não há de quem ceder — então ele mostra o texto todo, e quebra em duas
+   linhas antes de cortar. A data continua encolhendo, que é o certo: ela é o dado
+   auxiliar da fileira. */
+.history li .h-right > .h-verdict {
+  max-width: none; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 0 1 auto;
+}
 .history li .h-remove { grid-row: 1; grid-column: 3; align-self: center; }
 /* linha de baixo: PREÇO LIVE, na LARGURA INTEIRA da linha (task 007 o tinha posto
    na coluna 1, dividindo a fileira com o marcador "pronto/erro"). Numa lateral de
@@ -1133,13 +1150,22 @@ details.section[open] > summary::before { content: "▾"; }
    junto com o ticker, que é o defeito que esta rodada veio matar. Ele passa a ocupar
    a fileira toda, e o marcador — que é transitório e some sozinho — ganha a de baixo
    em vez de disputar espaço com o dado permanente. */
-.history li .h-price  { grid-row: 2; grid-column: 1 / -1; min-width: 0; }
-.history li .h-flag   { grid-row: 3; grid-column: 1 / -1; justify-self: end; align-self: center; }
-/* A FAIXA DE FRAMES na fileira 4, largura inteira (DA-133): embaixo do preço, que
-   com o ticker continua sendo o que se lê primeiro. Grade explícita porque o
-   `.h-flag` acima já ocupa a 3 — sem a linha própria, a faixa disputaria a fileira
-   com um marcador transitório e o card mudaria de altura quando ele sumisse. */
-.history li .h-faixa  { grid-row: 4; grid-column: 1 / -1; }
+/* PREÇO À ESQUERDA, FAIXA À DIREITA, na MESMA fileira — o layout que o Samyr fechou.
+   A regra 11 da DA-078 avisa que "um à esquerda + outro à direita" é justamente o
+   padrão que abre vão no meio e trunca nas pontas quando a coluna estreita; por isso
+   quem CEDE é a faixa (ela compacta), nunca o preço — dado primário não se sacrifica
+   (task 20260830-002). O `min-width: 0` no preço é o que permite a ele encolher sem
+   estourar a grade, e o `flex-wrap` deixa a faixa cair para baixo do preço na
+   largura mínima em vez de espremer os dois. */
+.history li .h-linha-preco {
+  grid-row: 3; grid-column: 1 / -1; min-width: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap;
+}
+.history li .h-linha-preco .h-price { min-width: 0; flex: 1 1 auto; }
+.history li .h-linha-preco .h-faixa { flex: 0 0 auto; margin-top: 0; }
+.history li .h-flag   { grid-row: 4; grid-column: 1 / -1; justify-self: end; align-self: center; }
+/* A faixa não tem mais fileira própria: ela vive DENTRO da linha do preço (acima). */
 .history li:hover { background: var(--panel-2); }
 
 /* esquerda: ticker em negrito SOBRE o nome da empresa em cinza (duas linhas) */
@@ -3041,8 +3067,17 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 
    Quadrada e chapada (DA-078 regras 1 e 2). Cresce sozinha se o scan ganhar
    frames: é `flex`, sem largura fixa e sem posição codificada. */
-.h-faixa { display: flex; gap: 3px; margin-top: 4px;
-           align-items: center; }
+/* DUAS LINHAS, uma por método (DA-137): 20 dos 20 ativos têm leitura nos dois, então
+   é o caso normal. Empilhadas e coladas — cada uma tem 13px, e o conjunto ocupa
+   menos que as duas fileiras separadas que a versão anterior usaria. */
+.h-faixa { display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
+           align-items: flex-end; }
+.h-faixa-linha { display: flex; gap: 3px; align-items: center; }
+/* O RÓTULO DO MÉTODO: sem ele, duas linhas de quadradinhos não dizem de quem é qual
+   — e os dois métodos numeram 1-2-3 coisas diferentes. */
+.fx-met { font-style: normal; font-size: .58rem; letter-spacing: .04em;
+          color: var(--muted); min-width: 30px; text-align: right;
+          font-family: var(--mono); }
 .fx-m { display: inline-flex; align-items: center; justify-content: center;
         min-width: 22px; height: 13px; padding: 0 3px; border-radius: 0;
         border: 1px solid var(--border); box-sizing: border-box; }
@@ -3077,6 +3112,11 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
                 border-style: dashed; background: transparent; }
 .fx-morreu { color: var(--muted); border-color: var(--border);
              text-decoration: line-through; background: transparent; }
+/* VETADO pelo Éden: o padrão EXISTE e foi barrado — diferente de não haver padrão.
+   Contorno TRACEJADO, a mesma gramática que o marcador vetado usa no gráfico
+   ("um anel quebrado se lê como não vale operar antes de qualquer palavra"), e sem
+   cor de direção: não há trade a fazer. */
+.fx-vetado { color: var(--muted); border-style: dashed; background: transparent; }
 /* SEM LEITURA: pontilhado e apagado — "não há leitura" não pode ter a mesma cara
    de "li e não achei". */
 .fx-sem { color: var(--muted); border-style: dotted; opacity: .6;

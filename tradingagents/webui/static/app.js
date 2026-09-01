@@ -6732,19 +6732,26 @@ const FAIXA_FASE_CLS = {
 // ali é que já não se opera (a mesma razão pela qual o chip da lista fica cinza).
 const _FAIXA_VIVAS = new Set(["agora", "esperando", "andou"]);
 
-function faixaMarcaHtml(frame, linha) {
+function faixaMarcaHtml(frame, linha, metodo) {
   const estado = (linha || {}).estado || "sem_dado";
   const fase = FASE_DO_SCAN_ESTADO[estado] || "sem_leitura";
   const dir = (linha || {}).direction === "venda" ? "venda"
             : (linha || {}).direction === "compra" ? "compra" : "";
   const viva = _FAIXA_VIVAS.has(fase) && dir;
-  const cls = ["fx-m", FAIXA_FASE_CLS[fase] || "fx-sem", viva ? dir : ""]
-    .filter(Boolean).join(" ");
+  // VETADO NÃO É SEM SETUP, e a diferença importa: vetado é um padrão que EXISTE e
+  // que o Éden barrou (com motivo escrito); sem setup é não haver o que mostrar.
+  // Os dois caem em "sem_leitura" no eixo de fase — então quem os separa aqui é uma
+  // marca própria, e a palavra no title. Só o Storm produz `vetado`.
+  const vetado = estado === "vetado";
+  const cls = ["fx-m", vetado ? "fx-vetado" : (FAIXA_FASE_CLS[fase] || "fx-sem"),
+               viva ? dir : ""].filter(Boolean).join(" ");
   // O TÍTULO É A LEITURA COMPLETA, em palavras: sem ele a faixa seria um código de
   // cores a decorar — e quem usa leitor de tela não teria nada.
-  const tit = `${tfNome(frame)} — ${faseRotulo(fase).toLowerCase()}` +
-    (viva ? ` de ${dir}` : "") +
-    (FASE_AJUDA[fase] ? `: ${FASE_AJUDA[fase]}` : "");
+  const tit = `${metodo ? metodo + " · " : ""}${tfNome(frame)} — ` +
+    (vetado ? "não opera: o filtro Éden barrou este padrão"
+            : faseRotulo(fase).toLowerCase() +
+              (viva ? ` de ${dir}` : "") +
+              (FASE_AJUDA[fase] ? `: ${FASE_AJUDA[fase]}` : ""));
   return `<span class="${cls}" title="${escapeHtml(tit)}" role="img" ` +
     `aria-label="${escapeHtml(tit)}"><i>${escapeHtml(tfCurto(frame))}</i></span>`;
 }
@@ -6777,18 +6784,66 @@ function faixaFonte() {
   return _scanData || _faixaScan;
 }
 
+// UMA LINHA POR MÉTODO, e só de quem tem o que dizer (DA-137).
+//
+// MEDIDO no scan salvo de agora: **20 dos 20 ativos** têm leitura nos DOIS métodos
+// (a medição anterior, de 19/20, era de ontem). Ou seja, duas linhas é o caso
+// NORMAL, não a exceção — e o Samyr quer CRESCER a watchlist, onde altura por card
+// é o recurso mais escasso.
+//
+// A regra que compensa isso: a linha de um método **só aparece quando ele tem algo
+// a dizer** naquele ativo. Hoje quase sempre dá duas; quando um método está sem
+// leitura em todos os frames, o card encolhe sozinho — densidade acompanhando
+// informação, em vez de espaço reservado.
+//
+// O RÓTULO CURTO à esquerda de cada linha resolve de graça a outra ambiguidade: os
+// dois métodos numeram 1-2-3 coisas DIFERENTES (o Setup123 numera SWINGS, o Storm
+// numera TRÊS CANDLES), e sem dizer de quem é a linha não há como saber qual
+// convenção está sendo lida.
+const _FAIXA_METODOS = [
+  ["123", "Setup123", (f) => f],
+  ["storm", "Storm123", (f) => f.storm || null],
+];
+
+function faixaLinhaHtml(rotulo, nome, frames, porFrame, extrai) {
+  const linhas = frames.map((f) => extrai(porFrame.get(f) || {}));
+  // NADA A DIZER = LINHA AUSENTE. "Sem leitura em frame nenhum" não é uma leitura:
+  // uma faixa inteira de marcadores vazios ocuparia altura para não informar nada.
+  const vivo = linhas.some((l) => l && !["sem_setup", "sem_dado"].includes(l.estado));
+  if (!vivo) return "";
+  const marcas = frames.map((f, i) => faixaMarcaHtml(f, linhas[i], nome)).join("");
+  return `<span class="h-faixa-linha">` +
+    `<i class="fx-met" title="${escapeHtml(nome)}">${escapeHtml(rotulo)}</i>` +
+    marcas + `</span>`;
+}
+
+// DO MENOR PARA O MAIOR, como o Samyr escreveu ("1h · 4h · D · S"). A ordem NÃO é
+// a do scan (que vem do maior para o menor): a faixa se lê da esquerda para a
+// direita como o tempo se abre — do frame em que a coisa acontece primeiro para o
+// que confirma. E a ordem sai da escada canônica `ALL_TFS`, não de uma lista
+// escrita aqui: quando o scan ganhar o semanal, ele entra no lugar certo sozinho.
+const _ORDEM_FAIXA = ALL_TFS.map(([tf]) => tf).reverse();
+
+function ordenaFramesDaFaixa(frames) {
+  return frames.slice().sort(
+    (a, b) => _ORDEM_FAIXA.indexOf(a) - _ORDEM_FAIXA.indexOf(b));
+}
+
 function faixaDeFramesHtml(ticker) {
   // SEM SCAN, SEM FAIXA. Uma faixa de marcadores mudos ao lado do preço se leria
   // como "varri e não achei nada" — que é diferente de "ainda não varri".
   const d = faixaFonte();
-  const frames = (d && d.frames) || [];
+  const frames = ordenaFramesDaFaixa((d && d.frames) || []);
   if (!frames.length) return "";
   const ativo = (d.ativos || []).find(
     (a) => (a.ticker || "").toUpperCase() === (ticker || "").toUpperCase());
   if (!ativo) return "";
   const porFrame = new Map((ativo.frames || []).map((f) => [f.frame, f]));
-  const marcas = frames.map((f) => faixaMarcaHtml(f, porFrame.get(f))).join("");
-  return `<span class="h-faixa" data-faixa-for="${escapeHtml(ticker)}">${marcas}</span>`;
+  const linhas = _FAIXA_METODOS
+    .map(([rot, nome, extrai]) => faixaLinhaHtml(rot, nome, frames, porFrame, extrai))
+    .filter(Boolean).join("");
+  if (!linhas) return "";
+  return `<span class="h-faixa" data-faixa-for="${escapeHtml(ticker)}">${linhas}</span>`;
 }
 
 
@@ -6867,15 +6922,15 @@ function paintHistory() {
         `<span class="h-meta">${meta}</span>` +
       `</span>` +
       rm +
-      priceHtml +
+      // PREÇO E FAIXA NA MESMA FILEIRA (DA-137), num contêiner só: preço à esquerda,
+      // faixa à direita. Sem o contêiner seriam dois filhos da grade disputando a
+      // mesma fileira, e a regra 11 da DA-078 (vão no meio, truncado nas pontas) é
+      // exatamente o que acontece quando se faz isso com `justify-self`.
+      `<span class="h-linha-preco">` + priceHtml + faixaDeFramesHtml(t) + `</span>` +
       // marcador "pronto/erro" na LINHA DO PREÇO (não mais espremido no ticker,
       // que quebrava — task 007): irmão de .h-price (o poller reescreve .h-price,
       // então o flag não pode ser filho dele), alinhado à direita onde há espaço.
       flagHtml +
-      // A FAIXA por último no HTML e embaixo no layout: o ticker e o preço
-      // continuam sendo o que se lê primeiro (a lição da task 20260830-002, onde o
-      // veredito esmagava o ticker). Ela é leitura de RELANCE, não manchete.
-      faixaDeFramesHtml(t) +
       `</li>`;
   };
   const filtered = runs.filter((r) => {

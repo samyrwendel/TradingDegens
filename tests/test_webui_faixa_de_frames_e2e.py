@@ -123,7 +123,10 @@ def test_a_faixa_tem_UM_marcador_por_frame_VARRIDO(base):
         _abre(page, base)
         m = page.evaluate(_FAIXA, "AAA")
         assert m and len(m["marcas"]) == 3, m
-        assert [x["tf"] for x in m["marcas"]] == ["D", "4h", "1h"], m["marcas"]
+        # DO MENOR PARA O MAIOR (DA-137), como o Samyr pediu — e NÃO na ordem do
+        # scan, que vem do maior para o menor. A faixa se lê da esquerda para a
+        # direita como o tempo se abre.
+        assert [x["tf"] for x in m["marcas"]] == ["1h", "4h", "D"], m["marcas"]
         # e nenhum 15m/semanal inventado
         assert not any(x["tf"] in ("15m", "S") for x in m["marcas"]), m["marcas"]
         browser.close()
@@ -138,15 +141,16 @@ def test_a_FASE_e_a_DIRECAO_saem_na_classe_e_por_extenso_no_title(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base)
-        m = page.evaluate(_FAIXA, "AAA")["marcas"]
-        assert "fx-agora" in m[0]["cls"] and "compra" in m[0]["cls"], m[0]
-        assert "fx-esperando" in m[1]["cls"], m[1]
-        assert "fx-andou" in m[2]["cls"], m[2]
-        assert "na entrada" in m[0]["title"].lower(), m[0]["title"]
-        assert "de compra" in m[0]["title"], m[0]["title"]
-        assert "diário" in m[0]["title"].lower() or "1d" in m[0]["title"], m[0]["title"]
+        m = {x["tf"]: x for x in page.evaluate(_FAIXA, "AAA")["marcas"]}
+        # por FRAME, não por posição: a ordem é decisão de layout e já tem o seu teste
+        assert "fx-agora" in m["D"]["cls"] and "compra" in m["D"]["cls"], m["D"]
+        assert "fx-esperando" in m["4h"]["cls"], m["4h"]
+        assert "fx-andou" in m["1h"]["cls"], m["1h"]
+        assert "na entrada" in m["D"]["title"].lower(), m["D"]["title"]
+        assert "de compra" in m["D"]["title"], m["D"]["title"]
+        assert "diário" in m["D"]["title"].lower(), m["D"]["title"]
         # o rótulo acessível existe e é o mesmo texto
-        assert m[0]["rotulo"] == m[0]["title"], m[0]
+        assert m["D"]["rotulo"] == m["D"]["title"], m["D"]
         browser.close()
 
 
@@ -158,11 +162,11 @@ def test_a_HISTORIA_nao_leva_cor_de_direcao(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base)
-        m = page.evaluate(_FAIXA, "BBB")["marcas"]
-        assert "fx-agora" in m[0]["cls"] and "venda" in m[0]["cls"], m[0]
-        assert "fx-morreu" in m[1]["cls"], m[1]
-        assert "fx-encerrado" in m[2]["cls"], m[2]
-        for x in (m[1], m[2]):
+        m = {x["tf"]: x for x in page.evaluate(_FAIXA, "BBB")["marcas"]}
+        assert "fx-agora" in m["D"]["cls"] and "venda" in m["D"]["cls"], m["D"]
+        assert "fx-morreu" in m["4h"]["cls"], m["4h"]
+        assert "fx-encerrado" in m["1h"]["cls"], m["1h"]
+        for x in (m["4h"], m["1h"]):
             assert "compra" not in x["cls"] and "venda" not in x["cls"], x
         browser.close()
 
@@ -174,10 +178,10 @@ def test_sem_leitura_NAO_se_veste_de_sem_setup_colorido(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base)
-        m = page.evaluate(_FAIXA, "CCC")["marcas"]
-        assert "fx-sem" in m[0]["cls"] and "fx-sem" in m[1]["cls"], m
-        assert "sem leitura" in m[0]["title"].lower(), m[0]["title"]
-        assert "fx-esperando" in m[2]["cls"] and "venda" in m[2]["cls"], m[2]
+        m = {x["tf"]: x for x in page.evaluate(_FAIXA, "CCC")["marcas"]}
+        assert "fx-sem" in m["D"]["cls"] and "fx-sem" in m["4h"]["cls"], m
+        assert "sem leitura" in m["D"]["title"].lower(), m["D"]["title"]
+        assert "fx-esperando" in m["1h"]["cls"] and "venda" in m["1h"]["cls"], m["1h"]
         browser.close()
 
 
@@ -193,9 +197,14 @@ def test_a_faixa_e_a_TABELA_do_scan_dizem_a_MESMA_fase(base):
         m = page.evaluate("""() => {
           const out = {};
           for (const a of faixaFonte().ativos) {
-            out[a.ticker] = (a.frames || []).map(f => ({
-              tf: f.frame,
-              faseTabela: FASE_DO_SCAN_ESTADO[f.estado] || 'sem_leitura',
+            // ordena pela MESMA função da produção: comparar posição a posição com
+            // duas ordens diferentes seria o teste falhando por layout, não por
+            // discordância de fase — que é o que ele existe pra pegar.
+            const ord = ordenaFramesDaFaixa((a.frames || []).map(f => f.frame));
+            const porF = new Map((a.frames || []).map(f => [f.frame, f]));
+            out[a.ticker] = ord.map(tf => ({
+              tf,
+              faseTabela: FASE_DO_SCAN_ESTADO[(porF.get(tf) || {}).estado] || 'sem_leitura',
             }));
           }
           const cards = {};
