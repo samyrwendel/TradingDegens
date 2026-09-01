@@ -394,7 +394,18 @@
                      chamava o duplo-clique de "reseta", que não diz o que se ganha.
                      Agora arrastar vale desde o começo, e o duplo-clique é o
                      "ajustar à tela" que traz velas E níveis do plano de volta. -->
-                <span class="chart-zoom-hint">roda = zoom · régua direita = zoom vertical · régua de baixo = zoom horizontal · arrasta = move o gráfico · 2 cliques = ajusta à tela (velas + níveis do plano)</span>
+                <!-- RECOLHÍVEL (DA-127): ela é AJUDA permanente ocupando área de
+                     DADO, e no print do Samyr tapava o ponto 1 do padrão — a
+                     estrutura que o gráfico existe pra mostrar. Aberta por padrão
+                     (ela ensina o gesto a quem chega); quem recolhe é que decidiu, e
+                     a decisão fica lembrada. Recolhida, sobra só o ícone: sumir de
+                     vez faria a ajuda deixar de existir pra quem esquecesse o gesto. -->
+                <div class="chart-hint-box" id="chartHintBox">
+                  <span class="chart-zoom-hint" id="chartZoomHint">roda = zoom · régua direita = zoom vertical · régua de baixo = zoom horizontal · arrasta = move o gráfico · 2 cliques = ajusta à tela (velas + níveis do plano)</span>
+                  <button type="button" class="chart-hint-btn" id="chartHintBtn"
+                          aria-controls="chartZoomHint" aria-expanded="true"
+                          title="Esconder a ajuda dos gestos"></button>
+                </div>
                 <canvas id="priceChart"></canvas>
               </div>
               <!-- O QUE A TELA ANUNCIA E NÃO ESTÁ ENQUADRADO. Fica ENTRE o canvas e a

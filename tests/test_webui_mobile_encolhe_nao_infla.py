@@ -36,7 +36,12 @@ _CSS = (pathlib.Path(__file__).resolve().parents[1]
 # análise: são auxiliares de uma interação que o telefone nem tem.
 _PODE_SUMIR = {
     ".col-resizer": "alça de redimensionar colunas — no telefone é coluna única",
-    ".chart-zoom-hint": "dica de roda/arrasto do mouse — o telefone usa toque",
+    # A dica virou uma CAIXA (texto + botão de recolher, DA-127) e some inteira no
+    # telefone: o controle sozinho, sem o texto que ele esconde, seria um botão que
+    # não faz nada visível. O seletor é composto porque a regra base vem DEPOIS no
+    # arquivo e define `display: flex` — com a mesma especificidade ela venceria.
+    ".chart-wrap .chart-hint-box": "dica de roda/arrasto do mouse (e o botão que a "
+                                   "recolhe) — o telefone usa toque",
 }
 
 # Propriedades que, se aparecerem no celular, têm de ser MENORES ou iguais à base.

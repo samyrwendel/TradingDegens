@@ -5709,6 +5709,49 @@ function avisoForaDaVista(canvas) {
   });
 }
 
+// ============ A DICA DOS GESTOS SE RECOLHE (DA-127) ==========================
+//
+// "dá pra recolher esse texto ou ocultar com o olhinho?" — com print da caixa por
+// cima do ponto 1 do padrão. É AJUDA permanente ocupando área de DADO: depois que
+// se aprendeu o gesto, ela só tapa a estrutura que o gráfico existe pra mostrar.
+//
+// ABERTA por padrão, e isso é escolha: ela ensina o gesto a quem chega, e quem
+// recolhe é que decidiu. A decisão fica LEMBRADA (localStorage, a mesma disciplina
+// da largura da lateral e da config de LLM) — recolher não pode virar uma tarefa
+// a refazer toda visita.
+//
+// RECOLHIDA sobra só o ícone, no mesmo lugar: sumir de vez faria a ajuda deixar de
+// existir pra quem esquecesse o gesto, e um afordância de volta escondido é o
+// mesmo que nenhum.
+const _HINT_KEY = "td_chart_hint";
+
+function dicaDosGestosLigada() {
+  try { return localStorage.getItem(_HINT_KEY) !== "off"; } catch (e) { return true; }
+}
+
+function aplicaDicaDosGestos() {
+  const box = $("chartHintBox");
+  const btn = $("chartHintBtn");
+  if (!box || !btn) return;
+  const on = dicaDosGestosLigada();
+  box.classList.toggle("is-off", !on);
+  btn.setAttribute("aria-expanded", String(on));
+  btn.title = on ? "Esconder a ajuda dos gestos" : "Mostrar a ajuda dos gestos";
+  btn.setAttribute("aria-label", btn.title);
+}
+
+function bindDicaDosGestos() {
+  const btn = $("chartHintBtn");
+  if (!btn || btn._bound) return;
+  btn._bound = true;
+  btn.addEventListener("click", () => {
+    try { localStorage.setItem(_HINT_KEY, dicaDosGestosLigada() ? "off" : "on"); }
+    catch (e) { /* quota: a preferência não persiste, a tela obedece mesmo assim */ }
+    aplicaDicaDosGestos();
+  });
+  aplicaDicaDosGestos();
+}
+
 function bindChartZoom(canvas) {
   if (!canvas || canvas._zoomBound) return;
   canvas._zoomBound = true;
@@ -8736,6 +8779,7 @@ function init() {
   bindScan();
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
+  bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-127)
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();
   // Ao abrir: se havia um run vivo sendo acompanhado, reengata o progresso; senão,

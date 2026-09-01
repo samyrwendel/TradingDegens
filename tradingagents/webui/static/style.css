@@ -1376,8 +1376,12 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   /* tabela larga rola dentro do próprio bloco, nunca empurra o body pro lado */
   .md table { display: block; overflow-x: auto; max-width: 100%; }
 
-  /* dica de mouse (roda/arrasta) não faz sentido no telefone e cobre o gráfico */
-  .chart-zoom-hint { display: none; }
+  /* dica de mouse (roda/arrasta) não faz sentido no telefone e cobre o gráfico —
+     e o botão de recolher some JUNTO (DA-127): um controle sozinho, sem o texto que
+     ele esconde, seria um botão que não faz nada visível. */
+  /* especificidade acima da regra base (que vem DEPOIS no arquivo e
+     define `display: flex`): com a mesma, a base venceria por ordem. */
+  .chart-wrap .chart-hint-box { display: none; }
 }
 
 /* topo: em telas bem estreitas o pill "rede Tailscale" desce em vez de espremer */
@@ -1388,7 +1392,9 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
 /* no touch, a dica de mouse (roda/arrasta) não faz sentido e ainda cobre o gráfico */
 @media (hover: none) and (pointer: coarse) {
-  .chart-zoom-hint { display: none; }
+  /* especificidade acima da regra base (que vem DEPOIS no arquivo e
+     define `display: flex`): com a mesma, a base venceria por ordem. */
+  .chart-wrap .chart-hint-box { display: none; }
 }
 
 /* ===========================================================================
@@ -2001,8 +2007,40 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
 /* dica de zoom no canto do gráfico */
 .chart-wrap { position: relative; }
-.chart-zoom-hint {
+/* A CAIXA da dica (DA-127): agrupa a frase e o botão que a recolhe. Ela é que se
+   posiciona; a frase de dentro perdeu o `position: absolute` pra poder encolher
+   sem deixar o botão órfão. */
+.chart-hint-box {
   position: absolute; right: 66px; top: 10px;
+  display: flex; align-items: flex-start; gap: 6px;
+  max-width: min(46%, 430px);
+}
+/* O BOTÃO é ícone VETORIAL de traço fino (DA-078 regra 7), desenhado em SVG —
+   nunca emoji (DA-076), então nada de "olhinho" em pictograma. Quadrado, chapado,
+   sem raio: mesma geometria do resto (DA-078 regras 1 e 2). */
+.chart-hint-btn {
+  flex: 0 0 auto; width: 16px; height: 16px; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 0;
+  background: rgba(20,24,34,.7) center / 11px 11px no-repeat;
+  /* olho ABERTO cortado por uma barra = "esconder" (estado atual: visível) */
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' \
+stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
+<path d='M1.5 8s2.6-4 6.5-4 6.5 4 6.5 4-2.6 4-6.5 4S1.5 8 1.5 8z'/>\
+<circle cx='8' cy='8' r='1.8'/><path d='M2.5 13.5 13.5 2.5'/></svg>");
+}
+.chart-hint-btn:hover { border-color: var(--accent); }
+/* RECOLHIDA: sobra só o ícone (olho aberto, sem a barra = "mostrar"), no mesmo
+   lugar — o afordância mínimo de volta que a DA-127 declarou. */
+.chart-hint-box.is-off .chart-zoom-hint { display: none; }
+.chart-hint-box.is-off .chart-hint-btn {
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' \
+stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
+<path d='M1.5 8s2.6-4 6.5-4 6.5 4 6.5 4-2.6 4-6.5 4S1.5 8 1.5 8z'/>\
+<circle cx='8' cy='8' r='1.8'/></svg>");
+}
+.chart-zoom-hint {
   font-size: var(--fs-10); color: var(--muted, #8b97ad);
   background: rgba(20,24,34,.7); padding: 2px 7px; border-radius: 2px;
   pointer-events: none; letter-spacing: .02em;
@@ -2011,7 +2049,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
      carimbo cresceu ("Diário · exploratório") os dois se sobrepuseram — texto por
      cima de texto, os dois ilegíveis. Quebrar em duas linhas custa nada: ali em cima
      é área vazia do gráfico. Afordância cede espaço pra dado, nunca o contrário. */
-  max-width: min(46%, 430px); text-align: right;
+  max-width: 100%; text-align: right;
 }
 #priceChart { touch-action: none; cursor: default; }
 
