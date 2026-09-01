@@ -50,7 +50,11 @@ def test_history_has_no_dividers_and_scrolls(base):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
-        page.goto(base, wait_until="networkidle")
+        # `networkidle` NÃO serve nesta tela: os pollers de lista (5s) e de preço (40s)
+        # batem sozinhos, e sob a carga da suíte cheia a rede não fica 500ms ociosa —
+        # o `goto` estoura em 30s e o teste reprova por espera, não por layout. Espera-se
+        # o que ele mede. (Mesma lição da DA-139 sobre deadlines de parede.)
+        page.goto(base, wait_until="domcontentloaded")
         page.wait_for_selector(".history li")
         # (1) sem régua de 1px entre os itens
         borders = page.evaluate(
@@ -69,7 +73,8 @@ def test_vertical_resizer_drags_and_persists(base):
         browser = p.chromium.launch()
         ctx = browser.new_context(viewport={"width": 1500, "height": 950})
         page = ctx.new_page()
-        page.goto(base, wait_until="networkidle")
+        page.goto(base, wait_until="domcontentloaded")
+        page.wait_for_selector("#colResizer", state="attached")
         rz = page.query_selector("#colResizer")
         assert rz is not None
         assert page.eval_on_selector("#colResizer", "el=>getComputedStyle(el).cursor") == "col-resize"
@@ -82,7 +87,8 @@ def test_vertical_resizer_drags_and_persists(base):
         assert w.endswith("px") and 360 <= int(w[:-2]) <= 440, w
         assert page.evaluate("()=>localStorage.getItem('td_sidebar_w')") == w[:-2]
         # persiste no reload
-        page.reload(wait_until="networkidle")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector("#colResizer", state="attached")
         w2 = page.evaluate("()=>getComputedStyle(document.querySelector('main.layout')).getPropertyValue('--sidebar-w')")
         assert int(w2.replace("px", "")) == int(w[:-2]), (w, w2)
         # sem overflow horizontal
@@ -96,7 +102,7 @@ def test_chart_card_setup_active_has_no_green_border(base):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
-        page.goto(base, wait_until="networkidle")
+        page.goto(base, wait_until="domcontentloaded")
         style = page.evaluate("""()=>{
           const d=document.createElement('div'); d.className='chart-card setup-active';
           document.body.appendChild(d); const cs=getComputedStyle(d);
@@ -113,7 +119,8 @@ def test_resizer_hidden_on_mobile(base):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 390, "height": 844})
-        page.goto(base, wait_until="networkidle")
+        page.goto(base, wait_until="domcontentloaded")
+        page.wait_for_selector("#colResizer", state="attached")
         assert page.eval_on_selector("#colResizer", "el=>getComputedStyle(el).display") == "none"
         ov = page.evaluate("()=>({sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth})")
         assert ov["sw"] <= ov["cw"], ov

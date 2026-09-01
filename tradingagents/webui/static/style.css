@@ -48,8 +48,15 @@
   --dim: #6b7280;
   /* OPACIDADE DE FANTASMA — uma definição, os dois tipos de história (invalidado e
      encerrado) a usam. "Já aconteceu" é o que a opacidade diz; a matiz continua
-     dizendo direção, e a palavra continua dizendo o resultado (DA-140). */
-  --alfa-fantasma: .82;
+     dizendo direção, e a palavra continua dizendo o resultado (DA-140).
+
+     .84 É MEDIDO, não escolhido: o título do card fantasma é `--muted` (#8b97ad)
+     sobre o painel (#1a1a1a) e tem 14px/700 — texto pequeno pela WCAG, piso 4,5:1.
+     A .82 que este valor herdou do card invalidado rendia **4,39:1**, logo abaixo
+     do piso; a .84 rende **4,55:1**. A diferença é invisível como esmaecimento e
+     decisiva como legibilidade — e agora ela vale pra TODA história, não só pra
+     invalidada, então o meio décimo importa em muito mais card. */
+  --alfa-fantasma: .84;
   /* Raio ÚNICO de botões e cards (task 009): menos arredondado e uniforme. Um
      token só — sem pílula em botão nem canto gordo em card. Dots redondos, barras
      de progresso e micro-pílulas de STATUS ficam de fora. */

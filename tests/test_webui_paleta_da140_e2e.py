@@ -392,3 +392,51 @@ def test_a_BORDA_da_linha_do_scan_tambem_larga_o_azul_de_estado(base, view):
                for d in ("compra", "venda")}
         assert cor["compra"] and cor["venda"] and cor["compra"] != cor["venda"], cor
         browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_card_fantasma_continua_LEGIVEL(base):
+    """ESMAECIDO NÃO É APAGADO — e agora vale pra toda história, não só pra
+    invalidada, então o piso de contraste passou a valer em muito mais card.
+
+    O título do card fantasma é `--muted` sobre o painel, 14px/700: texto pequeno
+    pela WCAG, piso 4,5:1. DENTE: baixar a opacidade de fantasma "só um pouco" para
+    o esmaecido ficar mais evidente é a tentação óbvia, e é ela que este teste pega —
+    o custo não aparece no print, aparece em quem não enxerga bem.
+    """
+    def _lum(c):
+        r, g, b = (int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
+        def f(x):
+            return x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+    from tests.test_webui_historia_ganho_e_perda_e2e import _abre as _abre_hist, _pat
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre_hist(page, base, _pat("concluido_alvo", "compra"))
+        m = page.evaluate("""() => {
+          const c = document.querySelector('#setupCards .sc-fantasma');
+          const t = c && c.querySelector('.sc-title');
+          if (!t) return null;
+          const cs = getComputedStyle(t);
+          return {cor: cs.color, tam: parseFloat(cs.fontSize), peso: cs.fontWeight,
+                  alfa: parseFloat(getComputedStyle(c).opacity),
+                  fundo: getComputedStyle(c).backgroundColor};
+        }""")
+        assert m, "nenhum card fantasma na tela"
+        # a cor COMPOSTA: o navegador devolve a cor declarada, e a opacidade do card
+        # é aplicada na composição — a conta tem de refazer a mistura contra o fundo.
+        cor = [int(x) for x in re.findall(r"\d+", m["cor"])[:3]]
+        fundo = [int(x) for x in re.findall(r"\d+", m["fundo"])[:3]]
+        a = m["alfa"]
+        mist = "#" + "".join(
+            f"{round(cor[i] * a + fundo[i] * (1 - a)):02x}" for i in range(3))
+        fundo_hex = "#" + "".join(f"{x:02x}" for x in fundo)
+        lt, lf = _lum(mist), _lum(fundo_hex)
+        razao = (max(lt, lf) + 0.05) / (min(lt, lf) + 0.05)
+        assert razao >= 4.5, (
+            f"título do card fantasma a {razao:.2f}:1 — abaixo do piso de 4,5:1 "
+            f"para texto pequeno", m, mist)
+        browser.close()
