@@ -5918,6 +5918,115 @@ function bindDicaDosGestos() {
   aplicaDicaDosGestos();
 }
 
+// ============ MAXIMIZAR O GRÁFICO (DA-134) ==================================
+//
+// "quero uma opção de maximizar o gráfico pra eu ver melhor os detalhes." O canvas
+// tem 380px fixos, e essa é a causa COMUM de três queixas do mesmo dia: o alvo
+// caindo fora do enquadramento, "12 das 15 marcas de recuo fora", e a dica de zoom
+// comendo proporção grande do desenho.
+//
+// SOBREPOSIÇÃO EM CSS, NÃO Fullscreen API — e o motivo é onde o ganho é maior: no
+// iPhone o Safari não abre elemento não-vídeo em tela cheia, então a API seria o
+// recurso falhando CALADO justamente no aparelho de 390px. A sobreposição dá a
+// mesma área menos a barra do navegador, funciona igual em todo lugar, e mantém os
+// controles do card (frame, camadas, legenda) — maximizar não pode custar o que faz
+// o gráfico valer.
+//
+// O ESTADO SOBREVIVE porque o canvas nunca sai do DOM: `_view`/`_vview` continuam
+// onde estavam, e o redesenho é o mesmo do resize (`drawPriceChart` direto), que já
+// é a disciplina da casa pra ficar nítido na dimensão nova em vez de esticado.
+function chartMaximizado() {
+  const card = document.getElementById("chartCard");
+  return !!(card && card.classList.contains("is-max"));
+}
+
+// A ALTURA DO CANVAS É MEDIDA, não calculada por fórmula fixa: o card leva avisos
+// que aparecem e somem (degradação, camadas, revalidação), e qualquer constante aqui
+// erraria toda vez que um deles mudasse de estado.
+function ajustaAlturaMaximizada() {
+  const card = document.getElementById("chartCard");
+  const cv = document.getElementById("priceChart");
+  if (!card || !cv || !card.classList.contains("is-max")) return;
+  const wrap = cv.closest(".chart-wrap");
+  const estilo = getComputedStyle(card);
+  let usado = parseFloat(estilo.paddingTop) + parseFloat(estilo.paddingBottom);
+  // SÓ O QUE ESTÁ ACIMA DO GRÁFICO desconta. O que está abaixo alcança-se rolando o
+  // card; descontá-lo dava 475px de 844 no aparelho onde o ganho devia ser maior.
+  // O que precisa caber sem rolar é o que se OPERA: frame, camadas, avisos.
+  //
+  // "ACIMA" É MEDIDO NA TELA, não na ordem do HTML: no telefone a legenda é irmã
+  // ANTERIOR ao gráfico no documento e aparece DEPOIS dele (a task 020 a mandou pra
+  // baixo com `order`, porque onze itens comiam quatro linhas antes de o gráfico
+  // aparecer). Percorrer o DOM descontava dela como se estivesse em cima.
+  const topoDoGrafico = wrap ? wrap.getBoundingClientRect().top : 0;
+  for (const filho of card.children) {
+    if (filho === wrap) continue;
+    if (!filho.getClientRects().length) continue;   // escondido não ocupa
+    const r = filho.getBoundingClientRect();
+    if (r.top >= topoDoGrafico) continue;           // está ABAIXO: rola-se até ele
+    usado += r.height + 10;
+  }
+  // o que sobra dentro do wrap além do canvas (a nota do gráfico, por exemplo)
+  if (wrap) {
+    for (const filho of wrap.children) {
+      if (filho === cv || !filho.getClientRects().length) continue;
+      if (getComputedStyle(filho).position === "absolute") continue;
+      usado += filho.getBoundingClientRect().height + 6;
+    }
+  }
+  card.style.setProperty("--chart-max-h",
+                         `${Math.max(240, Math.round(window.innerHeight - usado - 16))}px`);
+}
+
+function alternaMaximizar(ligar) {
+  const card = document.getElementById("chartCard");
+  const btn = document.getElementById("chartMaxBtn");
+  const cv = document.getElementById("priceChart");
+  if (!card) return;
+  const alvo = ligar === undefined ? !card.classList.contains("is-max") : !!ligar;
+  card.classList.toggle("is-max", alvo);
+  // O SCROLL DA PÁGINA TRAVA no modo maximizado: sem isto, rolar sobre a borda do
+  // gráfico move a página ATRÁS da sobreposição, e ao restaurar o usuário está em
+  // outro ponto da tela sem ter pedido.
+  document.body.classList.toggle("chart-max-aberto", alvo);
+  if (btn) {
+    btn.setAttribute("aria-pressed", alvo ? "true" : "false");
+    btn.title = alvo ? "Restaurar o tamanho do gráfico (Esc)" : "Maximizar o gráfico";
+  }
+  if (!alvo) card.style.removeProperty("--chart-max-h");
+  ajustaAlturaMaximizada();
+  // REDESENHA no tamanho novo, preservando zoom e deslocamento — é o mesmo caminho
+  // do resize. Sem isto o canvas ficaria com a resolução antiga esticada, que é
+  // borrão, não gráfico maior.
+  if (cv && cv._chart) drawPriceChart(cv, cv._chart, cv._actionable);
+  if (alvo && cv) card.scrollTop = 0;
+}
+
+function bindMaximizarGrafico() {
+  const btn = document.getElementById("chartMaxBtn");
+  if (btn && !btn._bound) {
+    btn._bound = true;
+    btn.addEventListener("click", () => alternaMaximizar());
+  }
+  if (!document._maxEsc) {
+    document._maxEsc = true;
+    // ESC SAI. É o gesto que quem abriu qualquer sobreposição já tenta primeiro, e
+    // sem ele o único caminho de volta seria achar o botão de novo.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && chartMaximizado()) {
+        e.preventDefault();
+        alternaMaximizar(false);
+      }
+    });
+    // Girar o telefone muda a altura útil inteira: sem recalcular, o canvas fica
+    // com a altura da orientação anterior.
+    window.addEventListener("resize", () => {
+      if (chartMaximizado()) ajustaAlturaMaximizada();
+    });
+  }
+}
+
+
 function bindChartZoom(canvas) {
   if (!canvas || canvas._zoomBound) return;
   canvas._zoomBound = true;
@@ -9061,6 +9170,7 @@ function init() {
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-128)
+  bindMaximizarGrafico();  // o gráfico maximiza, e o Esc volta (DA-134)
   // A FAIXA DE FRAMES do card (DA-133) lê o ÚLTIMO SCAN SALVO, e até aqui ele só
   // era buscado ao abrir o painel de varredura — com a lista de observação na tela
   // desde o boot, a faixa não apareceria nunca. É UMA leitura do disco do servidor

@@ -3087,3 +3087,59 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
   .fx-m { min-width: 20px; height: 12px; }
   .fx-m > i { font-size: .55rem; }
 }
+
+/* ============ MAXIMIZAR O GRÁFICO (DA-134) =================================
+   "quero uma opção de maximizar o gráfico pra eu ver melhor os detalhes."
+
+   O botão: quadrado, chapado, ícone VETORIAL de traço fino (DA-078 regras 1, 2 e
+   7), SVG embutido — nunca emoji (DA-076). Duas setas em diagonal saindo (maximizar)
+   viram duas entrando (restaurar): a mesma gramática do olho da DA-128, o ícone
+   mostrando o que o clique FAZ. */
+.chart-max-btn {
+  width: 22px; height: 22px; flex: 0 0 auto; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 0; background-color: transparent;
+  background-repeat: no-repeat; background-position: center;
+  background-size: 13px 13px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4'/%3E%3C/svg%3E");
+}
+.chart-max-btn:hover { border-color: var(--muted); }
+.chart-card.is-max .chart-max-btn {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 6h4V2M14 6h-4V2M2 10h4v4M14 10h-4v4'/%3E%3C/svg%3E");
+}
+
+/* MAXIMIZADO: sobreposição que cobre a viewport. `fixed` + `inset: 0` dá a mesma
+   área que a Fullscreen API daria menos a barra do navegador, e funciona igual em
+   todo lugar — inclusive no iPhone, onde a API não abriria. O card guarda o SEU
+   scroll: o seletor de frame, as camadas e a legenda continuam ali, porque
+   maximizar não pode custar os controles que fazem o gráfico valer. */
+.chart-card.is-max {
+  position: fixed; inset: 0; z-index: 60; margin: 0; border-radius: 0;
+  background: var(--panel); overflow: auto;
+  padding: 12px 14px; box-shadow: none;
+}
+/* O CANVAS OCUPA O QUE SOBRA. `--chart-max-h` é escrito pelo JS a partir da altura
+   real dos controles: uma conta fixa aqui erraria toda vez que uma linha de aviso
+   aparecesse ou sumisse. O piso de 240px protege o caso extremo (telefone deitado
+   com três avisos abertos), onde encolher mais seria pior que rolar. */
+.chart-card.is-max #priceChart {
+  /* `max-height: none` NÃO é redundante: a faixa do telefone impõe um TETO de 340px
+     (`max-height`), e teto não se vence com `height` por mais específica que a regra
+     seja. Sem esta linha, maximizar no aparelho onde o ganho é maior devolvia os
+     mesmos 340px — foi o teste do telefone que mostrou. */
+  height: var(--chart-max-h, 70vh); min-height: 240px; max-height: none;
+}
+/* Com o gráfico maximizado a PÁGINA não rola: rolar sobre a borda moveria o que
+   está atrás da sobreposição, e ao restaurar o usuário estaria em outro ponto da
+   tela sem ter pedido. O card tem o scroll dele. */
+body.chart-max-aberto { overflow: hidden; }
+/* MAXIMIZADO, O TÍTULO SAI DA VISTA — e só da vista. "Gráfico de candles
+   (candlestick) com faixas do plano" quebra em três linhas num telefone de 390px e
+   come 75px do que a pessoa pediu pra ver; e numa tela inteira ocupada pelo gráfico
+   ele é redundante com o próprio objeto. Continua no documento (`clip`, não
+   `display: none`), então leitor de tela e a estrutura de cabeçalhos não perdem
+   nada — e o botão de restaurar fica na fileira, visível. */
+.chart-card.is-max .chart-head .section-title {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+.chart-card.is-max .chart-head { justify-content: flex-end; margin-bottom: 6px; }

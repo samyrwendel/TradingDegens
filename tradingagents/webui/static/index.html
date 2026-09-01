@@ -355,6 +355,14 @@
             <div class="chart-card hidden" id="chartCard">
               <div class="chart-head">
                 <h2 class="section-title">Gráfico de candles <span class="orig">(candlestick)</span> com faixas do plano</h2>
+                <!-- MAXIMIZAR (DA-134): o canvas tem 380px fixos, e é a causa comum de
+                     três queixas — alvo fora do enquadramento, "12 das 15 marcas de
+                     recuo fora", e a dica de zoom comendo proporção grande do desenho.
+                     Sobreposição em CSS, não Fullscreen API: no iPhone o Safari não
+                     abre elemento não-vídeo em tela cheia, e o ganho é MAIOR no
+                     telefone — seria o recurso falhando calado justo onde mais serve. -->
+                <button type="button" class="chart-max-btn" id="chartMaxBtn"
+                        aria-pressed="false" title="Maximizar o gráfico"></button>
               </div>
               <!-- A legenda é IRMÃ do gráfico (não filha do cabeçalho) desde a task
                    020: no desktop ela continua na mesma fileira do título (grade do
