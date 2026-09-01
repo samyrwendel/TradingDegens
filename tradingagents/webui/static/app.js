@@ -5709,7 +5709,7 @@ function avisoForaDaVista(canvas) {
   });
 }
 
-// ============ A DICA DOS GESTOS SE RECOLHE (DA-127) ==========================
+// ============ A DICA DOS GESTOS SE RECOLHE (DA-128) ==========================
 //
 // "dá pra recolher esse texto ou ocultar com o olhinho?" — com print da caixa por
 // cima do ponto 1 do padrão. É AJUDA permanente ocupando área de DADO: depois que
@@ -8779,7 +8779,7 @@ function init() {
   bindScan();
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
-  bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-127)
+  bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-128)
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();
   // Ao abrir: se havia um run vivo sendo acompanhado, reengata o progresso; senão,

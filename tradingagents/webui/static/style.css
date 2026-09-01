@@ -1377,7 +1377,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .md table { display: block; overflow-x: auto; max-width: 100%; }
 
   /* dica de mouse (roda/arrasta) não faz sentido no telefone e cobre o gráfico —
-     e o botão de recolher some JUNTO (DA-127): um controle sozinho, sem o texto que
+     e o botão de recolher some JUNTO (DA-128): um controle sozinho, sem o texto que
      ele esconde, seria um botão que não faz nada visível. */
   /* especificidade acima da regra base (que vem DEPOIS no arquivo e
      define `display: flex`): com a mesma, a base venceria por ordem. */
@@ -2007,7 +2007,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 
 /* dica de zoom no canto do gráfico */
 .chart-wrap { position: relative; }
-/* A CAIXA da dica (DA-127): agrupa a frase e o botão que a recolhe. Ela é que se
+/* A CAIXA da dica (DA-128): agrupa a frase e o botão que a recolhe. Ela é que se
    posiciona; a frase de dentro perdeu o `position: absolute` pra poder encolher
    sem deixar o botão órfão. */
 .chart-hint-box {
@@ -2031,7 +2031,7 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 }
 .chart-hint-btn:hover { border-color: var(--accent); }
 /* RECOLHIDA: sobra só o ícone (olho aberto, sem a barra = "mostrar"), no mesmo
-   lugar — o afordância mínimo de volta que a DA-127 declarou. */
+   lugar — o afordância mínimo de volta que a DA-128 declarou. */
 .chart-hint-box.is-off .chart-zoom-hint { display: none; }
 .chart-hint-box.is-off .chart-hint-btn {
   background-image: url("data:image/svg+xml;utf8,\
