@@ -158,7 +158,7 @@ def test_a_barra_e_a_lateral_nao_tem_vao_com_conteudo_cortado(base, largura):
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": largura, "height": 1000})
         _rota(page)
-        page.goto(base, wait_until="networkidle")
+        page.goto(base, wait_until="domcontentloaded")
         page.wait_for_selector(".history li", state="attached")
         page.wait_for_timeout(300)
         ruins = page.evaluate(_VARRE, _VAO_MIN)
@@ -176,7 +176,12 @@ def test_o_cabecalho_do_resultado_nao_tem_vao_com_conteudo_cortado(base, largura
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": largura, "height": 1200})
         _rota(page)
-        page.goto(base, wait_until="networkidle")
+        # `networkidle` NÃO serve nesta tela: os pollers de lista (5s) e de preço
+        # (40s) batem sozinhos e a rede nunca fica 500ms ociosa — sob a carga da
+        # suíte cheia isso vira um timeout de 30s no `goto`, que se lê como "o
+        # cabeçalho tem vão" e não é. Espera-se o que de fato importa: o painel
+        # pintado. (Mesma lição do `test_webui_faixa_de_frames_e2e`.)
+        page.goto(base, wait_until="domcontentloaded")
         page.evaluate("() => watchRun('R1')")
         page.wait_for_selector("#resultPanel:not(.hidden)", state="attached")
         page.wait_for_timeout(400)
@@ -195,7 +200,7 @@ def test_a_meta_e_a_cotacao_ficam_na_MESMA_fileira_sem_buraco(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1200})
         _rota(page)
-        page.goto(base, wait_until="networkidle")
+        page.goto(base, wait_until="domcontentloaded")
         page.evaluate("() => watchRun('R1')")
         page.wait_for_selector("#headLevels:not(.hidden)", state="attached")
         page.wait_for_timeout(300)

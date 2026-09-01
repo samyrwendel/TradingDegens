@@ -388,3 +388,85 @@ def test_o_LINK_USD_REAL_reaberto_diz_o_desfecho_de_CADA_metodo(tmp_path):
     finally:
         with contextlib.suppress(StopIteration):
             next(it)   # fecha o servidor
+
+
+# ══════════ REGRA 4: OPORTUNIDADE NOVA APAGA O FANTASMA DAQUELE FRAME ═════════
+#
+# *"se aparecer uma nova oportunidade nesse time frame o fantasma some"* — e sem
+# setup novo ele PERMANECE como registro. É comportamento, não estilo, e o risco que
+# o teste guarda é o acúmulo: o canvas guarda o desenho anterior (`cv._chart`), e uma
+# leitura nova que não substituísse a antiga deixaria os dois 1-2-3 na mesma vela —
+# a história competindo por espaço com a oportunidade, que é o defeito que a DA-140
+# existe pra fechar.
+
+
+def _novo_vivo(direcao="compra"):
+    """Um 1-2-3 NOVO no mesmo frame: outros pontos, outro gatilho, vivo."""
+    p = _pat("vivo", direcao)
+    p["p1"] = {**p["p1"], "price": 400.0}
+    p["p2"] = {**p["p2"], "price": 380.0}
+    p["p3"] = {**p["p3"], "price": 392.0}
+    p["trigger"] = 401.0
+    return p
+
+
+_PONTOS_NA_TELA = """() => {
+  const cv = document.getElementById('priceChart');
+  const pts = JSON.parse(cv.dataset.pat123 || '[]');
+  return {
+    n: pts.length,
+    precos: pts.map((x) => x.preco),
+    // "não é vivo" tem DOIS carimbos na telemetria, porque são dois tipos de
+    // história: o encerrado carrega `historia` (a fase) e o invalidado carrega
+    // `fantasma`. Quem pergunta "isto já aconteceu?" tem de olhar os dois.
+    historia: pts.map((x) => !!(x.historia || x.fantasma)),
+    fase: patFase((cv._actionable || {}).pattern),
+  };
+}"""
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_setup_NOVO_no_mesmo_frame_APAGA_o_fantasma(base):
+    """DENTE: o fantasma do trade encerrado tem de CEDER O LUGAR — não somar. Três
+    pontos na tela, não seis; e os preços são os do padrão novo."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        # a ÂNCORA: com o encerrado na tela, o fantasma ESTÁ desenhado
+        _abre(page, base, _pat("concluido_alvo", "compra"))
+        antes = page.evaluate(_PONTOS_NA_TELA)
+        assert antes["fase"] == "ganho" and antes["n"] == 3, antes
+        assert all(antes["historia"]), ("o encerrado é história no desenho", antes)
+
+        # e agora o detector achou um 1-2-3 NOVO no MESMO frame
+        _abre(page, base, _novo_vivo("compra"))
+        depois = page.evaluate(_PONTOS_NA_TELA)
+        assert depois["fase"] == "vivo", depois
+        assert depois["n"] == 3, ("seis pontos = o fantasma somou em vez de ceder",
+                                  depois)
+        assert not any(depois["historia"]), depois
+        assert set(antes["precos"]) & set(depois["precos"]) == set(), (
+            "os pontos do padrão ANTIGO continuam na tela", antes, depois)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+@pytest.mark.parametrize("ciclo", ["concluido_alvo", "concluido_stop",
+                                   "invalidado_sem_acionar"])
+def test_SEM_setup_novo_o_fantasma_PERMANECE_como_registro(base, ciclo):
+    """O outro lado da régua, e é o que impede a "solução" preguiçosa de apagar toda
+    história: sem oportunidade nova naquele frame, o registro FICA — é ele que explica
+    onde o preço está. Some o convite a operar (o gatilho), não a memória."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, _pat(ciclo, "compra"))
+        page.wait_for_timeout(200)
+        m = page.evaluate(_PONTOS_NA_TELA)
+        assert m["n"] == 3 and all(m["historia"]), (ciclo, m)
+        # e continua depois de um redesenho (zoom, resize, repinte da lista)
+        page.evaluate("""() => { const cv = document.getElementById('priceChart');
+          drawPriceChart(cv, cv._chart, cv._actionable); }""")
+        de_novo = page.evaluate(_PONTOS_NA_TELA)
+        assert de_novo["n"] == 3 and all(de_novo["historia"]), (ciclo, de_novo)
+        browser.close()
