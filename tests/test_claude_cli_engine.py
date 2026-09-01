@@ -243,7 +243,7 @@ def _make_runner(tmp_path):
     )
 
 
-def _wait(runner, run_id, timeout=4.0):
+def _wait(runner, run_id, timeout=20.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         snap = runner.status(run_id)

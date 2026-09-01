@@ -116,7 +116,7 @@ def _dono(base):
     return op
 
 
-def _wait(pred, timeout=5.0, step=0.03):
+def _wait(pred, timeout=20.0, step=0.03):
     fim = time.time() + timeout
     while time.time() < fim:
         if pred():

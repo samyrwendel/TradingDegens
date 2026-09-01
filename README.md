@@ -256,6 +256,17 @@ Install the package and its dependencies:
 pip install .
 ```
 
+### Testing
+
+Install dev dependencies, then run the suite:
+```bash
+pip install ".[dev]"
+pytest tests/                        # full suite, parallel by default (~5-6 min on 4 CPUs)
+pytest tests/ -m "not integration"   # fast lane — skips the ~500 browser e2e tests (~30-45s)
+```
+`-n auto --dist=loadscope` (`pyproject.toml`) is the default: worker count follows the machine's
+CPU count, not a fixed number. See `SUITE-DIAGNOSTICO.md` for the measured before/after.
+
 ### Docker
 
 Alternatively, run with Docker:

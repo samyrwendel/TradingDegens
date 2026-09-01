@@ -3,6 +3,20 @@
 **Data:** 2026-09-01 · **Task:** 20260901-005 · **Nenhum teste removido nesta rodada.**
 Máquina: 4 CPUs. Tudo abaixo foi MEDIDO nesta máquina, não estimado.
 
+> **APLICADO em 2026-09-01 (task 20260901-012, DA-139):** `-n auto --dist=loadscope` agora é o
+> padrão em `pyproject.toml` — `pytest tests/` já roda em paralelo sem flag nenhuma. Fechar três
+> bugs de isolamento de teste (timeouts de parede curtos demais para 4 workers competindo por CPU +
+> um `importlib.reload` sem teardown) foi necessário para a suíte ficar verde sob o paralelo — ver
+> DA-139 em `~/DECISIONS.md` para o antes/depois medido de novo e o risco residual documentado
+> (um `_config` global em `dataflows/config.py`, pré-existente, não corrigido aqui).
+>
+> **Onde ler o comando, hoje:**
+> ```bash
+> pytest tests/                        # suíte cheia, paralela por padrão (~5-6 min)
+> pytest tests/ -m "not integration"   # faixa rápida, ~80% da suíte (~30-45s)
+> pytest tests/arquivo_tocado.py       # durante a edição
+> ```
+
 ## O número que importa
 
 | conjunto | testes | serial | com `-n 4` |

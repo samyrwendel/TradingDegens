@@ -224,7 +224,7 @@ def test_stop_cancels_run_cleanly_and_frees_active(tmp_path):
         httpd.shutdown()
 
 
-def _wait_until(pred, timeout=5.0, step=0.03):
+def _wait_until(pred, timeout=20.0, step=0.03):
     deadline = time.time() + timeout
     while time.time() < deadline:
         if pred():

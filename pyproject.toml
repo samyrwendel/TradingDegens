@@ -38,6 +38,7 @@ dev = [
     "ruff>=0.15",
     "pytest>=8.0",
     "pytest-subtests>=0.13",
+    "pytest-xdist>=3.6",
 ]
 # Amazon Bedrock support (AWS SigV4 auth + boto3). Optional so the core install
 # stays lean: pip install "tradingagents[bedrock]".
@@ -56,7 +57,15 @@ cli = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# -n auto (pytest-xdist): full suite runs on all CPUs by default — 1108s -> 332s
+# measured on a 4-CPU box (SUITE-DIAGNOSTICO.md). Worker count comes from the
+# machine, not a fixed number. Override with `-n0` to force serial.
+# --dist=loadscope keeps every module's tests on one worker (in order), so
+# module-scoped fixtures (e.g. the importlib.reload()/restore pair in
+# test_ollama_base_url.py) can't be interleaved with another module's tests
+# on the same worker — plain `load` distribution can, and that shadowed
+# cli.main.get_ticker under parallel runs.
+addopts = "-ra --strict-markers -n auto --dist=loadscope"
 markers = [
     "unit: fast isolated unit tests",
     "integration: tests requiring external services",

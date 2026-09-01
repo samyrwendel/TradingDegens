@@ -35,7 +35,7 @@ def _dual_factory():
     return make
 
 
-def _wait(runner, run_id, timeout=8.0):
+def _wait(runner, run_id, timeout=20.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         s = runner.status(run_id)

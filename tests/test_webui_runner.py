@@ -90,7 +90,7 @@ def _factory(final_state=FINAL_STATE, signal="Buy", raise_exc=None):
     return make
 
 
-def _wait(runner, run_id, timeout=3.0):
+def _wait(runner, run_id, timeout=20.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         snap = runner.status(run_id)
@@ -714,7 +714,7 @@ def test_run_estrutural_so_vira_done_DEPOIS_de_persistir(tmp_path, monkeypatch):
     monkeypatch.setattr(r, "_persist", _lento)
     rid = r.start("BTC-USD", "2026-08-31", method="setup123", timeframe="1d",
                   reuse=False)
-    fim = time.time() + 10
+    fim = time.time() + 30
     while time.time() < fim and r.status(rid).get("status") not in ("done", "error"):
         time.sleep(0.02)
 

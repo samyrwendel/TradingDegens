@@ -71,7 +71,15 @@ def cli_utils(monkeypatch):
     import importlib
 
     import cli.utils as cli_utils_module
-    return importlib.reload(cli_utils_module)
+    yield importlib.reload(cli_utils_module)
+    # Undo: cli.main's `from cli.utils import get_ticker` was bound at cli.main's
+    # own import time, so the reload above left it pointing at a stale function
+    # object. Reload both back so identity checks elsewhere in the session (or
+    # in a parallel worker's later test) don't see a shadowed cli.main.get_ticker
+    # (same leak/fix pattern as test_ollama_base_url.py's module teardown).
+    importlib.reload(cli_utils_module)
+    import cli.main
+    importlib.reload(cli.main)
 
 
 def test_ensure_api_key_returns_existing(monkeypatch, cli_utils):

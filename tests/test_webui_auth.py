@@ -46,7 +46,7 @@ def _capturing_factory(captured):
     return make
 
 
-def _wait(runner, run_id, timeout=3.0):
+def _wait(runner, run_id, timeout=20.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         snap = runner.status(run_id)
