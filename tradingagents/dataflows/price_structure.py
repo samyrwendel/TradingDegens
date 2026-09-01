@@ -235,6 +235,9 @@ class Pattern123:
     # num trade que já terminou. Sem isto, o LINK-USD do dia 30/08 saía "INVALIDADO"
     # oito horas depois de ter ATINGIDO O ALVO.
     desfecho: dict[str, Any] | None = None
+    # O PRIMEIRO toque no gatilho (DA-129). Separa "vivo" de "nunca acionou" e, na
+    # morte, "alguém estava posicionado" de "ninguém entrou".
+    acionado_em: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -248,6 +251,13 @@ class Pattern123:
             "invalidado_em": self.invalidado_em,
             "desfecho": self.desfecho,
             "encerrado": self.desfecho is not None,
+            "acionado_em": self.acionado_em,
+            # O CICLO é a leitura ÚNICA do estado (DA-129), a mesma que o Storm
+            # publica: seis valores, um só lugar que os decide. Quem quiser saber
+            # "isto ainda é um trade?" lê este campo, não recombina três outros.
+            "ciclo": ciclo_de_vida(acionado_em=self.acionado_em,
+                                   invalidado_em=self.invalidado_em,
+                                   desfecho=self.desfecho),
         }
 
 
@@ -611,28 +621,83 @@ def _leitura_de_referencia(leituras: list[dict[str, Any]] | None, price: float |
     return min(vivas, key=lambda L: abs(float(price) / float(L["trigger"]) - 1.0))
 
 
+# ---------------------------------------------------------------------------
+# CICLO DE VIDA DO PADRÃO (DA-129) — a autoridade dos DOIS métodos
+#
+# forma -> aciona -> desfecha. O padrão morre no PRIMEIRO desfecho depois do
+# rompimento do gatilho, e a partir dali é HISTÓRIA: nada posterior o reabre, o
+# invalida ou o reclassifica.
+#
+# Os SEIS valores. O briefing pedia cinco; o sexto (`invalidado_operando`) existe
+# na série e não podia ser dobrado dentro do quinto: um padrão que ENTROU e depois
+# perdeu o ponto 3 sem tocar alvo nem stop não é a mesma coisa que um que morreu
+# sem nunca ter acionado — no primeiro alguém estava posicionado.
+CICLO = ("nunca_acionou", "vivo", "concluido_alvo", "concluido_stop",
+         "invalidado_sem_acionar", "invalidado_operando")
+
+# O que cada valor significa, em uma linha, pra quem for ler o campo cru.
+CICLO_SENTIDO = {
+    "nunca_acionou": "formado, o gatilho nunca rompeu — não houve entrada",
+    "vivo": "acionado, sem desfecho: é o único estado em que ainda há posição",
+    "concluido_alvo": "encerrado no alvo — história, com ganho registrado",
+    "concluido_stop": "encerrado no stop — história, com perda registrada",
+    "invalidado_sem_acionar": "perdeu o ponto 3 antes de acionar; ninguém entrou",
+    "invalidado_operando": "entrou e perdeu o ponto 3 sem tocar alvo nem stop",
+}
+
+# Um ciclo ENCERRADO (os dois `concluido_*`) é história: quem lê o padrão pra
+# decidir agora não tem trade nenhum na mão.
+CICLO_ENCERRADO = ("concluido_alvo", "concluido_stop")
+
+
+def ciclo_de_vida(*, acionado_em: str | None, invalidado_em: str | None,
+                  desfecho: dict[str, Any] | None) -> str:
+    """O ciclo de vida do padrão, a partir dos três fatos que a régua apura.
+
+    Função PURA e única: os dois métodos a chamam com o resultado da mesma régua,
+    então não existe caminho por onde um veredito de ciclo divirja do outro.
+
+    A ordem das perguntas é a regra: o DESFECHO decide primeiro, porque é ele que
+    termina o trade — a invalidação posterior vira fato registrado, nunca veredito.
+    """
+    if desfecho:
+        return "concluido_alvo" if desfecho.get("tipo") == "alvo" else "concluido_stop"
+    if invalidado_em:
+        # Morreu ANTES ou DEPOIS de acionar? A régua já garante que uma invalidação
+        # anterior ao gatilho impede o desfecho; aqui só se nomeia qual dos dois foi.
+        return ("invalidado_operando"
+                if acionado_em and acionado_em <= invalidado_em
+                else "invalidado_sem_acionar")
+    return "vivo" if acionado_em else "nunca_acionou"
+
+
 def _morte_e_desfecho(df: pd.DataFrame, desde: int, nivel_invalidacao: float | None,
                       compra: bool, fmt: str, trigger: float | None,
                       alvo: float | None, stop: float | None
-                      ) -> tuple[str | None, dict[str, Any] | None]:
-    """``(invalidado_em, desfecho)`` pela régua ÚNICA dos dois detectores.
+                      ) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """``(invalidado_em, desfecho, acionado_em)`` pela régua ÚNICA dos dois detectores.
 
     ``invalidado_em`` é o FATO estrutural (a primeira barra que fecha além do nível)
     e continua sendo devolvido mesmo quando houve desfecho — ele aconteceu. Quem
     decide o veredito é o par: com ``desfecho`` preenchido, o padrão está encerrado
     e não se invalida.
 
+    ``acionado_em`` é o PRIMEIRO toque no gatilho — o que separa "vivo" de "nunca
+    acionou" e, na morte, "alguém estava posicionado" de "ninguém entrou". Ele sai
+    daqui porque é aqui que se sabe: nenhum chamador tem de reencontrá-lo sozinho
+    (dois cálculos do mesmo fato é como os dois métodos começaram a divergir).
+
     Empate na mesma barra entre alvo e stop conta o STOP: sem tick não dá pra saber
     a ordem dentro dela, e é a leitura pessimista do ``_primeiro_toque`` do ledger."""
     inval_em = (_primeira_barra_alem(df, desde, float(nivel_invalidacao), compra, fmt)
                 if nivel_invalidacao else None)
     if trigger is None or df is None or df.empty:
-        return inval_em, None
+        return inval_em, None, None
     depois = df.iloc[desde + 1:]
     gat_em = _primeiro_toque_na_serie(depois, float(trigger), fmt)
     # Sem entrada, ou morte ANTES da entrada: não há trade a encerrar.
     if gat_em is None or (inval_em is not None and inval_em < gat_em):
-        return inval_em, None
+        return inval_em, None, gat_em
     apos_entrada = depois[depois["Date"].dt.strftime(fmt) > gat_em]
     cands = []
     for tipo, nivel in (("stop", stop), ("alvo", alvo)):   # stop primeiro = empate pessimista
@@ -642,18 +707,18 @@ def _morte_e_desfecho(df: pd.DataFrame, desde: int, nivel_invalidacao: float | N
         if quando:
             cands.append((quando, tipo, round(float(nivel), 2)))
     if not cands:
-        return inval_em, None
+        return inval_em, None, gat_em
     cands.sort(key=lambda c: (c[0], 0 if c[1] == "stop" else 1))
     quando, tipo, preco = cands[0]
     # Morte ANTES do desfecho: o padrão morreu com o trade aberto; o toque posterior
     # não encerra coisa nenhuma (quem entrou já tinha saído).
     if inval_em is not None and inval_em < quando:
-        return inval_em, None
+        return inval_em, None, gat_em
     empate = any(c[0] == quando and c[1] != tipo for c in cands)
     desfecho = {"tipo": tipo, "em": quando, "price": preco,
                 "entrada_em": gat_em, "entrada": round(float(trigger), 2),
                 "empate_na_barra": empate}
-    return inval_em, desfecho
+    return inval_em, desfecho, gat_em
 
 
 def _primeira_barra_alem(df: pd.DataFrame, desde: int, nivel: float,
@@ -1843,7 +1908,7 @@ def build_actionable_plan(
     if struct.pattern is not None:
         _p3 = df.index[df["Date"].dt.strftime(fmt) == struct.pattern.p3["date"]]
         if len(_p3):
-            _em, _desf = _morte_e_desfecho(
+            _em, _desf, _ac = _morte_e_desfecho(
                 df, int(_p3[-1]), (invalidation or {}).get("price"),
                 struct.pattern.direction == "compra", fmt,
                 struct.pattern.trigger, (target or {}).get("price"),
@@ -1851,6 +1916,7 @@ def build_actionable_plan(
             struct.pattern.invalidado_em = _em
             struct.pattern.invalidado = _em is not None
             struct.pattern.desfecho = _desf
+            struct.pattern.acionado_em = _ac
 
     return ActionablePlan(
         symbol=symbol, as_of=as_of, price=price, timeframe=tf_ref,
@@ -2481,15 +2547,22 @@ def build_storm_plan(
         nivel = float((inval or {}).get("price") or 0.0)
         idx3 = df.index[df["Date"].dt.strftime(fmt) == pat.p3["date"]]
         L = _leitura_de_referencia(leituras, price)
-        em, desfecho = (_morte_e_desfecho(
+        em, desfecho, acionado = (_morte_e_desfecho(
             df, int(idx3[-1]), nivel or None, compra, fmt,
             (L or {}).get("trigger"), ((L or {}).get("target") or {}).get("price"),
             (stop or {}).get("price"))
-            if len(idx3) else (None, None))
+            if len(idx3) else (None, None, None))
+        # O CICLO sai da mesma autoridade do 1-2-3 (DA-129). Sem ele o Storm
+        # calculava o desfecho e jogava fora em toda superfície: a linha do scan
+        # dizia "vetado", o card dizia "NÃO OPERA" e o gráfico pintava de vivo um
+        # trade que já tinha terminado — o filtro do Éden respondendo sobre HISTÓRIA.
         out["pattern"] = {**out["pattern"],
                           "invalidado": em is not None and desfecho is None,
                           "invalidado_em": em,
-                          "desfecho": desfecho, "encerrado": desfecho is not None}
+                          "desfecho": desfecho, "encerrado": desfecho is not None,
+                          "acionado_em": acionado,
+                          "ciclo": ciclo_de_vida(acionado_em=acionado,
+                                                 invalidado_em=em, desfecho=desfecho)}
     # A faixa do ponto 3 do STORM é de outra natureza (o PRÓXIMO candle, não um swing
     # futuro): sai da sua própria regra, nunca da do outro método.
     nasce = pat is None or (out["pattern"] or {}).get("invalidado")

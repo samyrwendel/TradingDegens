@@ -2473,6 +2473,10 @@ function stormCardHtml(st, frameDoBloco) {
     ? st.timeframe : "";
   const eden = st.eden || {};
   const opera = st.opera === true;
+  // DECLARADO AQUI, no topo: o encerrado decide o selo, a linha do desfecho E o
+  // rótulo de cada leitura — e uma `const` usada antes da declaração é
+  // ReferenceError em execução, que apagaria o card inteiro em vez de uma linha.
+  const encerradoSt = !!(pat && pat.encerrado && pat.desfecho);
   const dir = pat ? ((PAT_DIR[pat.direction] || [])[1] || "") : "";
   const rows = [];
 
@@ -2493,7 +2497,31 @@ function stormCardHtml(st, frameDoBloco) {
       `<span class="sc-basis">${escapeHtml(eden.motivo || "")}</span></div>`);
   }
 
-  if (pat && ehFantasma(pat)) {
+  // ENCERRADO PRIMEIRO, igual ao card do 1-2-3 (DA-125/129): o desfecho muda o
+  // sentido de todos os níveis abaixo dele. O Storm calculava esta informação desde
+  // a DA-126 e não a mostrava em lugar nenhum — o método mais usado dos dois era o
+  // único cego pro próprio resultado.
+  if (pat && pat.encerrado && pat.desfecho) {
+    const d = pat.desfecho;
+    const ganhou = d.tipo === "alvo";
+    rows.push(scRow(
+      ganhou ? "ENCERRADO NO ALVO" : "ENCERRADO NO STOP",
+      `${fmtNum(d.price)} em ${fmtDataHora(d.em)}`,
+      `entrada no gatilho ${fmtNum(d.entrada)} em ${fmtDataHora(d.entrada_em)} — ` +
+      (ganhou
+        ? "o alvo foi atingido e o trade fechou no lucro. O que o preço fez DEPOIS " +
+          "não pertence a este setup: ele já tinha terminado."
+        : "o stop foi atingido e o trade fechou no prejuízo.") +
+      (d.empate_na_barra
+        ? " Alvo e stop caíram na MESMA barra: sem tick não dá pra saber a ordem " +
+          "dentro dela, então conta o stop — a leitura pessimista, a mesma do ledger."
+        : "") +
+      (pat.invalidado_em
+        ? ` O ponto 3 só foi perdido em ${fmtDataHora(pat.invalidado_em)}, com o ` +
+          "trade já fechado — por isso este setup NÃO está invalidado."
+        : ""),
+      ganhou ? "sc-ganho" : "sc-morto"));
+  } else if (pat && ehFantasma(pat)) {
     const inv0 = st.invalidation || {};
     const quando = pat.invalidado_em ? ` em ${fmtDate(pat.invalidado_em)}` : "";
     rows.push(scRow("INVALIDADO", `perdeu ${fmtNum(inv0.price != null ? inv0.price : pat.p2.price)}${quando}`,
@@ -2528,10 +2556,22 @@ function stormCardHtml(st, frameDoBloco) {
     leituras.forEach((L) => {
       const nome = STORM_ENTRADA[L.entrada] || L.entrada;
       const ordem = STORM_ORDEM_CURTO[L.ordem] || L.ordem || "";
+      // A LEITURA NÃO CONTRADIZ O PADRÃO (DA-129). Num padrão encerrado o card
+      // dizia "ENCERRADO NO ALVO" no topo e "em formação" três linhas abaixo — a
+      // mesma contradição, um nível mais fundo: o que forma as leituras é o padrão,
+      // e ele terminou. A leitura que DECIDIU o desfecho é identificável pelo preço
+      // de entrada; a outra não recebe rótulo nenhum, porque afirmar o que ela virou
+      // seria inventar um fato que este nível não tem.
+      let estadoL = L.state_label || L.state || "";
+      if (encerradoSt) {
+        estadoL = (L.trigger != null && pat.desfecho.entrada != null
+                   && Math.abs(L.trigger - pat.desfecho.entrada) < 1e-9)
+          ? `encerrado no ${pat.desfecho.tipo === "alvo" ? "alvo" : "stop"}` : "";
+      }
       rows.push(`<div class="sc-leitura" title="${escapeHtml(L.ordem_label || "")}">` +
         `<span class="sc-lk">${escapeHtml(nome)}</span>` +
         (ordem ? `<span class="sc-lo">${escapeHtml(ordem)}</span>` : "") +
-        `<span class="sc-lstate">${escapeHtml(L.state_label || L.state || "")}</span></div>`);
+        `<span class="sc-lstate">${escapeHtml(estadoL)}</span></div>`);
       if (L.trigger != null) rows.push(scRow("gatilho", fmtNum(L.trigger), L.label || ""));
       const tp = L.target || {};
       if (tp.price != null) rows.push(scRow("alvo (TP)", fmtNum(tp.price), tp.label || ""));
@@ -2555,7 +2595,18 @@ function stormCardHtml(st, frameDoBloco) {
   // na tela, porque "opera · qualidade zona neutra" lido rápido vira só "opera" —
   // e o aviso do Stormer ("muito mais perigoso") sumiria na leitura de relance.
   const neutra = st.qualidade === "neutra";
-  const selo = pat
+  // O SELO DO ÉDEN CALA SOBRE HISTÓRIA (DA-129). "NÃO OPERA · qualidade ruim" no
+  // topo de um card que diz "ENCERRADO NO ALVO" logo abaixo são dois vereditos
+  // opostos sobre a mesma coisa — e o filtro é o que fala do trade que NÃO existe.
+  // Em lugar dele, o card diz o que de fato aconteceu.
+  const selo = encerradoSt
+    ? `<div class="sc-verdict"><span class="sc-vk">${escapeHtml(edenNome(eden) || "filtro Éden")}</span>` +
+      `<span class="sc-state ${pat.desfecho.tipo === "alvo" ? "ativo" : "sem_setup"}">` +
+      `${pat.desfecho.tipo === "alvo" ? "ENCERRADO NO ALVO" : "ENCERRADO NO STOP"}` +
+      `</span></div>` +
+      `<div class="sc-hz">o trade terminou — o filtro do Éden decide entrada, e ` +
+      `aqui não há entrada a decidir.</div>`
+    : pat
     ? `<div class="sc-verdict" title="${escapeHtml(edenAjuda(eden))}">` +
       `<span class="sc-vk">${escapeHtml(edenNome(eden) || "filtro Éden")}</span>` +
       `<span class="sc-state ${neutra ? "aguardar_pullback" : (opera ? "ativo" : "sem_setup")}">` +
@@ -3424,6 +3475,11 @@ function stormColor(pat) {
 // que ainda existe; a invalidação, um que não existe mais.
 function stormEstado(storm) {
   if (!storm || !storm.pattern) return null;
+  // ENCERRADO manda, e manda ANTES DO VETO (DA-129). O Éden responde "vale a pena
+  // entrar AGORA?"; sobre um trade que já chegou ao alvo ou ao stop não há entrada
+  // nenhuma a autorizar. Sem esta linha o Storm dizia "não opera — Éden de Baixa"
+  // na legenda de um trade que ele mesmo já sabia ter fechado no lucro.
+  if (storm.pattern.encerrado && storm.pattern.desfecho) return "encerrado";
   if (ehFantasma(storm.pattern)) return "invalidado";
   return storm.opera === true ? "operavel" : "vetado";
 }
@@ -3436,6 +3492,10 @@ function stormEstado(storm) {
 // vem do vocabulário único (forma CURTA: aqui o espaço é a largura de uma vela) e,
 // alinhado, ganha o CONTRASTE de :func:`edenContraste` — ver ali o porquê.
 function stormEstadoTexto(estado, storm) {
+  if (estado === "encerrado") {
+    const d = ((storm || {}).pattern || {}).desfecho || {};
+    return `encerrado no ${d.tipo === "alvo" ? "alvo" : "stop"}`;
+  }
   if (estado === "invalidado") return "invalidado";
   if (estado !== "vetado") return "";
   const st = storm || {};
@@ -8214,6 +8274,12 @@ const SCAN_STORM_ESTADO = {
   // igual às outras é onde o aviso se perderia.
   zona_neutra: "zona neutra",
   formando: "formando", vetado: "vetado", sem_setup: "sem setup", sem_dado: "sem dado",
+  // Os dois estados que o CICLO trouxe pro Storm (DA-129). Antes a coluna dele não
+  // tinha como dizer nem "acabou" nem "morreu": um padrão invalidado saía
+  // "formando", e um encerrado saía "gatilho" quando o preço voltava a passar por
+  // ali. Se ganhou ou perdeu NÃO vai no chip da lista — vai no desfecho, no card
+  // (DA-125): célula de lista não é lugar de resultado.
+  concluido: "encerrado", invalidou: "invalidado",
 };
 
 function scanStormCellHtml(f) {

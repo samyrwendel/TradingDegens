@@ -292,7 +292,10 @@ def test_desfecho_DEPOIS_da_invalidacao_nao_encerra_nada():
 import inspect  # noqa: E402
 
 from tradingagents.dataflows import price_structure as _ps  # noqa: E402
-from tradingagents.dataflows.price_structure import _morte_e_desfecho  # noqa: E402
+from tradingagents.dataflows.price_structure import (  # noqa: E402
+    _morte_e_desfecho,
+    ciclo_de_vida,
+)
 
 
 def test_os_DOIS_detectores_chamam_a_MESMA_regua():
@@ -307,10 +310,14 @@ def test_os_DOIS_detectores_chamam_a_MESMA_regua():
 
 
 @pytest.mark.parametrize("caso,esperado", [
-    pytest.param("alvo_antes", ("alvo", False), id="alvo_antes_da_morte_ENCERRA_ganhando"),
-    pytest.param("stop_antes", ("stop", False), id="stop_antes_da_morte_ENCERRA_perdendo"),
-    pytest.param("morte_antes_da_entrada", (None, True), id="morreu_sem_acionar_INVALIDA"),
-    pytest.param("sem_gatilho", (None, True), id="alvo_sem_entrada_nao_encerra"),
+    pytest.param("alvo_antes", ("alvo", False, "concluido_alvo"),
+                 id="alvo_antes_da_morte_ENCERRA_ganhando"),
+    pytest.param("stop_antes", ("stop", False, "concluido_stop"),
+                 id="stop_antes_da_morte_ENCERRA_perdendo"),
+    pytest.param("morte_antes_da_entrada", (None, True, "invalidado_sem_acionar"),
+                 id="morreu_sem_acionar_INVALIDA"),
+    pytest.param("sem_gatilho", (None, True, "invalidado_sem_acionar"),
+                 id="alvo_sem_entrada_nao_encerra"),
 ])
 def test_a_REGUA_decide_igual_para_qualquer_chamador(caso, esperado):
     """A mesma sequência, a mesma resposta — venha do 1-2-3 ou do Storm.
@@ -336,11 +343,14 @@ def test_a_REGUA_decide_igual_para_qualquer_chamador(caso, esperado):
     }
     df = series[caso]
     gatilho = 11.52 if caso != "sem_gatilho" else 99.0
-    em, desf = _morte_e_desfecho(df, 0, 11.34, True, _FMT, gatilho, 11.63, 11.27)
-    tipo_esperado, invalida_esperado = esperado
+    em, desf, ac = _morte_e_desfecho(df, 0, 11.34, True, _FMT, gatilho, 11.63, 11.27)
+    tipo_esperado, invalida_esperado, ciclo_esperado = esperado
     assert (desf or {}).get("tipo") == tipo_esperado, (caso, em, desf)
     # o veredito EFETIVO: invalidado só quando não houve desfecho
     assert (em is not None and desf is None) is invalida_esperado, (caso, em, desf)
+    # e o CICLO (DA-129) sai da mesma apuração, para qualquer chamador
+    assert ciclo_de_vida(acionado_em=ac, invalidado_em=em,
+                         desfecho=desf) == ciclo_esperado, (caso, em, desf, ac)
 
 
 def test_o_FATO_da_invalidacao_sobrevive_ao_desfecho():
@@ -352,7 +362,7 @@ def test_o_FATO_da_invalidacao_sobrevive_ao_desfecho():
     df = _serie([
         ("2026-08-30 09:00", 11.30, 11.40), ("2026-08-30 13:00", 11.45, 11.55),
         ("2026-08-30 15:00", 11.55, 11.65), ("2026-08-30 23:00", 11.00, 11.45)])
-    em, desf = _morte_e_desfecho(df, 0, 11.34, True, _FMT, 11.52, 11.63, 11.27)
+    em, desf, _ac = _morte_e_desfecho(df, 0, 11.34, True, _FMT, 11.52, 11.63, 11.27)
     assert desf["tipo"] == "alvo"
     assert em == "2026-08-30 23:00", "o fato estrutural tem de continuar registrado"
 

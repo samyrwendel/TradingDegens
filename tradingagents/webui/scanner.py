@@ -156,6 +156,35 @@ def _chart_fallback(ticker: str, date: str, frame: str) -> dict:
         return {}
 
 
+# CICLO -> ESTADO DA LINHA, uma tradução só para os DOIS métodos (DA-129).
+#
+# A régua do desfecho já era compartilhada desde a DA-126, mas só o 1-2-3 tinha
+# aprendido a LER o resultado dela: o Storm calculava o ciclo e jogava fora aqui,
+# publicando "vetado" para um trade que já tinha terminado. Uma linha de scan que
+# consulta o filtro do Éden sobre um padrão ENCERRADO está perguntando "vale a pena
+# entrar?" sobre um trade que não existe mais.
+#
+# Só os estados que o CICLO decide moram aqui. Gatilho, movimento e formação
+# dependem da distância do preço, que é de cada método — mas eles só são
+# alcançados quando o ciclo não terminou.
+_CICLO_ESTADO = {
+    "concluido_alvo": "concluido",
+    "concluido_stop": "concluido",
+    "invalidado_sem_acionar": "invalidou",
+    "invalidado_operando": "invalidou",
+}
+
+
+def _estado_do_ciclo(pat: dict[str, Any] | None) -> str | None:
+    """O estado da linha quando o CICLO já decide sozinho; ``None`` se ainda é vivo.
+
+    Ponto único: enquanto os dois métodos passarem por aqui, não há como um deles
+    publicar "vetado" ou "em movimento" sobre um padrão que virou história.
+    """
+    ciclo = (pat or {}).get("ciclo")
+    return _CICLO_ESTADO.get(ciclo) if ciclo else None
+
+
 def _frame_row(ticker: str, date: str, frame: str,
                live_price: float | None = None) -> dict[str, Any]:
     """Uma linha do scan: plano do frame, classificada."""
@@ -215,8 +244,8 @@ def _frame_row(ticker: str, date: str, frame: str,
     # terminou, e nada posterior o reabre. Antes, o LINK-USD saía "invalidou" oito
     # horas DEPOIS de ter atingido o alvo — veredito invertido em relação ao
     # dinheiro. O desfecho vem do plano, que é onde padrão e níveis coexistem.
-    if pat.get("encerrado"):
-        estado = "concluido"
+    if (_do_ciclo := _estado_do_ciclo(pat)) is not None:
+        estado = _do_ciclo
     elif invalidated:
         estado = "invalidou"
     elif dist is not None and dist <= _GATILHO_TOL:
@@ -335,9 +364,15 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
     escolhida = min(leituras, key=_dist)
     dist = _dist(escolhida) if price else None
     estado = escolhida.get("state")
+    # O CICLO vem ANTES DE TUDO (DA-129) — inclusive do veto. Um padrão que chegou
+    # ao alvo ou ao stop é HISTÓRIA: o Éden responde "vale a pena entrar agora?", e
+    # não há entrada nenhuma a autorizar num trade que já terminou. Sem esta linha o
+    # Storm publicava "vetado" sobre o próprio desfecho que ele mesmo calcula.
+    if (_do_ciclo := _estado_do_ciclo(pat)) is not None:
+        linha_estado = _do_ciclo
     # VETO do Éden vem ANTES do estado do gatilho: um padrão acionado que a regra
     # proíbe não é "em movimento", é um trade que não se faz.
-    if not plano.get("opera"):
+    elif not plano.get("opera"):
         linha_estado = "vetado"
     elif plano.get("qualidade") == "neutra":
         # OPERA, mas na região que o Stormer chama de perigosa. Estado próprio: uma
@@ -352,6 +387,11 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
     rr = escolhida.get("risk_reward") or {}
     return {
         "estado": linha_estado,
+        # DESFECHO e CICLO viajam na linha do Storm como já viajavam na do 1-2-3
+        # (DA-129): "concluído" sem dizer se ganhou ou perdeu não informa nada, e
+        # era exatamente o que faltava pro método mais usado dos dois.
+        "desfecho": pat.get("desfecho"),
+        "ciclo": pat.get("ciclo"),
         "direction": direction,
         "entrada": escolhida.get("entrada"),
         "ordem": escolhida.get("ordem"),

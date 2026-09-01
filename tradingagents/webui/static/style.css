@@ -2713,6 +2713,12 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 .scan-storm.em_movimento .ss-e { color: var(--accent); }
 .scan-storm.vetado .ss-e { color: var(--text); }
 .scan-storm.vetado .ss-rr, .scan-storm.vetado .ss-p { opacity: .55; }
+/* ENCERRADO e INVALIDADO na coluna do Storm (DA-129): os dois são "não se opera
+   mais", e ficam CINZA como o invalidado do 1-2-3 — a cor aqui não diz ganho nem
+   perda (DA-078 regra 3: verde/vermelho é resultado, e resultado mora no card). */
+.scan-storm.concluido .ss-e, .scan-storm.invalidou .ss-e { color: var(--muted); }
+.scan-storm.concluido .ss-rr, .scan-storm.concluido .ss-p,
+.scan-storm.invalidou .ss-rr, .scan-storm.invalidou .ss-p { opacity: .55; }
 /* marcador do R:R medido do preço atual — o texto inteiro fica no title e na legenda */
 .scan-mark { color: var(--text); font-weight: var(--fw-bold); margin-left: 2px; }
 .scan-legenda { margin: 8px 0 0; font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
