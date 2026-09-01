@@ -6504,7 +6504,7 @@ async function loadHistory() {
 
 // Pinta a lista lateral a partir de `_allRuns` (sem re-buscar): usada pelo refresh,
 // pela troca de aba e pela re-pintura quando os nomes resolvem async.
-// ============ A FAIXA DE FRAMES NO CARD DA LISTA (DA-131) ====================
+// ============ A FAIXA DE FRAMES NO CARD DA LISTA (DA-133) ====================
 //
 // Pedido do Samyr: uma faixa "|15M | 1H | 4H | D | S|" no card, pra ler a
 // CONFLUÊNCIA de relance sem abrir o ativo. Três decisões que a proposta não
@@ -8839,7 +8839,7 @@ function paintScan(data) {
   // justamente quando o usuário está olhando.
   if (dadoNovo) marcarSinaisNovos(data.oportunidades);
   _scanData = data;   // guarda pra re-pintar ao trocar o filtro de estado
-  // A LISTA DE OBSERVAÇÃO tem a faixa de frames (DA-131) e ela sai daqui: sem este
+  // A LISTA DE OBSERVAÇÃO tem a faixa de frames (DA-133) e ela sai daqui: sem este
   // repintar, o card fica sem faixa até a próxima vez que a lista se redesenhar
   // sozinha — e na abertura isso é "nunca", porque o histórico pinta ANTES de o
   // scan salvo chegar. Só quando o dado é NOVO: filtro e busca não mexem na faixa.
@@ -9061,7 +9061,7 @@ function init() {
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-128)
-  // A FAIXA DE FRAMES do card (DA-131) lê o ÚLTIMO SCAN SALVO, e até aqui ele só
+  // A FAIXA DE FRAMES do card (DA-133) lê o ÚLTIMO SCAN SALVO, e até aqui ele só
   // era buscado ao abrir o painel de varredura — com a lista de observação na tela
   // desde o boot, a faixa não apareceria nunca. É UMA leitura do disco do servidor
   // (`/api/scan/salvo`), a mesma que o painel já fazia: não dispara varredura, não

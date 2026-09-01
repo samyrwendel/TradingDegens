@@ -1,4 +1,4 @@
-"""A FAIXA DE FRAMES no card da lista de observação (DA-131).
+"""A FAIXA DE FRAMES no card da lista de observação (DA-133).
 
 Proposta do Samyr: *"|15M | 1H | 4H | D | S|"* no card, pra ler a **confluência de
 relance** sem abrir o ativo. Três decisões que a proposta não trazia fechadas, e
