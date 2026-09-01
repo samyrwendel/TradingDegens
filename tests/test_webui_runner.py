@@ -679,3 +679,47 @@ def test_timeframe_view_leaves_equity_intraday_note_alone(tmp_path, monkeypatch)
     assert view["degraded"] is False
     assert view["timeframe"] == "15m"
     assert view["actionable"]["setup_state"] == "intradiario_indisponivel"
+
+
+# ─────────── ESTADO TERMINAL ⇒ HISTÓRICO JÁ ESCRITO (DA-130) ────────────────
+def test_run_estrutural_so_vira_done_DEPOIS_de_persistir(tmp_path, monkeypatch):
+    """Quem vê o estado terminal tem de ver a linha do histórico junto.
+
+    O ``_worker`` já documentava a disciplina ("flipped onto the run only after the
+    history write, so any poller that sees a terminal status also sees the persisted
+    history row"); o ``_worker_estrutural`` fazia o CONTRÁRIO — virava ``done`` e só
+    então persistia. Entre uma coisa e outra, uma consulta via run concluída **sem
+    linha no histórico**.
+
+    Não é hipótese: era a corrida que derrubava ``test_a_escada_sobrevive_ao_HISTORICO``
+    sob carga da suíte, e na tela seria o histórico sem a análise que acabou de sair.
+
+    O teste força a janela (um ``_persist`` lento) e mede o que um poller veria.
+    """
+    from tests.test_escada_multiframe import _runner_estrutural
+
+    r = _runner_estrutural(tmp_path, monkeypatch)
+    original = r._persist
+    visto = {"done_sem_registro": 0}
+
+    def _lento(run, status):
+        # A JANELA, aberta de propósito: é exatamente o intervalo que a ordem errada
+        # deixava exposto — só que aqui ele dura o bastante pra ser observado.
+        for _ in range(40):
+            if r.status(run.run_id).get("status") in ("done", "error"):
+                visto["done_sem_registro"] += 1
+            time.sleep(0.005)
+        original(run, status)
+
+    monkeypatch.setattr(r, "_persist", _lento)
+    rid = r.start("BTC-USD", "2026-08-31", method="setup123", timeframe="1d",
+                  reuse=False)
+    fim = time.time() + 10
+    while time.time() < fim and r.status(rid).get("status") not in ("done", "error"):
+        time.sleep(0.02)
+
+    assert visto["done_sem_registro"] == 0, (
+        "houve um intervalo em que a run já se dizia concluída e o histórico ainda "
+        "não tinha a linha", visto)
+    registro = r.store.get(rid)
+    assert registro is not None and registro.get("result") is not None, registro

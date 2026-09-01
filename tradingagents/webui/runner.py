@@ -27,6 +27,7 @@ from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
 from tradingagents.webui import agenda, ask as ask_module, execucao, sinais, timeutil
+from tradingagents.webui.ciclo_legado import completa_ciclo
 from tradingagents.webui.compare import (
     build_column,
     confront_pair_valid,
@@ -1130,17 +1131,24 @@ class AnalysisRunner:
                     run.ticker, run.date, run.asset_type, run.method, run.timeframe
                 ),
             }
-            run.status = "done"
+            estado_final = "done"
         except Exception as exc:  # noqa: BLE001 — erro vira run errada honesta
             logger.exception("%s run failed for %s", run.method, run.ticker)
             run.error = f"{type(exc).__name__}: {exc}"
             run.error_code = "unavailable"
-            run.status = "error"
             run.result = None
+            estado_final = "error"
         run.finished_at = time.time()
         run.finished_stamp = timeutil.stamp()
-        if run.status != "cancelled":
-            self._persist(run, run.status)
+        # ESCREVE O HISTÓRICO ANTES DE VIRAR O ESTADO — a mesma disciplina que o
+        # ``_worker`` documenta e este caminho não seguia: aqui o `status` virava
+        # "done" ANTES do `_persist`, e quem consultasse nesse intervalo via uma run
+        # concluída SEM linha no histórico. Não é hipótese: é a corrida que derrubava
+        # `test_a_escada_sobrevive_ao_HISTORICO` sob carga, e na tela seria o
+        # histórico sem a análise que acabou de terminar.
+        if estado_final != "cancelled":
+            self._persist(run, estado_final)
+        run.status = estado_final
         self.active.remove(run.run_id)
 
     def _worker(self, run: _Run) -> None:
@@ -2128,6 +2136,7 @@ class AnalysisRunner:
         rec = self.store.get(run_id)
         if isinstance(rec, dict):
             normalize_result(rec.get("result"))
+            completa_ciclo(rec.get("result"))
         return rec
 
     def _load_record(self, run_id: str) -> dict[str, Any] | None:

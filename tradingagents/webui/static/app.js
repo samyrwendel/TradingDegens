@@ -3423,18 +3423,74 @@ const COR_FANTASMA = "#6b7280";
 // ficar abaixo de 70% do contraste do vivo.
 const ALFA_FANTASMA = 0.85;
 
-// FANTASMA é o padrão MORTO. Um padrão ENCERRADO não é fantasma (DA-125): ele
-// terminou — no alvo ou no stop —, e pintá-lo com o cinza de "a premissa rompeu"
-// diria que o trade não existiu. O `invalidado` que chega aqui já é o EFETIVO (o
-// `as_dict` do padrão o zera quando houve desfecho), então esta função continua
-// sendo uma linha; o comentário existe pra ninguém "consertar" trocando o campo.
+// HISTÓRIA DE VITÓRIA E HISTÓRIA DE DERROTA NÃO SÃO A MESMA COISA (DA-130).
+//
+// A pintura inteira pendia de UM booleano (`invalidado`), e um booleano só sabe
+// dizer duas coisas. Com o ciclo de vida (DA-129) são quatro os significados que
+// disputam a mesma tela, e colapsá-los custa caro nos dois sentidos: pintar de
+// CINZA um trade que bateu o alvo diz que ele não existiu; pintá-lo com o AZUL de
+// um vivo diz que ainda há o que fazer com ele.
+//
+// A gramática é a que a tela já ensina (DA-078 regra 3), sem cor nova:
+//   verde   = ganho ....... encerrado no ALVO
+//   vermelho= perda ....... encerrado no STOP
+//   cinza   = nunca chegou a valer ....... invalidado
+//   azul/laranja por direção = ainda vale ....... vivo ou por acionar
+const COR_GANHO = "#2ecc71";   // o mesmo verde de "ganho/alta" do resto da tela
+const COR_PERDA = "#ff5c6c";   // o mesmo vermelho de perda
+
+// A FASE DA PINTURA: quatro valores, lidos do ESTADO e não de um sim/não. Este é o
+// único lugar que decide o que a cor significa — quem pinta consulta, não recombina.
+function patFase(pat) {
+  if (!pat) return null;
+  switch (pat.ciclo) {
+    case "concluido_alvo": return "ganho";
+    case "concluido_stop": return "perda";
+    case "invalidado_sem_acionar":
+    case "invalidado_operando": return "morto";
+    case "vivo":
+    case "nunca_acionou": return "vivo";
+  }
+  // RUN ANTIGA, sem `ciclo` no dicionário (o histórico é persistido inteiro e não se
+  // reescreve): degrada pro que aquela tela sempre mostrou, na mesma ordem de
+  // precedência — desfecho quando existe, senão o booleano.
+  if (pat.encerrado && pat.desfecho) {
+    return pat.desfecho.tipo === "alvo" ? "ganho" : "perda";
+  }
+  return pat.invalidado ? "morto" : "vivo";
+}
+
+// HISTÓRIA é tudo que não se opera mais — ganho, perda ou morte. É o eixo da
+// SUBORDINAÇÃO (peso, gatilho apagado); o eixo da COR diz qual dos três foi.
+function ehHistoria(pat) {
+  const f = patFase(pat);
+  return f === "ganho" || f === "perda" || f === "morto";
+}
+
+// FANTASMA é só o MORTO, e continua existindo porque é ele que carrega o cinza e a
+// palavra "invalidado" (DA-091). Um padrão ENCERRADO não é fantasma (DA-125): ele
+// terminou, e agora tem cor PRÓPRIA em vez de herdar a de um vivo.
 function ehFantasma(pat) {
-  return !!(pat && pat.invalidado);
+  return patFase(pat) === "morto";
 }
 
 function patColor(pat) {
-  if (ehFantasma(pat)) return COR_FANTASMA;
+  switch (patFase(pat)) {
+    case "morto": return COR_FANTASMA;
+    case "ganho": return COR_GANHO;
+    case "perda": return COR_PERDA;
+  }
   return (pat && PAT_COLORS[pat.direction]) || "#6ea8fe";
+}
+
+// A PALAVRA da fase, pra etiqueta na vela e pra legenda. Vazia no vivo: o normal não
+// se anuncia, só o que desvia dele.
+const FASE_PALAVRA = {
+  ganho: "encerrado no alvo", perda: "encerrado no stop", morto: "invalidado",
+};
+
+function patFasePalavra(pat) {
+  return FASE_PALAVRA[patFase(pat)] || "";
 }
 
 // O FANTASMA VALE PARA AS DUAS LEITURAS. O cinza do morto nasceu no 1-2-3 de
@@ -3697,7 +3753,10 @@ function chartLegendHtml(chart, actionable) {
   if (pat) {
     const [, dlabel] = PAT_DIR[pat.direction] || ["", ""];
     const q = familiasNaTela(actionable).length > 1 ? "Setup123 " : "";
-    const morto = ehFantasma(pat) ? " (invalidado)" : "";
+    // A PALAVRA vem da fase, não de um booleano (DA-130): "(invalidado)" num padrão
+    // que bateu o alvo é a legenda mentindo sobre o que a cor mostra.
+    const _fp = patFasePalavra(pat);
+    const morto = _fp ? ` (${_fp})` : "";
     legend.push(`<span class="lg"><span class="sw dot" style="background:${patColor(pat)}"></span>${q}1-2-3 ${escapeHtml(dlabel)}${morto}</span>`);
   }
   const est = camadaVisivel("storm") && actionable ? stormEstado(actionable.storm) : null;
@@ -3775,6 +3834,16 @@ function renderChartCard(chart, ticker, actionable, tf) {
     notes.push(`${mortos.join(" e ")} <b>invalidado</b> — os pontos ficam em cinza como ` +
       `história, e os níveis dele saem do gráfico: descrevem um trade que não existe mais.`);
   }
+  // ENCERRADO tem nota PRÓPRIA (DA-130). A de cima promete "cinza", e repetir a
+  // mesma frase sobre um trade que bateu o alvo contradiria o verde que está na tela
+  // — a nota existe justamente pra dizer o que a cor significa.
+  encerradosNaTela(chart, actionable).forEach(({ nome, fase }) => {
+    const ganhou = fase === "ganho";
+    notes.push(`${nome} <b>${ganhou ? "encerrado no alvo" : "encerrado no stop"}</b> — ` +
+      `os pontos ficam ${ganhou ? "em verde" : "em vermelho"} como história ` +
+      `${ganhou ? "de ganho" : "de perda"}, e o gatilho sai do gráfico: o trade ` +
+      `terminou, e o preço passando por ali de novo não o reabre.`);
+  });
   if (stormVetadoNaTela(actionable)) {
     const st = actionable.storm || {};
     const veto = st.veto || st.motivo || "";
@@ -4660,6 +4729,21 @@ function fantasmasNaTela(chart, a) {
   return nomes;
 }
 
+// OS ENCERRADOS NA TELA (DA-130) — o irmão de `fantasmasNaTela`, separado porque a
+// nota que eles pedem é OUTRA: a do fantasma promete cinza, e estes estão em verde
+// ou vermelho. Devolve a fase junto, senão a nota teria de reabrir o padrão pra
+// descobrir se ganhou.
+function encerradosNaTela(chart, a) {
+  const fora = [];
+  const pat = chart && chart.markers && chart.markers.pattern_123;
+  const f1 = camadaVisivel("plano") ? patFase(pat) : null;
+  if (f1 === "ganho" || f1 === "perda") fora.push({ nome: "Setup123", fase: f1 });
+  const st = camadaVisivel("storm") && a ? (a.storm || {}).pattern : null;
+  const f2 = st ? patFase(st) : null;
+  if (f2 === "ganho" || f2 === "perda") fora.push({ nome: "Storm123", fase: f2 });
+  return fora;
+}
+
 // O STORM VETADO NA NOTA. Ele está desenhado e sem nível nenhum — sem uma linha
 // dizendo por quê, a nota cairia no "Nenhum setup identificado" sobre três pontos
 // numerados na vela, que é a contradição que esta task veio desfazer.
@@ -4956,7 +5040,7 @@ function drawAxisPill(ctx, axisX, gutter, ry, text, bg, fg, strong) {
 // preço está, mas para de competir com o que ainda vale (DA-091).
 function desenha123(ctx, g, cfg, saida, rotulos) {
   const { pts, cor, forma, dash, fantasma, vetado, estado, nome, mostraNome,
-          trigger, dist, familia } = cfg;
+          trigger, dist, familia, historia } = cfg;
   if (!pts || !pts.length) return;
   const { x, y, padL, plotW } = g;
   ctx.save();
@@ -4965,17 +5049,29 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
   // multiplicá-lo por 0,45 sobre o preto o levava abaixo do piso de legibilidade —
   // "não existe mais" tinha virado "não está aqui" (ver ALFA_FANTASMA). A ordem de
   // leitura continua a mesma, medida no pixel: vivo > vetado > morto.
-  if (fantasma) ctx.globalAlpha = ALFA_FANTASMA;
+  // HISTÓRIA (ganho, perda ou morte) subordina IGUAL: o que separa os três é a COR,
+  // não o peso — "já não se opera" é a mesma informação nos três casos, e dar peso
+  // diferente ao ganho faria a tela hierarquizar por resultado em vez de por
+  // acionabilidade (DA-130).
+  if (fantasma || historia) ctx.globalAlpha = ALFA_FANTASMA;
   else if (vetado) ctx.globalAlpha = 0.7;
   ctx.strokeStyle = cor; ctx.setLineDash(dash); ctx.lineWidth = 1.5;
   ctx.beginPath();
   pts.forEach((p, k) => { const px = x(p.i), py = y(p.price); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
   ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
-  if (trigger != null && !fantasma) {
+  // O gatilho é o CONVITE A OPERAR: nem o morto nem o encerrado o desenham — num
+  // trade que já terminou ele é ainda mais enganoso, porque o preço pode estar
+  // passando por ali de novo (DA-130).
+  // TELEMETRIA DA LINHA DO GATILHO (DA-130). Ela era desenhada sem registro nenhum,
+  // e uma regra de tela que não se mede volta sozinha: um teste que afirmasse
+  // "o encerrado não desenha o gatilho" passaria com a linha na tela.
+  if (saida) saida.gatilho = { pedido: trigger != null, pintado: false };
+  if (trigger != null && !fantasma && !historia) {
     const ty = y(trigger);
     ctx.strokeStyle = cor + "80"; ctx.setLineDash([2, 3]);
     ctx.beginPath(); ctx.moveTo(padL, ty); ctx.lineTo(padL + plotW, ty); ctx.stroke();
     ctx.setLineDash([]);
+    if (saida) saida.gatilho = { pedido: true, pintado: true, y: Math.round(ty) };
   }
   pts.forEach((p) => {
     const px = x(p.i), cy = y(p.price), lado = p.kind === "L" ? 1 : -1;
@@ -4998,7 +5094,7 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
     // número ao lado — que tem área sólida de glifo. Dois pixels devolvem a cobertura
     // sem trocar a cor: a forma é portadora, e engrossá-la não devolve o morto ao
     // vocabulário dos vivos.
-    if (fantasma) ctx.lineWidth = 2;
+    if (fantasma || historia) ctx.lineWidth = 2;
     ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
     ctx.fillStyle = cor; ctx.fillText(p.lab, px, my);
     // O MARCADOR É OBSTÁCULO pro texto: sem isto o respaldo de um preço pousava em
@@ -5024,7 +5120,8 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
                             fantasma: !!fantasma, vetado: !!vetado,
                             px: Math.round(px), py: Math.round(my),
                             naVista: px >= padL && px <= padL + plotW,
-                            estado: estado || (fantasma ? "invalidado" : "") });
+                            historia: historia || "",
+                            estado: estado || historia || (fantasma ? "invalidado" : "") });
   });
   // Etiquetas ao lado do PRIMEIRO ponto: o nome da família (só quando há mais de uma
   // na tela — prefixo repetido num gráfico de uma leitura só é ruído) e "invalidado".
@@ -5040,12 +5137,13 @@ function desenha123(ctx, g, cfg, saida, rotulos) {
   // o desenho está na tela, e a palavra diz o que fazer com ele.
   if (estado) etiquetas.push(estado);
   else if (fantasma) etiquetas.push("invalidado");
+  else if (historia) etiquetas.push(historia);
   // NA COLUNA DO PONTO 1, logo depois do preço dele — não ao LADO do marcador. Ao
   // lado, a pílula (≈60px) cruzava a coluna dos pontos vizinhos e a de-colisão a
   // empurrava 90px pra baixo: um selo "Storm123" solto no meio do gráfico não nomeia
   // padrão nenhum. Na coluna, ela desce no máximo o que a própria coluna ocupa, e as
   // duas famílias se separam sozinhas quando os marcadores apontam pra lados opostos.
-  const peso = fantasma ? 0.45 : (vetado ? 0.7 : 1);
+  const peso = (fantasma || historia) ? 0.45 : (vetado ? 0.7 : 1);
   etiquetas.forEach((t, k) => rotulos.push(
     { x: x(p0.i), y: base + lado0 * (32 + k * 15), text: t, cor, align: "centro",
       pilula: true, opaco: peso }));
@@ -5519,6 +5617,10 @@ function drawPriceChart(canvas, chart, a) {
       forma: FORMA_DA_FAMILIA.plano, dash: [4, 3], dist: 14,
       // O gatilho é o convite a operar: um padrão morto não o desenha.
       trigger: pat.trigger, fantasma: ehFantasma(pat), mostraNome: _duasFamilias,
+      // ENCERRADO tem palavra e cor próprias (DA-130): sem isto o 1-2-3 que bateu o
+      // alvo saía com o azul de um vivo e sem etiqueta nenhuma — a tela oferecendo
+      // um trade que já terminou.
+      historia: patFase(pat) === "morto" ? "" : patFasePalavra(pat),
     }, _pontos123, _rotulos123);
     _fora.push(resumoEnquadramento("Setup123", brutos, _pontos123.slice(_antes),
                                    { v0, v1, candles }));
@@ -5554,6 +5656,7 @@ function drawPriceChart(canvas, chart, a) {
       // o gatilho do Storm já é uma linha de nível rotulada (planZonesStorm) — não
       // se traça o mesmo nível duas vezes
       trigger: null, fantasma: _stormEst === "invalidado", vetado: _stormEst === "vetado",
+      historia: _stormEst === "encerrado" ? patFasePalavra(_stormPat) : "",
       estado: stormEstadoTexto(_stormEst, a.storm), mostraNome: _duasFamilias,
     }, _pontos123, _rotulos123);
     _fora.push(resumoEnquadramento("Storm123", brutos, _pontos123.slice(_antes),
@@ -5564,6 +5667,9 @@ function drawPriceChart(canvas, chart, a) {
   _fora.push(resumoEnquadramento("recuo à média", _marcas, _marcasPint,
                                  { v0, v1, candles }, "marcas"));
   canvas.dataset.pat123 = JSON.stringify(_pontos123);
+  // `JSON.stringify` de um array ignora propriedades — o gatilho sai no seu próprio
+  // atributo, como o `rotulos123Geo` já faz pela mesma razão.
+  canvas.dataset.gatilho123 = JSON.stringify(_pontos123.gatilho || null);
   // Os rótulos são pintados DEPOIS de todos os marcadores das duas famílias, dentro
   // dos limites do plot — e o dataset guarda o que de fato saiu na tela, não o que se
   // pretendia (é o que deixa "nada foi coberto nem cortado" ser medido).
