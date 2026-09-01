@@ -180,8 +180,15 @@ def test_o_TITULO_diz_de_QUAL_metodo_e_a_marca(base):
         _abre(page, base)
         m = page.evaluate(_CARD, "AAA")
         for linha, nome in zip(m["linhas"], ("Setup123", "Storm123"), strict=True):
-            assert all(x["title"].startswith(nome + " ·") for x in linha["marcas"]), (
-                nome, linha["marcas"])
+            for x in linha["marcas"]:
+                # Desde a DA-143 o marcador navegável abre o title com a AÇÃO
+                # ("Abrir AAA no 4h com Storm123 — …"); a LEITURA vem depois do
+                # travessão, e é ela que tem de dizer de quem é a linha.
+                acao = x["title"].startswith("Abrir ")
+                leitura = x["title"].split(" — ", 1)[-1] if acao else x["title"]
+                assert leitura.startswith(nome + " ·"), (nome, x["title"])
+                if acao:
+                    assert f"com {nome} —" in x["title"], (nome, x["title"])
         browser.close()
 
 

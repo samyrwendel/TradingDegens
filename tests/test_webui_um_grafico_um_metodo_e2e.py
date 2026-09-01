@@ -253,10 +253,12 @@ def test_ligar_a_outra_camada_nomeia_TODOS_os_rotulos(base, viewport):
         antes = page.evaluate(_LE)
         assert antes["camadasVisivel"] is True, antes
         # leituras que existem + as duas famílias de média (task 010)
-        assert antes["camadasBtn"] == ["Setup123", "Storm123",
+        # "as duas" entra no grupo de leituras desde a DA-143: sobrepor deixou de ser
+        # efeito de "mostrar X" e virou opção com nome próprio.
+        assert antes["camadasBtn"] == ["Setup123", "Storm123", "as duas",
                                        "MMS (Padrão)", "EMA (Erick)"], antes
 
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')
         page.wait_for_timeout(250)
         m = page.evaluate(_LE)
         stops = [z for z in m["zonas"] if "stop" in z]
@@ -285,9 +287,9 @@ def test_desligar_a_camada_volta_ao_rotulo_limpo(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, "storm123")
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')   # sobrepõe
         page.wait_for_timeout(200)
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="storm"]')   # volta a UMA leitura (DA-143)
         page.wait_for_timeout(200)
         m = page.evaluate(_LE)
         assert all(z.startswith("Storm · ") or z.startswith("Storm p") for z in m["zonas"]), m["zonas"]
@@ -327,7 +329,7 @@ def test_os_pontos_numerados_sao_os_da_camada_aberta(base):
             """() => document.getElementById('chartLegend').innerText.replace(/\\s+/g,' ')""")
         # a legenda do padrão de swings (do plano) não está lá; a do Storm está
         assert so_storm.count("1-2-3") == 1, so_storm
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')   # sobrepõe (DA-143)
         page.wait_for_timeout(250)
         duas = page.evaluate(
             """() => document.getElementById('chartLegend').innerText.replace(/\\s+/g,' ')""")
@@ -356,7 +358,7 @@ def test_o_carimbo_de_RR_do_grafico_e_o_da_leitura_desenhada(base):
         assert "0,45" not in so_storm, ("número de leitura não desenhada", so_storm)
 
         # com as duas camadas na tela, o número ganha DONO
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')   # sobrepõe (DA-143)
         page.wait_for_timeout(250)
         duas = page.evaluate(chip)
         assert "Setup123" in duas and "0,45" in duas, duas

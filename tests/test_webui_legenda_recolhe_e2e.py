@@ -73,9 +73,14 @@ def _abre(page, base_url, run_id, storm=True):
     page.wait_for_selector("#setupCards:not(.hidden)")
     page.wait_for_timeout(400)
     if storm:
+        # AS DUAS leituras na tela — é o pior caso de legenda, que é o que este
+        # módulo mede. Desde a DA-143 isso é uma opção com nome ("as duas"): clicar
+        # em "Storm123" TROCA a leitura em vez de somar, e o gráfico voltaria a ter
+        # uma família só.
         page.evaluate("""() => {
-          const b = [...document.querySelectorAll('#camadasSelector button')]
-            .find(x => /storm/i.test(x.textContent || ''));
+          const b = document.querySelector('#camadasSelector [data-camada="ambas"]')
+            || [...document.querySelectorAll('#camadasSelector button')]
+                 .find(x => /storm/i.test(x.textContent || ''));
           if (b) b.click();
         }""")
         page.wait_for_timeout(500)

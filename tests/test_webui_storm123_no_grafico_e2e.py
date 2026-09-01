@@ -178,7 +178,7 @@ def test_com_as_duas_camadas_a_numeracao_nao_confunde(base, viewport):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=viewport)
         _abre(page, base)
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')   # sobrepõe (DA-143)
         page.wait_for_timeout(250)
         pintado = page.evaluate(_PINTADO)
         formas = {d["familia"]: d["forma"] for d in pintado}

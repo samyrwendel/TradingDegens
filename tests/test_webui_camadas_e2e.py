@@ -11,8 +11,12 @@ O que estes testes travam:
   * depois do primeiro toque a escolha é dele e PERSISTE nas análises seguintes
     (obrigar a reconfigurar a cada tela é transformar preferência em tarefa);
   * a escolha atravessa a troca de TIMEFRAME;
-  * ligar as duas leituras é legítimo — é comparação —, e aí **nenhum rótulo fica
-    anônimo**, nem os pontos numerados, que é o que gerou a confusão do print;
+  * **leitura é escolha ÚNICA** (DA-143): clicar numa TROCA, nunca soma. Somar era o
+    que devolvia dez níveis ao gráfico e dois stops a 0,39 um do outro — o sintoma
+    que a DA-088 tinha fechado, reaberto pela porta de um botão "mostrar X";
+  * a sobreposição continua existindo porque tem valor (comparação), mas com NOME
+    próprio ("as duas") — e aí **nenhum rótulo fica anônimo**, nem os pontos
+    numerados, que é o que gerou a confusão do print;
   * e a liberdade de frame NÃO apaga qual é o frame do VEREDITO: ver o 15m é direito
     dele, achar que o 15m é o veredito é o defeito (DA-085).
 
@@ -106,11 +110,11 @@ def test_a_escolha_do_usuario_PERSISTE_na_proxima_analise(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, "storm123")
-        page.click('.camada-btn[data-camada="plano"]')
-        page.click('.camada-btn[data-camada="mms"]')
+        page.click('.camada-btn[data-camada="plano"]')   # TROCA a leitura (DA-143)
+        page.click('.camada-btn[data-camada="mms"]')     # média SOMA (outra pergunta)
         page.wait_for_timeout(200)
         escolhido = page.evaluate(_LE)
-        assert escolhido["camadas"] == ["mms", "plano", "storm"], escolhido
+        assert escolhido["camadas"] == ["mms", "plano"], escolhido
         assert escolhido["tocado"] is True, escolhido
 
         _abre(page, base, "storm123", primeiro=False)   # outra análise, mesma sessão
@@ -128,15 +132,63 @@ def test_a_preferencia_nunca_deixa_o_grafico_vazio(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, "storm123")
-        page.click('.camada-btn[data-camada="storm"]')   # desliga a única leitura
+        # A preferência guardada é "storm", e a próxima análise não tem Storm nenhum.
+        # (Antes esta situação se produzia DESLIGANDO a única leitura pelo botão; com
+        # a leitura virando escolha única — DA-143 — isso deixou de ser possível pela
+        # tela, e o teste abaixo prova por quê.)
+        page.click('.camada-btn[data-camada="storm"]')
         page.wait_for_timeout(150)
-        assert page.evaluate("() => planZones(document.getElementById('priceChart')._actionable).length") == 0
+        assert page.evaluate("() => [..._camadas].includes('storm')"), "a escolha some"
 
         # agora abre uma análise SEM Storm: a preferência não acende nada ali
         _abre(page, base, "setup123", primeiro=False)
         m = page.evaluate(_LE)
         assert "plano" in m["camadas"], ("o chão do método volta", m)
         assert m["zonas"], m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_clicar_na_leitura_ja_ligada_NAO_apaga_o_grafico(base):
+    """DENTE nascido da DA-143. Quando a leitura era interruptor, clicar na única
+    ligada DESLIGAVA — e o gráfico ficava sem nível nenhum, que a própria
+    `iniciaCamadas` trata como defeito quando ele vem de outro caminho. Escolha única
+    tem chão: a leitura ativa não se desliga sozinha, ela só cede o lugar a outra."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, "storm123")
+        antes = page.evaluate(_LE)
+        page.click('.camada-btn[data-camada="storm"]')
+        page.wait_for_timeout(200)
+        depois = page.evaluate(_LE)
+        assert depois["camadas"] == antes["camadas"], depois
+        assert depois["zonas"] == antes["zonas"] and depois["zonas"], depois
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_uma_leitura_por_vez_e_o_gráfico_nao_acumula_stops(base):
+    """O PEDIDO, ao pé da letra: "mostrar Storm123" não podia acender os dois. DENTE:
+    com um método aberto, acionar o outro NÃO deixa dois stops nem dois alvos na
+    tela, e o contador de níveis reflete o que está desenhado."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, "storm123")
+        page.click('.camada-btn[data-camada="plano"]')
+        page.wait_for_timeout(250)
+        m = page.evaluate(_LE)
+        assert m["camadas"] == ["plano"], ("a leitura TROCA, não soma", m)
+        stops = [z for z in m["zonas"] if "stop" in z]
+        alvos = [z for z in m["zonas"] if "alvo" in z]
+        assert len(stops) <= 1 and len(alvos) <= 1, (stops, alvos, m["zonas"])
+        # o CONTADOR da legenda diz o que está desenhado, não o que existe no plano
+        n = page.evaluate("""() => {
+          const b = document.getElementById('chartNiveisBtn');
+          return b ? parseInt(b.querySelector('.lg-n').textContent, 10) : 0;
+        }""")
+        assert n == len(m["zonas"]), (n, m["zonas"])
         browser.close()
 
 
@@ -155,10 +207,13 @@ def test_a_camada_escolhida_vale_em_qualquer_frame(base, tf):
         page.wait_for_function(f"() => _tf === '{tf}' && _tfPendente === null")
         page.wait_for_timeout(200)
         m = page.evaluate(_LE)
-        assert m["camadas"] == ["plano", "storm"], (tf, m)
-        # e continuam NOMEADAS no frame novo
+        assert m["camadas"] == ["plano"], (tf, m)
+        # E COM UMA LEITURA SÓ, NADA DE PREFIXO (DA-143): a família só entra no rótulo
+        # quando DUAS dividem a tela — é ali que "stop (SL)" fica ambíguo. Prefixar
+        # com uma leitura só seria ruído que a troca de frame carregaria adiante.
+        assert m["zonas"], (tf, m)
         for z in m["zonas"]:
-            assert z.startswith("Setup123 · ") or z.startswith("Storm123 "), (tf, z)
+            assert not z.startswith("Storm123 "), (tf, z)
         browser.close()
 
 
@@ -189,13 +244,14 @@ def test_ver_outro_frame_nao_apaga_qual_e_o_do_veredito(base):
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 @pytest.mark.parametrize("viewport", [DESKTOP, TELEFONE], ids=["desktop", "telefone"])
 def test_as_duas_leituras_juntas_e_nada_sem_dono(base, viewport):
-    """Ligar as duas é o VALOR (comparação). O que não pode é o que gerou o print:
-    dois stops a 0,39 um do outro sem etiqueta de família."""
+    """Ligar as duas é o VALOR (comparação) — e desde a DA-143 é uma opção com NOME
+    ("as duas"), nunca o efeito de um botão rotulado "mostrar X". O que não pode é o
+    que gerou o print: dois stops a 0,39 um do outro sem etiqueta de família."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=viewport)
         _abre(page, base, "storm123")
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')
         page.wait_for_timeout(250)
         m = page.evaluate(_LE)
         stops = [z for z in m["zonas"] if "stop" in z]
@@ -265,7 +321,7 @@ def test_a_etiqueta_CURTA_do_grafico_tambem_se_nomeia(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=TELEFONE)
         _abre(page, base, "storm123")
-        page.click('.camada-btn[data-camada="plano"]')
+        page.click('.camada-btn[data-camada="ambas"]')
         page.wait_for_timeout(250)
         curtas = page.evaluate(
             """() => planZones(document.getElementById('priceChart')._actionable)
@@ -300,9 +356,12 @@ def test_grafico_desenhado_fora_do_fluxo_de_abrir_analise_nao_sai_em_branco(base
         }""")
         assert m["zonas"] > 0, ("gráfico em branco por estado não inicializado", m)
         assert m["ma"] > 0, m
-        # e desligar TUDO na tela continua sendo respeitado (vazio ≠ não inicializado)
-        page.click('.camada-btn[data-camada="plano"]')
-        page.wait_for_timeout(200)
-        assert page.evaluate(
-            "() => planZones(document.getElementById('priceChart')._actionable).length") == 0
+        # e um conjunto VAZIO continua sendo respeitado (vazio ≠ não inicializado).
+        # Ele não se produz mais pela tela — desde a DA-143 a leitura ativa não se
+        # desliga —, mas a distinção no código é o que impede o gráfico de nascer em
+        # branco, e é ela que este teste guarda.
+        assert page.evaluate("""() => {
+          _camadas = new Set();
+          return planZones(document.getElementById('priceChart')._actionable).length;
+        }""") == 0
         browser.close()

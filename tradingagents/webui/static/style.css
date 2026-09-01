@@ -3144,7 +3144,18 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
           font-family: var(--mono); }
 .fx-m { display: inline-flex; align-items: center; justify-content: center;
         min-width: 22px; height: 13px; padding: 0 3px; border-radius: 0;
-        border: 1px solid var(--border); box-sizing: border-box; }
+        border: 1px solid var(--border); box-sizing: border-box;
+        /* o marcador navegável é um <button> de verdade (DA-143): sem este reset ele
+           herdaria fundo, fonte e respiro do agente de usuário e a faixa inteira
+           mudaria de altura. Aparência: a mesma do <span> irmão. */
+        background: transparent; color: inherit; font: inherit; }
+/* CLICÁVEL: cursor, e um realce que NÃO é cor (DA-076/078) — anel por fora, que não
+   disputa com a borda de estado nem com o risco do invalidado. Quem NÃO leva a lugar
+   nenhum é o `fx-sem`, pontilhado e apagado: a diferença entre os dois já é de FORMA,
+   e o `title`/`aria-label` do navegável diz para onde ele leva. */
+.fx-vai { cursor: pointer; }
+.fx-vai:hover, .fx-vai:active { outline: 1px solid var(--text); outline-offset: 1px; }
+.fx-vai:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .fx-m > i { font-style: normal; font-size: .58rem; line-height: 1;
             letter-spacing: .04em; font-weight: var(--fw-bold);
             font-variant-numeric: tabular-nums; }

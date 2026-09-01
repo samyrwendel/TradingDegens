@@ -346,3 +346,148 @@ def test_cada_fase_se_distingue_SEM_a_cor(base):
         assert estilos["fx-morreu"]["risco"] == "line-through", estilos["fx-morreu"]
         assert estilos["fx-sem"]["estilo"] == "dotted", estilos["fx-sem"]
         browser.close()
+
+
+# ══════════ A FAIXA VIRA NAVEGAÇÃO (DA-143) ══════════════════════════════════
+#
+# *"quando clicar no timeframe e no tipo de 123, quero que o gráfico abra no
+# timeframe e no 123 indicado"*. Até aqui a faixa era só INDICADOR: ele via o
+# marcador aceso e refazia a seleção na mão — ativo, frame, método —, três controles
+# pra chegar onde a faixa já apontava. É a ponte que faltava entre VER a oportunidade
+# e OLHAR a oportunidade.
+
+
+_NAV = """() => [...document.querySelectorAll('.history li')].flatMap((li) =>
+  [...li.querySelectorAll('.h-faixa .fx-m')].map((m) => ({
+    ticker: li.dataset.ticker, tf: m.textContent, tag: m.tagName,
+    go: m.dataset.faixaGo || null, cls: m.className, title: m.title,
+  })))"""
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_marcador_com_leitura_e_um_BOTAO_e_diz_para_onde_leva(base):
+    """Botão de verdade, não um `span` com `onclick`: é o que dá foco por teclado,
+    anel de foco, cursor e o anúncio "botão" no leitor de tela. E o `title` diz o
+    destino ANTES do clique — aqui clicar dispara uma análise."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        nav = page.evaluate(_NAV)
+        vivos = [m for m in nav if m["go"]]
+        assert vivos, ("nenhum marcador navegável", nav)
+        for m in vivos:
+            assert m["tag"] == "BUTTON", m
+            assert "fx-vai" in m["cls"], m
+            assert m["title"].startswith(f"Abrir {m['ticker']} no "), m
+            tk, frame, metodo = m["go"].split("|")
+            assert tk == m["ticker"], m
+            assert metodo in ("setup123", "storm123"), m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_SEM_LEITURA_o_marcador_NAO_e_clicavel(base):
+    """"Não varri" e "varri e não achei" não têm para onde levar. Um marcador que
+    aceita o clique e abre um gráfico vazio promete o que não existe — e a diferença
+    visual entre ele e o navegável NÃO é cor: `fx-sem` é pontilhado e apagado."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        nav = page.evaluate(_NAV)
+        # CCC tem 1d sem_setup e 4h sem_dado — os dois caem em `fx-sem`
+        mudos = [m for m in nav if "fx-sem" in m["cls"]]
+        assert mudos, ("a fixture perdeu o caso sem leitura", nav)
+        for m in mudos:
+            assert m["go"] is None and m["tag"] == "SPAN", m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+@pytest.mark.parametrize("viewport", [DESKTOP, TELEFONE], ids=["desktop", "telefone"])
+def test_clicar_no_marcador_abre_o_ativo_NAQUELE_frame_e_NAQUELE_metodo(base, viewport):
+    """O DENTE: uma ação, três decisões. O clique tem de levar ticker, frame E método
+    — errar o método aqui abriria o Setup123 num marcador da linha do Storm, que é
+    exatamente a colisão de numeração que a DA-088 existe pra impedir."""
+    # payload PRÓPRIO: o ativo precisa ter leitura nos DOIS métodos pra o teste poder
+    # provar que a linha clicada decide o método. Nas outras fixturas só o Setup123
+    # tem leitura, e aí "clicou no storm" não seria distinguível de "clicou no 123".
+    dois = {**_SCAN, "ativos": [{
+        "ticker": "AAA",
+        "melhor": _linha("1d", "em_gatilho"),
+        "frames": [{**_linha(f, "em_gatilho"), "storm": _linha(f, "em_gatilho", "venda")}
+                   for f in ("1d", "4h", "1h")],
+    }]}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=viewport)
+        _abre(page, base, scan=dois, viewport=viewport)
+        # represa o POST da análise: o que se mede é o que a tela PEDIU
+        page.evaluate("""() => {
+          window.__pedido = null;
+          const o = window.fetch;
+          window.fetch = (u, x) => {
+            if (String(u).includes('/api/analyze') && x && x.body) {
+              window.__pedido = JSON.parse(x.body);
+              return new Promise(() => {});   // não deixa a run seguir
+            }
+            return o(u, x);
+          };
+        }""")
+        alvo = page.evaluate("""() => {
+          const li = [...document.querySelectorAll('.history li')]
+            .find((e) => e.dataset.ticker === 'AAA');
+          const b = [...li.querySelectorAll('.h-faixa-linha')]
+            .find((l) => l.querySelector('.fx-met').textContent === 'storm');
+          const m = b && [...b.querySelectorAll('[data-faixa-go]')]
+            .find((x) => x.textContent === '4h');
+          if (!m) return null;
+          m.click();
+          return m.dataset.faixaGo;
+        }""")
+        assert alvo == "AAA|4h|storm123", alvo
+        page.wait_for_function("() => window.__pedido !== null", timeout=10000)
+        pedido = page.evaluate("() => window.__pedido")
+        assert pedido["ticker"] == "AAA", pedido
+        assert pedido["timeframe"] == "4h", pedido
+        assert pedido["method"] == "storm123", pedido
+        # e a OUTRA linha, no mesmo card, pede o outro método: é a linha clicada que
+        # decide, não o ativo
+        page.evaluate("""() => {
+          window.__pedido = null;
+          const li = [...document.querySelectorAll('.history li')]
+            .find((e) => e.dataset.ticker === 'AAA');
+          const l = [...li.querySelectorAll('.h-faixa-linha')]
+            .find((x) => x.querySelector('.fx-met').textContent === '123');
+          [...l.querySelectorAll('[data-faixa-go]')]
+            .find((x) => x.textContent === 'D').click();
+        }""")
+        page.wait_for_function("() => window.__pedido !== null", timeout=10000)
+        outro = page.evaluate("() => window.__pedido")
+        assert outro["method"] == "setup123" and outro["timeframe"] == "1d", outro
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_clicar_no_marcador_NAO_dispara_o_clique_do_card(base):
+    """O `li` inteiro abre a ÚLTIMA run do ativo; clicar num frame específico é outra
+    intenção. Sem `stopPropagation` o clique fazia as duas coisas, e a que chegasse
+    por último mandava."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        page.evaluate("""() => {
+          window.__abriu = [];
+          window.__openRun = openRun;
+          openRun = (id) => { window.__abriu.push(id); };
+        }""")
+        page.evaluate("""() => {
+          const li = [...document.querySelectorAll('.history li')]
+            .find((e) => e.dataset.ticker === 'AAA');
+          li.querySelector('[data-faixa-go]').click();
+        }""")
+        page.wait_for_timeout(300)
+        assert page.evaluate("() => window.__abriu") == [], "o card abriu junto"
+        browser.close()

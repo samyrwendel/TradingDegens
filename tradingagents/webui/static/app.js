@@ -4176,31 +4176,61 @@ function reevaluate(tf) {
 // Fica sempre visível: não é mais "um extra que aparece quando há outra família", é
 // o controle do que a tela mostra. As leituras listadas são as que EXISTEM neste
 // plano — botão que liga o nada seria promessa falsa.
+// LEITURA É ESCOLHA ÚNICA; MÉDIA É CONJUNTO (DA-143).
+//
+// O botão de leitura era um interruptor: clicar em "Storm123" com o Setup123 ligado
+// ACENDIA os dois, e o gráfico voltava a ter dez níveis — "Storm123 · stop (SL)
+// 497,98" e "stop (SL) 497,59" empilhados a 0,39 um do outro. É EXATAMENTE o sintoma
+// que a DA-088 fechou ("um gráfico, um método"), reaberto pela porta de um botão
+// rotulado "mostrar X". O Samyr esperava ALTERNAR e a tela SOBREPÔS.
+//
+// Agora o grupo de leituras é escolha ÚNICA: clicar numa troca. E a sobreposição
+// **continua existindo**, porque ela tem valor real — comparar as duas leituras do
+// mesmo ativo é uma pergunta legítima, e a tela já sabe respondê-la (com duas
+// famílias na tela todo rótulo passa a dizer de quem é). O que ela deixa de ser é
+// EFEITO COLATERAL: vira uma opção própria, "as duas", com o nome do que faz.
+//
+// MÉDIA continua conjunto: MMS e EMA respondem "que réguas eu quero ver", não "qual
+// leitura estou operando" — e duas médias na tela não criam dois stops sem dono.
+const CAMADA_AMBAS = "ambas";
+
 function renderCamadasSelector(a) {
   const el = $("camadasSelector");
   if (!el) return;
   const leituras = leiturasDisponiveis(a);
-  const grupo = (rotulo, itens, ajuda) => itens.length
-    ? `<span class="camadas-k" title="${escapeHtml(ajuda)}">${rotulo}</span>` +
-      itens.map((f) => {
-        const on = camadasAtivas().has(f);
+  const ativas = camadasAtivas();
+  const ambas = leituras.length > 1 && leituras.every((f) => ativas.has(f));
+  const btn = (f, nome, on, tit) =>
+    `<button type="button" class="camada-btn${on ? " is-active" : ""}" ` +
+    `data-camada="${f}" aria-pressed="${on}" title="${escapeHtml(tit)}">` +
+    `${escapeHtml(nome)}</button>`;
+  const grupoLeituras = leituras.length
+    ? `<span class="camadas-k" title="${escapeHtml("Qual leitura o gráfico traça — uma por vez, ou as duas lado a lado")}">leituras</span>` +
+      leituras.map((f) => {
         const nome = CAMADA_NOME_TODAS[f];
-        const tit = on
-          ? `Esconder ${nome} no gráfico` +
-            (CAMADAS_LEITURA.includes(f) ? " — os níveis continuam inteiros no card dele" : "")
-          : `Mostrar ${nome} no gráfico` +
-            (CAMADAS_LEITURA.includes(f)
-              ? "; com duas leituras na tela cada rótulo passa a dizer de qual método é" : "");
-        return `<button type="button" class="camada-btn${on ? " is-active" : ""}" ` +
-          `data-camada="${f}" aria-pressed="${on}" title="${escapeHtml(tit)}">` +
-          `${escapeHtml(nome)}</button>`;
-      }).join("")
+        // O TÍTULO DIZ O QUE O BOTÃO FAZ. "Mostrar X" num botão que TROCA seria a
+        // mesma promessa errada, só que escrita: quem lê "mostrar" espera somar.
+        const on = ativas.has(f) && !ambas;
+        return btn(f, nome, on, `Ver ${nome} no gráfico` +
+          (leituras.length > 1
+            ? ` — sozinho; a outra leitura sai do desenho e continua inteira no card dela`
+            : ""));
+      }).join("") +
+      (leituras.length > 1
+        ? btn(CAMADA_AMBAS, "as duas", ambas,
+              "Sobrepor as duas leituras — com as duas na tela cada rótulo passa a " +
+              "dizer de qual método é, e o gráfico fica com o dobro de níveis")
+        : "")
     : "";
-  el.innerHTML =
-    grupo("leituras", leituras, "Quais níveis e pontos o gráfico traça") +
-    grupo("médias", CAMADAS_MEDIA,
-          "Famílias de média: MMS é a do Padrão, EMA 8/21/50 é a do Erick. " +
-          "A EMA 80 do Éden acompanha a leitura do Storm.");
+  const grupoMedias =
+    `<span class="camadas-k" title="${escapeHtml("Famílias de média: MMS é a do Padrão, EMA 8/21/50 é a do Erick. A EMA 80 do Éden acompanha a leitura do Storm.")}">médias</span>` +
+    CAMADAS_MEDIA.map((f) => {
+      const on = ativas.has(f);
+      const nome = CAMADA_NOME_TODAS[f];
+      return btn(f, nome, on,
+                 on ? `Esconder ${nome} no gráfico` : `Mostrar ${nome} no gráfico`);
+    }).join("");
+  el.innerHTML = grupoLeituras + grupoMedias;
   el.classList.toggle("hidden", !el.innerHTML);
   bindCamadasSelector();
 }
@@ -4220,7 +4250,13 @@ function renderCamadasSelector(a) {
 function renderCamadasAviso(a) {
   const el = $("camadasAviso");
   if (!el) return;
-  const fora = leiturasDisponiveis(a).filter((f) => !camadaVisivel(f));
+  // ELE ENSINA UMA VEZ, e depois cala (DA-143). Com a leitura virando escolha ÚNICA,
+  // a outra está SEMPRE desligada — e um aviso que aparece sempre não é aviso, é
+  // ruído fixo, que é o que o comentário acima já proibia. O que ele existe pra
+  // resolver é "do ponto de vista dele, o Storm deixou de existir"; quem já tocou no
+  // seletor uma vez sabe que ele existe, e os dois botões continuam na tela.
+  const fora = _camadasTocado
+    ? [] : leiturasDisponiveis(a).filter((f) => !camadaVisivel(f));
   if (!fora.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   const nomes = fora.map((f) => CAMADA_NOME_TODAS[f]);
   const quantos = fora.length > 1
@@ -4232,9 +4268,11 @@ function renderCamadasAviso(a) {
     // desliga; este é uma chamada pra ação, e um `querySelectorAll('.camada-btn')`
     // passaria a ver dois botões da mesma camada — o mesmo `data-camada` já basta pro
     // ouvinte compartilhado.
+    // "VER", não "mostrar" (DA-143): este botão TROCA a leitura desenhada, e
+    // "mostrar" prometia somar — que é como o gráfico acabava com dez níveis.
     fora.map((f) => `<button type="button" class="cav-btn" data-camada="${f}" ` +
-      `title="Desenhar ${escapeHtml(CAMADA_NOME_TODAS[f])} no gráfico">` +
-      `mostrar ${escapeHtml(CAMADA_NOME_TODAS[f])}</button>`).join("");
+      `title="${escapeHtml(`Desenhar ${CAMADA_NOME_TODAS[f]} no gráfico — a outra leitura sai do desenho e continua inteira no card dela`)}">` +
+      `ver ${escapeHtml(CAMADA_NOME_TODAS[f])}</button>`).join("");
   el.classList.remove("hidden");
   bindCamadasSelector(el);
 }
@@ -4251,12 +4289,25 @@ function bindCamadasSelector(alvo) {
     if (!btn) return;
     const f = btn.dataset.camada;
     const ativas = camadasAtivas();
-    if (ativas.has(f)) ativas.delete(f); else ativas.add(f);
+    const cv = $("priceChart");
+    const disp = leiturasDisponiveis(cv && cv._actionable);
+    if (f === CAMADA_AMBAS) {
+      // SOBREPOR é uma escolha com nome (DA-143), nunca o efeito de "mostrar X".
+      disp.forEach((x) => ativas.add(x));
+    } else if (CAMADAS_LEITURA.includes(f)) {
+      // LEITURA É ESCOLHA ÚNICA: a nova entra e as outras saem. Clicar na que já
+      // está ligada NÃO a desliga — a única leitura na tela desligada é um gráfico
+      // em branco, que `iniciaCamadas` já trata como defeito, e aqui seria um defeito
+      // que o próprio usuário provoca sem pedir.
+      CAMADAS_LEITURA.forEach((x) => ativas.delete(x));
+      ativas.add(f);
+    } else {
+      if (ativas.has(f)) ativas.delete(f); else ativas.add(f);
+    }
     // A partir do primeiro toque a escolha é DELE, e vale nas próximas análises.
     _camadasTocado = true;
     salvaCamadas();
     // redesenha com o estado do canvas (o plano e o chart moram nele)
-    const cv = $("priceChart");
     if (cv && cv._chart) renderChartCard(cv._chart, _openTicker, cv._actionable, cv._tf);
   });
 }
@@ -6835,7 +6886,15 @@ const FAIXA_FASE_CLS = {
 // ali é que já não se opera (a mesma razão pela qual o chip da lista fica cinza).
 const _FAIXA_VIVAS = new Set(["agora", "esperando", "andou"]);
 
-function faixaMarcaHtml(frame, linha, metodo) {
+// SEM LEITURA NÃO É CLICÁVEL. "Não varri" e "varri e não achei" não têm para onde
+// levar — e um marcador que aceita o clique e abre um gráfico vazio promete o que
+// não existe. Vetado, encerrado e invalidado LEVAM: eles são leituras de verdade, e
+// o gráfico as desenha (é justamente onde se confere por que não se opera).
+function faixaNavegavel(estado) {
+  return !!estado && estado !== "sem_setup" && estado !== "sem_dado";
+}
+
+function faixaMarcaHtml(frame, linha, metodo, ticker, metodoKey) {
   const estado = (linha || {}).estado || "sem_dado";
   const fase = FASE_DO_SCAN_ESTADO[estado] || "sem_leitura";
   const dir = (linha || {}).direction === "venda" ? "venda"
@@ -6846,17 +6905,34 @@ function faixaMarcaHtml(frame, linha, metodo) {
   // Os dois caem em "sem_leitura" no eixo de fase — então quem os separa aqui é uma
   // marca própria, e a palavra no title. Só o Storm produz `vetado`.
   const vetado = estado === "vetado";
+  const vai = faixaNavegavel(estado) && ticker && metodoKey;
   const cls = ["fx-m", vetado ? "fx-vetado" : (FAIXA_FASE_CLS[fase] || "fx-sem"),
-               viva ? dir : ""].filter(Boolean).join(" ");
+               viva ? dir : "", vai ? "fx-vai" : ""].filter(Boolean).join(" ");
   // O TÍTULO É A LEITURA COMPLETA, em palavras: sem ele a faixa seria um código de
   // cores a decorar — e quem usa leitor de tela não teria nada.
-  const tit = `${metodo ? metodo + " · " : ""}${tfNome(frame)} — ` +
+  const leitura = `${metodo ? metodo + " · " : ""}${tfNome(frame)} — ` +
     (vetado ? "não opera: o filtro Éden barrou este padrão"
             : faseRotulo(fase).toLowerCase() +
               (viva ? ` de ${dir}` : "") +
               (FASE_AJUDA[fase] ? `: ${FASE_AJUDA[fase]}` : ""));
-  return `<span class="${cls}" title="${escapeHtml(tit)}" role="img" ` +
-    `aria-label="${escapeHtml(tit)}"><i>${escapeHtml(tfCurto(frame))}</i></span>`;
+  // A AÇÃO ENTRA NO TÍTULO, antes da leitura: é o que o leitor de tela anuncia e o
+  // que o toque longo mostra. Um botão que não diz para onde leva é um botão que se
+  // aprende clicando — e aqui clicar dispara uma análise.
+  const tit = vai
+    ? `Abrir ${ticker} no ${tfNome(frame)} com ${metodo} — ${leitura}`
+    : leitura;
+  if (!vai) {
+    return `<span class="${cls}" title="${escapeHtml(tit)}" role="img" ` +
+      `aria-label="${escapeHtml(tit)}"><i>${escapeHtml(tfCurto(frame))}</i></span>`;
+  }
+  // BOTÃO DE VERDADE, e não um `span` com `onclick`: é o que dá foco por teclado, o
+  // anel de foco, o cursor e o anúncio "botão" no leitor de tela. A distinção visual
+  // de clicável NÃO é cor (DA-076/078): quem não leva a lugar nenhum é justamente o
+  // `fx-sem`, pontilhado e apagado — a diferença já é de FORMA.
+  return `<button type="button" class="${cls}" data-faixa-go="` +
+    `${escapeHtml(ticker)}|${escapeHtml(frame)}|${escapeHtml(metodoKey)}" ` +
+    `title="${escapeHtml(tit)}" aria-label="${escapeHtml(tit)}">` +
+    `<i>${escapeHtml(tfCurto(frame))}</i></button>`;
 }
 
 // A FONTE DA FAIXA É PRÓPRIA, e isso NÃO é duplicação — é separação de ciclo de
@@ -7011,18 +7087,23 @@ function faixaFonte() {
 // dois métodos numeram 1-2-3 coisas DIFERENTES (o Setup123 numera SWINGS, o Storm
 // numera TRÊS CANDLES), e sem dizer de quem é a linha não há como saber qual
 // convenção está sendo lida.
+// O 4º item é o MÉTODO como o formulário o nomeia — é ele que a navegação da faixa
+// coloca na barra de lançamento. Aqui, e não numa tradução em outro lugar: a linha
+// que MOSTRA a leitura é a mesma que ABRE a leitura, e um segundo mapa rótulo→método
+// seria a porta pra clicar em "storm" e abrir o Setup123.
 const _FAIXA_METODOS = [
-  ["123", "Setup123", (f) => f],
-  ["storm", "Storm123", (f) => f.storm || null],
+  ["123", "Setup123", (f) => f, "setup123"],
+  ["storm", "Storm123", (f) => f.storm || null, "storm123"],
 ];
 
-function faixaLinhaHtml(rotulo, nome, frames, porFrame, extrai) {
+function faixaLinhaHtml(rotulo, nome, frames, porFrame, extrai, ticker, metodoKey) {
   const linhas = frames.map((f) => extrai(porFrame.get(f) || {}));
   // NADA A DIZER = LINHA AUSENTE. "Sem leitura em frame nenhum" não é uma leitura:
   // uma faixa inteira de marcadores vazios ocuparia altura para não informar nada.
   const vivo = linhas.some((l) => l && !["sem_setup", "sem_dado"].includes(l.estado));
   if (!vivo) return "";
-  const marcas = frames.map((f, i) => faixaMarcaHtml(f, linhas[i], nome)).join("");
+  const marcas = frames.map(
+    (f, i) => faixaMarcaHtml(f, linhas[i], nome, ticker, metodoKey)).join("");
   return `<span class="h-faixa-linha">` +
     `<i class="fx-met" title="${escapeHtml(nome)}">${escapeHtml(rotulo)}</i>` +
     marcas + `</span>`;
@@ -7051,12 +7132,32 @@ function faixaDeFramesHtml(ticker) {
   if (!ativo) return "";
   const porFrame = new Map((ativo.frames || []).map((f) => [f.frame, f]));
   const linhas = _FAIXA_METODOS
-    .map(([rot, nome, extrai]) => faixaLinhaHtml(rot, nome, frames, porFrame, extrai))
+    .map(([rot, nome, extrai, metodoKey]) =>
+      faixaLinhaHtml(rot, nome, frames, porFrame, extrai, ticker, metodoKey))
     .filter(Boolean).join("");
   if (!linhas) return "";
   return `<span class="h-faixa" data-faixa-for="${escapeHtml(ticker)}">${linhas}</span>`;
 }
 
+
+// A PONTE ENTRE VER E OLHAR (DA-143). "quando clicar no timeframe e no tipo de 123,
+// quero que o gráfico abra no timeframe e no 123 indicado" — até aqui a faixa era só
+// indicador: ele via o marcador aceso e refazia a seleção na mão (ativo, frame,
+// método), três controles pra chegar onde a faixa já apontava.
+//
+// É o MESMO caminho que o painel do scan usa há tempos (`data-go`): preenche o
+// lançador e submete. Não é uma segunda rota de abertura — é a rota que existe,
+// alimentada por um novo lugar. Estrutural e $0: `setup123` e `storm123` não passam
+// por LLM nenhum.
+function abreDaFaixa(spec) {
+  const [tk, frame, metodo] = String(spec || "").split("|");
+  if (!tk || !metodo) return;
+  $("ticker").value = tk;
+  if (frame) _barTf = frame;
+  _barMethod = metodo;
+  renderLaunchBar();
+  $("analyzeForm").requestSubmit();
+}
 
 function paintHistory() {
   const ul = $("history");
@@ -7177,6 +7278,11 @@ function paintHistory() {
       ev.stopPropagation();   // não abrir a análise ao clicar no ×
       removeTicker(rm.getAttribute("data-ticker"));
     });
+    // A FAIXA VIRA NAVEGAÇÃO. `stopPropagation` pelo mesmo motivo do × acima: o `li`
+    // inteiro abre a ÚLTIMA run do ativo, e clicar num frame específico é outra
+    // intenção — o clique não pode disparar as duas.
+    li.querySelectorAll("[data-faixa-go]").forEach((b) => b.addEventListener(
+      "click", (ev) => { ev.stopPropagation(); abreDaFaixa(b.dataset.faixaGo); }));
   });
   // Resolve os nomes que faltam e re-pinta UMA vez quando chegam (cacheado → o
   // segundo ensureNames não muda nada e o loop para).
