@@ -197,3 +197,96 @@ def test_motivoCurto_devolve_a_primeira_oracao_e_nunca_texto_novo():
     esperado = "sem alvo estrutural à frente da entrada"
     assert _NOTA_REAL.startswith(esperado + " — ")
     assert json.dumps(esperado)          # (sanidade: é texto, não None)
+
+
+# ============ A CRONOLOGIA NA TELA (task 20260831-024, mesma superfície) =======
+#
+# O card passa a contar a ORDEM. Os dois casos têm de ser distinguíveis de relance,
+# e a frase de veredito é o que impede a leitura errada em cada um.
+_CRONO_ANTES = {
+    "desde": "2026-08-30 09:00", "invalidado_em": "2026-08-30 23:00",
+    "eventos": [
+        {"nome": "gatilho", "price": 11.52, "quando": "2026-08-30 13:00", "ordem": "antes"},
+        {"nome": "alvo (TP)", "price": 11.63, "quando": "2026-08-30 15:00", "ordem": "antes"},
+        {"nome": "stop (SL)", "price": 11.27, "quando": "2026-08-30 23:00", "ordem": "junto"},
+    ],
+}
+_CRONO_DEPOIS = {
+    "desde": "2026-08-29 03:00", "invalidado_em": "2026-08-29 11:00",
+    "eventos": [
+        {"nome": "gatilho", "price": 11.52, "quando": "2026-08-29 07:00", "ordem": "antes"},
+        {"nome": "stop (SL)", "price": 11.27, "quando": "2026-08-29 11:00", "ordem": "junto"},
+        {"nome": "alvo (TP)", "price": 11.63, "quando": "2026-08-30 15:00", "ordem": "depois"},
+    ],
+}
+
+
+def _com_crono(crono):
+    pat = dict(_ACT_4H["pattern"])
+    pat.update({"invalidado": True, "invalidado_em": crono["invalidado_em"]})
+    return {**_ACT_4H, "pattern": pat, "cronologia": crono,
+            "target": {"price": 11.63, "label": "alvo (TP)"},
+            "stop": {"price": 11.27, "basis": "invalidação + folga"}}
+
+
+_CRONO_NA_TELA = """() => {
+  const c = document.querySelector('.sc-crono');
+  return c ? {texto: c.innerText, veredito: (c.querySelector('.cr-vd') || {}).textContent || null,
+              depois: !!c.querySelector('.cr-depois')} : null;
+}"""
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_ALVO_ANTES_da_invalidacao_diz_que_o_setup_PAGOU(base):
+    """O caso REAL do LINK-USD: "invalidado" sozinho escondia que o alvo foi
+    alcançado com o padrão vivo, oito horas antes da morte."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, actionable=_com_crono(_CRONO_ANTES))
+        m = page.evaluate(_CRONO_NA_TELA)
+        assert m, "a linha do tempo não apareceu"
+        # a HORA está na tela — sem ela três eventos do mesmo dia perdem a ordem
+        assert "13:00" in m["texto"] and "15:00" in m["texto"] and "23:00" in m["texto"], m
+        assert "ALCANÇADO" in m["veredito"] and "pagou" in m["veredito"], m
+        assert not m["depois"], ("nada aconteceu depois da invalidação aqui", m)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_o_ALVO_DEPOIS_da_invalidacao_diz_que_NAO_e_alvo_alcancado(base):
+    """O engano ao contrário — e o que o Samyr teria lido sem a linha do tempo."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, actionable=_com_crono(_CRONO_DEPOIS))
+        m = page.evaluate(_CRONO_NA_TELA)
+        assert m and m["depois"], ("o marcador de DEPOIS tem de saltar da tela", m)
+        assert "não é alvo alcançado" in m["veredito"], m
+        assert "já tinha sido encerrado" in m["veredito"], m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_os_dois_casos_sao_distinguiveis_DE_RELANCE(base):
+    """Mesma tela, mesmos níveis, ordens opostas — e o texto tem de divergir."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, actionable=_com_crono(_CRONO_ANTES))
+        a = page.evaluate(_CRONO_NA_TELA)["veredito"]
+        _abre(page, base, actionable=_com_crono(_CRONO_DEPOIS))
+        d = page.evaluate(_CRONO_NA_TELA)["veredito"]
+        assert a != d and "ALCANÇADO" in a and "não é alvo alcançado" in d, (a, d)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_padrao_sem_cronologia_nao_ganha_bloco_nenhum(base):
+    """Bloco que sempre aparece não informa nada."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        assert page.evaluate(_CRONO_NA_TELA) is None
+        browser.close()

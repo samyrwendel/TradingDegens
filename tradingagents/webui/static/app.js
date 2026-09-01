@@ -285,6 +285,16 @@ function fmtDate(iso) {
   return m ? `${m[3]}/${m[2]}` : escapeHtml(String(iso || ""));
 }
 
+// DATA COM HORA quando ela existe (DA-124). O `fmtDate` corta o horário — e numa
+// cronologia intradiária os três eventos caem no MESMO dia: sem a hora, "30/08,
+// 30/08, 30/08" apaga exatamente a ordem que a linha do tempo existe para mostrar.
+function fmtDataHora(iso) {
+  const t = String(iso || "");
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!m) return escapeHtml(t);
+  return m[4] ? `${m[3]}/${m[2]} ${m[4]}:${m[5]}` : `${m[3]}/${m[2]}`;
+}
+
 function verdictKey(v) {
   return (v || "").toLowerCase().replace(/[^a-z]/g, "");
 }
@@ -2247,6 +2257,63 @@ function scSemNivel(nome, valor) {
     `<span class="sc-v sc-sem-v">${escapeHtml(valor || "sem nível definido")}</span></div>`;
 }
 
+// ============ A CRONOLOGIA DO PADRÃO — a ORDEM decide o resultado (DA-124) ====
+//
+// "pq invalidado se ele atingiu o alvo?" — a pergunta que expôs que a tela mostra
+// o preço passando pelos níveis e um rótulo "invalidado" ao lado, SEM dizer em que
+// ordem as coisas aconteceram. E a ordem é a única coisa que decide se o trade
+// ganhou ou perdeu: alvo tocado ANTES da morte é um setup que PAGOU; tocado DEPOIS
+// é quem entrou já ter sido stopado. Os dois são indistinguíveis sem timestamp, e
+// a leitura natural erra num dos dois sentidos.
+//
+// O backend mede (``actionable.cronologia``) e a tela ORDENA em palavras. O gatilho
+// entra na lista de propósito: sem ter ENTRADO, "tocou o alvo" não significa nada.
+
+const CRONO_ORDEM_PT = {
+  antes: "antes de invalidar",
+  junto: "na mesma barra da invalidação",
+  depois: "DEPOIS de invalidar — com o setup já encerrado",
+};
+
+// A frase que resolve a ambiguidade, e só ela sai em destaque. Nem toda cronologia
+// tem uma: um padrão vivo, ou morto sem nenhum nível tocado, não tem nada a
+// desfazer — e um aviso que sempre aparece não avisa nada.
+function cronoVeredito(c) {
+  if (!c || !c.invalidado_em) return null;
+  const alvo = (c.eventos || []).find((e) => e.nome.startsWith("alvo"));
+  const gat = (c.eventos || []).find((e) => e.nome === "gatilho");
+  if (!alvo) return null;
+  if (alvo.ordem === "depois") {
+    return "o preço só tocou o nível do alvo DEPOIS da invalidação — quem entrou " +
+           "já tinha sido encerrado, então isto não é alvo alcançado.";
+  }
+  // Alvo tocado com o padrão VIVO. Só é "alcançado" se a entrada aconteceu antes.
+  if (!gat || gat.quando > alvo.quando) {
+    return "o nível do alvo foi tocado com o padrão ainda vivo, mas o gatilho não " +
+           "tinha sido rompido antes — não houve entrada a realizar.";
+  }
+  return "o alvo foi ALCANÇADO com o padrão vivo (entrada no gatilho antes), e a " +
+         "invalidação veio DEPOIS: o setup pagou e só então morreu.";
+}
+
+function cronoLinhaHtml(c) {
+  if (!c || !(c.eventos || []).length) return "";
+  const itens = c.eventos.map((e) =>
+    `<span class="cr-ev"><b>${escapeHtml(e.nome)}</b> ${escapeHtml(fmtNum(e.price))} ` +
+    `<span class="cr-q">${escapeHtml(fmtDataHora(e.quando))}</span>` +
+    (e.ordem ? `<span class="cr-o cr-${escapeHtml(e.ordem)}">${escapeHtml(CRONO_ORDEM_PT[e.ordem])}</span>` : "") +
+    `</span>`).join("");
+  const morte = c.invalidado_em
+    ? `<span class="cr-ev cr-morte"><b>INVALIDOU</b> ` +
+      `<span class="cr-q">${escapeHtml(fmtDataHora(c.invalidado_em))}</span></span>`
+    : "";
+  const vd = cronoVeredito(c);
+  return `<div class="sc-crono"><span class="cr-k">linha do tempo — ` +
+    `o padrão existe desde ${escapeHtml(fmtDataHora(c.desde))}</span>` +
+    `<div class="cr-linha">${itens}${morte}</div>` +
+    (vd ? `<div class="cr-vd">${escapeHtml(vd)}</div>` : "") + `</div>`;
+}
+
 // ============ NÍVEL RECUSADO SE EXPLICA ONDE SE PROCURA (DA-123) ==============
 //
 // "kd o alvo do Setup123?" — o Samyr, olhando o gráfico do MSFT no 4h. O alvo
@@ -2567,6 +2634,11 @@ function renderSetupCards(a) {
         + " Quem estava posicionado por ele perdeu a premissa — o gatilho deste padrão não vale mais, e uma nova entrada exige um novo ponto 3.",
         "sc-morto"));
     }
+    // A LINHA DO TEMPO vem logo depois da morte (ou no topo, num padrão vivo que já
+    // tocou níveis): ela é o que responde "pq invalidado se atingiu o alvo?", e a
+    // resposta tem de estar ANTES dos níveis, não depois — quem lê o número do alvo
+    // sem saber a ordem já tirou a conclusão errada (DA-124).
+    if (a.cronologia) rows.push(cronoLinhaHtml(a.cronologia));
     if (pat.trigger != null) {
       rows.push(scRow("gatilho", fmtNum(pat.trigger),
         pat.direction === "venda" ? "perda da mínima do ponto 2"

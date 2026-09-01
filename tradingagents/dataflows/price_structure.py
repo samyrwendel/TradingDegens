@@ -576,6 +576,90 @@ def _primeira_barra_alem(df: pd.DataFrame, desde: int, nivel: float,
     return None
 
 
+# ── A CRONOLOGIA DO PADRÃO: em que ORDEM as coisas aconteceram (DA-124) ──────
+#
+# *"pq invalidado se ele atingiu o alvo?"* — o Samyr, olhando o LINK-USD no 1h.
+#
+# A pergunta expôs que a tela não conta a ORDEM, e a ordem é a única coisa que
+# decide se um trade ganhou ou perdeu. Cronometrado na série, o caso do print
+# (LINK-USD 1h, análise de 30/08):
+#
+#   30/08 09:00   nasce o ponto 3 (11,34) — o padrão passa a existir
+#   30/08 13:00   gatilho 11,52 TOCADO — a entrada aconteceu
+#   30/08 15:00   alvo 11,63 TOCADO — duas barras depois da entrada
+#   30/08 23:00   stop 11,27 tocado E o fechamento cai além do ponto 3: INVALIDA
+#
+# Ou seja: **ele tem razão** — o alvo foi alcançado com o padrão VIVO, e a morte
+# veio oito horas depois. Um rótulo "invalidado" sozinho esconde que o setup pagou.
+# (O caminho inverso também existe e engana ao contrário: preço tocando o nível do
+# alvo DEPOIS da morte, com quem entrou já stopado. Sem timestamps os dois são
+# indistinguíveis, e a leitura natural erra num dos dois sentidos.)
+#
+# É a MESMA disciplina da task 008, que tirou o veredito de fechamento do track
+# record da inspeção de nível e o pôs na SÉRIE, com direção e ordem: **"o preço
+# passou pelo nível" não é "o trade ganhou"**. Aqui ela chega ao gráfico.
+#
+# O que se mede — e é MEDIDA, não veredito novo: desde o ponto 3 (quando o padrão
+# passou a existir), a data do PRIMEIRO toque em cada nível que decide o resultado
+# — gatilho, alvo e stop —, e a posição de cada um em relação à invalidação. O
+# toque é por AMPLITUDE da barra (mínima ≤ nível ≤ máxima), o mesmo critério do
+# ``_primeiro_toque`` do ledger: um alvo não precisa de fechamento além dele para
+# ser tocado.
+#
+# O GATILHO entra na lista de propósito. Sem ele, "tocou o alvo" continua não
+# significando "ganhou" — é preciso ter ENTRADO antes, e é o gatilho que diz se e
+# quando isso aconteceu.
+
+
+def _primeiro_toque_na_serie(df: pd.DataFrame, nivel: float, fmt: str) -> str | None:
+    """Data da primeira barra cuja AMPLITUDE contém ``nivel``, ou ``None``."""
+    if df is None or df.empty or nivel is None:
+        return None
+    lows, highs = df["Low"].astype(float), df["High"].astype(float)
+    tocou = (lows <= float(nivel)) & (highs >= float(nivel))
+    if not bool(tocou.any()):
+        return None
+    return df["Date"].iloc[int(tocou.values.argmax())].strftime(fmt)
+
+
+def _cronologia_do_padrao(df, pattern, target, stop, fmt) -> dict[str, Any] | None:
+    """A linha do tempo do padrão — ``None`` quando não há padrão.
+
+    Devolve ``{desde, invalidado_em, eventos: [{nome, price, quando, ordem}]}``,
+    com ``ordem`` em ``antes`` / ``junto`` / ``depois`` **relativa à invalidação**
+    (e ``None`` quando o padrão está vivo — aí não há morte a que se referir).
+
+    Só os três níveis que decidem o resultado entram: gatilho, alvo e stop. A
+    invalidação não é evento da lista — ela É o marco contra o qual os outros se
+    ordenam."""
+    if pattern is None or df is None or df.empty:
+        return None
+    p3 = (getattr(pattern, "p3", None) or {}).get("date")
+    if not p3:
+        return None
+    vivos = df[df["Date"] >= pd.to_datetime(p3)]
+    if vivos.empty:
+        return None
+    em = getattr(pattern, "invalidado_em", None) if getattr(pattern, "invalidado", False) else None
+    niveis = [("gatilho", getattr(pattern, "trigger", None)),
+              ("alvo (TP)", (target or {}).get("price")),
+              ("stop (SL)", (stop or {}).get("price"))]
+    eventos = []
+    for nome, preco in niveis:
+        if preco is None:
+            continue
+        quando = _primeiro_toque_na_serie(vivos, float(preco), fmt)
+        if quando is None:
+            continue
+        ordem = None
+        if em:
+            ordem = "antes" if quando < em else ("junto" if quando == em else "depois")
+        eventos.append({"nome": nome, "price": round(float(preco), 2),
+                        "quando": quando, "ordem": ordem})
+    eventos.sort(key=lambda e: e["quando"])
+    return {"desde": p3, "invalidado_em": em, "eventos": eventos}
+
+
 # ── PROJEÇÃO DO PONTO 3: onde ele precisa nascer pra o padrão validar ─────────
 #
 # "Se tiver em formação de 123, marcar onde deve ser a nova formação do 3, tipo uma
@@ -1075,6 +1159,11 @@ class ActionablePlan:
     # morreu. É a "preparação para acompanhar a hora de entrar" — derivada da regra
     # do detector, nunca chutada. ``None`` com padrão vivo: ali o ponto 3 já existe.
     projecao_p3: dict[str, Any] | None = None
+    # A CRONOLOGIA do padrão (DA-124): desde quando ele existe, quando invalidou, e
+    # em que ORDEM o preço tocou gatilho, alvo e stop. Sem isto a tela mostra o
+    # preço passando pelo alvo com um rótulo "invalidado" ao lado, e a leitura
+    # natural erra — num sentido ou no outro, conforme a ordem real.
+    cronologia: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -1094,6 +1183,7 @@ class ActionablePlan:
             "risk_reward": self.risk_reward,
             "setup_source": self.setup_source,
             "projecao_p3": self.projecao_p3,
+            "cronologia": self.cronologia,
         }
 
 
@@ -1596,6 +1686,7 @@ def build_actionable_plan(
         invalidation=invalidation, stop=stop, target=target, risk_reward=risk_reward,
         setup_source=setup_source,
         projecao_p3=_projecao_p3(df, lows, highs, price, struct.pattern, fmt),
+        cronologia=_cronologia_do_padrao(df, struct.pattern, target, stop, fmt),
     )
 
 

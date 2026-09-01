@@ -144,6 +144,13 @@ def test_dict_is_json_serializable(synth):
         # 3 já existe —, mas a CHAVE existe sempre: a tela não pode ter que adivinhar
         # se o campo sumiu porque não se aplica ou porque o plano esqueceu.
         "projecao_p3",
+        # cronologia é a ORDEM dos eventos do padrão (DA-124): desde quando ele
+        # existe, quando invalidou, e em que ordem o preço tocou gatilho, alvo e
+        # stop. Sem ela a tela mostra o preço passando pelo alvo com um rótulo
+        # "invalidado" ao lado, e a leitura natural erra — num sentido ou no outro,
+        # conforme a ordem real. A CHAVE existe sempre, pelo mesmo motivo do
+        # projecao_p3: "não se aplica" e "o plano esqueceu" não podem se confundir.
+        "cronologia",
     }
 
 
