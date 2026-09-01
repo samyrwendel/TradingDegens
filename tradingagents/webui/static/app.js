@@ -1155,6 +1155,10 @@ function renderResult(snap) {
   $("progressPanel").classList.add("hidden");
   const panel = $("resultPanel");
   panel.classList.remove("hidden");
+  // A run terminou e o resultado NOVO está na tela: a marca de "recalculando",
+  // acesa pelo caminho REAVALIAR, sai aqui — é o único ponto por onde toda run
+  // concluída passa, então não há caminho que a deixe acesa.
+  marcaRevalidando(false);
   // Esconde uma barra de Retomar remanescente; o erro PARCIAL resumível a re-mostra.
   if ($("resumeBar")) $("resumeBar").classList.add("hidden");
 
@@ -4074,7 +4078,21 @@ function reevaluate(tf) {
   // fontes) — mesma verdade que a troca de TF do gráfico (switchTimeframe usa _openMethod).
   // Com uma análise aberta _openMethod sempre existe; cai em 'padrao' só na ausência dela.
   const method = _openMethod || "padrao";
-  $("resultPanel").classList.add("hidden");
+  // O QUE CONTINUA VÁLIDO NÃO SE APAGA (DA-118, agora no caminho REAVALIAR — era o
+  // único que tinha ficado de fora). Reavaliar dispara uma análise NOVA, então
+  // mostrar progresso é legítimo; esconder o painel inteiro **antes do POST** não é:
+  // o gráfico, os níveis e o card daquele frame continuam sendo a leitura vigente
+  // até a nova chegar. O Samyr clicou em "Reavaliar" e a tela ficou sem gráfico.
+  //
+  // O QUE FICA: a análise anterior, inteira. O QUE TROCA: só quando a nova run
+  // termina, pelo caminho normal do `watchRun`.
+  //
+  // E ELA SE DECLARA: o card do gráfico entra em `is-revalidando` — o MESMO
+  // mecanismo que a revalidação automática já usa —, então o que está na tela nunca
+  // se apresenta como se fosse o resultado da reavaliação em curso.
+  const _tinhaResultado = !$("resultPanel").classList.contains("hidden");
+  if (!_tinhaResultado) $("resultPanel").classList.add("hidden");
+  else marcaRevalidando(true);
   $("steps").innerHTML = "";
   renderProgress({
     status: "running", ticker: _openTicker, elapsed: 0, cost: null,
@@ -4086,9 +4104,14 @@ function reevaluate(tf) {
       if (data && data.run_id) {
         rememberRunToken(data.run_id, data.run_token);
         watchRun(data.run_id); loadHistory();
-      } else { $("formError").textContent = (data && data.error) || "falha ao reavaliar"; }
+      } else {
+        marcaRevalidando(false);
+        $("formError").textContent = (data && data.error) || "falha ao reavaliar";
+      }
     })
-    .catch(() => { $("formError").textContent = "falha ao reavaliar"; });
+    // A MARCA SAI NA FALHA. Sem isto, uma reavaliação que nem começou deixaria o
+    // gráfico anunciando um recálculo em curso para sempre.
+    .catch(() => { marcaRevalidando(false); $("formError").textContent = "falha ao reavaliar"; });
 }
 
 // O SELETOR DE CAMADAS. Dois grupos, porque são duas perguntas: quais LEITURAS
