@@ -67,6 +67,16 @@ MINUTOS_DO_FRAME = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080}
 # bastante pra a barra existir.
 ATRASO_POS_FECHAMENTO_S = 60
 
+# Quanto tempo depois do INÍCIO da passada o arquivo do último scan já está gravado.
+# A passada não é instantânea: ela varre a watchlist inteira e só então grava o
+# ``last_scan.json``. Quem for LER esse arquivo por causa da agenda tem de esperar a
+# gravação, senão relê exatamente o mesmo conteúdo de antes e conclui que nada mudou.
+# MEDIDO na passada das 12:01 de 01/09/2026: carimbo 12:01:02, arquivo gravado
+# 12:01:28 — 26s com 20 ativos. 120s é ~4,6x essa medida, e numa cadência de 60min
+# são 2 minutos de atraso que ninguém percebe. Aqui, e não no JavaScript: quem manda
+# no relógio da agenda é este módulo (é a razão de :func:`proxima_passada` existir).
+MARGEM_LEITURA_S = 120
+
 # Sessões em que uma AÇÃO vale a pena: durante o pregão e nas pontas (pré e after),
 # onde o preço ainda anda. "fechado" é a noite — ali a ação repete o mesmo candle.
 # O after-market cobre o fechamento do candle DIÁRIO, que é o mais importante do dia.

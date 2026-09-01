@@ -206,3 +206,82 @@ def test_o_agendamento_nao_conhece_ticker_nenhum():
     fonte = inspect.getsource(_AR.agenda_proxima)
     for nome in ("MSFT", "NVDA", "AAPL", "BTC-USD", "GOLD", "GC=F"):
         assert nome not in fonte, f"{nome} chumbado no agendamento"
+
+
+# ============ A AGENDA DO SCAN (DA-141) =======================================
+#
+# Irmã da de cima, e a diferença é a PERGUNTA. `/api/agenda/proxima` responde pelo
+# candle de um frame de um ativo — é o que a revalidação do gráfico precisa saber.
+# `/api/agenda/scan` responde pela PASSADA: quando a agenda varre a watchlist e
+# grava o `last_scan.json`, que é o arquivo de onde a faixa de frames do card
+# (DA-133) lê. A faixa se agendava... nunca: `carregaFaixaDoScan` tinha uma única
+# chamada, no boot, e o card ficava com o estado de quando a aba abriu.
+#
+# O dente comum aos dois: o relógio é o de :mod:`agenda`, comparado com as FUNÇÕES
+# e não com uma constante decorada aqui — trocar a regra num lado sem o outro cai.
+
+
+def test_a_cadencia_do_scan_e_a_do_candle_mais_rapido_que_ele_le(runner):
+    """DENTE: o front não pode contar "60 minutos" por conta própria.
+
+    A cadência é a de :func:`agenda.cadencia_minutos` sobre ``SCAN_FRAMES``. No dia
+    em que o scan ganhar o 15m, a faixa passa a reler de 15 em 15 sozinha — porque
+    ela obedece a este número em vez de ter o seu.
+    """
+    a = runner.agenda_do_scan()
+    assert a["cadencia_min"] == agenda.cadencia_minutos()
+    assert a["atraso_s"] == agenda.ATRASO_POS_FECHAMENTO_S
+
+
+def test_a_passada_do_scan_e_a_MESMA_que_o_laco_da_agenda_executa(runner):
+    """DENTE: dois relógios divergindo é o defeito que isto existe pra impedir."""
+    antes = timeutil.now()
+    a = runner.agenda_do_scan()
+    depois = timeutil.now()
+    proxima = datetime.fromisoformat(a["proxima"])
+    assert proxima in {agenda.proxima_passada(t) for t in (antes, depois)}
+    assert 1 <= a["em_segundos"] <= agenda.cadencia_minutos() * 60 + 60
+
+
+def test_a_LEITURA_espera_a_passada_gravar(runner):
+    """A passada não é instantânea: varre a watchlist e SÓ ENTÃO grava.
+
+    DENTE: reler no instante do fechamento leria o arquivo ANTERIOR e a tela
+    concluiria que nada mudou — o mesmo congelamento, uma hora mais tarde. A folga
+    sai de :data:`agenda.MARGEM_LEITURA_S` (medida na passada real), e vem SOMADA
+    do servidor pra o JavaScript não ter margem própria.
+    """
+    a = runner.agenda_do_scan()
+    assert a["margem_s"] == agenda.MARGEM_LEITURA_S
+    assert a["ler_em_segundos"] == a["em_segundos"] + agenda.MARGEM_LEITURA_S
+    assert a["ler_em_segundos"] > a["em_segundos"]
+
+
+def test_perguntar_quando_ler_NAO_varre_e_NAO_custa_cotacao(runner, monkeypatch):
+    """$0: é aritmética de calendário. Uma varredura por pergunta seria o oposto
+    do que a faixa promete (uma leitura de arquivo, sem LLM)."""
+    monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist",
+                        lambda *a, **k: pytest.fail("perguntar a hora não pode varrer"))
+    monkeypatch.setattr("tradingagents.dataflows.live_price.fetch_live_price",
+                        lambda t: pytest.fail("perguntar a hora não pode custar cotação"))
+    assert runner.agenda_do_scan()["ler_em_segundos"] > 0
+
+
+def test_o_endpoint_da_agenda_do_scan_responde(tmp_path, monkeypatch):
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path))
+    monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist",
+                        lambda *a, **k: pytest.fail("perguntar a hora não pode varrer"))
+    httpd = make_server("127.0.0.1", 0, runner=runner)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/api/agenda/scan"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            a = json.loads(resp.read().decode())
+        assert a["cadencia_min"] == agenda.cadencia_minutos()
+        assert a["ler_em_segundos"] == a["em_segundos"] + agenda.MARGEM_LEITURA_S
+        assert datetime.fromisoformat(a["proxima"]) > datetime.fromisoformat(a["agora"])
+        assert datetime.fromisoformat(a["proxima"]) - datetime.fromisoformat(a["agora"]) \
+            <= timedelta(minutes=agenda.cadencia_minutos(), seconds=61)
+    finally:
+        httpd.shutdown()

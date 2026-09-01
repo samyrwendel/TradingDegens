@@ -2956,6 +2956,35 @@ class AnalysisRunner:
             "revalida": revalida,
         }
 
+    def agenda_do_scan(self) -> dict[str, Any]:
+        """QUANDO a próxima PASSADA da agenda acontece — e quando LER o resultado.
+
+        Irmã de :meth:`agenda_proxima`, e a diferença é a pergunta: aquela responde
+        pelo candle de UM frame de UM ativo (é o que a revalidação do gráfico precisa
+        saber); esta responde pela passada do SCAN, cuja cadência é o candle mais
+        rápido de :data:`scanner.SCAN_FRAMES` — o mesmo relógio de
+        :class:`agenda.AgendaScan`, não uma segunda regra.
+
+        ``ler_em_segundos`` já traz a :data:`agenda.MARGEM_LEITURA_S` somada: a
+        passada leva dezenas de segundos até gravar o ``last_scan.json``, e quem
+        relesse no instante do fechamento leria o arquivo ANTERIOR. A margem sai
+        daqui e não do JavaScript porque o relógio da agenda é deste lado.
+
+        $0 e sem I/O de rede: é aritmética de calendário.
+        """
+        agora = timeutil.now()
+        proxima = agenda.proxima_passada(agora)   # frames = SCAN_FRAMES (o default)
+        em_s = max(1, int((proxima - agora).total_seconds()))
+        return {
+            "cadencia_min": agenda.cadencia_minutos(),
+            "atraso_s": agenda.ATRASO_POS_FECHAMENTO_S,
+            "margem_s": agenda.MARGEM_LEITURA_S,
+            "agora": timeutil.stamp(agora),
+            "proxima": timeutil.stamp(proxima),
+            "em_segundos": em_s,
+            "ler_em_segundos": em_s + agenda.MARGEM_LEITURA_S,
+        }
+
     def scan_ultimo(self) -> dict[str, Any]:
         """O último scan COMPLETO salvo em disco, ou ``{}`` se nunca houve um.
 

@@ -6820,7 +6820,85 @@ async function carregaFaixaDoScan() {
     if (!data || !(data.ativos || []).length || !data.gerado_em) return;
     _faixaScan = data;
     paintHistory();
-  } catch (e) { /* sem salvo: o card fica como era */ }
+  } catch (e) { /* sem salvo: o card fica como era */
+  } finally {
+    // Leu (ou tentou), agenda a próxima. No `finally` de propósito: uma leitura que
+    // falhou não pode ENCERRAR o ciclo — seria um blecaute de rede de 2s deixando a
+    // faixa congelada até o próximo F5, que é o defeito que isto veio consertar.
+    agendaProximaLeituraDaFaixa();
+  }
+}
+
+// A FAIXA ACOMPANHA A AGENDA (DA-141) — e o relógio é o do SERVIDOR.
+//
+// O defeito: `carregaFaixaDoScan` tinha UMA chamada em todo o front, dentro do
+// `init`. Depois do boot ninguém mais a chamava, e `_faixaScan` ficava com o que
+// existia quando a aba abriu. Enquanto isso a agenda varre de hora em hora e GRAVA
+// (DA-114/116), a lista de observação se repinta a cada 5s e o gráfico revalida
+// sozinho no fechamento do candle (DA-118) — então o mesmo ativo mudava no gráfico
+// e não mudava no card até recarregar a página. Quanto mais tempo a aba ficava
+// aberta, mais velha a faixa, e nada na tela dizia isso: estado de horas atrás com
+// cara de agora, numa tela de operação.
+//
+// **O gatilho é a passada da agenda, não um intervalo escolhido aqui.** O arquivo
+// muda quando a passada grava; reler de 5 em 5 segundos seria bater num arquivo que
+// muda uma vez por hora, e contar "60 minutos" em JavaScript seria um SEGUNDO
+// agendador com regra própria — no dia em que divergisse do de `agenda.py` ninguém
+// saberia qual manda. A tela PERGUNTA (`/api/agenda/scan`), e obedece: o
+// `ler_em_segundos` da resposta já traz a folga pra passada terminar de gravar.
+// Mesma disciplina da DA-118, pela mesma razão.
+//
+// **Custo: $0.** É a MESMA leitura de arquivo que o painel já fazia — não dispara
+// varredura, não chama LLM, não é por card. Uma requisição por hora.
+//
+// **Não consome o "novo desde a última visita".** Este caminho toca só `_faixaScan`
+// e repinta a lista; quem marca o que é novo é o `paintScan`, e ele continua
+// rodando só quando o painel está aberto (é o bug que o comentário de `_faixaScan`
+// documenta — a marca calculada e dada por vista antes de o painel existir).
+//
+// **Aba em segundo plano:** o navegador afrouxa `setTimeout` (no celular, chega a
+// parar). Por isso o horário-alvo fica em `_faixaAlvoMs` e é conferido ao voltar
+// pro primeiro plano — o timer é o caminho feliz, a volta da aba é a rede de
+// segurança, como no `revalidaSeOCandleFechouEnquantoEuNaoOlhava`.
+let _faixaTimer = null;
+let _faixaAlvoMs = 0;
+// Entre TENTATIVAS de perguntar — e isto não é a cadência da faixa. Quem decide
+// quando ler continua sendo o servidor; se a pergunta não foi respondida (rede
+// oscilou, processo reiniciando), o que se repete é a PERGUNTA. Sem isto, um
+// blecaute de dois segundos no instante errado encerrava o ciclo e devolvia a faixa
+// ao congelamento até o próximo F5 — o defeito, entrando pela porta do erro.
+const _FAIXA_RETENTA_MS = 60000;
+
+async function agendaProximaLeituraDaFaixa() {
+  if (_faixaTimer) { clearTimeout(_faixaTimer); _faixaTimer = null; }
+  _faixaAlvoMs = 0;
+  let ms = 0;
+  try {
+    const res = await fetch("/api/agenda/scan");
+    const a = res.ok ? await res.json() : null;
+    const s = Number(a && a.ler_em_segundos);
+    if (s && isFinite(s)) ms = Math.max(1000, s * 1000);
+  } catch (e) { /* sem agenda agora: retenta a pergunta abaixo */ }
+  if (ms) {
+    _faixaAlvoMs = Date.now() + ms;
+    _faixaTimer = setTimeout(() => { _faixaTimer = null; carregaFaixaDoScan(); }, ms);
+  } else {
+    _faixaTimer = setTimeout(
+      () => { _faixaTimer = null; agendaProximaLeituraDaFaixa(); }, _FAIXA_RETENTA_MS);
+  }
+}
+
+// Chamado pelo `onVisibleForeground`: se a passada aconteceu enquanto a aba estava
+// atrás (e o navegador engoliu o timer), relê agora. Se não aconteceu, só garante
+// que o timer existe.
+function leFaixaSeAPassadaAconteceuEnquantoEuNaoOlhava() {
+  if (_faixaAlvoMs && Date.now() >= _faixaAlvoMs) {
+    _faixaAlvoMs = 0;
+    if (_faixaTimer) { clearTimeout(_faixaTimer); _faixaTimer = null; }
+    carregaFaixaDoScan();          // relê e reagenda no `finally`
+    return;
+  }
+  if (!_faixaTimer) agendaProximaLeituraDaFaixa();
 }
 
 // De ONDE a faixa lê, num lugar só: o scan da TELA tem precedência sobre o salvo —
@@ -9362,7 +9440,8 @@ function init() {
   // era buscado ao abrir o painel de varredura — com a lista de observação na tela
   // desde o boot, a faixa não apareceria nunca. É UMA leitura do disco do servidor
   // (`/api/scan/salvo`), a mesma que o painel já fazia: não dispara varredura, não
-  // custa LLM, e não é por card.
+  // custa LLM, e não é por card. Daqui em diante ela se REAGENDA sozinha, pela
+  // agenda do servidor (DA-141) — sem isso a faixa congelava no boot.
   carregaFaixaDoScan();
   { const rb = $("resumeRunBtn"); if (rb) rb.addEventListener("click", resumeRun); }  // Retomar (task 026)
   loadHistory();
@@ -9443,6 +9522,7 @@ function onVisibleForeground() {
   else resumeActiveRun();                                    // timer morreu: reengata o vivo
   refreshPrices();                                           // preços live ao voltar pra aba
   revalidaSeOCandleFechouEnquantoEuNaoOlhava();              // candle que fechou atrás da aba
+  leFaixaSeAPassadaAconteceuEnquantoEuNaoOlhava();           // passada que gravou atrás da aba
 }
 
 // A lista de fundo se atualiza devagar (5s), independente do run assistido: é o

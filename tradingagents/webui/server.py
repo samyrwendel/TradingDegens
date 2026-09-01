@@ -573,6 +573,14 @@ class _Handler(BaseHTTPRequestHandler):
                     (qs.get("tf", ["1d"])[0] or "1d"),
                     (qs.get("ticker", [""])[0] or ""),
                     (qs.get("asset_type", [""])[0] or "")))
+            elif path == "/api/agenda/scan":
+                # QUANDO a próxima passada da agenda do scan acontece — e quando a
+                # tela deve RELER o resultado dela. A faixa de frames do card
+                # (DA-133) se agenda por aqui em vez de contar 60 minutos em
+                # JavaScript: a cadência é a de :mod:`agenda`, a mesma que a passada
+                # usa, e dois relógios divergiriam sem que ninguém soubesse qual
+                # manda. $0, sem varrer — é aritmética de calendário.
+                self._send_json(self.runner.agenda_do_scan())
             elif path == "/api/scan/salvo":
                 # O ÚLTIMO scan COMPLETO já salvo em disco — leitura de arquivo, $0 e
                 # instantânea. É o que o painel pinta na ABERTURA, com o carimbo de

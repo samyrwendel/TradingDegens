@@ -708,16 +708,23 @@ def test_setup123_run_is_instant_free_and_ungated(server, monkeypatch):
     with urllib.request.urlopen(req, timeout=5) as resp:
         body = json.loads(resp.read())
     assert resp.status == 200
-    # a run termina sozinha quase na hora (worker determinístico)
-    deadline = time.time() + 3
-    snap = None
-    while time.time() < deadline:
+    # A run termina sozinha quase na hora (worker determinístico) — mas "quase na
+    # hora" é medida de CPU, e desde a DA-139 a suíte roda em PARALELO: um limite de
+    # 3s de relógio de parede reprovava um worker que talvez nem tivesse sido
+    # escalonado ainda (visto em duas rodadas cheias seguidas, verde em isolado). O
+    # `_wait_until` deste arquivo é a espera que os outros testes já usam, e o limite
+    # generoso não deixa o teste mais lento no caso bom: ele sai no instante em que o
+    # status muda. O que ele mede é que a run TERMINA sozinha, não em quanto tempo.
+    snap = {}
+
+    def terminou():
+        nonlocal snap
         snap = json.loads(urllib.request.urlopen(
             f"{server}/api/status/{body['run_id']}", timeout=5).read())
-        if snap["status"] != "running":
-            break
-        time.sleep(0.05)
-    assert snap and snap["status"] == "done"
+        return snap["status"] != "running"
+
+    assert _wait_until(terminou), snap
+    assert snap["status"] == "done", snap
     assert snap["method"] == "setup123"
     assert snap["cost"]["usd"] == 0
     assert (snap["result"] or {}).get("setup123") is True
