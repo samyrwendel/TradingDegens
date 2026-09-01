@@ -7353,6 +7353,10 @@ async function applyConfig() {
     $("tzLabel").textContent = "(" + TZ_LABEL + ")";
     $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
     _isOwner = !!cfg.owner;
+    // O BOTÃO DA CARTEIRA DO ERICK depende de DUAS coisas, e as duas só se sabem
+    // aqui: ser dono E esta instância ter a credencial (a rota devolve 404 sem
+    // ela). Ver `preparaCarteiraErick` — DA-148.
+    preparaCarteiraErick();
     _ownerLoginEnabled = !!cfg.owner_login_enabled;
     if (cfg.llm) { _llmMeta = cfg.llm; renderConfigPanel(); }
     updateConfigBadge();
@@ -8542,6 +8546,210 @@ function renderModelTest(data) {
   }).join("");
 }
 
+// ══════════ A CARTEIRA DO ERICK, DENTRO DO PRODUTO (DA-148) ═════════════════
+//
+// "QUERO DEIXAR ISSO NO TRADINGDEGENS" (Samyr). É a carteira REAL do autor do
+// método — posição, movimentações datadas e o racional escrito por ele — ao lado do
+// que o NOSSO sistema diz sobre os mesmos papéis. O valor não é o espelho: é poder
+// clicar num ativo dele e ver o veredito do produto sobre a posição real.
+//
+// SÓ-DONO, e o portão é de AUTORIZAÇÃO, não de custo. Todo o resto do produto lê
+// fonte pública; isto é assinatura paga de terceiro ("acesso exclusivo para
+// alunos"). Trazer chave própria de LLM não compra assinatura de outra pessoa — por
+// isso o botão nasce ESCONDIDO e só aparece quando o `/api/config` diz `owner` E a
+// rota responde. Visitante não vê, não lista, não descobre que existe.
+//
+// DE QUANDO É O DADO, sempre (DA-114): fonte de terceiro atualizada à mão, lida uma
+// vez por dia. Se a leitura de agora falhou, a tela mostra o ÚLTIMO lido com a data
+// e diz que está degradado — painel vazio se leria como "ele zerou a carteira", que
+// é uma afirmação, não uma ausência.
+let _erickDados = null;
+
+async function abreCarteiraErick() {
+  const painel = $("erickPanel");
+  if (!painel) return;
+  painel.classList.remove("hidden");
+  $("erickCorpo").innerHTML = '<span class="hint">lendo a carteira…</span>';
+  try {
+    const res = await fetch("/api/erick/carteira");
+    if (!res.ok) {
+      // 403 (não é dono) e 404 (instância sem credencial) não são erro de tela: a
+      // feature simplesmente não existe pra quem pediu. Fecha e some o botão.
+      painel.classList.add("hidden");
+      $("erickOpenBtn")?.classList.add("hidden");
+      return;
+    }
+    _erickDados = await res.json();
+    pintaCarteiraErick();
+  } catch (e) {
+    $("erickCorpo").innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// A IDADE DO DADO EM PALAVRAS. "há 3h" responde a pergunta que "27/08" não responde
+// sozinha — e o degradado diz por que está velho, em vez de deixar o leitor supor.
+function erickCarimboHtml(d) {
+  const q = d.lido_em ? fmtStamp(new Date(d.lido_em * 1000).toISOString()) : null;
+  const h = d.idade_horas;
+  const idade = h == null ? "" : h < 1 ? "agora há pouco"
+    : h < 48 ? `há ${Math.round(h)}h` : `há ${Math.round(h / 24)} dias`;
+  const atualizado = ((d.carteira || {}).atualizado || "").trim();
+  return [
+    atualizado ? `carteira publicada por ele em <b>${escapeHtml(atualizado)}</b>` : "",
+    q ? `lida ${idade} (${escapeHtml(q)})` : "",
+    d.degradado
+      ? `<span class="ek-degradado">a leitura de agora falhou — isto é o último lido</span>` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function erickPct(v) {
+  return v == null ? "—" : `${(v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+}
+
+function pintaCarteiraErick() {
+  const d = _erickDados;
+  if (!d) return;
+  $("erickCarimbo").innerHTML = erickCarimboHtml(d);
+  const linhas = d.composicao || [];
+  const caixa = linhas.find((L) => (L.classe || "").toLowerCase() === "caixa");
+  const ativos = linhas.filter((L) => L !== caixa);
+
+  // O CAIXA EM DESTAQUE, e com a palavra que ele mesmo usa. 71% em caixa é POSTURA
+  // DE RISCO declarada ("caixa elevado por escolha"), não sobra — e num painel de
+  // composição ele sairia como só mais uma linha, a maior e a mais muda.
+  const caixaHtml = caixa ? `
+    <div class="ek-caixa">
+      <span class="ek-caixa-k">caixa</span>
+      <b class="ek-caixa-v">${erickPct(caixa.participacao)}</b>
+      <span class="ek-caixa-nota">${escapeHtml((caixa.tese || "").split(".")[0] || "")}</span>
+    </div>` : "";
+
+  // CADA ATIVO É CLICÁVEL — é o gancho que torna isto útil em vez de um espelho:
+  // ver a posição REAL dele e o que o NOSSO sistema diz sobre ela, lado a lado.
+  // Reusa a rota de abertura que a faixa do card já usa (DA-143), com o método
+  // padrão do produto; caixa não é clicável porque não há o que analisar.
+  const linhaHtml = (L) => {
+    const sym = L.simbolo_produto;
+    const v = L.variacao_pm;
+    const dir = v == null ? "" : v >= 0 ? "compra" : "venda";
+    const abre = sym
+      ? `<button type="button" class="ek-abre" data-erick-go="${escapeHtml(sym)}" ` +
+        `title="${escapeHtml(`Analisar ${sym} pelo Setup123 — a posição real dele e o veredito do sistema, lado a lado`)}">analisar</button>`
+      : "";
+    // O RÓTULO VIAJA COM O NÚMERO (`data-k`). No desktop quem nomeia é o cabeçalho
+    // da grade; no telefone ele não cabe e some — e aí "22,11 · 381,93 · 492,00"
+    // vira três números sem dono, que é o oposto de dado (DA-078 regra 5). O CSS
+    // faz o rótulo aparecer só onde o cabeçalho não está.
+    return `<div class="ek-linha">
+      <span class="ek-tk">${escapeHtml(L.ticker || "")}</span>
+      <span class="ek-nome">${escapeHtml(L.nome || "")}</span>
+      <span class="ek-num" data-k="qtd">${fmtNum(L.qtd)}</span>
+      <span class="ek-num" data-k="preço médio">${fmtNum(L.precoMedio)}</span>
+      <span class="ek-num" data-k="agora">${L.preco_agora == null ? "—" : fmtNum(L.preco_agora)}</span>
+      <span class="ek-num ek-var ${dir}" data-k="desde o PM">${erickPct(v)}</span>
+      <span class="ek-num" data-k="peso">${erickPct(L.participacao)}</span>
+      <span class="ek-entrada" data-k="entrada">${escapeHtml(L.entrada || "")}</span>
+      ${abre}
+    </div>`;
+  };
+
+  const cab = `<div class="ek-linha ek-cab">
+      <span class="ek-tk">ativo</span><span class="ek-nome">nome</span>
+      <span class="ek-num">qtd</span><span class="ek-num">preço médio</span>
+      <span class="ek-num">agora</span><span class="ek-num">desde o PM</span>
+      <span class="ek-num">peso</span><span class="ek-entrada">entrada</span><span></span>
+    </div>`;
+
+  const feed = ((d.carteira || {}).feed || []).map((f) => {
+    const quando = String(f.data || "").replace("T", " ").slice(0, 16);
+    return `<li class="ek-mov ${escapeHtml(f.tipo || "")}">
+      <span class="ek-mov-q">${escapeHtml(quando)}</span>
+      <span class="ek-mov-t">${escapeHtml(f.titulo || "")}</span>
+      <span class="ek-mov-r">${escapeHtml(f.resumo || f.texto || "")}</span>
+    </li>`;
+  }).join("");
+
+  // OS RELATÓRIOS SÃO O RACIONAL, e é o que menos se acha em outro lugar — mas são
+  // longos. Ficam recolhidos, um <details> por relatório: presentes sem tomar a
+  // tela (mesma disciplina da legenda que recolhe, DA-135).
+  const rels = ((d.carteira || {}).relatorios || []).map((r) => {
+    const txt = String(r.conteudo || r.texto || "")
+      .replace(/:::[a-zç]+[^\n]*/gi, "").replace(/:::/g, "").trim();
+    return `<details class="ek-rel"><summary>${escapeHtml(String(r.data || "").slice(0, 10))} — ${escapeHtml(r.titulo || "")}</summary>
+      <div class="ek-rel-txt">${escapeHtml(txt).replace(/\n{2,}/g, "<br><br>")}</div></details>`;
+  }).join("");
+
+  const hist = erickCurvaHtml((d.historico || {}));
+
+  $("erickCorpo").innerHTML =
+    caixaHtml +
+    `<div class="ek-grade">${cab}${ativos.map(linhaHtml).join("")}</div>` +
+    hist +
+    (feed ? `<h3 class="ek-sec">movimentações</h3><ul class="ek-movs">${feed}</ul>` : "") +
+    (rels ? `<h3 class="ek-sec">relatórios — o racional dele</h3>${rels}` : "");
+
+  $("erickCorpo").querySelectorAll("[data-erick-go]").forEach((b) =>
+    b.addEventListener("click", () => {
+      // Mesma rota de abertura da faixa (DA-143): preenche o lançador e submete.
+      $("erickPanel").classList.add("hidden");
+      abreDaFaixa(`${b.dataset.erickGo}|1d|setup123`);
+    }));
+}
+
+// A CURVA DE PATRIMÔNIO em SVG inline — sem biblioteca e sem canvas: são poucos
+// pontos e o desenho é uma linha. Sem série, a seção não aparece (em vez de um eixo
+// vazio que se leria como "patrimônio zero").
+function erickCurvaHtml(h) {
+  const pts = Array.isArray(h) ? h : (h && Array.isArray(h.serie) ? h.serie : []);
+  const vals = pts.map((p) => Number(
+    typeof p === "number" ? p : (p.valor ?? p.patrimonio ?? p.total ?? p.v))).filter(
+      (n) => Number.isFinite(n));
+  if (vals.length < 2) return "";
+  const min = Math.min(...vals), max = Math.max(...vals), amp = (max - min) || 1;
+  const W = 100, H = 28;
+  const d = vals.map((v, i) => `${i === 0 ? "M" : "L"}${(i / (vals.length - 1)) * W},` +
+    `${H - ((v - min) / amp) * H}`).join(" ");
+  const sobe = vals[vals.length - 1] >= vals[0];
+  return `<h3 class="ek-sec">patrimônio</h3>
+    <div class="ek-curva">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="${escapeHtml(`curva de patrimônio, ${vals.length} pontos, de ${fmtNum(vals[0])} a ${fmtNum(vals[vals.length - 1])}`)}">
+        <path d="${d}" fill="none" stroke-width="1.2" vector-effect="non-scaling-stroke"
+              class="${sobe ? "compra" : "venda"}"></path>
+      </svg>
+      <span class="ek-curva-n">${fmtNum(vals[0])} → <b>${fmtNum(vals[vals.length - 1])}</b> · ${vals.length} pontos</span>
+    </div>`;
+}
+
+// O BOTÃO SÓ EXISTE PRO DONO, e só depois de a rota confirmar. Duas condições, e a
+// segunda importa: `owner` sozinho não garante que ESTA instância tem a credencial
+// configurada — sem ela a rota devolve 404 e o botão não deve aparecer prometendo
+// uma tela que não abre.
+async function preparaCarteiraErick() {
+  const btn = $("erickOpenBtn");
+  if (!btn) return;
+  if (!_isOwner) { btn.classList.add("hidden"); return; }
+  try {
+    const res = await fetch("/api/erick/carteira");
+    if (!res.ok) { btn.classList.add("hidden"); return; }
+    _erickDados = await res.json();
+    btn.classList.remove("hidden");
+  } catch (e) { btn.classList.add("hidden"); }
+}
+
+function bindCarteiraErick() {
+  const open = $("erickOpenBtn");
+  if (open && !open._bound) {
+    open._bound = true;
+    open.addEventListener("click", abreCarteiraErick);
+  }
+  const close = $("erickCloseBtn");
+  if (close && !close._bound) {
+    close._bound = true;
+    close.addEventListener("click", () => $("erickPanel").classList.add("hidden"));
+  }
+}
+
 // ---- SCAN DE PORTFÓLIO (28/08): gatilhos 1-2-3 a $0 de LLM ---------------------
 // O olho barato: varre a watchlist em 1d+4h+1h, classifica pela distância do preço ao
 // gatilho e oferece a análise completa (Padrão/Erick) a um clique no que estiver
@@ -9641,6 +9849,7 @@ function init() {
   bindConfront();
   bindLaunchBar();
   bindScan();
+  bindCarteiraErick();   // carteira do Erick: só-dono, botão escondido por default (DA-148)
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-128)

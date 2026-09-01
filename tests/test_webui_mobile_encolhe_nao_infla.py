@@ -42,6 +42,13 @@ _PODE_SUMIR = {
     # arquivo e define `display: flex` — com a mesma especificidade ela venceria.
     ".chart-wrap .chart-hint-box": "dica de roda/arrasto do mouse (e o botão que a "
                                    "recolhe) — o telefone usa toque",
+    # O cabeçalho da grade da carteira do Erick some no telefone, mas o DADO que ele
+    # nomeava NÃO some: o rótulo viaja com o número (`data-k` + `::before`), porque
+    # oito colunas em 390px seriam oito colunas ilegíveis. É troca de PORTADOR do
+    # rótulo, não perda — que é justamente a distinção que este teste existe pra
+    # cobrar (DA-148/DA-078 regra 5).
+    ".ek-cab": "cabeçalho da grade da carteira — no telefone o rótulo passa a viajar "
+               "com cada número (data-k), então nenhum dado fica sem nome",
 }
 
 # Propriedades que, se aparecerem no celular, têm de ser MENORES ou iguais à base.

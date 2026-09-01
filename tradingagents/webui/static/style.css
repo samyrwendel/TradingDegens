@@ -3320,3 +3320,92 @@ body.chart-max-aberto { overflow: hidden; }
 .vig-alvo { border-left-color: var(--green); }
 .vig-alvo, .vig-alvo > i { color: var(--green); }
 .vig-gatilho { border-left-color: var(--muted); }
+
+/* ══════════ CARTEIRA DO ERICK (DA-148) — painel só-dono ═══════════════════════
+   Mesma linguagem do resto: canto reto (DA-070), sem degradê, sem pictograma
+   (DA-076), número tabular à direita (DA-078 regra 6), e a cor só onde ela
+   significa — a variação desde o preço médio usa a paleta de DIREÇÃO da DA-140,
+   porque é exatamente isso que ela diz (subiu = verde, caiu = vermelho). */
+.erick-panel { padding: 12px 14px; }
+.ek-carimbo { color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12); margin: 0 0 10px; }
+.ek-degradado { color: var(--text); }
+/* O CAIXA É MANCHETE, não linha de tabela. 71% em caixa é POSTURA declarada por
+   ele ("caixa elevado por escolha"), e numa grade de composição sairia como só
+   mais uma linha — a maior e a mais muda. */
+.ek-caixa {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-left: 3px solid var(--dim);
+  padding: 8px 11px; margin-bottom: 10px;
+}
+.ek-caixa-k { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .5px; }
+.ek-caixa-v { font-size: var(--fs-16); line-height: var(--lh-16); font-family: var(--mono);
+  font-variant-numeric: tabular-nums; }
+.ek-caixa-nota { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted);
+  overflow-wrap: anywhere; }
+/* GRADE, não tabela: no telefone as colunas de número precisam poder encolher sem
+   estourar a página, e `minmax(0,...)` é o que impede o vão da regra 11. */
+.ek-grade { display: grid; gap: 0; min-width: 0; overflow-x: auto; }
+.ek-linha {
+  display: grid; align-items: baseline; gap: 4px 10px; padding: 5px 2px;
+  border-bottom: 1px solid var(--border); min-width: 0;
+  grid-template-columns: minmax(48px, auto) minmax(0, 1.4fr) repeat(5, minmax(0, auto))
+                         minmax(0, auto) minmax(0, auto);
+}
+.ek-cab { color: var(--muted); font-size: var(--fs-10); line-height: var(--lh-10);
+  text-transform: uppercase; letter-spacing: .4px; }
+.ek-tk { font-weight: var(--fw-bold); font-family: var(--mono); }
+.ek-nome { color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ek-num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right;
+  font-size: var(--fs-12); line-height: var(--lh-12); }
+.ek-var.compra { color: var(--green); }
+.ek-var.venda { color: var(--red); }
+.ek-entrada { color: var(--muted); font-size: var(--fs-10); line-height: var(--lh-10); }
+/* "analisar" é o gancho que torna isto útil em vez de espelho: a posição REAL dele
+   e o veredito do NOSSO sistema, lado a lado. Botão de verdade — foco, cursor e
+   anúncio no leitor de tela (mesma escolha do marcador da faixa, DA-143). */
+.ek-abre {
+  font: inherit; font-size: var(--fs-10); line-height: var(--lh-10);
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 0; padding: 2px 7px; cursor: pointer;
+}
+.ek-abre:hover { color: var(--text); border-color: var(--text); }
+.ek-abre:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.ek-sec { font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-med);
+  color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 6px; }
+.ek-curva { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ek-curva svg { width: 100%; max-width: 420px; height: 40px; }
+.ek-curva path.compra { stroke: var(--green); }
+.ek-curva path.venda { stroke: var(--red); }
+.ek-curva-n { font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+.ek-movs { list-style: none; margin: 0; padding: 0; }
+.ek-mov { display: grid; gap: 2px 10px; padding: 6px 2px; border-bottom: 1px solid var(--border);
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr); min-width: 0; }
+.ek-mov-q { font-family: var(--mono); font-size: var(--fs-10); line-height: var(--lh-10);
+  color: var(--muted); white-space: nowrap; }
+.ek-mov-t { font-weight: var(--fw-bold); font-size: var(--fs-12); line-height: var(--lh-12); }
+.ek-mov-r { grid-column: 1 / -1; color: var(--muted); font-size: var(--fs-12);
+  line-height: var(--lh-12); overflow-wrap: anywhere; }
+/* O RACIONAL RECOLHE (mesma disciplina da legenda, DA-135): é o que menos se acha
+   em outro lugar, e é longo demais pra ficar aberto tomando a tela. */
+.ek-rel { border-bottom: 1px solid var(--border); }
+.ek-rel > summary { cursor: pointer; padding: 6px 2px; font-size: var(--fs-12);
+  line-height: var(--lh-12); }
+.ek-rel-txt { padding: 0 2px 10px; color: var(--muted); font-size: var(--fs-12);
+  line-height: 1.55; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  /* NO TELEFONE a grade vira duas faixas: identificação em cima, números embaixo —
+     oito colunas em 390px seriam oito colunas ilegíveis (DA-101: encolhe, não some). */
+  .ek-linha { grid-template-columns: minmax(0, auto) minmax(0, 1fr); }
+  .ek-cab { display: none; }
+  .ek-num, .ek-entrada { text-align: left; }
+  /* SEM O CABEÇALHO, O RÓTULO VOLTA PRA JUNTO DO NÚMERO. "22,11 · 381,93 · 492,00"
+     empilhado sem nome é três números sem dono — o oposto de dado. O rótulo entra
+     miúdo e cinza, o valor segue com o peso (DA-078 regra 5). */
+  .ek-num[data-k]::before, .ek-entrada[data-k]::before {
+    content: attr(data-k) " "; color: var(--muted);
+    font-family: var(--font); font-size: var(--fs-10); letter-spacing: .3px;
+  }
+}

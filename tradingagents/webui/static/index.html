@@ -171,6 +171,8 @@
         <div class="wl-search-wrap">
           <input type="search" class="wl-search" id="watchlistSearch" placeholder="Buscar ativo ou nome…"
                  autocomplete="off" spellcheck="false" aria-label="Buscar na lista de observação">
+          <button type="button" class="wl-scan-icon hidden" id="erickOpenBtn"
+                  title="Carteira real do Erick Sekiama — composição, movimentações e relatórios (só o dono vê)">erick</button>
           <button type="button" class="wl-scan-icon" id="scanOpenBtn"
                   title="Varrer a watchlist: quem está em gatilho de compra/venda do Setup123 e do Storm123 (1d + 4h + 1h, sem LLM)">scan</button>
         </div>
@@ -506,6 +508,24 @@
         <!-- Q&A ancorado sobre a comparação (task 027): a resposta pode
              referenciar as duas leituras (Padrão × Erick) com os níveis reais. -->
         <div class="ask-box" id="askCompare"></div>
+      </section>
+
+      <!-- CARTEIRA DO ERICK (DA-148) — SÓ-DONO. Nasce escondida e só é montada
+           quando o /api/config diz owner:true E a rota responde: um visitante nem
+           vê o botão. É conteúdo de assinatura paga de terceiro, e o portão aqui é
+           de AUTORIZAÇÃO, não de custo — BYOK não compra assinatura de outra
+           pessoa. Ver tradingagents/dataflows/erick_carteira.py. -->
+      <section class="panel erick-panel hidden" id="erickPanel">
+        <div class="scan-head">
+          <h2>Carteira do Erick <span class="orig">(fonte do autor · leitura diária)</span></h2>
+          <div class="scan-actions">
+            <button type="button" class="scan-close" id="erickCloseBtn" title="Fechar">✕</button>
+          </div>
+        </div>
+        <!-- DE QUANDO É O DADO, sempre (DA-114): fonte de terceiro atualizada à mão,
+             e dado velho não pode se disfarçar de novo. -->
+        <p class="ek-carimbo" id="erickCarimbo"></p>
+        <div id="erickCorpo"></div>
       </section>
 
       <!-- SCAN DE PORTFÓLIO (28/08): o olho barato ($0 de LLM) — varre a watchlist

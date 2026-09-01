@@ -2985,6 +2985,58 @@ class AnalysisRunner:
             "ler_em_segundos": em_s + agenda.MARGEM_LEITURA_S,
         }
 
+    def erick_carteira(self, *, force: bool = False) -> dict[str, Any] | None:
+        """A carteira REAL do Erick pra tela — SÓ-DONO (DA-148), ``None`` se a
+        instância não tem a credencial configurada.
+
+        Passa direto pro módulo, que já decide cache × leitura e degrada pro último
+        lido. Aqui só se acrescenta o que a TELA precisa e o módulo não deve saber:
+        a composição com participação calculada e a cotação de agora dos papéis
+        dele, reusando o cache de preço do runner (:data:`_PRICE_TTL`) — a mesma
+        fonte que a lista de observação já usa, não uma segunda.
+        """
+        from tradingagents.dataflows import erick_carteira as ec
+
+        payload = ec.carteira(force=force)
+        if payload is None:
+            return None
+        linhas = ec.composicao(payload)
+        # CAIXA não tem cotação, e pedir uma seria inventar símbolo. Cripto do
+        # payload vem no formato da exchange ("BINANCE:BTCUSDT"); o produto fala
+        # "BTC-USD" — a tradução é da TELA (o payload dele não muda por nossa causa).
+        simbolos = [s for s in (self._erick_simbolo(L) for L in linhas) if s]
+        precos = self.live_prices(simbolos) if simbolos else {}
+        for L in linhas:
+            sym = self._erick_simbolo(L)
+            L["simbolo_produto"] = sym
+            cot = (precos or {}).get(sym) if sym else None
+            preco = (cot or {}).get("price") if isinstance(cot, dict) else None
+            L["preco_agora"] = preco
+            try:
+                pm = float(L.get("precoMedio") or 0)
+                L["variacao_pm"] = ((float(preco) / pm) - 1) if preco and pm else None
+            except (TypeError, ValueError, ZeroDivisionError):
+                L["variacao_pm"] = None
+        payload["composicao"] = linhas
+        return payload
+
+    @staticmethod
+    def _erick_simbolo(linha: dict[str, Any]) -> str | None:
+        """O ticker do ativo dele no vocabulário DO PRODUTO.
+
+        Caixa não é ativo negociável — devolve None em vez de um símbolo falso que
+        faria o produto pedir cotação de "CASH". E a cripto vem no formato da
+        exchange no payload dele; aqui vira o par que o resto do produto entende.
+        """
+        if (linha.get("classe") or "").lower() == "caixa":
+            return None
+        tk = (linha.get("ticker") or "").strip().upper()
+        if not tk:
+            return None
+        if (linha.get("classe") or "").lower() == "cripto":
+            return f"{tk}-USD"
+        return tk
+
     def scan_ultimo(self) -> dict[str, Any]:
         """O último scan COMPLETO salvo em disco, ou ``{}`` se nunca houve um.
 

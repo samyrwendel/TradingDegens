@@ -573,6 +573,24 @@ class _Handler(BaseHTTPRequestHandler):
                     (qs.get("tf", ["1d"])[0] or "1d"),
                     (qs.get("ticker", [""])[0] or ""),
                     (qs.get("asset_type", [""])[0] or "")))
+            elif path == "/api/erick/carteira":
+                # SÓ-DONO, SEM ALTERNATIVA DE BYOK (DA-148). Todo o resto do produto
+                # lê fonte pública; isto é conteúdo de assinatura paga de terceiro —
+                # a tela de login do site diz "acesso exclusivo para alunos". Trazer
+                # chave própria de LLM não compra assinatura de outra pessoa, então
+                # o `_gate_or_403` (portão de CUSTO) não serve aqui: é portão de
+                # AUTORIZAÇÃO, e o único que serve é o de dono.
+                if not self._owner_or_403():
+                    return
+                dados = self.runner.erick_carteira()
+                if dados is None:
+                    # Instância sem a credencial: a feature não existe aqui. 404 e
+                    # não 500 — não é erro, é ausência; e a mensagem não diz nada
+                    # sobre o endereço nem sobre quem é o assinante.
+                    self._send_json({"error": "carteira não configurada nesta instância",
+                                     "error_code": "sem_carteira"}, 404)
+                    return
+                self._send_json(dados)
             elif path == "/api/agenda/scan":
                 # QUANDO a próxima passada da agenda do scan acontece — e quando a
                 # tela deve RELER o resultado dela. A faixa de frames do card
