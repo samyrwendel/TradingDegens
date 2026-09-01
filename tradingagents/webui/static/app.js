@@ -2247,6 +2247,43 @@ function scSemNivel(nome, valor) {
     `<span class="sc-v sc-sem-v">${escapeHtml(valor || "sem nível definido")}</span></div>`;
 }
 
+// ============ NÍVEL RECUSADO SE EXPLICA ONDE SE PROCURA (DA-123) ==============
+//
+// "kd o alvo do Setup123?" — o Samyr, olhando o gráfico do MSFT no 4h. O alvo
+// estava AUSENTE por decisão correta (o papel está na máxima da série: não há topo
+// anterior acima da entrada, então não há retorno a projetar, e a task 008
+// estabeleceu que número inventado não se publica). O defeito era de COMUNICAÇÃO:
+// na legenda apareciam "recuo à média", "invalidação" e "stop (SL)", e o alvo
+// simplesmente não existia — sem uma palavra. O único vestígio era um
+// "R:R não calculável" num canto, que não responde "cadê o alvo".
+//
+// O MOTIVO já existia no dado (``risk_reward.note``, escrito pelo backend). Estas
+// funções o levam até onde a pergunta nasce, e NENHUMA delas escreve texto novo:
+// uma devolve a frase inteira, a outra a PRIMEIRA ORAÇÃO dela, para caber onde o
+// espaço é de uma linha. Inventar prosa aqui criaria uma segunda explicação para o
+// mesmo fato, e as duas divergiriam no dia em que o backend mudasse a dele.
+
+// A primeira oração do motivo — um EXTRATO, nunca um texto paralelo.
+function motivoCurto(nota) {
+  const t = String(nota || "").trim();
+  if (!t) return "";
+  const corte = t.search(/\s—\s|;|\.\s|\.$/);
+  return (corte > 0 ? t.slice(0, corte) : t).trim();
+}
+
+// Os níveis que a LEITURA recusou publicar, com o motivo. Genérico de propósito:
+// a regra é "ausência declarada" (task 008), e hoje só o alvo cai nela — mas o dia
+// em que o stop ou a invalidação forem recusados, a legenda já sabe dizer.
+function niveisRecusados(a) {
+  if (!a) return [];
+  const out = [];
+  const rr = a.risk_reward || {};
+  const temPadrao = !!a.pattern;
+  const semAlvo = !(a.target && a.target.price != null);
+  if (temPadrao && semAlvo && rr.note) out.push({ nome: "alvo (TP)", motivo: rr.note });
+  return out;
+}
+
 // A LINHA DO R:R NUNCA SOME. Ela é o número que diz se o setup vale o risco, e
 // some-la quando não dá pra calcular deixava o leitor sem saber se o R:R era
 // ruim, bom ou inexistente — nos prints do Samyr (mesmo ativo, três frames) ele
@@ -2559,7 +2596,12 @@ function renderSetupCards(a) {
     } else if (tp.price != null) {
       rows.push(scSemNivel("alvo (TP)", "não publicável"));
     } else {
-      rows.push(scSemNivel("alvo (TP)"));
+      // O MOTIVO CURTO na própria linha do alvo (DA-123). Ele era só "sem nível
+      // definido", e a explicação ficava duas linhas abaixo, na do R:R — onde o
+      // leitor que procura o ALVO não olha. Não é duplicata (DA-077): aqui vai a
+      // primeira oração, lá vai a frase inteira; é o mesmo texto em dois níveis de
+      // detalhe, como o card já faz com "no gatilho" e "percurso".
+      rows.push(scSemNivel("alvo (TP)", motivoCurto(rr.note) || "sem nível definido"));
     }
     // A conta do R:R declara a entrada — mas quando ela É o gatilho (o caso comum),
     // repetir o número seria escrever o mesmo preço duas vezes no mesmo card: aqui
@@ -3459,6 +3501,18 @@ function chartLegendHtml(chart, actionable) {
   zones.forEach((z) => legend.push(
     `<span class="lg"><span class="sw band${z.familia === "storm" ? " storm" : ""}" ` +
     `style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
+  // NÍVEL RECUSADO ENTRA NA LEGENDA (DA-123). A legenda descreve o desenho, e a
+  // AUSÊNCIA de um nível que o leitor espera encontrar é parte do desenho: sem
+  // esta linha, "cadê o alvo?" não tem resposta em lugar nenhum do gráfico. A
+  // amostra vai VAZIA (contorno tracejado) porque não há linha traçada a
+  // decodificar — é isso que ela diz. Sem cor nova (DA-078 regra 3): o que
+  // distingue é a forma da amostra e a palavra.
+  if (camadaVisivel("plano")) {
+    niveisRecusados(actionable).forEach((n) => legend.push(
+      `<span class="lg lg-sem" title="${escapeHtml(n.motivo)}">` +
+      `<span class="sw vazia"></span>${escapeHtml(n.nome)} — sem alvo: ` +
+      `${escapeHtml(motivoCurto(n.motivo))}</span>`));
+  }
   // As bolinhas verdes na mínima da vela (``chart.markers.buy_regions``) marcam
   // TOQUES PASSADOS na média — nada delas está na legenda hoje, e círculo vivo sem
   // rótulo ao lado do losango apagado do Storm lê como "onde estão os números do
@@ -5112,7 +5166,8 @@ function drawPriceChart(canvas, chart, a) {
              `R:R ${_pre}${fmtNum(rrPlan.rr)}:1 · risco ${rrVezes(rrPlan.rr)}x`,
              `R:R ${_pre}${fmtNum(rrPlan.rr)}:1`]
           : [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1`])
-      : (rrPlan ? ["R:R não calculável", "R:R sem base"]
+      : (rrPlan ? [`R:R não calculável — ${motivoCurto(rrPlan.note)}`,
+                   "R:R não calculável", "R:R sem base"]
                 : _rrG.morto ? ["R:R não vale — padrão invalidado", "R:R — invalidado"]
                 // ESCADA de três degraus, e o NOME sobrevive aos dois primeiros: no
                 // telefone o chip cabe em ~250px, e "Éden de Baixa" × "armadilha" são

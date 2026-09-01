@@ -772,6 +772,8 @@ details.section[open] > summary::before { content: "▾"; }
 .chart-head .section-title { margin: 0; }
 .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* O nível RECUSADO carrega uma frase, não um rótulo curto: ele pode quebrar. */
+.chart-legend .lg-sem { white-space: normal; }
 .chart-legend .sw { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
 .chart-legend .sw.dot { width: 9px; height: 9px; border-radius: 50%; }
 /* LOSANGO = Storm123. A forma do marcador desenhado na vela, repetida aqui:
@@ -2926,3 +2928,11 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .sc-fase.agora { color: var(--green); border-color: var(--green-dim); }
 .sc-fase.morreu, .sc-fase.sem_leitura { color: var(--muted); }
 .sc-mec { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); }
+
+/* NÍVEL RECUSADO na legenda (DA-123). A amostra vai VAZIA — contorno tracejado, sem
+   preenchimento — porque não há linha traçada a decodificar: é exatamente isso que
+   ela diz. Sem cor nova (DA-078 regra 3); o que distingue é a forma e a palavra. */
+.chart-legend .lg-sem { color: var(--muted); }
+.chart-legend .sw.vazia {
+  background: none !important; border: 1px dashed var(--muted); border-radius: 0;
+}
