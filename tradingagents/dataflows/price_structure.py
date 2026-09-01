@@ -573,6 +573,89 @@ def _pattern_123(
     )
 
 
+# ── A RÉGUA COMPARTILHADA: morte E desfecho, para os DOIS detectores (DA-126) ──
+#
+# A DA-125 corrigiu o veredito invertido ("invalidado" num trade que atingiu o
+# alvo) **só no 1-2-3 deste módulo**. O Storm123 tem o SEU caminho de morte
+# (``build_storm_plan``, que sobrescreve ``invalidado``/``invalidado_em`` no dict do
+# padrão) e ficou com o defeito de pé. Corrigir um só seria pior que o bug: os dois
+# métodos passariam a discordar sobre a MESMA sequência de preço.
+#
+# Então a fronteira entra na régua que os dois usam. A regra, em uma frase:
+# **a invalidação só é procurada enquanto o trade está VIVO** — do ponto 3 até o
+# primeiro desfecho (alvo ou stop, o que vier primeiro) quando houve entrada.
+#
+# A ordem de resolução é o que faz os dois lados nunca discordarem:
+#
+#   1. o GATILHO foi tocado? Sem entrada não há trade a encerrar.
+#   2. a invalidação veio ANTES do gatilho? Então o padrão morreu sem acionar —
+#      invalidado, e o que o preço fizer depois não é desfecho de nada.
+#   3. entrou: qual veio primeiro, alvo ou stop? Esse é o DESFECHO, e a partir dele
+#      o setup está ENCERRADO — a invalidação posterior é fato registrado, não
+#      veredito.
+
+
+def _leitura_de_referencia(leituras: list[dict[str, Any]] | None, price: float | None):
+    """A leitura do Storm que descreve o trade que se faria: a de gatilho MAIS
+    PRÓXIMO do preço.
+
+    Mesma escolha que a linha do scan faz (``scanner._storm_row``) — as duas
+    entradas do padrão são leituras independentes (DA-079), e eleger uma diferente
+    aqui faria o desfecho descrever um trade que a lista não mostra.
+    """
+    vivas = [L for L in (leituras or []) if L.get("trigger") is not None]
+    if not vivas:
+        return None
+    if price is None:
+        return vivas[0]
+    return min(vivas, key=lambda L: abs(float(price) / float(L["trigger"]) - 1.0))
+
+
+def _morte_e_desfecho(df: pd.DataFrame, desde: int, nivel_invalidacao: float | None,
+                      compra: bool, fmt: str, trigger: float | None,
+                      alvo: float | None, stop: float | None
+                      ) -> tuple[str | None, dict[str, Any] | None]:
+    """``(invalidado_em, desfecho)`` pela régua ÚNICA dos dois detectores.
+
+    ``invalidado_em`` é o FATO estrutural (a primeira barra que fecha além do nível)
+    e continua sendo devolvido mesmo quando houve desfecho — ele aconteceu. Quem
+    decide o veredito é o par: com ``desfecho`` preenchido, o padrão está encerrado
+    e não se invalida.
+
+    Empate na mesma barra entre alvo e stop conta o STOP: sem tick não dá pra saber
+    a ordem dentro dela, e é a leitura pessimista do ``_primeiro_toque`` do ledger."""
+    inval_em = (_primeira_barra_alem(df, desde, float(nivel_invalidacao), compra, fmt)
+                if nivel_invalidacao else None)
+    if trigger is None or df is None or df.empty:
+        return inval_em, None
+    depois = df.iloc[desde + 1:]
+    gat_em = _primeiro_toque_na_serie(depois, float(trigger), fmt)
+    # Sem entrada, ou morte ANTES da entrada: não há trade a encerrar.
+    if gat_em is None or (inval_em is not None and inval_em < gat_em):
+        return inval_em, None
+    apos_entrada = depois[depois["Date"].dt.strftime(fmt) > gat_em]
+    cands = []
+    for tipo, nivel in (("stop", stop), ("alvo", alvo)):   # stop primeiro = empate pessimista
+        if nivel is None:
+            continue
+        quando = _primeiro_toque_na_serie(apos_entrada, float(nivel), fmt)
+        if quando:
+            cands.append((quando, tipo, round(float(nivel), 2)))
+    if not cands:
+        return inval_em, None
+    cands.sort(key=lambda c: (c[0], 0 if c[1] == "stop" else 1))
+    quando, tipo, preco = cands[0]
+    # Morte ANTES do desfecho: o padrão morreu com o trade aberto; o toque posterior
+    # não encerra coisa nenhuma (quem entrou já tinha saído).
+    if inval_em is not None and inval_em < quando:
+        return inval_em, None
+    empate = any(c[0] == quando and c[1] != tipo for c in cands)
+    desfecho = {"tipo": tipo, "em": quando, "price": preco,
+                "entrada_em": gat_em, "entrada": round(float(trigger), 2),
+                "empate_na_barra": empate}
+    return inval_em, desfecho
+
+
 def _primeira_barra_alem(df: pd.DataFrame, desde: int, nivel: float,
                          compra: bool, fmt: str) -> str | None:
     """Data da primeira barra após ``desde`` cujo FECHAMENTO passou de ``nivel``.
@@ -654,6 +737,12 @@ def _primeiro_toque_na_serie(df: pd.DataFrame, nivel: float, fmt: str) -> str | 
 
 
 def _desfecho_do_padrao(cronologia: dict[str, Any] | None) -> dict[str, Any] | None:
+    # NOTA (DA-126): esta função lê a CRONOLOGIA já medida e é a forma conveniente
+    # de olhar o desfecho a partir dela — quem decide o estado do padrão é a régua
+    # compartilhada :func:`_morte_e_desfecho`, chamada pelos DOIS detectores. As
+    # duas concordam por construção: leem os mesmos toques, com a mesma ordem e o
+    # mesmo empate pessimista. Mantida porque a cronologia é publicada na tela e
+    # alguém vai querer derivar o desfecho dela sem repetir a varredura.
     """O primeiro desfecho do trade — ``None`` quando não houve.
 
     Derivado da CRONOLOGIA (uma medição só, DA-124): exige o gatilho rompido e,
@@ -1741,13 +1830,27 @@ def build_actionable_plan(
     )
     realize_zone = _reconcile_realize(realize_zone, struct.pattern, target)
 
-    # A CRONOLOGIA primeiro, o DESFECHO dela (DA-124 + DA-125). O desfecho volta
-    # PARA O PADRÃO: é ele que decide se a invalidação posterior ainda vale, e o
-    # `as_dict` do padrão já sabe disso. Só aqui os dois lados existem juntos — o
-    # detector não conhece alvo nem stop, e por isso não podia decidir sozinho.
+    # MORTE E DESFECHO pela RÉGUA COMPARTILHADA (DA-126) — a MESMA função que o
+    # Storm chama. Só aqui os dois lados existem juntos: o detector não conhece alvo
+    # nem stop, e por isso não podia decidir sozinho; o `invalidado` que ele calculou
+    # é o fallback de quem não tem níveis (o `build_price_chart`), e aqui é
+    # RECALCULADO com a fronteira do desfecho.
+    #
+    # Uma régua só para os dois métodos não é elegância: sem ela, o 1-2-3 e o Storm
+    # passariam a discordar sobre a MESMA sequência de preço — pior que o bug que a
+    # DA-125 veio matar.
     cronologia = _cronologia_do_padrao(df, struct.pattern, target, stop, fmt)
     if struct.pattern is not None:
-        struct.pattern.desfecho = _desfecho_do_padrao(cronologia)
+        _p3 = df.index[df["Date"].dt.strftime(fmt) == struct.pattern.p3["date"]]
+        if len(_p3):
+            _em, _desf = _morte_e_desfecho(
+                df, int(_p3[-1]), (invalidation or {}).get("price"),
+                struct.pattern.direction == "compra", fmt,
+                struct.pattern.trigger, (target or {}).get("price"),
+                (stop or {}).get("price"))
+            struct.pattern.invalidado_em = _em
+            struct.pattern.invalidado = _em is not None
+            struct.pattern.desfecho = _desf
 
     return ActionablePlan(
         symbol=symbol, as_of=as_of, price=price, timeframe=tf_ref,
@@ -2364,16 +2467,29 @@ def build_storm_plan(
     if pat is not None and price is not None:
         inval, stop, leituras = _storm_levels(pat, _atr(df), price)
         out.update({"invalidation": inval, "stop": stop, "leituras": leituras})
-        # MORTE do Storm, medida na mesma régua do outro detector: a primeira barra
-        # após o ponto 3 que FECHA além do ponto 2 (o fundo que a reversão declarou).
-        # Sem isto, um Storm morto continuava desenhado com a cor de um vivo.
+        # MORTE E DESFECHO do Storm, pela RÉGUA COMPARTILHADA (DA-126). Era só a
+        # morte — a primeira barra após o ponto 3 que fecha além do ponto 2 — e o
+        # Storm herdava o mesmo veredito invertido que a DA-125 corrigiu no 1-2-3:
+        # "invalidado" num trade que já tinha atingido o alvo. Corrigir um detector
+        # só faria os dois discordarem sobre a MESMA sequência de preço, que é pior
+        # que o bug. Aqui a régua é literalmente a mesma função.
+        #
+        # O ALVO do Storm vive DENTRO de cada leitura (ele muda com o gatilho, DA-079).
+        # A leitura que decide o desfecho é a MAIS PRÓXIMA do preço — a mesma que a
+        # linha do scan publica —, porque é a que descreve o trade que se faria.
         compra = pat.direction != "venda"
         nivel = float((inval or {}).get("price") or 0.0)
         idx3 = df.index[df["Date"].dt.strftime(fmt) == pat.p3["date"]]
-        em = (_primeira_barra_alem(df, int(idx3[-1]), nivel, compra, fmt)
-              if len(idx3) and nivel else None)
-        out["pattern"] = {**out["pattern"], "invalidado": em is not None,
-                          "invalidado_em": em}
+        L = _leitura_de_referencia(leituras, price)
+        em, desfecho = (_morte_e_desfecho(
+            df, int(idx3[-1]), nivel or None, compra, fmt,
+            (L or {}).get("trigger"), ((L or {}).get("target") or {}).get("price"),
+            (stop or {}).get("price"))
+            if len(idx3) else (None, None))
+        out["pattern"] = {**out["pattern"],
+                          "invalidado": em is not None and desfecho is None,
+                          "invalidado_em": em,
+                          "desfecho": desfecho, "encerrado": desfecho is not None}
     # A faixa do ponto 3 do STORM é de outra natureza (o PRÓXIMO candle, não um swing
     # futuro): sai da sua própria regra, nunca da do outro método.
     nasce = pat is None or (out["pattern"] or {}).get("invalidado")

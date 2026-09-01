@@ -277,3 +277,90 @@ def test_desfecho_DEPOIS_da_invalidacao_nao_encerra_nada():
     d = _desfecho_do_padrao(_crono(serie, _pat("2026-08-29 03:00", 11.52, "2026-08-29 11:00"),
                                    11.63, 11.27))
     assert d["tipo"] == "stop", "o PRIMEIRO desfecho manda — o alvo posterior não conta"
+
+
+# ============ PARIDADE ENTRE OS DOIS DETECTORES (DA-126) ======================
+#
+# A DA-125 corrigiu o veredito invertido só no 1-2-3 deste módulo. O Storm123 tem o
+# SEU caminho de morte (`build_storm_plan`, que sobrescreve `invalidado` no dict do
+# padrão) e ficou com o defeito de pé. Corrigir um só é PIOR que o bug: os dois
+# métodos passariam a discordar sobre a MESMA sequência de preço.
+#
+# A régua agora é uma função só. Estes testes travam as duas coisas que fazem isso
+# continuar verdade: os dois CHAMAM a régua, e a régua decide igual.
+
+import inspect  # noqa: E402
+
+from tradingagents.dataflows import price_structure as _ps  # noqa: E402
+from tradingagents.dataflows.price_structure import _morte_e_desfecho  # noqa: E402
+
+
+def test_os_DOIS_detectores_chamam_a_MESMA_regua():
+    """DENTE: uma segunda política de morte é como o defeito sobreviveu à DA-125."""
+    storm = inspect.getsource(_ps.build_storm_plan)
+    plano = inspect.getsource(_ps.build_actionable_plan)
+    assert "_morte_e_desfecho(" in storm, "o Storm voltou a decidir a morte sozinho"
+    assert "_morte_e_desfecho(" in plano, "o 1-2-3 voltou a decidir a morte sozinho"
+    # e nenhum dos dois volta a cravar `invalidado` direto do `_primeira_barra_alem`
+    for fonte, nome in ((storm, "Storm"), (plano, "1-2-3")):
+        assert '"invalidado": em is not None,' not in fonte, nome
+
+
+@pytest.mark.parametrize("caso,esperado", [
+    pytest.param("alvo_antes", ("alvo", False), id="alvo_antes_da_morte_ENCERRA_ganhando"),
+    pytest.param("stop_antes", ("stop", False), id="stop_antes_da_morte_ENCERRA_perdendo"),
+    pytest.param("morte_antes_da_entrada", (None, True), id="morreu_sem_acionar_INVALIDA"),
+    pytest.param("sem_gatilho", (None, True), id="alvo_sem_entrada_nao_encerra"),
+])
+def test_a_REGUA_decide_igual_para_qualquer_chamador(caso, esperado):
+    """A mesma sequência, a mesma resposta — venha do 1-2-3 ou do Storm.
+
+    A régua não sabe qual detector a chamou: recebe série, ponto 3, nível de
+    invalidação, gatilho, alvo e stop. É por isso que a paridade é estrutural, e
+    não uma coincidência a manter à mão.
+    """
+    series = {
+        # ponto3 · gatilho 11,52 · alvo 11,63 · stop 11,27 · invalidação 11,34
+        "alvo_antes": _serie([
+            ("2026-08-30 09:00", 11.30, 11.40), ("2026-08-30 13:00", 11.45, 11.55),
+            ("2026-08-30 15:00", 11.55, 11.65), ("2026-08-30 23:00", 11.00, 11.45)]),
+        "stop_antes": _serie([
+            ("2026-08-30 09:00", 11.30, 11.40), ("2026-08-30 13:00", 11.45, 11.55),
+            ("2026-08-30 17:00", 11.20, 11.35), ("2026-08-30 21:00", 11.55, 11.70)]),
+        "morte_antes_da_entrada": _serie([
+            ("2026-08-30 09:00", 11.30, 11.40), ("2026-08-30 11:00", 11.10, 11.20),
+            ("2026-08-30 15:00", 11.45, 11.70)]),
+        "sem_gatilho": _serie([
+            ("2026-08-30 09:00", 11.30, 11.40), ("2026-08-30 15:00", 11.60, 11.65),
+            ("2026-08-30 23:00", 11.00, 11.20)]),
+    }
+    df = series[caso]
+    gatilho = 11.52 if caso != "sem_gatilho" else 99.0
+    em, desf = _morte_e_desfecho(df, 0, 11.34, True, _FMT, gatilho, 11.63, 11.27)
+    tipo_esperado, invalida_esperado = esperado
+    assert (desf or {}).get("tipo") == tipo_esperado, (caso, em, desf)
+    # o veredito EFETIVO: invalidado só quando não houve desfecho
+    assert (em is not None and desf is None) is invalida_esperado, (caso, em, desf)
+
+
+def test_o_FATO_da_invalidacao_sobrevive_ao_desfecho():
+    """`invalidado_em` continua sendo devolvido — ele aconteceu, só não decide mais.
+
+    Apagá-lo esconderia que o ponto 3 foi perdido, que é história real da série e é
+    o que a linha do tempo mostra ao lado do desfecho.
+    """
+    df = _serie([
+        ("2026-08-30 09:00", 11.30, 11.40), ("2026-08-30 13:00", 11.45, 11.55),
+        ("2026-08-30 15:00", 11.55, 11.65), ("2026-08-30 23:00", 11.00, 11.45)])
+    em, desf = _morte_e_desfecho(df, 0, 11.34, True, _FMT, 11.52, 11.63, 11.27)
+    assert desf["tipo"] == "alvo"
+    assert em == "2026-08-30 23:00", "o fato estrutural tem de continuar registrado"
+
+
+def test_a_leitura_de_referencia_do_Storm_e_a_mais_PROXIMA_do_preco():
+    """As duas entradas do Storm são leituras independentes (DA-079); o desfecho
+    descreve a que a lista mostra, senão card e linha falariam de trades diferentes."""
+    leituras = [{"entrada": "ponto2", "trigger": 11.44}, {"entrada": "ponto3", "trigger": 11.45}]
+    assert _ps._leitura_de_referencia(leituras, 11.46)["entrada"] == "ponto3"
+    assert _ps._leitura_de_referencia(leituras, 11.30)["entrada"] == "ponto2"
+    assert _ps._leitura_de_referencia([], 11.0) is None
