@@ -1,5 +1,12 @@
 # Sistema de sinais pro MT5 (conta demo) — estudo de arquitetura
 
+> **SUPERADO pela task 20260901-038 — ver `ESTUDO-MERIDIAN-INTEGRACAO.md`.** Depois
+> deste estudo, o Samyr informou que já existe o projeto MERIDIAN
+> (`samyrwendel/meridian`, privado) com a integração MT5 demo pronta — a pergunta
+> deixou de ser "qual ponte construir" e virou "como integrar com o que já existe".
+> A análise de símbolos/arquitetura abaixo (broker desconhecido) foi refeita lá com
+> o código real do Meridian e o XM confirmado como corretora. Mantido por histórico.
+
 **Data:** 2026-09-01 · **Task:** 20260901-036 · **Pedido do Samyr:** *"quero um sistema de
 sinais para usar no MT5 com uma conta demo"*.
 
