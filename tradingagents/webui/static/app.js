@@ -7018,10 +7018,18 @@ const _FAIXA_VIVAS = new Set(["agora", "esperando", "andou"]);
 
 // SEM LEITURA NÃO É CLICÁVEL. "Não varri" e "varri e não achei" não têm para onde
 // levar — e um marcador que aceita o clique e abre um gráfico vazio promete o que
-// não existe. Vetado, encerrado e invalidado LEVAM: eles são leituras de verdade, e
-// o gráfico as desenha (é justamente onde se confere por que não se opera).
+// não existe. Vetado e encerrado LEVAM: são leituras de verdade, e o gráfico as
+// desenha (é justamente onde se confere por que não se opera).
+//
+// INVALIDADO DEIXOU DE LEVAR (DA-152, revisa a DA-143). A faixa existe pra
+// mostrar OPORTUNIDADE — "o Samyr: 'setup invalidado é registro, não
+// oportunidade; aceso ali, ele disputa atenção com o que ainda vale'". O
+// marcador continua na tela, no vocabulário de FANTASMA (`fx-morreu`, cinza,
+// riscado) — só some quando não há leitura nenhuma (sem_setup/sem_dado); o que
+// ele perde é o convite pro clique, que é o que dizia "isto merece sua atenção
+// agora".
 function faixaNavegavel(estado) {
-  return !!estado && estado !== "sem_setup" && estado !== "sem_dado";
+  return !!estado && estado !== "sem_setup" && estado !== "sem_dado" && estado !== "invalidou";
 }
 
 function faixaMarcaHtml(frame, linha, metodo, ticker, metodoKey) {
@@ -7266,7 +7274,23 @@ function faixaDeFramesHtml(ticker) {
       faixaLinhaHtml(rot, nome, frames, porFrame, extrai, ticker, metodoKey))
     .filter(Boolean).join("");
   if (!linhas) return "";
-  return `<span class="h-faixa" data-faixa-for="${escapeHtml(ticker)}">${linhas}</span>`;
+  // A FAIXA INTEIRA PODE FICAR SEM OPORTUNIDADE — todo frame de todo método
+  // invalidou, venceu, morreu ou foi vetado, e nenhum está NA ENTRADA/AGUARDANDO/
+  // JÁ ANDOU (DA-152). "Não clicável" não pode virar "não diz nada": sem esta
+  // declaração, uma fileira de fantasma cinza lê como "ainda não varri" pra quem
+  // não parar pra conferir cada marcador — o oposto do que o fantasma cinza
+  // significa em todo o resto da tela.
+  const semOportunidade = _FAIXA_METODOS.every(([, , extrai]) => !frames.some((f) => {
+    const l = extrai(porFrame.get(f) || {});
+    const estado = (l || {}).estado || "sem_dado";
+    return _FAIXA_VIVAS.has(FASE_DO_SCAN_ESTADO[estado] || "sem_leitura");
+  }));
+  const marca = semOportunidade
+    ? ` data-faixa-sem-oportunidade="true" title="${escapeHtml(
+        "sem oportunidade agora — os frames varridos são história (encerrado/invalidado) " +
+        "ou vetados; nenhum está na entrada, aguardando ou já andou")}"`
+    : "";
+  return `<span class="h-faixa" data-faixa-for="${escapeHtml(ticker)}"${marca}>${linhas}</span>`;
 }
 
 

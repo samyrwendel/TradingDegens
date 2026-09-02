@@ -469,6 +469,88 @@ def test_clicar_no_marcador_abre_o_ativo_NAQUELE_frame_e_NAQUELE_metodo(base, vi
         browser.close()
 
 
+# ══════════ INVALIDADO NÃO É SINAL DE OPORTUNIDADE (DA-152, continua a DA-140) ═
+#
+# O Samyr: "se invalidado não deveria virar fantasma branco de invalidação e nem
+# aparecer mais o sinal no WL?" A faixa existe pra mostrar OPORTUNIDADE; setup
+# invalidado é registro, não oportunidade — aceso ali (mesmo em cinza), ele
+# disputa atenção com o que ainda vale. O marcador continua na tela, no
+# vocabulário de FANTASMA (`fx-morreu`), só perde o convite pro clique.
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_invalidado_sem_setup_vetado_e_nao_varrido_no_MESMO_card(base):
+    """O DENTE dos quatro estados: um card só (BBB), com invalidado, sem_setup e
+    vetado nos três frames varridos — provando que nenhum se confunde com outro
+    — e o quarto estado, "não varrido", provado pela AUSÊNCIA de marcador de 15m/
+    semanal (DA-133), a mesma varredura de sempre.
+
+    O invalidado é o que MUDOU: continua com o marcador cinza-fantasma
+    (`fx-morreu`), mas vira `<span>`, não `<button>` — sem_setup já era `<span>`
+    (`fx-sem`) e vetado continua `<button>` (a marca própria dele, intacta)."""
+    quatro = {**_SCAN, "ativos": [{
+        "ticker": "BBB",
+        "melhor": _linha("1d", "invalidou", "venda"),
+        "frames": [_linha("1d", "invalidou", "venda"),
+                   _linha("4h", "sem_setup", None),
+                   _linha("1h", "vetado", None)],
+    }]}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, scan=quatro)
+        m = {x["tf"]: x for x in page.evaluate(_FAIXA, "BBB")["marcas"]}
+        nav = {x["tf"]: x for x in page.evaluate(_NAV) if x["ticker"] == "BBB"}
+        # não varrido: só os TRÊS frames que o scan varre aparecem — nunca 15m/S
+        assert set(m.keys()) == {"D", "4h", "1h"}, m
+
+        # invalidado: fantasma cinza (fx-morreu), mas NÃO clicável — a mudança
+        assert "fx-morreu" in m["D"]["cls"], m["D"]
+        assert nav["D"]["tag"] == "SPAN" and nav["D"]["go"] is None, nav["D"]
+        assert "invalidado" in m["D"]["title"].lower(), m["D"]["title"]
+
+        # sem_setup: pontilhado e apagado (fx-sem), não clicável — sempre foi
+        assert "fx-sem" in m["4h"]["cls"], m["4h"]
+        assert nav["4h"]["tag"] == "SPAN" and nav["4h"]["go"] is None, nav["4h"]
+
+        # vetado: marca própria (fx-vetado), continua CLICÁVEL — intocado
+        assert "fx-vetado" in m["1h"]["cls"], m["1h"]
+        assert nav["1h"]["tag"] == "BUTTON" and nav["1h"]["go"] is not None, nav["1h"]
+
+        # nenhum par se confunde: classe (a forma) é única por estado
+        classes = {k: frozenset(c for c in v["cls"].split() if c != "fx-m")
+                   for k, v in m.items()}
+        assert len(set(classes.values())) == 3, classes
+
+        # a faixa inteira, sem nenhum frame vivo, DECLARA que não há oportunidade
+        faixa = page.evaluate("""(tk) => {
+          const li = [...document.querySelectorAll('.history li')]
+            .find((e) => e.dataset.ticker === tk);
+          const f = li.querySelector('.h-faixa');
+          return {marca: f.dataset.faixaSemOportunidade || null, title: f.title};
+        }""", "BBB")
+        assert faixa["marca"] == "true", faixa
+        assert "sem oportunidade" in faixa["title"].lower(), faixa
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_faixa_com_oportunidade_viva_NAO_leva_a_marca_de_sem_oportunidade(base):
+    """Controle: AAA tem um frame NA ENTRADA — sem ele, o teste acima passaria só
+    porque a marca sempre aparece, não porque ela é condicional."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        faixa = page.evaluate("""(tk) => {
+          const li = [...document.querySelectorAll('.history li')]
+            .find((e) => e.dataset.ticker === tk);
+          return li.querySelector('.h-faixa').dataset.faixaSemOportunidade || null;
+        }""", "AAA")
+        assert faixa is None, faixa
+        browser.close()
+
+
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_clicar_no_marcador_NAO_dispara_o_clique_do_card(base):
     """O `li` inteiro abre a ÚLTIMA run do ativo; clicar num frame específico é outra
