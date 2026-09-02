@@ -18,6 +18,11 @@ Samyr:** existe o projeto `samyrwendel/meridian` (privado, TypeScript, rodando l
 > mesma conta demo, e isso levanta magic number por estratégia, política de
 > conflito e tamanho de posição comparável. Reclonei o repo (mesmo processo, só
 > leitura) pra verificar mais fundo antes de responder.
+>
+> **Atualizado pela task 20260901-040** (§14-§16): DRY RUN vira o modo PADRÃO
+> da escada de execução, antes de DEMO. `scripts/mt5_dry_run.py` (novo) já
+> roda de verdade contra o scan real e REGISTRA o payload completo + o
+> veredito de validação — rodei contra sinais reais desta watchlist, ver §15.
 
 ---
 
@@ -294,6 +299,16 @@ não pede solução.
 7. **Aprovar os DOIS `strategyId` e os DOIS magics** (Setup123 e Storm123,
    §9/§10) — mesma mudança de uma linha da decisão 1, só que duas linhas.
 
+**Mais decisões, da task 20260901-040 (ver §14-§16):**
+
+8. **Quando construir o gate dry_run/demo de verdade** (§14.2/14.3) — hoje é
+   proposta; vira código quando o Samyr aprovar as decisões 1/6/7 acima e
+   houver uma primeira estratégia pra realmente alternar de modo.
+9. **Aprovar (ou não) a mudança no Meridian pro dry run com `order_check()`**
+   (§15.1) — a única forma de "aceitaria: true/false" de verdade, em vez de
+   `null`; é opcional, o dry run já presta contas sem ela, só com validação
+   parcial declarada.
+
 ---
 
 ## 9. Ativação independente por estratégia — já existe, verificado no código
@@ -483,3 +498,119 @@ dos últimos 90 dias** (`_history(days=90)`, `recent[:100]`) — pra uma
 comparação que dure mais que isso, o TradingDegens precisa GRAVAR o que já
 leu (o mesmo padrão do `scans.jsonl` append-only que o paper interno já
 usa), não confiar em reconsultar o snapshot pra sempre.
+
+---
+
+## 14. DRY RUN — o modo padrão da escada (task 20260901-040)
+
+**A escada tem três degraus, e só dois existem de verdade:**
+
+1. **DRY RUN (padrão)** — o sinal percorre o caminho INTEIRO até o formato de
+   ordem do Meridian (símbolo, lado, lote, SL/TP, magic, comment) e é
+   REGISTRADO, nunca enviado.
+2. **DEMO** — a ordem É enviada, pela fila autenticada do §2, com as travas
+   do §1 rejeitando conta real/concurso.
+3. **REAL** — não existe. As travas do Meridian (servidor + agente,
+   independentes, §1) já bloqueiam — não há nada a construir nem a "não
+   construir", é ausência estrutural.
+
+### 14.1. Por que dry run primeiro, e por que ele PRESTA CONTAS
+
+Um dry run que só imprime "enviaria X" na tela e some não vale nada — o
+valor está em ter um REGISTRO que alguém pode olhar depois e comparar com o
+que a demo realmente fez. Por isso o formato do registro é o MESMO shape do
+payload que iria pro Meridian (§2) MAIS o veredito de validação, nunca só um
+dos dois.
+
+### 14.2. Onde o estado (dry_run/demo) mora — proposta, não implementada
+
+Hoje NÃO existe nenhuma ponte TradingDegens↔Meridian rodando (§038/039 são
+estudo, nada foi ligado) — então "o estado persistido" ainda não tem onde
+morar de verdade. A proposta, seguindo o MESMO molde que o paper trading
+interno já usa (`PaperWalletStore`, DA-155 — um arquivo pequeno, uma chave
+por unidade, sem duplicar o que já é fonte de verdade em outro lugar):
+
+```
+~/.tradingagents/logs/webui/mt5_modo.json
+{
+  "tradingdegens-setup123": {"modo": "dry_run", "atualizado_em": "..."},
+  "tradingdegens-storm123": {"modo": "dry_run", "atualizado_em": "..."}
+}
+```
+
+Padrão `dry_run` pra QUALQUER estratégia ausente do arquivo (o mesmo
+princípio do `enabled: false` por padrão que o Meridian já usa em
+`broker_strategy_activations`, §9) — nunca o oposto. Passar uma estratégia
+pra `"demo"` é uma ação EXPLÍCITA (um endpoint/botão "ativar demo pra
+Setup123"), nunca uma consequência de outra coisa. **Isto é código pra
+construir quando o Samyr aprovar a integração (§8) — não construí agora
+porque não há, ainda, nenhuma chamada real ao Meridian pra este estado
+guardar.**
+
+### 14.3. O gate, quando existir
+
+```
+sinal em_gatilho aparece
+  → modo da estratégia (arquivo acima) == "dry_run"?
+      SIM → scripts/mt5_dry_run.py (ou o mesmo código, chamado da webui):
+            registra payload + validação, PARA aqui. Nunca chama o Meridian.
+      NÃO (== "demo") → tudo que o dry run faria, MAIS o POST real pro
+            Meridian (§038 §5, o botão que abre a sessão de dono) — o dry
+            run não é pulado, é a MESMA tradução seguida de um passo a mais.
+```
+
+Isso responde "nunca pule do dry run pra demo por conta própria": não há
+NENHUM caminho de código em que um sinal chega à fila do Meridian sem o
+Samyr ter movido aquela estratégia especificamente pra `"demo"` antes —
+e mesmo assim, o §9 garante que a ORDEM em si ainda pede confirmação
+(`mode: "confirm_each_order"`, forçado pelo servidor Meridian).
+
+---
+
+## 15. O que dá pra validar DESTE lado, e o que precisa do agente
+
+`scripts/mt5_dry_run.py` (novo, testado contra o scan REAL — não uma
+fixture) só confere o que é ARITMÉTICA pura do TradingDegens:
+
+| checado aqui (Debian, sem MT5) | não checado aqui — precisa do agente MT5 (Windows) |
+|---|---|
+| o símbolo tem mapeamento (tabela do §3, por enquanto estimada) | o símbolo EXISTE de verdade na corretora conectada |
+| a direção é compra/venda válida | o lote respeita mínimo/máximo/passo do símbolo (`info.volume_min/max/step`) |
+| gatilho, SL e TP estão todos presentes | a distância de SL/TP respeita `trade_stops_level` |
+| o lote calculado (banca/entrada) é positivo | o mercado está aberto / o símbolo não está suspenso agora |
+| — | a conta demo está online e o Algo Trading está ligado |
+
+Rodei o script contra o scan real hoje (2026-09-02) e ele registrou 3
+sinais de verdade (AAOI venda/Setup123, IBM venda/Storm123 em dois frames)
+com `"aceitaria": null` — nunca `true`, porque a aprovação de verdade só o
+`order_check()` do agente pode dar. Testei também o caminho de REJEIÇÃO
+(símbolo sem mapeamento, ex. SPCX): `"aceitaria": false`, com o motivo
+escrito — a aritmética já reprova antes de precisar da corretora, e o script
+não finge que passaria.
+
+### 15.1. Proposta pro Meridian: dry run DE VERDADE, com o agente
+
+O jeito de fechar a lacuna "não checado aqui" é o Meridian ganhar um MODO no
+comando da fila (`broker_order_commands.status`, ou um campo novo tipo
+`dry_run: boolean`) que faz `execute_demo_order()` (`xm_mt5_bridge.py:590`)
+parar LOGO DEPOIS do `mt5.order_check(order)` (linha 671-674) — que já
+existe, já roda ANTES de qualquer `order_send()`, e já valida margem, lote e
+distância de stop contra a corretora de verdade, sem executar nada — e
+reportar o `check.retcode`/`check.comment` de volta pelo mesmo
+`report_command()` que já existe, em vez de seguir pro `order_send()`
+(linha 675). **Isto é proposta, não implementação**: mexe no repositório do
+Meridian, e o pedido é claro que mudanças lá esperam aprovação do Samyr
+(§8) antes de eu tocar em qualquer coisa.
+
+---
+
+## 16. O ganho: dry run × demo é a medida do atrito de execução
+
+Com os dois registrados pelo MESMO par de chaves (`strategy_id` +
+`ticker`+`frame`+`ts`, igual ao `_chave()` do `mt5_dry_run.py`), dá pra
+comparar, sinal a sinal: o que o dry run disse que ENVIARIA (SL/TP/lote
+calculados do plano) contra o que a demo realmente executou (preço de
+entrada real, que já andou entre o gatilho e o `order_send`; slippage;
+spread pago). Essa diferença É o custo de execução que nem o ledger interno
+nem o dry run sozinho conseguem medir — só a demo, comparada contra o dry
+run que a precede.
