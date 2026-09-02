@@ -191,25 +191,105 @@ def test_ciclo_entrou_e_saiu_realiza_com_nossos_precos():
     assert r["retorno_pct"] == pytest.approx(14000.0 / CAP)
 
 
-# ── a DEFASAGEM viaja em cada operação, na cadência REAL ────────────────────────
-def test_defasagem_registrada_por_operacao():
-    atual = _atual([_ativo("MSFT", 22, 381)],
-                   lido_em=datetime(2026, 9, 2, tzinfo=timezone.utc).timestamp())
-    op = C.op_de_mudanca(_mud("MSFT", "entrou", 0.3, qtd_agora=22), atual, {"price": 500.0})
-    assert op["defasagem_base"] == "entrada"
-    assert op["defasagem_granularidade"] == "mes"
-    assert op["defasagem_dias"] == 63               # jul/2026 (dia 1) → 02/09
-    assert op["dele_entrada"] == "jul/2026"
+# ── DEFASAGEM EM DUAS PERNAS, separadas e nomeadas (task 057) ───────────────────
+def test_duas_pernas_de_defasagem_gravadas_separadas():
+    det = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc).timestamp()
+    ant = datetime(2026, 9, 2, 11, 0, tzinfo=timezone.utc).timestamp()   # leitura anterior
+    atual = _atual([_ativo("MSFT", 22, 381)], atualizado="27/08/2026", lido_em=det)
+    op = C.op_de_mudanca(_mud("MSFT", "entrou", 0.3, qtd_agora=22), atual,
+                         {"price": 500.0}, deteccao_anterior=ant)
+    assert op["defasagem_fonte_dias"] == 6            # PERNA 1: 27/08 → 02/09 (dias)
+    assert op["defasagem_deteccao_horas"] == 1.0      # PERNA 2: janela de 1h
+    assert op["fonte_atualizado"] == "27/08/2026"
+    assert op["conflito_carimbo"] is False
 
 
-def test_defasagem_ajuste_usa_atualizado_do_snapshot():
-    atual = _atual([_ativo("GOOGL", 5, 327)], atualizado="27/08/2026",
-                   lido_em=datetime(2026, 9, 2, tzinfo=timezone.utc).timestamp())
-    op = C.op_de_mudanca(_mud("GOOGL", "aumentou", 0.2, qtd_antes=3, qtd_agora=5),
-                         atual, {"price": 300.0})
-    assert op["defasagem_base"] == "atualizado"
-    assert op["defasagem_granularidade"] == "dia"
-    assert op["defasagem_dias"] == 6                 # 27/08 → 02/09
+def test_perna2_de_1h_nao_esconde_a_perna1_de_dias():
+    """Gravar só a perna 2 (nossa detecção, ~1h) faria o clone parecer rápido; a
+    perna 1 (a fonte publicando dias depois de operar) tem de aparecer inteira."""
+    det = datetime(2026, 9, 10, 9, 0, tzinfo=timezone.utc).timestamp()
+    ant = datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc).timestamp()
+    atual = _atual([_ativo("BE", 10, 181)], atualizado="20/08/2026", lido_em=det)
+    op = C.op_de_mudanca(_mud("BE", "entrou", 0.2, qtd_agora=10), atual,
+                         {"price": 200.0}, deteccao_anterior=ant)
+    assert op["defasagem_fonte_dias"] == 21           # 20/08 → 10/09 (a fonte)
+    assert op["defasagem_deteccao_horas"] == 1.0      # nós (limite superior)
+    assert op["defasagem_fonte_dias"] > op["defasagem_deteccao_horas"] / 24.0
+
+
+# ── CONFLITO DE CARIMBO: composição muda sem a data andar (task 057) ────────────
+def _base_e_cash():
+    return [_ativo("MSFT", 22, 381),
+            {"ticker": "CASH", "classe": "Caixa", "qtd": 40000, "precoMedio": 1, "entrada": "-"}]
+
+
+def test_dente_conflito_de_carimbo_detectado_e_registrado(tmp_path):
+    """DENTE: ele mexe na carteira mas NÃO move o `atualizado` → a data da fonte é
+    suspeita e a operação fica MARCADA; nunca se escolhe em silêncio qual crer."""
+    C.configurar_capital(CAP, dir=tmp_path)
+    d1 = datetime(2026, 9, 1, 10, tzinfo=timezone.utc).timestamp()
+    d2 = datetime(2026, 9, 2, 10, tzinfo=timezone.utc).timestamp()
+    C.observar(_atual(_base_e_cash(), atualizado="27/08/2026", lido_em=d1), dir=tmp_path,
+               preco_fn=lambda t, c: {"price": 500.0})
+    depois = _base_e_cash() + [_ativo("ASTS", 100, 67.82)]
+    r = C.observar(_atual(depois, atualizado="27/08/2026", lido_em=d2), dir=tmp_path,   # MESMO carimbo
+                   preco_fn=lambda t, c: {"price": 45.0})
+    assert r["conflito_carimbo"] is True
+    op = next(o for o in r["ops"] if o["ticker"] == "ASTS")
+    assert op["conflito_carimbo"] is True
+    assert "carimbo" in op["defasagem_fonte_nota"].lower()
+
+
+def test_carimbo_que_anda_nao_e_conflito(tmp_path):
+    C.configurar_capital(CAP, dir=tmp_path)
+    d1 = datetime(2026, 9, 1, 10, tzinfo=timezone.utc).timestamp()
+    d2 = datetime(2026, 9, 2, 10, tzinfo=timezone.utc).timestamp()
+    C.observar(_atual(_base_e_cash(), atualizado="27/08/2026", lido_em=d1), dir=tmp_path,
+               preco_fn=lambda t, c: {"price": 500.0})
+    depois = _base_e_cash() + [_ativo("ASTS", 100, 67.82)]
+    r = C.observar(_atual(depois, atualizado="02/09/2026", lido_em=d2), dir=tmp_path,   # carimbo ANDOU
+                   preco_fn=lambda t, c: {"price": 45.0})
+    assert r["conflito_carimbo"] is False
+
+
+# ── PERDA POR DEFASAGEM: quanto custa seguir atrasado (task 057) ────────────────
+def test_perda_por_defasagem_mede_compra_pior_que_o_nivel_dele():
+    atual = _atual([_ativo("X", 1, 100)])            # ele ~100
+    op = C.op_de_mudanca(_mud("X", "entrou", 0.5, qtd_agora=1), atual, {"price": 130.0})
+    r = C.replay([op], CAP)                            # nós, atrasados, a 130
+    units = 0.5 * CAP / 130.0
+    assert r["perda_por_defasagem"] == pytest.approx((130.0 - 100.0) * units)
+    assert r["n_ops_defasagem_medida"] == 1
+
+
+def test_dente_perda_usa_precoMedio_so_pra_MEDIR_nao_pra_precificar():
+    """DENTE: a POSIÇÃO é precificada pelo nosso preço REAL (130); o precoMedio dele
+    (100) entra SÓ na perda por defasagem. Se alguém precificar pela precoMedio, o
+    não-realizado deixa de ser 0 e este teste quebra."""
+    atual = _atual([_ativo("X", 1, 100)])
+    op = C.op_de_mudanca(_mud("X", "entrou", 0.5, qtd_agora=1), atual, {"price": 130.0})
+    r = C.replay([op], CAP, precos_atuais={"X": 130.0})
+    assert r["posicoes_abertas"]["X"]["preco_medio_clone"] == pytest.approx(130.0)
+    assert r["nao_realizado"] == pytest.approx(0.0)   # marcado a 130 = nosso custo
+    assert r["perda_por_defasagem"] > 0               # mas o custo do atraso existe
+
+
+def test_veredito_defasagem_come_a_vantagem():
+    atual = _atual([_ativo("A", 1, 100), _ativo("B", 1, 100), _ativo("D", 1, 100)])
+    ops = [C.op_de_mudanca(_mud(t, "entrou", 0.2, qtd_agora=1), atual, {"price": 150.0})
+           for t in ("A", "B", "D")]
+    precos = {"A": 150.0, "B": 150.0, "D": 150.0}     # marcado a 150 = sem ganho
+    r = C.resumo(ops, CAP, precos_atuais=precos)
+    assert r["estado"] == "ok"
+    assert "come a vantagem" in r["veredito_defasagem"].lower()
+    assert r["perda_por_defasagem"] > 0
+
+
+def test_veredito_defasagem_amostra_insuficiente():
+    atual = _atual([_ativo("A", 1, 100)])
+    op = C.op_de_mudanca(_mud("A", "entrou", 0.2, qtd_agora=1), atual, {"price": 150.0})
+    r = C.resumo([op], CAP, precos_atuais={"A": 150.0})
+    assert "amostra insuficiente" in r["veredito_defasagem"]
 
 
 # ── sem preço real: op gravada, mas FORA da conta (não inventa entrada) ──────────

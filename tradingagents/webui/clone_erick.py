@@ -34,12 +34,23 @@ que entra na conta. Teste-dente em ``test_webui_clone_erick``.
 transporta. O clone mira o ``peso_agora`` (pct do capital DEPOIS da mudança)
 aplicado ao capital CONFIGURADO. O retorno em % é invariante à escala do capital.
 
-**A DEFASAGEM é gravada em cada operação, na cadência REAL.** A detecção roda a cada
-HORA (task 053 — não mais o diário 09:15), então o atraso máximo entre o que ele faz
-e o que a gente vê caiu de ~24h pra ~1h. Cada op grava o instante EXATO da nossa
-detecção (``ts``, com hora) contra a data (grosseira) da mudança dele; nenhum piso de
-24h/09:15 é assumido. É esse campo que separa "seguir o Erick" de "ter feito o que o
-Erick fez".
+**A DEFASAGEM é gravada em DUAS PERNAS (task 057)**, porque a carteira é publicada
+PELO DONO, na mão, quando ele quiser:
+
+* **Perna 1 — da FONTE** (``defasagem_fonte_dias``): ele operar → ele publicar. Pode
+  ser DIAS, e a própria fonte declara pelo campo ``atualizado`` estar velho quando a
+  vemos.
+* **Perna 2 — da NOSSA detecção** (``defasagem_deteccao_horas``): a publicação ficar
+  disponível → nós detectarmos. Limitada pela cadência horária (task 053); medida
+  como a janela entre a leitura anterior e esta (limite superior — o instante exato
+  da publicação não é observável).
+
+Gravar só a perna 2 faria o clone parecer muito mais rápido do que é. E o
+``perda_por_defasagem`` acumula quanto seguir atrasado nos custou (o preço REAL que
+pagamos × o preço médio dele) — se a perda comer a vantagem, o veredito honesto é
+"pode não valer clonar esta fonte". Se a composição muda mas o carimbo ``atualizado``
+não anda, é ``conflito_carimbo``: a data da fonte fica marcada como suspeita, nunca
+escolhida em silêncio (DA-157).
 
 O saldo é sempre DERIVADO do ledger append-only (disciplina da carteira virtual do
 scan, DA-155): :func:`replay` relê as operações do zero. O resumo declara os estados
@@ -117,7 +128,7 @@ def configurar_capital(valor: float, *, dir: str | os.PathLike | None = None) ->
     if v <= 0:
         raise ValueError("capital do clone tem de ser positivo")
     est = _carrega_estado(dir)
-    est.update({"capital": v, "baseline": None,
+    est.update({"capital": v, "baseline": None, "baseline_lido_em": None,
                 "ativado_em": datetime.now(timezone.utc).isoformat()})
     _grava_estado(est, dir)
     return v
@@ -173,6 +184,12 @@ def _defasagem(deteccao: date | None, dele: date | None) -> int | None:
     return (deteccao - dele).days
 
 
+def _horas(depois: float | None, antes: float | None) -> float | None:
+    if not depois or not antes:
+        return None
+    return round((float(depois) - float(antes)) / 3600.0, 2)
+
+
 # ── preço REAL na detecção ──────────────────────────────────────────────────────
 def _preco_real(ticker: str, classe: str | None) -> dict[str, Any] | None:
     """Cotação REAL de agora — o único preço que o clone tem direito de usar.
@@ -194,12 +211,31 @@ PrecoFn = Callable[[str, "str | None"], "dict[str, Any] | None"]
 
 # ── uma mudança detectada → uma operação de clone ───────────────────────────────
 def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
-                  preco_info: dict[str, Any] | None) -> dict[str, Any]:
+                  preco_info: dict[str, Any] | None, *,
+                  deteccao_anterior: float | None = None,
+                  conflito_carimbo: bool = False) -> dict[str, Any]:
     """Constrói a operação de paper a partir de UMA mudança detectada + o preço REAL.
 
     Função pura (sem I/O): é aqui que a regra "o preço é o REAL da detecção, nunca o
     ``precoMedio`` dele" vive, e é aqui que o teste-dente morde. ``preco_info`` é o
     retorno de :func:`live_price.fetch_live_price` (ou ``None``).
+
+    A DEFASAGEM é gravada em DUAS PERNAS separadas (task 057), porque a carteira é
+    publicada PELO DONO, na mão, quando ele quer:
+
+    * **Perna 1 — defasagem da FONTE** (``defasagem_fonte_dias``): o dono operar →
+      o dono publicar. Fora do nosso controle, pode ser DIAS, e a própria fonte
+      declara isso pelo campo ``atualizado`` estar velho no instante em que a vemos.
+      É ``data(detecção) − data(atualizado)``.
+    * **Perna 2 — defasagem da NOSSA detecção** (``defasagem_deteccao_horas``): a
+      publicação ficar disponível → nós detectarmos. Limitada pela cadência horária
+      (task 053); medida como a JANELA entre a nossa leitura anterior e esta (limite
+      superior da latência — o instante exato da publicação não é observável).
+
+    Gravar só a perna 2 faria o clone parecer muito mais rápido do que é. E se a
+    composição mudou mas o ``atualizado`` NÃO andou (``conflito_carimbo``), a data da
+    fonte é suspeita pra esta operação — fica marcada, nunca escolhida em silêncio
+    (DA-157).
     """
     ticker = str(m.get("ticker") or "").upper()
     classe = m.get("classe") or ""
@@ -219,15 +255,29 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
         if preco is not None and preco <= 0:
             preco = None
 
-    # Data da mudança DELE: pra posição nova, a `entrada` dela é o sinal mais
-    # específico; pros ajustes (aumentou/reduziu/saiu) não há data por-operação,
-    # então o `atualizado` do snapshot é o melhor proxy do "quando ele mexeu".
-    if tipo == "entrou":
-        base_txt, base_nome = dele.get("entrada"), "entrada"
-    else:
-        base_txt, base_nome = atualizado, "atualizado"
-    d_dele, granularidade = _parse_data_dele(base_txt)
+    # PERNA 1 — a fonte declara a própria defasagem pelo carimbo `atualizado`.
+    a_dele, granularidade = _parse_data_dele(atualizado)
     d_det = _data_epoch(lido_em)
+    defasagem_fonte = _defasagem(d_det, a_dele)
+    if conflito_carimbo:
+        nota_fonte = ("carimbo não andou — ele mexeu sem atualizar a data; a data "
+                      "da fonte é suspeita pra esta operação")
+    elif defasagem_fonte is None:
+        nota_fonte = "data da fonte ausente ou ilegível"
+    else:
+        nota_fonte = f"carimbo `atualizado` = {atualizado} (granularidade: {granularidade})"
+
+    # PERNA 2 — a nossa janela de detecção (limite superior da latência).
+    defasagem_deteccao_h = _horas(lido_em, deteccao_anterior)
+
+    # PROXY do CUSTO DE DEFASAGEM (medido, SEPARADO do PnL): o gap entre o preço
+    # REAL que nós pagamos e o preço médio DELE — o preço médio é usado AQUI só pra
+    # MEDIR o custo do atraso, jamais pra precificar a nossa posição.
+    pm = None
+    with contextlib.suppress(TypeError, ValueError):
+        pm = float(dele.get("precoMedio"))
+        pm = pm if pm > 0 else None
+    gap = (preco - pm) if (preco is not None and pm is not None) else None
 
     incluido = preco is not None
     return {
@@ -246,17 +296,23 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
         "preco_rotulo": (preco_info or {}).get("rotulo"),
         "incluido": incluido,
         "motivo_exclusao": None if incluido else "sem cotação real na detecção",
-        # ── DEFASAGEM (o que separa seguir de ter feito) — detecção EXATA (ts,
-        # cadência horária) contra a data grosseira dele. ──
-        "dele_entrada": dele.get("entrada"),
-        "dele_atualizado": atualizado,
-        "defasagem_base": base_nome,
-        "defasagem_granularidade": granularidade,
-        "defasagem_dias": _defasagem(d_det, d_dele),
+        # ── DEFASAGEM EM DUAS PERNAS (task 057) ──
+        "fonte_atualizado": atualizado,
+        "deteccao_ts": (datetime.fromtimestamp(float(lido_em), tz=timezone.utc).isoformat()
+                        if lido_em else None),
+        "deteccao_anterior_ts": (datetime.fromtimestamp(float(deteccao_anterior),
+                                 tz=timezone.utc).isoformat() if deteccao_anterior else None),
+        "conflito_carimbo": bool(conflito_carimbo),
+        "defasagem_fonte_dias": defasagem_fonte,        # PERNA 1 (dias)
+        "defasagem_fonte_nota": nota_fonte,
+        "defasagem_deteccao_horas": defasagem_deteccao_h,  # PERNA 2 (horas, limite sup.)
+        # PROXY do custo de defasagem (o PnL fica em `replay`; aqui só o gap de preço)
+        "gap_preco_vs_dele": gap,
         # ── AUDITORIA: o preço DELE fica gravado SÓ pra provar que não é ele que
-        # entra na conta. Se um dia alguém trocar `preco` por isto, o teste-dente
-        # quebra. ──
+        # entra na conta E pra medir o custo do atraso. Se alguém trocar `preco` por
+        # isto pra PRECIFICAR, o teste-dente quebra. ──
         "dele_precoMedio": dele.get("precoMedio"),
+        "dele_entrada": dele.get("entrada"),
         "qtd_antes_dele": m.get("qtd_antes"),
         "qtd_agora_dele": m.get("qtd_agora"),
     }
@@ -265,13 +321,17 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
 # ── gravação (append-only) ──────────────────────────────────────────────────────
 def registrar(mudou: list[dict[str, Any]], atual: dict[str, Any] | None, *,
               preco_fn: PrecoFn | None = None,
-              path: str | os.PathLike | None = None) -> list[dict[str, Any]]:
+              path: str | os.PathLike | None = None,
+              deteccao_anterior: float | None = None,
+              conflito_carimbo: bool = False) -> list[dict[str, Any]]:
     """Transforma cada mudança detectada numa operação e ANEXA ao ledger (baixo
     nível — não decide ativação; quem gatilha é :func:`observar`).
 
     O caixa nunca vira operação (não é posição — é o residual de toda compra/venda).
     ``preco_fn(ticker, classe)`` é injetável pra o teste cravar um preço REAL
     diferente do ``precoMedio`` dele; o default busca a cotação viva.
+    ``deteccao_anterior`` (epoch da leitura anterior) e ``conflito_carimbo`` são
+    repassados pra a defasagem em duas pernas (task 057).
     """
     if not mudou:
         return []
@@ -285,7 +345,9 @@ def registrar(mudou: list[dict[str, Any]], atual: dict[str, Any] | None, *,
         info = None
         with contextlib.suppress(Exception):
             info = preco_fn(str(m.get("ticker") or "").upper(), m.get("classe"))
-        ops.append(op_de_mudanca(m, atual, info))
+        ops.append(op_de_mudanca(m, atual, info,
+                                 deteccao_anterior=deteccao_anterior,
+                                 conflito_carimbo=conflito_carimbo))
     if ops:
         with alvo.open("a", encoding="utf-8") as fh:
             for op in ops:
@@ -332,16 +394,26 @@ def observar(atual: dict[str, Any] | None, *, preco_fn: PrecoFn | None = None,
     carteira_atual = atual.get("carteira")
     if not est.get("baseline"):
         est["baseline"] = carteira_atual
+        est["baseline_lido_em"] = atual.get("lido_em")
         est.setdefault("ativado_em", datetime.now(timezone.utc).isoformat())
         _grava_estado(est, dir)
         return {"estado": "ativo", "ops": [],
                 "nota": "baseline da ativação gravada — a carteira nasce vazia, as "
                         "posições atuais dele NÃO são replicadas"}
-    mudou = A.mudancas({"carteira": est.get("baseline")}, atual)
-    ops = registrar(mudou, atual, preco_fn=preco_fn, path=ledger_path(dir))
+    baseline = est.get("baseline")
+    mudou = A.mudancas({"carteira": baseline}, atual)
+    # CONFLITO DE CARIMBO (task 057): a composição mudou mas o `atualizado` não
+    # andou → ele mexeu sem carimbar a data. Não se escolhe em silêncio qual data
+    # crer; marca-se a operação (DA-157).
+    conflito = bool(mudou) and (
+        (carteira_atual or {}).get("atualizado") == (baseline or {}).get("atualizado"))
+    ops = registrar(mudou, atual, preco_fn=preco_fn, path=ledger_path(dir),
+                    deteccao_anterior=est.get("baseline_lido_em"),
+                    conflito_carimbo=conflito)
     est["baseline"] = carteira_atual
+    est["baseline_lido_em"] = atual.get("lido_em")
     _grava_estado(est, dir)
-    return {"estado": "ativo", "ops": ops}
+    return {"estado": "ativo", "ops": ops, "conflito_carimbo": conflito}
 
 
 # ── saldo DERIVADO do ledger (replay) ───────────────────────────────────────────
@@ -361,6 +433,26 @@ def replay(ops: list[dict[str, Any]], capital: float,
     pos: dict[str, dict[str, float]] = {}
     realizado = 0.0
     n_incl = 0
+    # CUSTO DE DEFASAGEM (task 057): quanto seguir com atraso nos custou. Só o lado
+    # da COMPRA é medível pela `precoMedio` dele (≈ o nível em que ele entrou); a
+    # venda dele não expõe preço de saída, então não se inventa custo de saída.
+    perda_defasagem = 0.0
+    n_perda = 0
+
+    def _custo_lag(op: dict[str, Any], preco: float, units: float) -> None:
+        nonlocal perda_defasagem, n_perda
+        if units <= 0:
+            return
+        pm = None
+        with contextlib.suppress(TypeError, ValueError):
+            pm = float(op.get("dele_precoMedio"))
+            pm = pm if pm > 0 else None
+        if pm is None:
+            return
+        # pago a mais que o nível dele = perda (positivo). units da NOSSA compra.
+        perda_defasagem += (preco - pm) * units
+        n_perda += 1
+
     for op in sorted(ops, key=lambda o: str(o.get("ts") or "")):
         if not op.get("incluido"):
             continue
@@ -380,6 +472,7 @@ def replay(ops: list[dict[str, Any]], capital: float,
             alvo_val = w * cap
             cur = {"units": alvo_val / preco, "custo": alvo_val}
             cash -= alvo_val
+            _custo_lag(op, preco, alvo_val / preco)
             pos[t] = cur
         elif tipo in ("aumentou", "reduziu"):
             alvo_val = w * cap
@@ -388,6 +481,7 @@ def replay(ops: list[dict[str, Any]], capital: float,
                 cur["units"] += delta_val / preco
                 cur["custo"] += delta_val
                 cash -= delta_val
+                _custo_lag(op, preco, delta_val / preco)
             else:                                    # venda parcial
                 venda_units = -delta_val / preco
                 avg = cur["custo"] / cur["units"] if cur["units"] > 1e-12 else preco
@@ -426,6 +520,9 @@ def replay(ops: list[dict[str, Any]], capital: float,
         "retorno_pct": (equity - cap) / cap if cap else 0.0,
         "n_ops_incluidas": n_incl,
         "posicoes_abertas": abertos,
+        # custo de seguir com atraso (compras): + = pagamos mais que o nível dele.
+        "perda_por_defasagem": perda_defasagem,
+        "n_ops_defasagem_medida": n_perda,
     }
 
 
@@ -451,6 +548,23 @@ def resumo(ops: list[dict[str, Any]], capital: float | None,
                           "cotação real no instante da detecção — sem preço nosso "
                           "não se afirma retorno"}
     r = replay(ops, capital, precos_atuais)
+    # VEREDITO DE DEFASAGEM (task 057): a perda por atraso comeu a vantagem? Quero
+    # esse veredito tanto quanto o contrário — se comer, o honesto é "pode não valer
+    # clonar esta fonte". Só se pronuncia com amostra; senão, diz que não sabe.
+    ganho = r["realizado"] + r["nao_realizado"]
+    perda = r["perda_por_defasagem"]
+    if r["n_ops_defasagem_medida"] < 3:
+        veredito = ("amostra insuficiente para veredito de defasagem — poucas "
+                    "compras medidas")
+    elif perda <= 0:
+        veredito = ("a defasagem jogou A FAVOR no período — entramos a preço melhor "
+                    "que o nível dele")
+    elif perda >= max(ganho, 0.0):
+        veredito = ("a defasagem COME a vantagem — sinal de que pode não valer "
+                    "clonar esta fonte que publica quando quer")
+    else:
+        veredito = "a defasagem custa, mas não comeu a vantagem do período"
     return {"estado": "ok", **r,
             "n_ops_total": len(ops),
-            "n_ops_sem_preco": len(ops) - len(incluidas)}
+            "n_ops_sem_preco": len(ops) - len(incluidas),
+            "veredito_defasagem": veredito}
