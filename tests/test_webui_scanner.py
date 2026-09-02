@@ -559,6 +559,29 @@ def test_pnl_paper_trade_None_para_aberto_e_sem_base():
     assert sc._pnl_paper_trade(v, banca=100.0) is None
 
 
+def test_pnl_paper_trade_storm_LEDGER_ANTIGO_com_rotulo_reconstroi_pelo_trigger():
+    """BUG (task 20260902-035): ``_storm_row`` carimba ``entrada`` com o RÓTULO da
+    leitura escolhida (``ponto2``/``ponto3``/``ponto2e3`` — útil pra célula do scan),
+    e o ledger gravava esse rótulo cru. ``_pnl_paper_trade`` fazia ``float("ponto3")``,
+    estourava ``ValueError`` e devolvia ``None`` — o Storm fechado saía SEM PnL em USD,
+    silenciosamente, sempre. O preço da MESMA leitura está em ``trigger`` (a leitura
+    escolhida é uma só): um ``entrada`` que não converte pra número é tratado como
+    ausente, e o PnL sai do trigger — sem reescrever o ledger append-only."""
+    v = _v(veredito="bateu_tp", trigger=105.0, entrada="ponto3", tp=115.0, setup="storm")
+    p = sc._pnl_paper_trade(v, banca=100.0)
+    assert p is not None, "Storm com ledger antigo (rótulo em vez de preço) não pode virar PnL em branco"
+    assert p["pnl_usd"] == round(100.0 * (115.0 - 105.0) / 105.0, 2), p
+
+
+def test_pnl_paper_aberto_storm_LEDGER_ANTIGO_com_rotulo_reconstroi_pelo_trigger():
+    """Mesmo bug, na posição ABERTA (marcação a mercado)."""
+    v = _v(veredito="andamento_lucro", trigger=105.0, entrada="ponto2", setup="storm",
+           preco_agora=110.0)
+    p = sc._pnl_paper_aberto(v, banca=100.0)
+    assert p is not None, "posição aberta do Storm com ledger antigo não pode ficar em branco"
+    assert p["pnl_usd"] == round(100.0 * (110.0 - 105.0) / 105.0, 2), p
+
+
 def test_pnl_risco_fixo_e_a_leitura_ALTERNATIVA():
     """Se arriscasse a banca inteira por trade: ganha rr×banca no alvo, perde a
     banca inteira no stop — DIFERENTE do PnL de posição fixa (a pergunta é outra)."""

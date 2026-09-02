@@ -2844,8 +2844,15 @@ class AnalysisRunner:
                 st = f.get("storm") or {}
                 if (st.get("estado") == "em_gatilho" and st.get("opera")
                         and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known):
+                    # ``st["entrada"]`` é o RÓTULO da leitura escolhida
+                    # (``ponto2``/``ponto3``/``ponto2e3``, de :func:`_storm_row` —
+                    # o que a célula do scan mostra), não um preço. O ledger
+                    # espera preço em ``entrada`` (:func:`_pnl_paper_trade`): sem
+                    # essa troca o PnL em USD do Storm saía sempre em branco
+                    # (task 20260902-035). O preço da MESMA leitura é ``trigger``.
                     self.scan_log.record({**st, "ticker": s["ticker"],
-                                          "frame": f.get("frame"), "setup": "storm"})
+                                          "frame": f.get("frame"), "setup": "storm",
+                                          "entrada": st.get("trigger")})
                     known.add(("storm", s["ticker"], f.get("frame"), st.get("trigger")))
                     novos += 1
         return {"gatilhos": novos, "sem_dado": sem_dado,

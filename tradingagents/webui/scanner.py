@@ -1047,13 +1047,39 @@ def _agrupa_por_frame(fechados: list[dict[str, Any]]) -> dict[str, list[dict[str
     return out
 
 
+def _entrada_numerica(v: dict[str, Any]) -> float | None:
+    """A entrada em PREÇO pra cálculo de PnL — nunca um rótulo.
+
+    ``_storm_row`` usa o campo ``entrada`` pra carregar o RÓTULO da leitura
+    escolhida (``ponto2``/``ponto3``/``ponto2e3`` — é o que a célula do scan e o
+    app.js mostram). Ledger gravado antes da correção do bug de PnL (task
+    20260902-035) carimbou esse rótulo cru — ``float("ponto3")`` estourava e o
+    Storm fechado saía sem PnL em USD, sempre, silenciosamente. O preço da MESMA
+    leitura sempre viajou junto em ``trigger`` (a leitura escolhida é uma só):
+    um ``entrada`` que não converte pra número é tratado como AUSENTE, e cai no
+    trigger — reconstrução na LEITURA, sem reescrever o ledger append-only.
+    """
+    entrada = v.get("entrada")
+    if entrada is not None:
+        try:
+            return float(entrada)
+        except (TypeError, ValueError):
+            pass
+    trigger = v.get("trigger")
+    try:
+        return float(trigger) if trigger is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _pnl_paper_trade(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
     """PnL de UM trade fechado, POSIÇÃO FIXA (não risco fixo — ver :data:`_PREMISSA_PAPER`).
 
     Quantidade = ``banca / entrada``; resultado = variação percentual do preço ×
-    banca. A ENTRADA é ``entrada`` quando o log a carimbou (Storm, que referencia
-    o ponto de entrada real) ou o ``trigger`` (1-2-3 — a entrada É o gatilho). A
-    SAÍDA é o nível que o veredito diz que foi tocado: o alvo publicável
+    banca. A ENTRADA vem de :func:`_entrada_numerica` — o preço que o log carimbou
+    (Storm, que referencia o ponto de entrada real) ou o ``trigger`` (1-2-3 — a
+    entrada É o gatilho; também o fallback do Storm quando ``entrada`` não é um
+    preço). A SAÍDA é o nível que o veredito diz que foi tocado: o alvo publicável
     (:func:`_tp_publicavel`, nunca um alvo degenerado) em ``bateu_tp``, o stop em
     ``bateu_sl``. ``None`` pra qualquer coisa que não seja um fechado de verdade
     ou que não tenha preço suficiente pra calcular — número inventado é pior que
@@ -1067,12 +1093,12 @@ def _pnl_paper_trade(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
     veredito = v.get("veredito")
     if veredito not in ("bateu_tp", "bateu_sl"):
         return None
-    entrada = v.get("entrada") if v.get("entrada") is not None else v.get("trigger")
+    entrada = _entrada_numerica(v)
     saida = _tp_publicavel(v) if veredito == "bateu_tp" else v.get("sl")
     if entrada is None or saida is None:
         return None
     try:
-        entrada, saida = float(entrada), float(saida)
+        saida = float(saida)
     except (TypeError, ValueError):
         return None
     if entrada <= 0:
@@ -1147,12 +1173,12 @@ def _pnl_paper_aberto(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
     qualquer coisa que não seja uma posição aberta de verdade."""
     if v.get("veredito") not in ("andamento_lucro", "andamento_prejuizo"):
         return None
-    entrada = v.get("entrada") if v.get("entrada") is not None else v.get("trigger")
+    entrada = _entrada_numerica(v)
     preco = v.get("preco_agora")
     if entrada is None or preco is None:
         return None
     try:
-        entrada, preco = float(entrada), float(preco)
+        preco = float(preco)
     except (TypeError, ValueError):
         return None
     if entrada <= 0:

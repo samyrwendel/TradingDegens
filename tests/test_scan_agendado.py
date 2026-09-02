@@ -244,6 +244,24 @@ def test_rodar_DUAS_vezes_seguidas_nao_infla_o_ledger(tmp_path, monkeypatch):
     assert [p["gatilhos"] for p in r.scan_log.passadas()] == [2, 0, 0, 0, 0]
 
 
+def test_storm_grava_ENTRADA_como_PRECO_nao_rotulo(tmp_path, monkeypatch):
+    """BUG DE DADO (task 20260902-035): ``_storm_row`` usa ``entrada`` pra carregar o
+    RÓTULO da leitura escolhida (``ponto2``/``ponto3``/``ponto2e3`` — é o que a célula
+    do scan e o app.js mostram), e ``_registrar_gatilhos`` espalhava esse dict inteiro
+    (``**st``) pro ledger sem trocar o rótulo pelo preço. ``_pnl_paper_trade`` lê
+    ``entrada`` como PREÇO — com o rótulo cru, ``float("ponto2")`` estoura e o Storm
+    fechado nunca produz PnL em USD. O preço da MESMA leitura já está em ``trigger``:
+    é ele que tem de ir pro campo ``entrada`` do ledger, não o rótulo."""
+    r = _runner(tmp_path, monkeypatch, _UM_GATILHO)
+    r.scan_agendado()
+    storm_entries = [e for e in r.scan_log.entries() if e.get("setup") == "storm"]
+    assert len(storm_entries) == 1, storm_entries
+    entrada = storm_entries[0].get("entrada")
+    assert not isinstance(entrada, str), ("ledger gravou o RÓTULO em vez do preço",
+                                          storm_entries[0])
+    assert entrada is not None and float(entrada) == 229.0, storm_entries[0]
+
+
 def test_a_mesma_de_duplicacao_vale_DENTRO_de_uma_passada(tmp_path, monkeypatch):
     """Dois frames do mesmo ativo com o MESMO gatilho não podem virar duas linhas — a
     varredura da tela lia o ledger uma vez só e não via o que ela própria acabara de
