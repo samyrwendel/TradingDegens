@@ -1763,35 +1763,26 @@ function renderLaunchBar() {
     return `<button type="button" class="${cls}" data-tf="${tf}" ${on ? "" : "disabled"} ` +
       `title="${escapeHtml(title)}" aria-label="${escapeHtml(completo)}">${escapeHtml(curto)}</button>`;
   };
-  // TEMPO em DUAS linhas contando como UM elemento da barra — a mesma gramática do
-  // bloco MODELOS (coluna de duas fileiras, alinhada embaixo com o resto). Em cima
-  // o macro (S · D), embaixo o intradiário (4h · 1h · 15m).
-  tfsEl.innerHTML = tfFaixas().map(({ faixa, itens }) =>
-    `<div class="lb-tf-row is-${faixa}">${itens.map(pill).join("")}</div>`).join("");
-  // MÉTODO em DUAS fileiras contando como UM elemento da barra — a mesma gramática
-  // do TEMPO e do bloco MODELOS. Com o Storm são CINCO métodos, e cinco numa fila só
-  // empurravam a barra além dos 1440 (o ATIVO encolhia pra pagar a conta).
-  //
-  // A divisão não é só de espaço: em cima os que rodam MODELO (custam), embaixo os
-  // ESTRUTURAIS (leem a série, $0). A largura do grupo passa a ser a da fileira mais
-  // larga em vez da soma das cinco.
-  const methodRows = [
-    ["llm", [
-      ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
-      ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
-      ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
-    ]],
-    ["estrutural", [
-      ["setup123", "Setup123", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
-      ["storm123", "Storm123", "O 1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
-    ]],
+  // TEMPO numa linha só (task 034), ordem CRESCENTE — do frame mais rápido pro
+  // mais lento (15m → 1h → 4h → D → S), como o mercado lê. ALL_TFS é decrescente
+  // (fonte também do seletor do gráfico, que continua na ordem dele); aqui só
+  // inverte a LEITURA, sem duplicar a lista.
+  tfsEl.innerHTML = [...ALL_TFS].reverse().map(pill).join("");
+  // MÉTODO numa linha só (task 034): os cinco apps de referência concordam — nenhum
+  // empilha método/timeframe em duas fileiras. A ordem é a de sempre (os que rodam
+  // MODELO primeiro, os ESTRUTURAIS por último).
+  const metodos = [
+    ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
+    ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
+    ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+    ["setup123", "Setup123", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
+    ["storm123", "Storm123", "O 1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
   ];
-  mEl.innerHTML = methodRows.map(([faixa, itens]) =>
-    `<div class="lb-method-row is-${faixa}">` + itens.map(([m, label, title]) => {
-      const active = m === _barMethod;
-      const cls = ["lb-method", m, active ? "is-active" : ""].filter(Boolean).join(" ");
-      return `<button type="button" class="${cls}" data-method="${m}" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
-    }).join("") + "</div>").join("");
+  mEl.innerHTML = metodos.map(([m, label, title]) => {
+    const active = m === _barMethod;
+    const cls = ["lb-method", m, active ? "is-active" : ""].filter(Boolean).join(" ");
+    return `<button type="button" class="${cls}" data-method="${m}" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  }).join("");
   updateDateChip();
   renderLaunchModels();
   const rerun = $("rerunBtn");
@@ -1854,6 +1845,40 @@ function renderLaunchModels() {
   host.innerHTML = chip("quick") + chip("deep");
 }
 
+// Menu COLAPSADO dos modelos (task 034): o par rápido/pesado só aparece sob
+// demanda, atrás do chevron — antes ficava sempre visível, duas linhas com o
+// rótulo "modelos" por cima, parecendo um campo de formulário a mais na barra.
+function _closeModelsMenu() {
+  const pop = $("launchModelsPop");
+  const btn = $("modelsToggle");
+  if (pop) pop.classList.add("hidden");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  document.removeEventListener("mousedown", _modelsMenuOutside, true);
+  document.removeEventListener("keydown", _modelsMenuEsc, true);
+}
+function _modelsMenuOutside(e) {
+  const pop = $("launchModelsPop");
+  const btn = $("modelsToggle");
+  if (!pop || pop.classList.contains("hidden")) return;
+  if (pop.contains(e.target) || (btn && btn.contains(e.target))) return;
+  _closeModelsMenu();
+}
+function _modelsMenuEsc(e) {
+  if (e.key !== "Escape") return;
+  _closeLaunchModelPop();
+  _closeModelsMenu();
+}
+function _toggleModelsMenu() {
+  const pop = $("launchModelsPop");
+  const btn = $("modelsToggle");
+  if (!pop || !btn) return;
+  if (!pop.classList.contains("hidden")) { _closeModelsMenu(); return; }
+  pop.classList.remove("hidden");
+  btn.setAttribute("aria-expanded", "true");
+  document.addEventListener("mousedown", _modelsMenuOutside, true);
+  document.addEventListener("keydown", _modelsMenuEsc, true);
+}
+
 // Popover pesquisável (singleton) ancorado no chip. Reusa filterModels/_priceLabel/
 // _modelItems — a MESMA lista do config; se ainda não veio, dispara refreshModels().
 let _lbPop = null;   // { el, level, input, list, view, active }
@@ -1883,6 +1908,7 @@ function _lbChooseModel(level, val) {
   updateConfigBadge();
   renderLaunchModels();
   _closeLaunchModelPop();
+  _closeModelsMenu();
 }
 
 function _lbRenderPopList() {
@@ -2020,6 +2046,12 @@ function bindLaunchBar() {
       const b = e.target.closest("button.lb-model-pick");
       if (b) openLaunchModelPicker(b.dataset.level, b);
     });
+  }
+  // Chevron que colapsa o par rápido/pesado (task 034): sob demanda, não sempre visível.
+  const modelsToggle = $("modelsToggle");
+  if (modelsToggle && !modelsToggle._bound) {
+    modelsToggle._bound = true;
+    modelsToggle.addEventListener("click", () => _toggleModelsMenu());
   }
   const chip = $("dateChip");
   if (chip && !chip._bound) {
@@ -3750,19 +3782,6 @@ function tfNome(tf) {
 
 function tfCurto(tf) {
   return TF_SHORT[tf] || tf || "";
-}
-
-// As linhas do bloco TEMPO saem da faixa declarada em ALL_TFS, na ordem em que
-// cada faixa aparece — quem acrescentar um frame não precisa lembrar de mexer aqui.
-function tfFaixas() {
-  const linhas = [];
-  for (const item of ALL_TFS) {
-    const faixa = item[3] || "intra";
-    let linha = linhas.find((l) => l.faixa === faixa);
-    if (!linha) linhas.push((linha = { faixa, itens: [] }));
-    linha.itens.push(item);
-  }
-  return linhas;
 }
 
 // Legenda do gráfico (swatches das MMS/EMA + faixas do plano + 1-2-3). Extraída
@@ -7650,6 +7669,12 @@ async function applyConfig() {
     if (cfg.tz_label) TZ_LABEL = cfg.tz_label;
     if (cfg.today) { _todayManaus = cfg.today; $("date").value = cfg.today; }
     $("tzLabel").textContent = "(" + TZ_LABEL + ")";
+    // O fuso fica em TÍTULO (hover), não mais escrito por extenso ao lado de "data"
+    // (task 034): "(GMT-4 (Manaus))" era o texto mais longo do grupo ATIVO+DATA e
+    // truncava feio sob pressão de espaço — a info já está no rodapé (tzNote), essa
+    // aqui era duplicada.
+    const dateGlabel = $("tzLabel").closest(".lb-glabel");
+    if (dateGlabel) dateGlabel.title = "Horários em " + TZ_LABEL + ".";
     $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
     _isOwner = !!cfg.owner;
     // O BOTÃO DA CARTEIRA DO ERICK depende de DUAS coisas, e as duas só se sabem

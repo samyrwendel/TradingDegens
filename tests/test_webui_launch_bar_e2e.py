@@ -1,7 +1,8 @@
-"""E2E da barra de controle numa linha só (task de UI 010, pedido do Samyr).
+"""E2E da barra de controle numa linha só (task de UI 010, pedido do Samyr;
+redistribuída na task 034 a partir de 5 apps de referência — Quantfury/Krystal/
+CoinMarketCap).
 
-O pedido: Ativo · Data · Tempo · Método · Analisar · ↻ na MESMA linha, e o bloco
-MODELOS em duas linhas (rápido em cima, pesado embaixo) contando como UM elemento —
+O pedido original: Ativo · Data · Tempo · Método · Analisar · ↻ na MESMA linha —
 antes a barra quebrava em três faixas e o bloco de modelos ficava pendurado à
 direita, cortado.
 
@@ -12,6 +13,11 @@ coluna do conteúdo sem tocar no viewport, e a página passou a rolar na horizon
 (``test_vertical_resizer_drags_and_persists`` pegou). O gatilho virou CONTAINER
 QUERY, e é isso que se prova aqui: cabe numa linha quando há espaço, quebra quando
 não há, e NUNCA gera scroll horizontal.
+
+A task 034 apertou o orçamento de largura pra caber em 1280px de VIEWPORT (não só
+container): ATIVO parou de crescer (fixo ~160px), TEMPO e MÉTODO viraram uma linha
+só (eram duas fileiras empilhadas) e MODELOS colapsou num chevron — o número do
+limiar da container query (abaixo) é MEDIDO contra esse orçamento novo.
 """
 
 import threading
@@ -51,11 +57,12 @@ def _medidas(page):
       const bar = document.querySelector('.launch-bar');
       const r = document.documentElement;
       const alt = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().height) : null; };
-      const topo = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().top) : null; };
+      const fundo = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().bottom) : null; };
       return {
         barW: bar.scrollWidth, barC: bar.clientWidth, barH: Math.round(bar.getBoundingClientRect().height),
-        tfsH: alt('.lb-tfs'), methodsH: alt('.lb-methods'), modelsH: alt('.lb-models'),
-        topoAtivo: topo('.lb-ticker'), topoAnalisar: topo('#runBtn'), topoModelos: topo('.lb-models'),
+        tfsH: alt('.lb-tfs'), methodsH: alt('.lb-methods'), assetH: alt('.lb-asset'),
+        toggleH: alt('.lb-model-toggle'),
+        fundoAtivo: fundo('.lb-ticker'), fundoAnalisar: fundo('#runBtn'), fundoToggle: fundo('.lb-model-toggle'),
         docW: r.scrollWidth, viewW: r.clientWidth,
       };
     }""")
@@ -72,25 +79,23 @@ def test_barra_cabe_numa_linha_na_tela_larga(base):
         m = _medidas(page)
         # nenhuma quebra: a barra inteira cabe na largura que tem
         assert m["barW"] <= m["barC"] + 1, m
-        # MODELOS em DUAS linhas — o par é o bloco alto que define a altura da barra
-        assert m["modelsH"] >= 48, m
-        # TEMPO também é duas fileiras desde a task 017, mas na MESMA forma do par de
-        # modelos: a linha aqui era `tfsH <= 34` ("cinco pills não viram duas linhas")
-        # e virou esta — o que ela sempre defendeu foi a ALTURA DA BARRA, não o número
-        # de fileiras. Empilhar de propósito, dentro da altura que já existia, passa;
-        # TEMPO passar de MODELOS (foi o que a pill de 30px fazia) cresce a barra e cai.
-        assert m["tfsH"] == m["modelsH"], ("TEMPO tem de caber na forma de MODELOS", m)
-        # MÉTODO virou DUAS fileiras na task 022 (o Storm é o quinto método): em cima
-        # os que rodam modelo, embaixo os estruturais ($0). A linha aqui era
-        # `methodsH <= 36` ("os métodos numa fileira só") — o que ela defendia era a
-        # ALTURA DA BARRA, e é isso que continua travado: empilhar DENTRO da forma do
-        # bloco de modelos passa; crescer além dela cai.
-        assert m["methodsH"] == m["modelsH"], ("MÉTODO tem de caber na forma de MODELOS", m)
-        assert m["barH"] - m["modelsH"] <= 20, ("a barra é o bloco mais alto + o rótulo", m)
-        # e continua sendo UM elemento da MESMA linha: os três começam juntos
-        # (o topo do bloco de modelos é o mais alto; ninguém foi empurrado pra baixo)
-        assert m["topoModelos"] <= m["topoAtivo"], m
-        assert abs(m["topoAnalisar"] - m["topoAtivo"]) < 40, m
+        assert m["docW"] <= m["viewW"], m
+        # Task 034: TEMPO e MÉTODO viraram UMA linha só (eram duas fileiras
+        # empilhadas) — a altura da pill (26px) é bem menor que o campo ATIVO
+        # (rótulo + input, o bloco mais alto da barra agora).
+        assert m["tfsH"] == 26, m
+        assert m["methodsH"] == 26, m
+        assert m["assetH"] > m["tfsH"], ("ATIVO+DATA (rótulo+input) é o bloco mais alto", m)
+        assert m["barH"] == m["assetH"], ("a barra tem a altura do bloco mais alto", m)
+        # MODELOS colapsou num chevron (task 034): mesma altura de botão (36px) do
+        # ↻/Analisar, não mais um par de chips sempre visível.
+        assert m["toggleH"] == 36, m
+        # e continua sendo UM elemento da MESMA linha: todos compartilham o
+        # rodapé (`align-items: flex-end`), não o topo — blocos de alturas
+        # diferentes têm topos diferentes na mesma linha.
+        assert m["fundoToggle"] == m["fundoAtivo"] == m["fundoAnalisar"], m
+        # o painel de modelos nasce FECHADO — sob demanda, não sempre visível
+        assert page.is_hidden("#launchModelsPop"), "o popover de modelos não pode nascer aberto"
         browser.close()
 
 

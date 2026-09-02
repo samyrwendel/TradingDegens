@@ -195,23 +195,34 @@
          aria-label="Redimensionar histórico e conteúdo" tabindex="0"></div>
 
     <div class="content">
-      <!-- Barra ÚNICA (task 029): o launcher ABSORVEU a barra de reanálise (023).
-           Ativo · data (chip, padrão hoje) · timeframe · método · Analisar · ↻.
-           Analisar roda com o método + TF escolhidos; ↻ reanalisa o ativo ABERTO
-           hoje preservando o método aberto (absorve o antigo "Atualizar"). A barra de
-           reanálise separada deixou de existir — método volta a viver aqui (reverte a
-           021 de propósito). Preserva método por TF: trocar de TF não reseta o método.
+      <!-- Barra ÚNICA (task 029, redistribuída na 034 a partir de 5 apps de
+           referência — Quantfury/Krystal/CoinMarketCap): ativo+data (mesmo grupo,
+           é a mesma pergunta "o quê e quando") · tempo · método · Analisar · ↻ ·
+           modelos. Analisar roda com o método + TF escolhidos; ↻ reanalisa o ativo
+           ABERTO hoje preservando o método aberto. Preserva método por TF: trocar
+           de TF não reseta o método.
            Task 20260902-028: sumiram os rótulos-palavra "tempo"/"método" — a POSIÇÃO
-           na barra (entre data e Analisar) e os nomes das próprias pills já ensinam. -->
+           na barra (entre data e Analisar) e os nomes das próprias pills já ensinam.
+           Task 034: ATIVO deixa de crescer (é ticker, não frase — flex fixo, não
+           `1 1`); TEMPO e MÉTODO viram UMA linha só em vez de duas fileiras (os 5
+           apps de referência concordam: nenhum empilha frame/método em duas linhas);
+           os grupos passam a respirar por GAP (24-32px), sem rótulo e sem borda; e
+           MODELOS sai do bloco órfão à direita (duas linhas com o rótulo "modelos",
+           parecendo dois campos de formulário) e vira um chevron discreto ao lado do
+           ↻ — abre o mesmo par de chips rápido/pesado num popover, só que sob
+           demanda em vez de sempre visível. -->
       <section class="panel launcher">
         <form id="analyzeForm" class="launch-bar" autocomplete="off">
-          <div class="lb-field lb-ticker">
-            <label for="ticker">Ativo <span class="orig">(sigla ou nome)</span></label>
-            <input id="ticker" name="ticker" placeholder="AAPL · Microsoft · BTC-USD · Bitcoin"
-                   list="tickerSuggest" autocomplete="off" required />
-            <datalist id="tickerSuggest"></datalist>
-          </div>
-          <div class="lb-ctrls">
+          <!-- ATIVO + DATA no mesmo grupo visual (gap curto): "o quê" e "quando"
+               são a mesma pergunta, então ficam colados — o respiro grande (gap da
+               barra) só separa PERGUNTAS diferentes (ativo/data · tempo · método). -->
+          <div class="lb-asset">
+            <div class="lb-field lb-ticker">
+              <label for="ticker">Ativo <span class="orig">(sigla ou nome)</span></label>
+              <input id="ticker" name="ticker" placeholder="AAPL · BTC-USD"
+                     list="tickerSuggest" autocomplete="off" required />
+              <datalist id="tickerSuggest"></datalist>
+            </div>
             <!-- Data via chip: clica → abre o calendário nativo; mostra "Hoje" quando é
                  a data de hoje, senão dd/mm. O input date (sobreposto transparente) é a
                  fonte da verdade do POST e recebe o clique. -->
@@ -223,22 +234,19 @@
                 <input id="date" name="date" type="date" class="date-native" aria-label="Data da análise" tabindex="-1" />
               </div>
             </div>
-            <!-- Sem rótulo "tempo": a posição (logo após a data, antes do método)
-                 já ensina o que é — o aria-label do grupo cobre leitor de tela. -->
-            <div class="lb-group lb-tf">
-              <div class="lb-tfs" id="launchTfs" role="group" aria-label="Timeframe da análise"></div>
-            </div>
-            <!-- Idem "método": a posição (entre tempo e Analisar) e os próprios
-                 rótulos das pills (Padrão/Erick/Comparar/...) já dizem o que é. -->
-            <div class="lb-group lb-method">
-              <div class="lb-methods" id="launchMethods" role="group" aria-label="Método da análise"></div>
-            </div>
-            <!-- Seletor COMPACTO de modelo (task 012): o rápido/pesado morava só atrás
-                 do botão "Chaves" — impossível de achar procurando "modelo". Aqui os
-                 dois chips mostram o modelo em uso e abrem um popover PESQUISÁVEL pra
-                 ESCOLHER (não digitar), refletindo/sincronizando com os campos do
-                 config (#cfgQuick/#cfgDeep). O cross-provider por nível (027) segue no
-                 config, alcançável pelo link "avançado" do popover. -->
+          </div>
+          <!-- Sem rótulo "tempo": a posição (logo após ativo/data, antes do método)
+               já ensina o que é — o aria-label do grupo cobre leitor de tela. UMA
+               linha só, ordem CRESCENTE (15m → 1h → 4h → D → S): é como o mercado
+               lê — do mais rápido pro mais lento, não o contrário. -->
+          <div class="lb-group lb-tf">
+            <div class="lb-tfs" id="launchTfs" role="group" aria-label="Timeframe da análise"></div>
+          </div>
+          <!-- Idem "método": a posição (entre tempo e Analisar) e os próprios
+               rótulos das pills (Padrão/Erick/Comparar/...) já dizem o que é.
+               Os cinco numa linha só (nenhum dos 5 apps de referência empilha). -->
+          <div class="lb-group lb-method">
+            <div class="lb-methods" id="launchMethods" role="group" aria-label="Método da análise"></div>
           </div>
           <div class="lb-actions">
             <button type="submit" id="runBtn">Analisar</button>
@@ -247,13 +255,23 @@
             <button type="button" id="rerunBtn" class="rerun-btn"
                     title="Reanalisar o ativo aberto hoje (mesmo método)"
                     aria-label="Reanalisar o ativo aberto" disabled>↻</button>
-          </div>
-          <!-- MODELOS é o ÚLTIMO elemento da barra e ocupa DUAS linhas (rápido em
-               cima, pesado embaixo) contando como UM só elemento — foi o pedido: a
-               barra antes quebrava e deixava este bloco pendurado à direita. -->
-          <div class="lb-group lb-model">
-            <span class="lb-glabel">modelos</span>
-            <div class="lb-models" id="launchModels" role="group" aria-label="Modelo rápido e pesado da análise"></div>
+            <!-- Seletor de modelo (task 012), COLAPSADO na 034: era dois chips
+                 sempre visíveis, empilhados, com o rótulo "modelos" por cima —
+                 parecia campo de formulário e ficava órfão no canto direito. Vira um
+                 chevron discreto ao lado do ↻; o clique abre o MESMO par de chips
+                 rápido/pesado (cada um com o popover pesquisável de sempre) num
+                 painel flutuante. Nada de função se perde, só a exposição permanente. -->
+            <div class="lb-group lb-model">
+              <button type="button" class="lb-model-toggle" id="modelsToggle"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Modelos da análise (rápido e pesado)"
+                      title="Modelos da análise — clique pra escolher">
+                <span aria-hidden="true">▾</span>
+              </button>
+              <div class="lb-models-pop hidden" id="launchModelsPop">
+                <div class="lb-models" id="launchModels" role="group" aria-label="Modelo rápido e pesado da análise"></div>
+              </div>
+            </div>
           </div>
         </form>
         <p class="hint" id="assetHint"></p>

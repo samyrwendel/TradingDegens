@@ -222,14 +222,11 @@ def test_o_storm_tem_chip_proprio_na_barra(base):
             .map(b => b.dataset.method),
           rotulos: [...document.querySelectorAll('#launchMethods .lb-method')]
             .map(b => b.innerText.trim()),
-          fileiras: [...document.querySelectorAll('#launchMethods .lb-method-row')]
-            .map(r => [...r.querySelectorAll('.lb-method')].map(b => b.dataset.method)),
         })""")
-        # DUAS fileiras contando como UM elemento da barra: em cima os que rodam
-        # MODELO (custam), embaixo os ESTRUTURAIS ($0). Cinco numa fila só empurravam
-        # a barra além dos 1440 e o campo ATIVO encolhia pra pagar.
-        assert m["fileiras"] == [["padrao", "erick", "compare"],
-                                 ["setup123", "storm123"]], m
+        # UMA fileira só desde a task 034 (revertendo o empilhamento em duas
+        # fileiras da 022) — os 5 apps de referência (Quantfury/Krystal/
+        # CoinMarketCap) concordam: nenhum estica método em duas linhas.
+        assert m["metodos"] == ["padrao", "erick", "compare", "setup123", "storm123"], m
         assert "Storm123" in m["rotulos"], m
         # e o chip do Storm NÃO é o chip do 1-2-3 (são métodos, não uma flag)
         assert m["metodos"].count("storm123") == 1 and m["metodos"].count("setup123") == 1

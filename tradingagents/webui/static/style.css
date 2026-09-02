@@ -207,7 +207,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .field input:focus { outline: none; border-color: var(--accent); }
 #runBtn {
   background: var(--primary); color: #fff; border: none;
-  border-radius: var(--radius); padding: 0 22px; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold);
+  border-radius: var(--radius); padding: 0 11px; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-bold);
   cursor: pointer; height: 36px;
 }
 #runBtn:disabled { opacity: .55; cursor: not-allowed; }
@@ -218,30 +218,44 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    da COLUNA, não a da tela: arrastar o resizer da lateral pra 400px encolhe o
    conteúdo sem mexer no viewport, e um `nowrap` preso ao viewport estourava a
    página na horizontal (pego por test_vertical_resizer_drags_and_persists). Base
-   `wrap`: sem espaço, quebra — melhor duas linhas legíveis que scroll horizontal. */
-.launch-bar { display: flex; gap: 10px 12px; align-items: flex-end; flex-wrap: wrap; }
+   `wrap`: sem espaço, quebra — melhor duas linhas legíveis que scroll horizontal.
+
+   Task 034 — redistribuição a partir de 5 apps de referência (Quantfury/Krystal/
+   CoinMarketCap): o gap GRANDE (24px — o piso da faixa 24-32px) separa PERGUNTAS
+   (ativo+data · tempo · método · ações); o PEQUENO (6px, em `.lb-asset`) só existe
+   DENTRO da mesma pergunta (ativo+data — "o quê" e "quando" são a mesma coisa). */
+.launch-bar { display: flex; gap: 12px 24px; align-items: flex-end; flex-wrap: wrap; }
 .lb-field { display: flex; flex-direction: column; gap: 5px; }
-.lb-ticker { flex: 1 1 160px; min-width: 108px; }
+/* Fixo (`0 0`), não `1 1`: o ATIVO é um TICKER (até ~12 chars reais, "BTC-USD"),
+   não uma frase — deixá-lo crescer sozinho na barra é o que abria ~345px de campo
+   com metade vazia. */
+.lb-ticker { flex: 0 0 160px; min-width: 120px; }
 .lb-ticker label { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .lb-ticker input {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: var(--radius); padding: 8px 11px; font-size: var(--fs-14); width: 100%;
 }
 .lb-ticker input:focus { outline: none; border-color: var(--accent); }
-.lb-ctrls { display: flex; gap: 10px 12px; align-items: flex-end; flex-wrap: wrap; }
+/* ATIVO + DATA no MESMO grupo visual: mesma pergunta, gap pequeno; quem separa é
+   o gap grande da `.launch-bar`, entre este grupo e o de TEMPO. */
+.lb-asset { display: flex; gap: 6px; align-items: flex-end; }
 /* A coluna do conteúdo é o container medido (o resizer da lateral muda esta
-   largura sem tocar no viewport). 1106px é o que a barra INTEIRA ocupa numa linha
-   — medido, não chutado; abaixo disso ela quebra sozinha. Era 1176 (o mesmo
-   número, medido quando o TEMPO era uma fileira de cinco): empilhar o TEMPO em
-   duas linhas devolveu 70px de largura, e o limiar TEM de descer junto — senão a
-   barra continuaria quebrando entre 1106 e 1176 por um número velho. */
+   largura sem tocar no viewport) — por isso CONTAINER QUERY, não media query.
+   900px é medido na barra redistribuída da 034 (ATIVO mais estreito, MODELOS
+   virou chevron, TEMPO/MÉTODO viraram uma linha só): abaixo disso ela quebra
+   sozinha, por grupo inteiro — nunca uma pill isolada. */
 .launcher { container-type: inline-size; }
-@container (min-width: 1106px) {
-  .launch-bar, .lb-ctrls { flex-wrap: nowrap; }
+@container (min-width: 900px) {
+  .launch-bar { flex-wrap: nowrap; }
 }
 .lb-group { display: flex; flex-direction: column; gap: 5px; }
-.lb-glabel { font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
-.lb-glabel .tz { text-transform: none; letter-spacing: 0; margin-left: 4px; }
+.lb-glabel { font-size: var(--fs-10); line-height: var(--lh-10); text-transform: uppercase; letter-spacing: .5px; color: var(--muted); white-space: nowrap; }
+/* O fuso ("GMT-4 (Manaus)") virou TÍTULO (hover) em vez de texto sempre visível
+   (task 034): era, sozinho, o texto mais largo do grupo ATIVO+DATA — mais largo
+   que o próprio chip "Hoje" — e era ELE, não o chip, quem decidia se o grupo (e a
+   barra) cabiam numa linha em 1280px. A info não se perde: `title` no hover, e o
+   rodapé (`tzNote`) já a escreve por extenso sempre visível. */
+.lb-glabel .tz { display: none; }
 
 /* chip de data: mostra "Hoje" (ou dd/mm); clicar abre o calendário nativo. O input
    #date fica sobreposto transparente (fonte da verdade do POST) e recebe o clique. */
@@ -258,60 +272,32 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   opacity: 0; border: 0; padding: 0; margin: 0; cursor: pointer;
 }
 
-/* timeframe + método na barra única — pills herdados da antiga barra de reanálise */
-/* TEMPO em DUAS linhas contando como UM elemento da barra — a MESMA gramática do
-   bloco MODELOS (coluna de duas fileiras, `gap: 4px`, e o `align-items: flex-end`
-   da barra alinhando o resto embaixo). Em cima o macro (S · D), embaixo o
-   intradiário (4h · 1h · 15m): o corte é semântico, não "3 e 2 pra ficar quadrado".
-   Cada fileira NÃO quebra por dentro — quem decide onde quebra é a faixa do frame,
-   nunca o espaço que sobrou (era o `flex-wrap` livre que fazia TEMPO virar duas
-   fileiras arbitrárias e crescer a barra, corrigido na 010). */
-.lb-tfs { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
-.lb-tf-row { display: flex; gap: 5px; flex-wrap: nowrap; }
-/* A fileira de cima tem menos pills que a de baixo; esticá-las fecha o retângulo em
-   vez de deixar um degrau à direita — e não custa largura nenhuma, porque a largura
-   do grupo já é a da fileira MAIS LARGA (a de baixo). */
-.lb-tf-row.is-macro button.lb-tf { flex: 1; }
+/* timeframe + método na barra única — pills herdadas da antiga barra de reanálise.
+   Task 034: UMA linha só (eram duas fileiras empilhadas) — os 5 apps de
+   referência concordam: nenhum estica o seletor de frame/método em duas linhas.
+   A posição (sem rótulo, sem borda) já ensina o que cada grupo é. */
+.lb-tfs { display: inline-flex; gap: 2px; flex-wrap: nowrap; align-items: center; }
 /* `button.` NÃO é decoração de seletor: o GRUPO no HTML é `<div class="lb-group
    lb-tf">` e a PILL é `<button class="lb-tf">` — o mesmo nome nos dois. Sem o
-   qualificador, o div do grupo herdava borda, fundo e 6px/8px de padding de pill,
-   e o mesmo valia pro método. Era uma caixa em volta de cada grupo, sem
-   significado, comendo largura nas duas pontas — parte do "espaços mal
-   utilizados". A largura que isso devolve vai pro nome do modelo, não pros gaps. */
+   qualificador, o div do grupo herdava borda, fundo e padding de pill — uma caixa
+   sem significado em volta de TEMPO e MÉTODO, comendo largura nas duas pontas. */
 button.lb-tf {
   font-family: var(--mono); font-size: var(--fs-12); font-weight: var(--fw-med);
-  /* `line-height: 1` (era `--lh-12`, 16px) é o que faz a pill medir 26px, igual ao
-     chip de MODELOS — duas fileiras de 26 + 4 de gap dão exatamente os 56px que o
-     par de modelos já ocupa. É assim que TEMPO ganha a segunda linha SEM crescer a
-     altura da barra: ela continua sendo definida pelo bloco mais alto, que não mudou. */
   line-height: 1;
   /* TEXTO, não botão (DA-078 regra 9): a escolha do frame não executa nada. */
   color: var(--muted); background: none; border: none; border-radius: 0;
-  /* 7px (era 6 + 1 de borda): sem a moldura, é o padding que mantém a pill em 26px
-     — a altura que faz TEMPO caber na forma do bloco MODELOS. */
-  padding: 7px 8px; cursor: pointer; transition: color .12s;
-  min-width: 30px; text-align: center;
+  padding: 7px 4px; cursor: pointer; transition: color .12s;
+  min-width: 24px; text-align: center;
 }
 button.lb-tf:hover:not(.is-off):not(.is-active) { color: var(--text); }
 button.lb-tf.is-active { color: var(--green); font-weight: var(--fw-bold); }
 button.lb-tf.is-off { color: #55607a; cursor: not-allowed; opacity: .6; text-decoration: line-through; text-decoration-color: #55607a55; }
 
-/* MÉTODO em DUAS fileiras contando como UM elemento (mesma gramática do TEMPO e do
-   bloco MODELOS): em cima os que rodam MODELO, embaixo os ESTRUTURAIS ($0). Com o
-   quinto método (Storm) uma fila só empurrava a barra além dos 1440 e o ATIVO
-   encolhia pra pagar; assim a largura do grupo é a da fileira MAIS LARGA. */
-.lb-methods { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
-.lb-method-row { display: flex; gap: 6px; flex-wrap: nowrap; }
-/* a fileira de baixo tem menos botões: esticá-los fecha o retângulo em vez de
-   deixar um degrau à direita — e não custa largura, a do grupo já é a da de cima */
-.lb-method-row.is-estrutural button.lb-method { flex: 1; }
+.lb-methods { display: inline-flex; gap: 2px; flex-wrap: nowrap; align-items: center; }
 button.lb-method {
   font: inherit; font-size: var(--fs-14); line-height: 1; font-weight: var(--fw-med); cursor: pointer;
-  /* 6px/8px = a mesma altura das pills de TEMPO: duas fileiras de 26px + 4 de gap
-     dão os 56px que o bloco MODELOS já ocupa, então a segunda linha NÃO cresce a
-     altura da barra (ela é definida pelo bloco mais alto, que não mudou). */
   /* TEXTO, não botão (DA-078 regra 9) — o método é escolha, não ação. */
-  border-radius: 0; padding: 6px 10px; white-space: nowrap;   /* 5 + 1 da borda que saiu */
+  border-radius: 0; padding: 6px 6px; white-space: nowrap;
   border: none; background: none; color: var(--muted);
   transition: color .12s;
 }
@@ -322,30 +308,43 @@ button.lb-method:hover:not(.is-active) { color: var(--text); }
 /* método SELECIONADO (o que Analisar/↻ vão rodar): anel de destaque */
 button.lb-method.is-active { color: var(--green); font-weight: var(--fw-bold); }
 
-.lb-actions { display: inline-flex; gap: 8px; align-items: flex-end; }
+.lb-actions { display: inline-flex; gap: 5px; align-items: flex-end; }
 /* ↻ reanalisa o ativo ABERTO hoje (mesmo método) — absorve o antigo "Atualizar" */
 .rerun-btn {
   background: var(--panel-2); color: var(--accent); border: 1px solid var(--border);
-  border-radius: var(--radius); height: 36px; min-width: 40px; font-size: var(--fs-16); line-height: 1;
+  border-radius: var(--radius); height: 36px; min-width: 36px; font-size: var(--fs-16); line-height: 1;
   cursor: pointer; transition: color .12s, border-color .12s, background .12s;
 }
 .rerun-btn:hover:not(:disabled) { color: #fff; border-color: var(--accent); background: var(--panel); }
 .rerun-btn:disabled { opacity: .45; cursor: not-allowed; }
 
-/* Seletor compacto de modelos na barra (task 012): dois chips (rápido/pesado)
-   mostram o modelo em uso e abrem um popover pesquisável pra ESCOLHER (não digitar).
-   Antes o rápido/pesado morava só atrás do botão "Chaves" — impossível de achar. */
+/* Seletor de modelos (task 012), COLAPSADO na 034: eram dois chips SEMPRE
+   visíveis (rápido em cima, pesado embaixo) com o rótulo "modelos" por cima —
+   parecia mais um campo de formulário sobrando no canto direito, órfão dos outros
+   grupos (que já não têm rótulo desde a 028). Vira um chevron discreto ao lado do
+   ↻ (mesma altura 36px dos outros controles); o clique abre o MESMO par de chips,
+   sob demanda, num popover. Nenhuma função se perde. */
 .lb-model { position: relative; }
-/* MODELOS em DUAS linhas (rápido em cima, pesado embaixo) contando como UM
-   elemento da barra: o par é mais alto que os demais controles, e o
-   ``align-items: flex-end`` da barra mantém todo o resto alinhado embaixo, sem
-   esticar altura de ninguém. */
-.lb-models { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
 .lb-model { flex: 0 0 auto; }
+.lb-model-toggle {
+  height: 36px; min-width: 36px; padding: 0 10px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  border-radius: var(--radius); cursor: pointer; font-size: var(--fs-16); line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.lb-model-toggle:hover, .lb-model-toggle[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+.lb-models-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .55); padding: 10px;
+}
+.lb-models-pop.hidden { display: none; }
+.lb-models { display: inline-flex; flex-direction: column; gap: 6px; align-items: stretch; }
 .lb-model-pick {
   display: inline-flex; align-items: center; gap: 6px;
   font: inherit; font-size: var(--fs-12); line-height: 1; cursor: pointer; white-space: nowrap;
-  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
   border-radius: var(--radius); padding: 6px 10px;
   transition: color .12s, border-color .12s, background .12s;
 }
@@ -356,17 +355,16 @@ button.lb-method.is-active { color: var(--green); font-weight: var(--fw-bold); }
 .lb-model-pick .lbm-model {
   font-family: var(--mono); font-weight: var(--fw-bold); color: var(--accent);
   /* 200px: cabe INTEIRO o nome mais longo que o produto realmente usa — medido,
-     `claude-haiku-4-5-20251001` pede 181px e antes era cortado em 120 ("claude-
-     haiku-4-…"). A largura veio da caixa fantasma dos grupos e do rótulo curto do
-     TEMPO, que era o pedido: usar o espaço liberado pro MODELO, não pros gaps.
-     As reticências FICAM como último recurso — um id gigante de OpenRouter não
-     pode voltar a ser quem decide se a barra cabe numa linha. */
+     `claude-haiku-4-5-20251001` pede 181px. As reticências FICAM como último
+     recurso — um id gigante de OpenRouter não pode voltar a decidir o layout. */
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .lb-model-pick.is-default .lbm-model { color: var(--muted); font-weight: normal; }
 
+/* Popover de BUSCA (por nível, rápido OU pesado) — ancorado à direita, à direita
+   do próprio bloco MODELOS: é ali que ele sempre vive na barra redistribuída. */
 .lb-model-pop {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 41;
   min-width: 288px; max-width: 380px;
   background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--radius);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
@@ -1344,35 +1342,34 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
   .field input { min-width: 0; width: 100%; }
 
   /* barra ÚNICA empilha em blocos (ativo · data · tempo · método · ações), sem
-     empurrar nada pro lado; TFs e métodos ocupam a largura toda e o "Comparar"
-     continua achável de relance. Nada estoura na largura de 390. */
+     empurrar nada pro lado; nada estoura na largura de 390. Empilhamento MANTIDO
+     na task 034 (Samyr: "está bom") — só o agrupamento de TEMPO mudou (abaixo). */
   .launch-bar { flex-direction: column; align-items: stretch; gap: 12px; }
+  .lb-asset { flex-direction: column; align-items: stretch; gap: 12px; width: 100%; }
   .lb-ticker { flex: 1 1 auto; min-width: 0; }
   .lb-ticker input { width: 100%; }
-  .lb-ctrls { flex-direction: column; align-items: stretch; gap: 12px; }
   .lb-group { width: 100%; }
-  .lb-tfs, .lb-methods, .lb-models { width: 100%; }
-  /* No telefone o TEMPO volta a ser UMA fileira: a barra aqui já é uma coluna de
-     blocos, então a segunda linha só somaria altura sem devolver largura nenhuma —
-     ela existe pra estreitar o desktop. `display: contents` dissolve as fileiras e
-     devolve os botões ao flex da .lb-tfs, que é o layout que já estava no ar. */
-  .lb-tfs { flex-direction: row; }
-  .lb-tf-row { display: contents; }
-  button.lb-tf { flex: 1; text-align: center; }
+  .lb-tfs, .lb-methods { width: 100%; }
+  /* Task 034 — DENTE: os cinco frames viviam com `flex: 1` esticando cada pill de
+     ponta a ponta ("S" grudado na esquerda, "15m" na direita, o meio vazio) — o
+     efeito visual de um `justify-content: space-between` sem ser um. Sem o
+     `flex: 1`, os botões voltam ao próprio tamanho e o gap da `.lb-tfs` (herdado
+     do desktop) os mantém JUNTOS, agrupados — nada mais a fazer aqui: a fileira
+     única já vem de graça da base (a segunda fileira que existia só no desktop
+     foi removida de vez, ver acima). */
   /* CINCO métodos (o Storm é o quinto) não cabem numa fileira só de 390px, e com
      `nowrap` eles estouravam a barra pro lado — o defeito que a 020 tinha matado.
      A fileira passa a QUEBRAR: falta de largura vira ALTURA, nunca informação
      saindo da tela. `flex: 1 1 auto` deixa cada botão pedir o tamanho do próprio
      texto (que é `nowrap` e não encolhe) e esticar só o que sobra na última linha. */
-  .lb-methods { flex-direction: row; flex-wrap: wrap; }
-  .lb-method-row { display: contents; }
+  .lb-methods { flex-wrap: wrap; }
   .lb-method { flex: 1 1 auto; min-width: 84px; text-align: center; padding: 10px 8px; }
-  .lb-model-pick { flex: 1; justify-content: center; }
-  /* popover ocupa a largura da barra no mobile (não estoura os 390) */
-  .lb-model-pop { left: 0; right: 0; min-width: 0; max-width: none; }
   .date-chip-wrap { width: 100%; }
   .date-chip { width: 100%; text-align: left; }
   .lb-actions { width: 100%; }
+  /* o chevron de MODELOS mora dentro de .lb-actions (task 034) — não pode herdar
+     `.lb-group { width: 100% }` ou quebra a fileira Analisar/↻/chevron. */
+  .lb-actions .lb-model { width: auto; }
   #runBtn { flex: 1; }
   .rerun-btn { flex: 0 0 auto; }
   .act-grid { grid-template-columns: 1fr; }

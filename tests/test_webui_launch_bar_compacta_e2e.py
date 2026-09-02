@@ -71,6 +71,15 @@ def _abre(page, base):
     page.wait_for_timeout(150)
 
 
+# Task 034: MODELOS colapsou num chevron — os chips (`.lbm-model`) só têm caixa de
+# layout (e por tabela, `scrollWidth`/`clientWidth` mensuráveis) quando o painel
+# está ABERTO. Testes que medem corte de texto do modelo precisam abrir primeiro.
+def _abre_com_modelos_visiveis(page, base):
+    _abre(page, base)
+    page.evaluate("() => _toggleModelsMenu()")
+    page.wait_for_timeout(80)
+
+
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_a_barra_usa_o_rotulo_curto_e_guarda_o_completo_no_title_e_no_aria(base):
     with sync_playwright() as p:
@@ -83,7 +92,9 @@ def test_a_barra_usa_o_rotulo_curto_e_guarda_o_completo_no_title_e_no_aria(base)
         por_tf = {p_["tf"]: p_ for p_ in pills}
         # DENTE: era "Semanal"/"Diário" escritos por extenso na pill
         assert por_tf["1w"]["txt"] == "S" and por_tf["1d"]["txt"] == "D", pills
-        assert [p_["txt"] for p_ in pills] == ["S", "D", "4h", "1h", "15m"], pills
+        # Task 034: ordem CRESCENTE (15m → S) — do frame mais rápido pro mais
+        # lento, como o mercado lê. Era decrescente (S → 15m) até aqui.
+        assert [p_["txt"] for p_ in pills] == ["15m", "1h", "4h", "D", "S"], pills
         # o nome completo NÃO se perde — acessibilidade e clareza continuam
         assert por_tf["1w"]["aria"] == "Semanal" and por_tf["1d"]["aria"] == "Diário", pills
         assert "Semanal" in por_tf["1w"]["title"], pills
@@ -93,7 +104,12 @@ def test_a_barra_usa_o_rotulo_curto_e_guarda_o_completo_no_title_e_no_aria(base)
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_o_seletor_do_grafico_herda_a_mesma_fonte_sem_lista_paralela(base):
     """Fonte ÚNICA: barra, gráfico e scan derivam de ALL_TFS. Se alguém recriar uma
-    lista à mão pra uma das superfícies, elas divergem — e é isso que se proíbe."""
+    lista à mão pra uma das superfícies, elas divergem — e é isso que se proíbe.
+
+    Task 034: a barra do LAUNCHER passou a ler ALL_TFS em ordem INVERSA (crescente,
+    15m → S — como o mercado lê); o gráfico e o scan continuam na ordem original
+    de ALL_TFS (decrescente). A inversão é um `.reverse()` no próprio render, não
+    uma segunda lista escrita à mão — é isso que este teste trava."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -108,7 +124,7 @@ def test_o_seletor_do_grafico_herda_a_mesma_fonte_sem_lista_paralela(base):
             return d.firstChild.textContent.trim(); }),
         })""")
         curtos_da_fonte = [c for _, c in m["fonte"]]
-        assert m["barra"] == curtos_da_fonte, m
+        assert m["barra"] == list(reversed(curtos_da_fonte)), ("a barra lê a fonte de trás pra frente", m)
         assert m["scan"] == curtos_da_fonte, ("o scan tem que sair da MESMA fonte", m)
         assert dict(m["curtos"]) == dict(m["fonte"]), m
         # e o completo continua existindo pra prosa ("veredito no Semanal")
@@ -121,7 +137,9 @@ def test_o_nome_do_modelo_cabe_inteiro_e_a_barra_fica_numa_linha_em_1500(base):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
-        _abre(page, base)
+        # Task 034: os chips só ganham caixa de layout com o painel de MODELOS
+        # aberto (colapsou num chevron) — sem abrir, `.lbm-model` mede 0x0.
+        _abre_com_modelos_visiveis(page, base)
         m = page.evaluate("""() => {
           const bar = document.querySelector('.launch-bar');
           const r = document.documentElement;
@@ -188,46 +206,47 @@ def test_o_grupo_nao_se_veste_de_pill(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_em_1280_a_barra_quebra_sem_rolar_a_pagina(base):
-    """Largura menor: pode quebrar (a container query da 010 manda), mas nem a
-    página rola na horizontal nem o modelo volta a ser cortado."""
+def test_em_1280_a_barra_cabe_numa_linha_sem_rolar_a_pagina(base):
+    """Task 034: 1280px é largura de VIEWPORT explicitamente pedida (Samyr aprovou
+    a redistribuição a partir dos 5 apps de referência) — a barra tem que caber
+    numa linha AQUI, não só quebrar sem rolar. O orçamento (ATIVO fixo ~160px,
+    TEMPO/MÉTODO numa linha só, MODELOS um chevron de 36px) foi calibrado pra isso:
+    com a lateral padrão (280px + resizer), o conteúdo tem 962px — e é exatamente
+    o que a barra pede, sem sobrar quase nada."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 950})
-        _abre(page, base)
+        _abre_com_modelos_visiveis(page, base)
         m = page.evaluate("""() => {
+          const bar = document.querySelector('.launch-bar');
           const r = document.documentElement;
           return {docW: r.scrollWidth, viewW: r.clientWidth,
+                  umaLinha: bar.scrollWidth <= bar.clientWidth + 1,
                   cortados: [...document.querySelectorAll('.lbm-model')]
                     .filter(e => e.scrollWidth > e.clientWidth + 1).length,
                   pills: [...document.querySelectorAll('#launchTfs button.lb-tf')]
                     .map(b => b.textContent.trim())};
         }""")
         assert m["docW"] <= m["viewW"], m
+        assert m["umaLinha"], ("a barra tem que caber numa linha em 1280 (task 034)", m)
         assert m["cortados"] == 0, m
-        assert m["pills"] == ["S", "D", "4h", "1h", "15m"], m
+        assert m["pills"] == ["15m", "1h", "4h", "D", "S"], m
         browser.close()
 
 
 # ---------------------------------------------------------------------------
-# Task 017 — TEMPO em DUAS fileiras, contando como UM elemento da barra
+# Task 20260902-034 — TEMPO e MÉTODO voltam a UMA fileira; MODELOS colapsa
 #
-# O rótulo curto da 016 deixou "S D 4h 1h 15m", mas cinco pills em fila ainda
-# ocupavam 185px. O bloco MODELOS já resolvia isso empilhando dois chips e
-# contando como um elemento só; TEMPO passa a usar a MESMA gramática: macro
-# (S · D) em cima, intradiário (4h · 1h · 15m) embaixo.
-#
-# Medido em 1500px com modelos longos reais:
-#   grupo TEMPO            185px → 115px
-#   campo ATIVO            147px → 178px  (a largura vai pro conteúdo, não pro gap)
-#   altura da barra         73px →  73px  (a mesma: MODELOS já era o bloco mais alto)
-#   1 linha até (container)         1174px → 1104px  →  em 1440 a barra deixou de
-#                                   quebrar (139px em duas fileiras → 73px em uma)
+# As tasks 017/022 tinham empilhado TEMPO e MÉTODO em DUAS fileiras cada (a
+# mesma gramática do bloco MODELOS) pra caber em 1500px sem estourar. A 034
+# reverte isso DE PROPÓSITO: o pedido, a partir de 5 apps de referência
+# (Quantfury/Krystal/CoinMarketCap), foi UMA linha só pra cada grupo — nenhum
+# desses apps empilha frame/método em duas fileiras. O espaço que isso custa
+# saiu de outro lugar: ATIVO deixou de crescer (fixo ~160px, antes esticava até
+# ~345px), MODELOS colapsou de um par de chips sempre visível pra um chevron de
+# 36px, e o padding das pills apertou. O orçamento inteiro foi recalibrado pra
+# caber em 1280px de VIEWPORT (não só 1500) — ver os testes de largura abaixo.
 # ---------------------------------------------------------------------------
-
-_LINHAS = """() => [...document.querySelectorAll('#launchTfs .lb-tf-row')]
-    .map(r => ({faixa: [...r.classList].find(c => c.startsWith('is-')),
-                pills: [...r.querySelectorAll('button.lb-tf')].map(b => b.dataset.tf)}))"""
 
 # align-items: flex-end — quem está na MESMA fileira da barra divide o mesmo rodapé.
 _FILEIRAS_DA_BARRA = """() => {
@@ -238,51 +257,38 @@ _FILEIRAS_DA_BARRA = """() => {
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_tempo_vira_duas_fileiras_e_o_corte_sai_da_faixa_do_frame(base):
-    """A quebra é SEMÂNTICA (macro × intradiário) e vem declarada no próprio frame,
-    em ALL_TFS. Não pode existir uma lista de "quem vai em cima" mantida à parte —
-    foi assim que o rótulo curto da 012 chegou só ao scan (task 016)."""
+def test_tempo_e_metodo_sao_uma_fileira_so(base):
+    """DENTE: TEMPO e MÉTODO eram DUAS fileiras (17px×2 + gap) — task 034 reverte
+    pra UMA, seguindo os 5 apps de referência. `.lb-tf-row`/`.lb-method-row` (os
+    wrappers de fileira) saíram do HTML por completo — não há mais fileira pra
+    achar."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _abre(page, base)
-        linhas = page.evaluate(_LINHAS)
-        # DENTE: era UMA fileira com os cinco frames
-        assert [li["pills"] for li in linhas] == [["1w", "1d"], ["4h", "1h", "15m"]], linhas
-        assert [li["faixa"] for li in linhas] == ["is-macro", "is-intra"], linhas
-        # e o agrupamento é DERIVADO da fonte única, não escrito de novo aqui
-        da_fonte = page.evaluate("""() => {
-          const g = {};
-          for (const [tf, , , faixa] of ALL_TFS) (g[faixa] ||= []).push(tf);
-          return Object.entries(g);
-        }""")
-        assert [(li["faixa"].replace("is-", ""), li["pills"]) for li in linhas] == [
-            (faixa, tfs) for faixa, tfs in da_fonte], (linhas, da_fonte)
-        # a ordem de leitura (e do tab) continua decrescente, sem virar duas listas
-        assert page.evaluate("""() => [...document.querySelectorAll('#launchTfs button.lb-tf')]
-            .map(b => b.textContent.trim())""") == ["S", "D", "4h", "1h", "15m"]
-        # o bloco é um RETÂNGULO: a fileira de cima tem menos pills, então elas
-        # esticam pra fechar a largura em vez de deixar um degrau à direita — e isso
-        # é de graça, a largura do grupo já é a da fileira mais larga (a de baixo).
-        sobra = page.evaluate("""() => [...document.querySelectorAll('#launchTfs .lb-tf-row')]
-            .map(r => { const pills = [...r.querySelectorAll('button.lb-tf')];
-              return Math.round(r.getBoundingClientRect().right
-                                - pills[pills.length - 1].getBoundingClientRect().right); })""")
-        assert sobra == [0, 0], ("nenhuma fileira pode terminar num degrau", sobra)
+        m = page.evaluate("""() => ({
+          semFileiraTf: document.querySelectorAll('#launchTfs .lb-tf-row').length,
+          semFileiraMet: document.querySelectorAll('#launchMethods .lb-method-row').length,
+          tfTops: [...new Set([...document.querySelectorAll('#launchTfs button.lb-tf')]
+            .map(b => Math.round(b.getBoundingClientRect().top)))].length,
+          metTops: [...new Set([...document.querySelectorAll('#launchMethods button.lb-method')]
+            .map(b => Math.round(b.getBoundingClientRect().top)))].length,
+          ordem: [...document.querySelectorAll('#launchTfs button.lb-tf')].map(b => b.dataset.tf),
+        })""")
+        assert m["semFileiraTf"] == 0 and m["semFileiraMet"] == 0, m
+        assert m["tfTops"] == 1, ("os 5 frames numa única fileira", m)
+        assert m["metTops"] == 1, ("os 5 métodos numa única fileira", m)
+        # e a ordem de leitura é CRESCENTE (15m → S), não mais decrescente
+        assert m["ordem"] == ["15m", "1h", "4h", "1d", "1w"], m
         browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_as_duas_fileiras_contam_como_um_elemento_e_nao_crescem_a_barra(base):
-    """O par de MODELOS já ocupava duas fileiras sem esticar a barra — a altura dela
-    é a do bloco mais alto. TEMPO tem de caber DENTRO dessa mesma altura: duas pills
-    de 26px + 4px de gap = os 56px. Se a pill voltar aos 30px (``line-height:
-    var(--lh-12)``), TEMPO passa MODELOS e a barra cresce.
-
-    A task 20260902-028 tirou o rótulo-palavra "tempo" (a posição já ensina), então
-    TEMPO deixou de ter a MESMA forma de MODELOS (que mantém o rótulo "modelos") —
-    56px contra 73px. O que continua valendo, e é o que este teste trava, é o TETO:
-    TEMPO não pode passar de MODELOS, senão é ele quem estica a barra inteira."""
+def test_modelos_colapsa_num_chevron_de_36px(base):
+    """MODELOS era o bloco mais ALTO da barra (73px, dois chips empilhados com o
+    rótulo "modelos" por cima) — hoje é um botão-ícone de 36px, a mesma altura de
+    Analisar/↻. Quem passa a definir a altura da barra é o campo ATIVO+DATA
+    (rótulo + input), não mais MODELOS."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -290,94 +296,82 @@ def test_as_duas_fileiras_contam_como_um_elemento_e_nao_crescem_a_barra(base):
         m = page.evaluate("""() => {
           const h = (s) => Math.round(document.querySelector(s).getBoundingClientRect().height);
           return {barra: h('.launch-bar'), tempo: h('.lb-group.lb-tf'),
-                  modelos: h('.lb-group.lb-model'), pill: h('#launchTfs button.lb-tf'),
-                  chip: h('.lb-model-pick')};
+                  metodo: h('.lb-group.lb-method'), asset: h('.lb-asset'),
+                  toggle: h('.lb-model-toggle'), run: h('#runBtn')};
         }""")
-        # DENTE: duas fileiras de pill (26px) + 4px de gap, sem rótulo por cima
-        assert m["tempo"] == 56, m
-        assert m["tempo"] <= m["modelos"], ("TEMPO não pode passar MODELOS e esticar a barra", m)
-        assert m["pill"] == m["chip"], ("a pill e o chip de modelo medem o mesmo", m)
-        # DENTE: com a pill em 30px isto vira 82 > 73 e a barra inteira cresce
-        assert m["barra"] == m["modelos"], ("a barra continua com a altura do bloco mais alto", m)
+        assert m["toggle"] == 36 and m["run"] == 36, m
+        assert m["tempo"] == 26 and m["metodo"] == 26, ("uma fileira só de pill", m)
+        assert m["barra"] == m["asset"], ("ATIVO+DATA é o bloco mais alto agora", m)
+        assert m["asset"] > m["toggle"], m
         # e a barra segue sendo UMA fileira em 1500 (item 1 da task 010)
         assert page.evaluate(_FILEIRAS_DA_BARRA) == 1, "a barra não pode quebrar em duas"
         browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_a_largura_economizada_vai_pro_conteudo_e_nao_pro_gap(base):
+def test_o_ativo_para_de_crescer_e_vira_ticker(base):
+    """DENTE: o ATIVO era ``flex: 1 1 160px`` e esticava até ~345px com a barra
+    folgada — "é ticker, não frase" (Samyr). Task 034: ``flex: 0 0 160px``, não
+    cresce nunca, só encolhe sob pressão real (`min-width`)."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        page = browser.new_page(viewport={"width": 2200, "height": 950})
         _abre(page, base)
         m = page.evaluate("""() => {
-          const w = (s) => Math.round(document.querySelector(s).getBoundingClientRect().width);
           const t = document.querySelector('.lb-ticker');
-          return {tempo: w('.lb-group.lb-tf'), ticker: w('.lb-ticker'),
-                  base: parseFloat(getComputedStyle(t).flexBasis),
-                  gapBarra: getComputedStyle(document.querySelector('.launch-bar')).columnGap,
-                  gapCtrls: getComputedStyle(document.querySelector('.lb-ctrls')).columnGap,
-                  gapTfs: getComputedStyle(document.querySelector('#launchTfs')).rowGap};
+          const c = getComputedStyle(t);
+          return {largura: Math.round(t.getBoundingClientRect().width),
+                  grow: c.flexGrow, base: parseFloat(c.flexBasis)};
         }""")
-        # DENTE: 185px em fileira única; empilhado cabe em ~115
-        assert m["tempo"] <= 130, ("o grupo TEMPO tem de estreitar de verdade", m)
-        # os 70px devolvidos NÃO viram respiro entre os blocos...
-        assert m["gapBarra"] == "12px" and m["gapCtrls"] == "12px", m
-        assert m["gapTfs"] == "4px", ("o gap interno é o do bloco MODELOS", m)
-        # ...vão pro campo ATIVO, que antes vivia ESMAGADO abaixo da própria base
-        assert m["ticker"] > m["base"], ("o ATIVO tem de deixar de encolher", m)
+        assert m["grow"] == "0", ("o ATIVO não pode crescer mesmo com a barra folgada", m)
+        assert m["base"] == 160, m
+        assert m["largura"] == 160, ("mesmo com 2200px de sobra, o ATIVO fica em 160px", m)
         browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_em_1440_a_barra_deixou_de_quebrar(base):
-    """O limiar da container query é um número MEDIDO (era 1176 = a largura que a
-    barra ocupava numa linha). Empilhar o TEMPO devolveu 70px; se o limiar ficasse
-    no número velho, a barra continuaria quebrando à toa entre 1106 e 1176 — e é
-    exatamente onde cai o 1440 do MacBook, o print onde MODELOS ficava pendurado
-    sozinho na segunda fileira."""
+def test_em_1440_a_barra_cabe_numa_linha(base):
+    """O limiar da container query é um número MEDIDO contra o orçamento da 034
+    (ATIVO fixo, TEMPO/MÉTODO em uma linha, MODELOS um chevron) — não o número
+    velho da 017 (empilhamento), que não existe mais."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 950})
-        _abre(page, base)
+        _abre_com_modelos_visiveis(page, base)
         assert page.evaluate(_FILEIRAS_DA_BARRA) == 1, "em 1440 a barra cabe numa linha"
         m = page.evaluate("""() => ({
-          barra: Math.round(document.querySelector('.launch-bar').getBoundingClientRect().height),
-          modelos: Math.round(document.querySelector('.lb-group.lb-model').getBoundingClientRect().height),
           docW: document.documentElement.scrollWidth, viewW: document.documentElement.clientWidth,
           cortados: [...document.querySelectorAll('.lbm-model')]
             .filter(e => e.scrollWidth > e.clientWidth + 1).length,
         })""")
-        assert m["barra"] == m["modelos"], m  # DENTE: 139px (duas fileiras) antes
         assert m["docW"] <= m["viewW"] and m["cortados"] == 0, m
         browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_clicar_numa_pill_da_fileira_de_baixo_seleciona_o_frame(base):
-    """As pills passaram a viver dentro de um <div> de fileira; o clique é delegado
-    no #launchTfs. Se a delegação parasse no wrapper, o intradiário inteiro ficaria
-    inclicável — a fileira de baixo é a que este teste aperta."""
+def test_clicar_numa_pill_de_tempo_seleciona_o_frame(base):
+    """As pills de TEMPO vivem direto em `#launchTfs` (sem wrapper de fileira desde
+    a 034) — o clique é delegado ali; qualquer pill, inclusive as antes "de baixo"
+    (intradiário), tem que responder."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _abre(page, base)
-        page.click("#launchTfs .lb-tf-row.is-intra button[data-tf='4h']")
+        page.click("#launchTfs button[data-tf='4h']")
         page.wait_for_timeout(80)
         m = page.evaluate("""() => ({barTf: _barTf,
-          ativa: document.querySelector('#launchTfs button.lb-tf.is-active').dataset.tf,
-          fileiraDaAtiva: [...document.querySelector(
-            '#launchTfs button.lb-tf.is-active').closest('.lb-tf-row').classList]
-            .find(c => c.startsWith('is-'))})""")
+          ativa: document.querySelector('#launchTfs button.lb-tf.is-active').dataset.tf})""")
         assert m["barTf"] == "4h" and m["ativa"] == "4h", m
-        assert m["fileiraDaAtiva"] == "is-intra", m
         browser.close()
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_no_telefone_o_tempo_continua_em_uma_fileira(base):
-    """A segunda fileira existe pra estreitar o DESKTOP. No telefone a barra já é uma
-    coluna de blocos: empilhar ali só somaria altura sem devolver largura nenhuma."""
+def test_no_telefone_o_tempo_fica_agrupado_nao_esparramado(base):
+    """DENTE (task 034): os cinco frames viviam com `flex: 1` no mobile — cada pill
+    esticava pra dividir a largura toda, "S" grudado na esquerda e "15m" na
+    direita, o meio vazio (o efeito visual de um `space-between` sem ser um).
+    Samyr pediu pra "agrupar com gap fixo em vez de space-between" — as pills
+    ficam do próprio tamanho, JUNTAS, com gap fixo, sem preencher a linha toda."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 390, "height": 844})
@@ -386,19 +380,25 @@ def test_no_telefone_o_tempo_continua_em_uma_fileira(base):
           const bs = [...document.querySelectorAll('#launchTfs button.lb-tf')];
           const g = document.querySelector('#launchTfs').getBoundingClientRect();
           const r = bs.map(b => b.getBoundingClientRect());
+          const gaps = r.slice(1).map((x, i) => Math.round(x.left - r[i].right));
           return {
             tops: [...new Set(r.map(x => Math.round(x.top)))].length, pills: bs.length,
             larguras: r.map(x => Math.round(x.width)),
+            gaps,
             preenche: Math.round(r[0].left - g.left) === 0
                    && Math.round(g.right - r[r.length - 1].right) === 0,
             docW: document.documentElement.scrollWidth, viewW: document.documentElement.clientWidth,
           };
         }""")
         assert m["pills"] == 5 and m["tops"] == 1, ("no 390 os cinco frames ficam em fila", m)
-        # e a fila é a MESMA que já estava no ar: cinco pills de igual largura ocupando
-        # a linha inteira (é o `flex: 1` do mobile — ele só alcança os botões se as
-        # fileiras se dissolverem com `display: contents`).
-        assert max(m["larguras"]) - min(m["larguras"]) <= 1, m
-        assert m["preenche"], ("as pills ocupam a largura toda no telefone", m)
+        # DENTE: eram 5 larguras IGUAIS (a marca do `flex: 1`) — agora cada pill
+        # pede o próprio tamanho ("15m" é mais largo que "S"/"D").
+        assert len(set(m["larguras"])) > 1, ("as pills não podem mais ter largura idêntica (flex:1)", m)
+        # gap FIXO entre elas (não zero, não crescente/decrescente feito space-between)
+        assert all(g == m["gaps"][0] for g in m["gaps"]), ("o gap entre pills tem que ser fixo", m)
+        assert 0 < m["gaps"][0] <= 8, m
+        # DENTE: antes elas preenchiam a linha inteira (primeira encostada na
+        # esquerda, última na direita) — agrupadas, sobra espaço à direita.
+        assert not m["preenche"], ("agrupadas, não pode mais preencher a linha toda", m)
         assert m["docW"] <= m["viewW"], m
         browser.close()

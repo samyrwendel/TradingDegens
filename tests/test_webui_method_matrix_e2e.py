@@ -307,11 +307,10 @@ def test_single_bar_layout_no_separate_reanalyze_bar(live_server):
             assert page.locator("#runBtn").count() == 1
             assert page.locator("#rerunBtn").count() == 1
             assert page.locator("#launchTfs button.lb-tf").count() == 5
-            # CINCO métodos desde a task 022 (o Storm entrou), em DUAS fileiras que
-            # contam como um elemento da barra: em cima os que rodam modelo, embaixo
-            # os estruturais ($0).
+            # CINCO métodos desde a task 022 (o Storm entrou); numa fileira só desde
+            # a task 034 (o empilhamento em duas fileiras da 022 foi revertido).
             assert page.locator("#launchMethods button.lb-method").count() == 5
-            assert page.locator("#launchMethods .lb-method-row").count() == 2
+            assert page.locator("#launchMethods .lb-method-row").count() == 0
 
             # sem ativo aberto, o ↻ nasce desabilitado (não há o que reanalisar)
             assert page.is_disabled("#rerunBtn") is True
@@ -333,11 +332,10 @@ def test_bar_renders_and_clicks_on_mobile_390(live_server):
         try:
             page.goto(live_server)
             page.wait_for_selector("#launchMethods button.lb-method", state="visible")
-            # CINCO métodos desde a task 022 (o Storm entrou), em DUAS fileiras que
-            # contam como um elemento da barra: em cima os que rodam modelo, embaixo
-            # os estruturais ($0).
+            # CINCO métodos desde a task 022 (o Storm entrou); numa fileira só desde
+            # a task 034 (o empilhamento em duas fileiras da 022 foi revertido).
             assert page.locator("#launchMethods button.lb-method").count() == 5
-            assert page.locator("#launchMethods .lb-method-row").count() == 2
+            assert page.locator("#launchMethods .lb-method-row").count() == 0
             assert page.locator("#launchTfs button.lb-tf").count() == 5
 
             # quebra limpa: nada estoura a largura de 390 (sem scroll horizontal)
