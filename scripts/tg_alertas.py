@@ -112,6 +112,15 @@ def carteira() -> int:
 
     anterior = _carrega(_ULTIMA_CARTEIRA)
     mudou = A.mudancas(anterior, atual)
+    # CLONE EM PAPER (task 20260902-055): este é o ÚNICO ponto do sistema com
+    # `anterior` e `atual` reais já comparados — é aqui que cada mudança vira uma
+    # operação da carteira-espelho, com o preço REAL da detecção (nunca o preço
+    # médio dele). Passa defensivamente: o alerta é o produto; o clone é um
+    # registrador passivo e uma falha dele jamais pode derrubar o alerta.
+    from tradingagents.webui import clone_erick as _clone
+
+    with contextlib.suppress(Exception):
+        _clone.registrar(mudou, atual)
     # O ESTADO É GRAVADO SEMPRE, mesmo sem mudança: senão a primeira leitura de
     # amanhã compararia contra a de anteontem e reanunciaria o que já foi dito.
     _grava(_ULTIMA_CARTEIRA, {"carteira": atual.get("carteira")})
