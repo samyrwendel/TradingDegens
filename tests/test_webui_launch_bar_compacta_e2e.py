@@ -276,8 +276,13 @@ def test_o_tempo_vira_duas_fileiras_e_o_corte_sai_da_faixa_do_frame(base):
 def test_as_duas_fileiras_contam_como_um_elemento_e_nao_crescem_a_barra(base):
     """O par de MODELOS já ocupava duas fileiras sem esticar a barra — a altura dela
     é a do bloco mais alto. TEMPO tem de caber DENTRO dessa mesma altura: duas pills
-    de 26px + 4px de gap = os 56px do par de modelos. Se a pill voltar aos 30px
-    (``line-height: var(--lh-12)``), TEMPO passa MODELOS e a barra cresce."""
+    de 26px + 4px de gap = os 56px. Se a pill voltar aos 30px (``line-height:
+    var(--lh-12)``), TEMPO passa MODELOS e a barra cresce.
+
+    A task 20260902-028 tirou o rótulo-palavra "tempo" (a posição já ensina), então
+    TEMPO deixou de ter a MESMA forma de MODELOS (que mantém o rótulo "modelos") —
+    56px contra 73px. O que continua valendo, e é o que este teste trava, é o TETO:
+    TEMPO não pode passar de MODELOS, senão é ele quem estica a barra inteira."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -288,7 +293,9 @@ def test_as_duas_fileiras_contam_como_um_elemento_e_nao_crescem_a_barra(base):
                   modelos: h('.lb-group.lb-model'), pill: h('#launchTfs button.lb-tf'),
                   chip: h('.lb-model-pick')};
         }""")
-        assert m["tempo"] == m["modelos"], ("TEMPO tem de ter a mesma forma de MODELOS", m)
+        # DENTE: duas fileiras de pill (26px) + 4px de gap, sem rótulo por cima
+        assert m["tempo"] == 56, m
+        assert m["tempo"] <= m["modelos"], ("TEMPO não pode passar MODELOS e esticar a barra", m)
         assert m["pill"] == m["chip"], ("a pill e o chip de modelo medem o mesmo", m)
         # DENTE: com a pill em 30px isto vira 82 > 73 e a barra inteira cresce
         assert m["barra"] == m["modelos"], ("a barra continua com a altura do bloco mais alto", m)

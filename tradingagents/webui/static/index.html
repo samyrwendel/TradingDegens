@@ -200,7 +200,9 @@
            Analisar roda com o método + TF escolhidos; ↻ reanalisa o ativo ABERTO
            hoje preservando o método aberto (absorve o antigo "Atualizar"). A barra de
            reanálise separada deixou de existir — método volta a viver aqui (reverte a
-           021 de propósito). Preserva método por TF: trocar de TF não reseta o método. -->
+           021 de propósito). Preserva método por TF: trocar de TF não reseta o método.
+           Task 20260902-028: sumiram os rótulos-palavra "tempo"/"método" — a POSIÇÃO
+           na barra (entre data e Analisar) e os nomes das próprias pills já ensinam. -->
       <section class="panel launcher">
         <form id="analyzeForm" class="launch-bar" autocomplete="off">
           <div class="lb-field lb-ticker">
@@ -221,12 +223,14 @@
                 <input id="date" name="date" type="date" class="date-native" aria-label="Data da análise" tabindex="-1" />
               </div>
             </div>
+            <!-- Sem rótulo "tempo": a posição (logo após a data, antes do método)
+                 já ensina o que é — o aria-label do grupo cobre leitor de tela. -->
             <div class="lb-group lb-tf">
-              <span class="lb-glabel">tempo</span>
               <div class="lb-tfs" id="launchTfs" role="group" aria-label="Timeframe da análise"></div>
             </div>
+            <!-- Idem "método": a posição (entre tempo e Analisar) e os próprios
+                 rótulos das pills (Padrão/Erick/Comparar/...) já dizem o que é. -->
             <div class="lb-group lb-method">
-              <span class="lb-glabel">método</span>
               <div class="lb-methods" id="launchMethods" role="group" aria-label="Método da análise"></div>
             </div>
             <!-- Seletor COMPACTO de modelo (task 012): o rápido/pesado morava só atrás
