@@ -97,13 +97,53 @@ def test_nada_mudou_e_SILENCIO_nao_e_mensagem_vazia_enviada():
 
 def test_a_mensagem_traz_ATIVO_o_QUE_mudou_e_o_PCT_e_o_racional_dele():
     txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
-    assert "*IREN*" in txt and "SAIU" in txt
+    assert "IREN" in txt and "SAIU" in txt and "🔴⬇" in txt
     assert "% do capital" in txt
     # o racional é o que dá sentido: "saiu de IREN" sem o porquê é um número
     assert "timing, não tese" in txt
     assert "27/08/2026" in txt
     # DA-033: sem tabela markdown, e com respiro entre blocos
     assert "|---" not in txt and "\n\n" in txt
+
+
+# ── DA-034: o formato lúdico aprovado pelo Samyr, com dente ────────────────────
+def test_DENTE_a_carteira_nao_tem_UM_asterisco_sequer():
+    """Telegram mostra o asterisco cru — markdown aqui não vira negrito, vira
+    poluição visual. Ênfase é emoji e caixa alta, não `*texto*` (DA-034)."""
+    txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
+    assert "*" not in txt
+
+
+def test_DENTE_nenhuma_linha_passa_de_60_chars():
+    """Racional pode chegar a 400 chars — sem quebra isso é parede de texto no
+    Telegram. formata_carteira tem que embrulhar, não despejar (DA-033)."""
+    racional_longo = ("Reduzi bastante essa posição porque o setup técnico de "
+                      "curto prazo enfraqueceu muito depois do resultado "
+                      "trimestral, e prefiro esperar confirmação antes de voltar.")
+    depois_com_racional = _cart(_DEPOIS["carteira"]["ativos"],
+                                feed=[{"ticker": "IREN", "resumo": racional_longo}])
+    txt = A.formata_carteira(A.mudancas(_ANTES, depois_com_racional), depois_com_racional)
+    for linha in txt.split("\n"):
+        assert len(linha) <= 60, linha
+
+
+def test_DENTE_blocos_separados_por_linha_em_branco():
+    """Cabeçalho, movimentos e o fecho de ação são blocos DIFERENTES — sem respiro
+    entre eles vira parede de texto (DA-033)."""
+    txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
+    assert txt.count("\n\n") >= 2
+
+
+def test_a_mensagem_fecha_com_a_ACAO_em_linha_propria():
+    """Fecho com 👉 aponta o que olhar primeiro — o maior movimento do lote."""
+    txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
+    ultima = txt.strip().split("\n")[-1]
+    assert ultima.startswith("👉")
+
+
+def test_o_cabecalho_traz_total_e_caixa():
+    txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
+    assert "Total:" in txt and "caixa" in txt
 
 
 # ── (B) sinais ────────────────────────────────────────────────────────────────

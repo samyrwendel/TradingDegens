@@ -1,13 +1,15 @@
 [Unit]
-# Alerta diário no Telegram — mudança na carteira do Erick (task 20260902-051).
-# Dispara `scripts/tg_alertas.py carteira`: silêncio quando nada mudou (DA-034),
-# e a fonte da carteira só pode ir pra DM do dono, nunca grupo (DA-149,
-# tradingagents/webui/alertas_tg.py::destino_valido). ERICK_CARTEIRA_EMAIL e
-# ALERTA_CARTEIRA_CHAT vêm do .env do repo (gitignored, 0600) — nunca aqui.
+# Alerta HORÁRIO no Telegram — mudança na carteira do Erick (task 20260902-053,
+# cadência corrigida de diária pra 1h por ordem do Samyr; task 20260902-051 é a
+# origem do mecanismo). Dispara `scripts/tg_alertas.py carteira`: silêncio
+# quando nada mudou (DA-034), e a fonte da carteira só pode ir pra DM do dono,
+# nunca grupo (DA-149, tradingagents/webui/alertas_tg.py::destino_valido).
+# ERICK_CARTEIRA_EMAIL e ALERTA_CARTEIRA_CHAT vêm do .env do repo (gitignored,
+# 0600) — nunca aqui.
 # Instalar: copiar pra ~/.config/systemd/user/ e
 # `systemctl --user enable --now tg-alertas-carteira.timer` (o .timer aciona
 # este .service — não dar enable/start neste diretamente).
-Description=Alerta Telegram — mudança na carteira do Erick (task 20260902-051)
+Description=Alerta Telegram — mudança na carteira do Erick (task 20260902-053)
 After=network-online.target
 Wants=network-online.target
 

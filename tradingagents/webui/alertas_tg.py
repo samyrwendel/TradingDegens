@@ -28,6 +28,7 @@ ligar é decisão de quem responde pela comunidade, depois de ver a amostra.
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any
 
 # ── (A) política de destino ────────────────────────────────────────────────────
@@ -130,34 +131,111 @@ def _pct(v: float | None) -> str:
     return "—" if v is None else f"{v * 100:.1f}%".replace(".", ",")
 
 
+def _money(v: float) -> str:
+    s = f"{abs(v):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"{'-' if v < 0 else ''}${s}"
+
+
+def _qtd(v: float | None) -> str:
+    """Quantidade pro humano ler — sem zero de sobra, vírgula decimal."""
+    if v is None:
+        return "0"
+    v = float(v)
+    s = f"{v:.4f}".rstrip("0").rstrip(".") if v != int(v) else str(int(v))
+    return s.replace(".", ",")
+
+
+def _caixa(payload: dict[str, Any] | None) -> tuple[float, float, float | None]:
+    """(valor do caixa, total da carteira, % do total em caixa) de uma leitura."""
+    ativos = _por_ticker(payload)
+    total = sum(_valor(a) for a in ativos.values())
+    caixa = sum(_valor(a) for a in ativos.values()
+                if str(a.get("classe") or "").strip().lower() == "caixa")
+    return caixa, total, (caixa / total if total else None)
+
+
+_BARRA_BLOCOS = 5
+
+
+def _barra(valor: float, maximo: float, blocos: int = _BARRA_BLOCOS) -> str:
+    """Barra de magnitude relativa ao MAIOR movimento do lote — o tamanho salta aos
+    olhos sem precisar ler o número (DA-034)."""
+    cheios = round(blocos * abs(valor) / maximo) if maximo > 0 else 0
+    cheios = max(0, min(blocos, cheios))
+    return "█" * cheios + "░" * (blocos - cheios)
+
+
+def _quebra(texto: str, prefixo: str = "  ↳ ", largura: int = 60) -> list[str]:
+    """Quebra uma linha longa em várias de até ``largura`` chars — o dente que
+    proíbe parede de texto numa linha só (DA-033)."""
+    if not texto:
+        return []
+    disponivel = max(20, largura - len(prefixo))
+    primeira, resto = True, textwrap.wrap(texto, width=disponivel)
+    out = []
+    for linha in resto:
+        out.append(f"{prefixo}{linha}" if primeira else f"{' ' * len(prefixo)}{linha}")
+        primeira = False
+    return out
+
+
 _VERBO = {"entrou": "ENTROU", "saiu": "SAIU", "aumentou": "AUMENTOU", "reduziu": "REDUZIU"}
+_EMOJI_MUDANCA = {"entrou": "🟢⬆", "aumentou": "🟢⬆", "reduziu": "🔴⬇", "saiu": "🔴⬇"}
 
 
-def formata_carteira(mudou: list[dict[str, Any]], atual: dict[str, Any] | None) -> str:
-    """A mensagem de DM. Respiro entre blocos, negrito só no que decide, sem tabela
-    (DA-033); o % vem junto do verbo porque é ele que dimensiona a mudança (DA-034).
+def formata_carteira(mudou: list[dict[str, Any]], atual: dict[str, Any] | None,
+                     anterior: dict[str, Any] | None = None) -> str:
+    """A mensagem de DM, no formato lúdico que o Samyr aprovou (DA-034): emoji como
+    MARCADOR DE DADO — não decoração — (🟢⬆ ganhou exposição, 🔴⬇ perdeu), barra de
+    magnitude proporcional ao maior movimento do lote, ZERO markdown (Telegram
+    mostra asterisco cru), respiro entre blocos e fecho com a AÇÃO em linha própria.
+
+    ``anterior`` é opcional só por compatibilidade — sem ele o caixa mostra o valor
+    de agora sem o "antes → depois" (task 20260902-053 pediu esse contraste, mas
+    quem já chamava com dois argumentos não pode quebrar).
 
     Lista vazia devolve string vazia — e quem chama NÃO envia. "Nenhuma mudança
     hoje" todo dia é o ruído que faz o alerta deixar de ser lido.
     """
     if not mudou:
         return ""
-    linhas = [f"*Carteira do Erick mudou* — {len(mudou)} movimento(s)", ""]
-    for m in mudou:
-        cab = (f"*{m['ticker']}* {_VERBO.get(m['tipo'], m['tipo'])} "
-               f"· {_pct(m['pct_capital'])} do capital")
-        if m["tipo"] != "saiu":
-            cab += f" · peso agora {_pct(m['peso_agora'])}"
-        linhas.append(cab)
-        if m.get("nome"):
-            linhas.append(f"  {m['nome']}")
-        r = _racional(atual, m["ticker"])
-        if r:
-            linhas.append(f"  _{r[:400]}_")
-        linhas.append("")
+
+    caixa_v, total, caixa_pct = _caixa(atual)
+    _, _, caixa_pct_antes = _caixa(anterior) if anterior else (0.0, 0.0, None)
+
+    linhas = [f"💼 CARTEIRA DO ERICK mudou — {len(mudou)} movimento(s)"]
+    if total > 0:
+        linhas.append(f"Total: {_money(total)}")
+        if caixa_pct_antes is not None and caixa_pct is not None:
+            caixa_txt = f"{_pct(caixa_pct_antes)} → {_pct(caixa_pct)}"
+        else:
+            caixa_txt = _pct(caixa_pct)
+        linhas.append(f"  ↳ caixa {_money(caixa_v)} · {caixa_txt} do total")
     atualizado = ((atual or {}).get("carteira") or {}).get("atualizado")
     if atualizado:
-        linhas.append(f"Publicado por ele em {atualizado}.")
+        linhas.append(f"  ↳ publicado por ele em {atualizado}")
+    linhas.append("")
+
+    maior_pct = max(m["pct_capital"] for m in mudou) or 1.0
+    for m in mudou:
+        emoji = _EMOJI_MUDANCA.get(m["tipo"], "⚪")
+        cab = (f"{emoji} {m['ticker']} {_VERBO.get(m['tipo'], m['tipo'])} "
+               f"· {_pct(m['pct_capital'])} do capital {_barra(m['pct_capital'], maior_pct)}")
+        if m["tipo"] != "saiu":
+            cab += f" · peso {_pct(m['peso_agora'])}"
+        linhas.append(cab)
+        linhas.extend(_quebra(f"qtd {_qtd(m['qtd_antes'])} → {_qtd(m['qtd_agora'])}"))
+        if m.get("nome"):
+            linhas.extend(_quebra(m["nome"]))
+        r = _racional(atual, m["ticker"])
+        if r:
+            linhas.extend(_quebra(r[:400]))
+    linhas.append("")
+
+    maior = max(mudou, key=lambda m: m["pct_capital"])
+    linhas.append(f"👉 Olhar primeiro: {maior['ticker']} "
+                  f"({_VERBO.get(maior['tipo'], maior['tipo']).lower()}, "
+                  f"{_pct(maior['pct_capital'])} do capital)")
     return "\n".join(linhas).strip()
 
 

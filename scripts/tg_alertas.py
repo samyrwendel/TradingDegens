@@ -10,7 +10,7 @@ ligado é um mecanismo que estreia sem ninguém ter visto a amostra.
     ALERTA_SINAIS_CHAT     DM ou grupo (id negativo). Vazio = desligado.
     ALERTA_SINAIS_TOPICO   opcional: id do tópico dentro do grupo.
 
-Uso:  tg_alertas.py carteira      (uma vez por dia — ele mexe à mão)
+Uso:  tg_alertas.py carteira      (a cada 1h — task 20260902-053, ordem do Samyr)
       tg_alertas.py sinais        (após a passada da agenda, por candle fechado)
 
 O envio reusa o `tg-outbox-send.sh` que já existe: uma fila só, um lugar só que
@@ -19,6 +19,7 @@ fala com o Telegram.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -32,6 +33,8 @@ from tradingagents.webui import alertas_tg as A  # noqa: E402
 
 _ESTADO = Path.home() / ".tradingagents" / "cache"
 _ULTIMA_CARTEIRA = _ESTADO / "erick-carteira-alertada.json"
+_FALHA_ALERTADA = _ESTADO / "erick-carteira-falha-alertada.json"
+_FALHA_LIMITE_H = 24.0
 _SINAIS_ENVIADOS = _ESTADO / "sinais-enviados.jsonl"
 _SCAN_SALVO = Path.home() / ".tradingagents" / "logs" / "webui" / "last_scan.json"
 _ENVIAR = Path.home() / "claude-tg-tmux" / "scripts" / "tg-outbox-send.sh"
@@ -83,12 +86,36 @@ def carteira() -> int:
     atual = ec.carteira()
     if atual is None:
         return 0                                  # sem credencial: feature não existe
+
+    if atual.get("degradado"):
+        # Leitura ao vivo falhou e isto é o último dado bom, requentado. Não é
+        # "mudou" (é o MESMO snapshot de sempre) — e um alerta a cada hora aqui
+        # seria justamente o ruído que o silêncio-por-padrão existe pra evitar.
+        # Só vira alerta se a fonte ficar tempo REAL sem responder (>24h): aí é
+        # problema de verdade (site fora do ar, credencial vencida), não hiato
+        # normal entre duas leituras.
+        idade = atual.get("idade_horas") or 0.0
+        if idade > _FALHA_LIMITE_H:
+            lido_em = atual.get("lido_em")
+            ja_alertado = (_carrega(_FALHA_ALERTADA) or {}).get("lido_em") == lido_em
+            if not ja_alertado:
+                aviso = (f"⚠️ CARTEIRA DO ERICK sem leitura nova há {idade:.0f}h — "
+                         f"a fonte pode estar fora do ar ou a credencial venceu.")
+                if _envia(chat, aviso):
+                    _grava(_FALHA_ALERTADA, {"lido_em": lido_em})
+        return 0
+    if _FALHA_ALERTADA.exists():
+        # Voltou a ler ao vivo: o próximo episódio de falha começa a contar do
+        # zero, não continua um relógio de uma falha antiga já superada.
+        with contextlib.suppress(OSError):
+            _FALHA_ALERTADA.unlink()
+
     anterior = _carrega(_ULTIMA_CARTEIRA)
     mudou = A.mudancas(anterior, atual)
     # O ESTADO É GRAVADO SEMPRE, mesmo sem mudança: senão a primeira leitura de
     # amanhã compararia contra a de anteontem e reanunciaria o que já foi dito.
     _grava(_ULTIMA_CARTEIRA, {"carteira": atual.get("carteira")})
-    texto = A.formata_carteira(mudou, atual)
+    texto = A.formata_carteira(mudou, atual, anterior)
     if not texto:
         return 0                                  # nada mudou → silêncio
     return 0 if _envia(chat, texto) else 1

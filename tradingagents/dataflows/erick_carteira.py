@@ -14,10 +14,11 @@ trazer chave própria de LLM não compra assinatura de terceiro.
 EXISTE — ``carteira()`` devolve ``None`` e a tela não mostra nada. Falha silenciosa
 e limpa: um stack trace aqui exporia o endereço de alguém.
 
-**Cadência civilizada.** É servidor de outra pessoa, e o dado é atualizado À MÃO
-(o payload traz um campo ``atualizado`` com a data). Uma leitura por dia basta;
-entre uma e outra o cache local responde. Bater de minuto em minuto seria abusar de
-infraestrutura alheia pra reler um número que não mudou.
+**Cadência: 1 leitura por HORA** (ordem direta do Samyr, task 20260902-053 — era
+diária até ele decidir que o custo de um GET a mais por hora é irrisório perto de
+saber da mudança dentro da hora). É servidor de outra pessoa mesmo assim: o cache
+local responde entre uma leitura e outra, e ninguém bate no site duas vezes na
+mesma janela de 1h.
 
 **Dado velho nunca se disfarça de novo** (mesma disciplina da DA-114): o cache
 carrega o instante da leitura, e quem exibe recebe ``lido_em`` + ``idade_horas``
@@ -42,10 +43,14 @@ _LOGIN = f"{BASE}/login.php"
 _API = f"{BASE}/api.php?acao=ler"
 _HISTORICO = f"{BASE}/historico.json"
 
-# Uma leitura por dia. O número não é conservadorismo genérico: o campo
-# `atualizado` do payload é preenchido à mão pelo autor, e reler mais que isso é
-# gastar servidor alheio pra receber o mesmo byte.
-_TTL_S = 24 * 3600
+# Uma leitura por HORA — ordem direta do Samyr (task 20260902-053): "preciso de um
+# scan a cada 1h". Era 24h (o campo `atualizado` do payload é preenchido à mão pelo
+# autor, então reler mais que isso parecia gastar servidor alheio à toa) até ele
+# decidir que o custo — um GET de ~27KB por hora — é irrisório perto de saber da
+# mudança dentro da hora. O alerta que consome isto (`scripts/tg_alertas.py`)
+# continua em silêncio absoluto quando nada mudou; o TTL só evita reler o mesmo
+# byte se algo chamar `carteira()` duas vezes na mesma janela.
+_TTL_S = 1 * 3600
 _TIMEOUT_S = 12
 
 _CACHE = Path.home() / ".tradingagents" / "cache" / "erick-carteira.json"

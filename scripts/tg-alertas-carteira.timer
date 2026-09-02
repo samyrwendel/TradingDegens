@@ -1,12 +1,15 @@
 [Unit]
-Description=Timer diário — alerta de mudança na carteira do Erick (task 20260902-051)
+Description=Timer horário — alerta de mudança na carteira do Erick (task 20260902-053)
 
 [Timer]
-# 09:15 Manaus (GMT-4) = 13:15 UTC. Logo depois do alert-contas (09:00) — a fonte
-# do Erick é atualizada à mão por ele e o cache local já tem TTL de 24h
-# (tradingagents/dataflows/erick_carteira.py), então um horário fixo por dia basta;
-# bater de hora em hora seria abusar de servidor alheio pra reler o mesmo byte.
-OnCalendar=*-*-* 13:15:00 UTC
+# 1 HORA — ordem direta do Samyr (task 20260902-053): "preciso de um scan a cada
+# 1h". Era diário às 13:15 UTC (task 20260902-051, argumento: cache de 24h da
+# fonte tornava mais frequente inútil) até ele decidir que o custo de um GET a
+# mais por hora é irrisório perto de saber da mudança dentro da hora — e o TTL
+# de `erick_carteira.py` foi pra 1h junto, senão o timer bateria mas a função
+# devolveria o mesmo cache do dia inteiro. O alerta continua em silêncio total
+# quando nada muda (DA-034) — 24 disparos/dia sem mensagem é o esperado.
+OnCalendar=hourly
 Persistent=true
 Unit=tg-alertas-carteira.service
 
