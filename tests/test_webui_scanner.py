@@ -514,7 +514,7 @@ def test_sem_serie_o_trade_fica_ABERTO_nunca_fechado_no_escuro(tmp_path, monkeyp
 
 def _v(veredito="bateu_tp", direction="compra", trigger=100.0, tp=110.0, sl=95.0,
       rr=2.0, entrada=None, ts="2026-08-20T12:00:00+00:00", fechado_em="2026-08-25",
-      ticker="C", frame="1d", setup="123", preco_agora=None):
+      ticker="C", frame="1d", setup="123", preco_agora=None, pattern_state=None):
     v = {"veredito": veredito, "direction": direction, "trigger": trigger, "tp": tp,
         "sl": sl, "rr": rr, "ts": ts, "fechado_em": fechado_em, "ticker": ticker,
         "frame": frame, "setup": setup}
@@ -522,6 +522,8 @@ def _v(veredito="bateu_tp", direction="compra", trigger=100.0, tp=110.0, sl=95.0
         v["entrada"] = entrada
     if preco_agora is not None:
         v["preco_agora"] = preco_agora
+    if pattern_state is not None:
+        v["pattern_state"] = pattern_state
     return v
 
 
@@ -580,6 +582,47 @@ def test_pnl_paper_aberto_storm_LEDGER_ANTIGO_com_rotulo_reconstroi_pelo_trigger
     p = sc._pnl_paper_aberto(v, banca=100.0)
     assert p is not None, "posição aberta do Storm com ledger antigo não pode ficar em branco"
     assert p["pnl_usd"] == round(100.0 * (110.0 - 105.0) / 105.0, 2), p
+
+
+def test_pnl_paper_trade_123_ACIONADO_reconstroi_a_entrada_do_rr_nao_o_trigger_velho():
+    """BUG (task 20260902-047): o 1-2-3 nunca gravou entrada própria no ledger, e
+    ``_entrada_numerica`` caía no ``trigger``. Num padrão JÁ ACIONADO no log o
+    ``trigger`` é o nível de ponto-2 deixado pra trás — a entrada honesta é o PREÇO
+    no log, que ``_entry_ref`` usa pra medir o ``rr``. Usar o trigger creditava o
+    movimento anterior ao log: o caso medido foi LINK 1d, trigger 8,87 com a entrada
+    real em 11,43 (tp 11,55, sl 7,56, rr 0,03) — +30% fabricados onde só sobrava ~1%.
+
+    A entrada reconstrói por álgebra do que ESTÁ no ledger (rr, tp, sl):
+        rr = |tp-e|/|e-sl|  ⇒  e = (tp + rr·sl)/(1+rr)   (mesma fórmula compra/venda).
+    """
+    v = _v(veredito="bateu_tp", trigger=8.87, sl=7.56, tp=11.55, rr=0.03,
+           entrada=None, pattern_state="acionado", ticker="LINK-USD")
+    entrada_real = (11.55 + 0.03 * 7.56) / (1 + 0.03)   # ≈ 11,4338
+    p = sc._pnl_paper_trade(v, banca=100.0)
+    assert p is not None, "acionado com rr/tp/sl no ledger é reconstruível, não None"
+    esperado = round(100.0 * (11.55 - entrada_real) / entrada_real, 2)
+    assert p["pnl_usd"] == esperado, ("usou o trigger velho em vez da entrada real", p)
+    # o dente: o número velho (entrada = trigger 8,87) inflava pra ~+30% — inaceitável
+    inflado = round(100.0 * (11.55 - 8.87) / 8.87, 2)
+    assert p["pnl_usd"] < 3.0 < inflado, ("PnL ainda inflado pelo gatilho", p, inflado)
+
+
+def test_entrada_numerica_123_NAO_acionado_a_entrada_E_o_gatilho():
+    """Enquanto o padrão não acionou, o gatilho É a entrada (:func:`_entry_ref`) —
+    e o valor sai EXATO do trigger, sem passar pela reconstrução (que só arredonda)."""
+    v = _v(veredito="bateu_tp", trigger=100.0, sl=95.0, tp=110.0, rr=2.0,
+           entrada=None, pattern_state="formando")
+    assert sc._entrada_numerica(v) == 100.0, v
+
+
+def test_entrada_numerica_123_ACIONADO_sem_rr_e_NAO_recuperavel_nunca_o_trigger():
+    """DA-157: um acionado sem rr/tp/sl no ledger não tem como recuperar a entrada.
+    O honesto é declarar AUSENTE (``None`` → PnL ``None``), jamais devolver o
+    ``trigger`` velho travestido de entrada — que foi exatamente o bug."""
+    v = _v(veredito="bateu_sl", trigger=8.87, sl=7.56, tp=None, rr=None,
+           entrada=None, pattern_state="acionado")
+    assert sc._entrada_numerica(v) is None, ("acionado sem rr virou trigger cru", v)
+    assert sc._pnl_paper_trade(v, banca=100.0) is None
 
 
 def test_pnl_risco_fixo_e_a_leitura_ALTERNATIVA():

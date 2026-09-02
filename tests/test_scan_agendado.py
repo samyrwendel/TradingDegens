@@ -262,6 +262,33 @@ def test_storm_grava_ENTRADA_como_PRECO_nao_rotulo(tmp_path, monkeypatch):
     assert entrada is not None and float(entrada) == 229.0, storm_entries[0]
 
 
+_UM_GATILHO_123_ACIONADO = {
+    "date": "2026-08-30", "frames": ["1d"], "resumo": {}, "ativos": [
+        # 1-2-3 JÁ ACIONADO: o gatilho (ponto 2) ficou pra trás e a entrada de
+        # referência é o PREÇO no log (``rr_entry``, de ``_entry_ref``). trigger 8,87,
+        # entrada real 11,43 — o mesmo caso do LINK 1d da task 047.
+        {"ticker": "LINK-USD", "melhor": {"estado": "em_gatilho"}, "frames": [
+            {"frame": "1d", "estado": "em_gatilho", "trigger": 8.87, "sl": 7.56,
+             "tp": 11.55, "rr": 0.03, "direction": "compra", "pattern_state": "acionado",
+             "rr_entry": 11.43, "rr_basis": "preço atual (padrão já acionado)"},
+        ]},
+    ]}
+
+
+def test_123_grava_ENTRADA_como_PRECO_do_setup_nao_o_gatilho(tmp_path, monkeypatch):
+    """Espelho da 035, agora pro 1-2-3 (task 20260902-047): o ledger tem de carimbar
+    a ENTRADA em PREÇO também pro 1-2-3 — antes ele só gravava o ``trigger``, e um
+    padrão já acionado tem o gatilho velho lá. A entrada honesta é ``rr_entry`` (o
+    preço que ``_entry_ref`` usa pra medir o rr), não o gatilho deixado pra trás."""
+    r = _runner(tmp_path, monkeypatch, _UM_GATILHO_123_ACIONADO)
+    r.scan_agendado()
+    e123 = [e for e in r.scan_log.entries() if e.get("setup") == "123"]
+    assert len(e123) == 1, e123
+    entrada = e123[0].get("entrada")
+    assert entrada is not None, ("o 1-2-3 não gravou entrada própria", e123[0])
+    assert float(entrada) == 11.43, ("gravou o gatilho velho em vez do preço", e123[0])
+
+
 def test_a_mesma_de_duplicacao_vale_DENTRO_de_uma_passada(tmp_path, monkeypatch):
     """Dois frames do mesmo ativo com o MESMO gatilho não podem virar duas linhas — a
     varredura da tela lia o ledger uma vez só e não via o que ela própria acabara de

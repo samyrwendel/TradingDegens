@@ -2839,7 +2839,13 @@ class AnalysisRunner:
                 # passada (:meth:`ScanLog.record_pass`).
                 if f.get("estado") == "sem_dado":
                     sem_dado += 1
-                linha = {**f, "ticker": s["ticker"], "setup": "123"}
+                # A ENTRADA em PREÇO viaja pro ledger também no 1-2-3 (task
+                # 20260902-047, espelho da 035 no Storm): ``rr_entry`` é o preço que
+                # ``_entry_ref`` usa pra medir o R:R — o gatilho enquanto o padrão não
+                # acionou, o PREÇO ATUAL depois. Sem isto o ledger só tinha o gatilho, e
+                # num padrão já acionado ele é um nível velho que inflava o paper.
+                linha = {**f, "ticker": s["ticker"], "setup": "123",
+                         "entrada": f.get("rr_entry")}
                 if (f.get("estado") == "em_gatilho"
                         and ("123", s["ticker"], f.get("frame"), f.get("trigger")) not in known
                         and _estrutura_do_gatilho(linha) not in estruturas):

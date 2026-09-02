@@ -1067,29 +1067,70 @@ def _agrupa_por_frame(fechados: list[dict[str, Any]]) -> dict[str, list[dict[str
     return out
 
 
-def _entrada_numerica(v: dict[str, Any]) -> float | None:
-    """A entrada em PREÇO pra cálculo de PnL — nunca um rótulo.
+def _entrada_reconstruida(v: dict[str, Any]) -> float | None:
+    """A entrada que o ``rr`` GRAVADO mediu, recuperada por álgebra do ledger.
 
-    ``_storm_row`` usa o campo ``entrada`` pra carregar o RÓTULO da leitura
-    escolhida (``ponto2``/``ponto3``/``ponto2e3`` — é o que a célula do scan e o
-    app.js mostram). Ledger gravado antes da correção do bug de PnL (task
-    20260902-035) carimbou esse rótulo cru — ``float("ponto3")`` estourava e o
-    Storm fechado saía sem PnL em USD, sempre, silenciosamente. O preço da MESMA
-    leitura sempre viajou junto em ``trigger`` (a leitura escolhida é uma só):
-    um ``entrada`` que não converte pra número é tratado como AUSENTE, e cai no
-    trigger — reconstrução na LEITURA, sem reescrever o ledger append-only.
+    Num 1-2-3 já ACIONADO no log, :func:`_entry_ref` mede o R:R a partir do PREÇO
+    ATUAL — então o ``trigger`` gravado (o nível de ponto 2) é um número velho e
+    NÃO é a entrada. ``rr``, ``tp`` e ``sl`` estão no ledger; a entrada, não. Como
+    ``rr = |tp-e| / |e-sl|`` (mesma conta pra compra e venda), inverte-se::
+
+        e = (tp + rr·sl) / (1 + rr)
+
+    e volta o preço que o produto assumiu ao calcular o R:R (o LINK 1d denuncia:
+    trigger 8,87, rr 0,03, tp 11,55, sl 7,56 → e = 11,43 — task 20260902-047).
+    ``None`` quando falta rr/tp/sl: ENTRADA NÃO RECUPERÁVEL, declarada, jamais o
+    gatilho cru travestido de entrada (DA-157)."""
+    tp, rr, sl = v.get("tp"), v.get("rr"), v.get("sl")
+    try:
+        tp, rr, sl = float(tp), float(rr), float(sl)
+    except (TypeError, ValueError):
+        return None
+    denom = 1.0 + rr
+    if denom == 0:
+        return None
+    entrada = (tp + rr * sl) / denom
+    return entrada if entrada > 0 else None
+
+
+def _entrada_numerica(v: dict[str, Any]) -> float | None:
+    """A entrada em PREÇO pra cálculo de PnL — nunca um rótulo, nunca um gatilho velho.
+
+    Três fontes, nesta ordem:
+
+    1. ``entrada`` NUMÉRICA — o preço carimbado no ledger (Storm desde a task
+       20260902-035; 1-2-3 desde a 20260902-047). É a fonte de verdade quando existe.
+    2. ``entrada`` NÃO-numérica — é o RÓTULO da leitura do Storm
+       (``ponto2``/``ponto3``/``ponto2e3``, de :func:`_storm_row`, que a célula do
+       scan mostra), gravado cru no ledger antigo. O preço da MESMA leitura viaja em
+       ``trigger`` (a leitura escolhida é uma só, e o R:R do Storm é medido nela):
+       reconstrói pelo ``trigger``, sem reescrever o ledger append-only.
+    3. ``entrada`` AUSENTE — 1-2-3 do ledger antigo (nunca gravou entrada própria).
+       Aqui o ``trigger`` só é a entrada enquanto o padrão NÃO acionou (é onde se
+       entra). JÁ ACIONADO, o gatilho ficou pra trás e usá-lo credita o movimento
+       anterior ao log (o +$106 fabricado do 1-2-3 diário — task 20260902-047); a
+       entrada honesta reconstrói do ``rr`` (:func:`_entrada_reconstruida`), e é NÃO
+       RECUPERÁVEL quando falta rr/tp/sl — nunca o gatilho cru (DA-157).
     """
     entrada = v.get("entrada")
     if entrada is not None:
         try:
             return float(entrada)
         except (TypeError, ValueError):
-            pass
-    trigger = v.get("trigger")
-    try:
-        return float(trigger) if trigger is not None else None
-    except (TypeError, ValueError):
-        return None
+            # rótulo do Storm (pré-035): o preço da leitura escolhida é o trigger.
+            trigger = v.get("trigger")
+            try:
+                return float(trigger) if trigger is not None else None
+            except (TypeError, ValueError):
+                return None
+    # 1-2-3 sem entrada própria: gatilho SÓ enquanto não acionou; acionado reconstrói.
+    if str(v.get("pattern_state")) != "acionado":
+        trigger = v.get("trigger")
+        try:
+            return float(trigger) if trigger is not None else None
+        except (TypeError, ValueError):
+            return None
+    return _entrada_reconstruida(v)
 
 
 def _pnl_paper_trade(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
