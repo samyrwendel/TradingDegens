@@ -12,6 +12,12 @@ Samyr:** existe o projeto `samyrwendel/meridian` (privado, TypeScript, rodando l
 > arquivo. Este documento **substitui** a recomendação de arquitetura do
 > `ESTUDO-MT5-SINAIS.md` (mantido por histórico, com um aviso no topo apontando pra
 > cá): não há mais "qual caminho construir" — o caminho existe, o trabalho é integrar.
+>
+> **Atualizado pela task 20260901-039** (§9-§13): o Samyr precisou o requisito —
+> Setup123 e Storm123 têm de ser ligáveis/desligáveis de forma independente, na
+> mesma conta demo, e isso levanta magic number por estratégia, política de
+> conflito e tamanho de posição comparável. Reclonei o repo (mesmo processo, só
+> leitura) pra verificar mais fundo antes de responder.
 
 ---
 
@@ -179,9 +185,9 @@ tocar em nada além de registrar o `strategyId`.
 **Se o Samyr quiser um MAGIC NUMBER próprio de verdade** (útil pra ver de
 relance no histórico do MT5, que mostra magic mas não sempre o comment
 inteiro), o agente precisa de uma pequena mudança: um mapa
-`strategy_id -> magic_number` em vez do `260811` fixo. Proponho reservar
-**`260812`** pro TradingDegens (sequencial ao existente, sem colidir) — decisão
-do Samyr, não uma escolha que eu travo sozinho.
+`strategy_id -> magic_number` em vez do `260811` fixo. **Corrigido na §10**: um
+magic só pro TradingDegens não bastava — Setup123 e Storm123 precisam de
+magics DISTINTOS entre si também (requisito da task 20260901-039).
 
 ---
 
@@ -272,9 +278,208 @@ não pede solução.
    TradingDegens em `EXECUTABLE_STRATEGIES` — um repo dele, uma linha).
 2. **Conferir a Observação de Mercado do terminal XM já aberto** — 10 minutos,
    substitui a estimativa da seção 3 por número real.
-3. **Magic number próprio ou não** (seção 4) — `260812` proposto, dele decidir.
+3. **Magic number por estratégia** (seção 4, corrigido na §10) — faixa
+   `270101`/`270102` proposta, dele decidir.
 4. **Qual caminho de envio**: o botão manual do §5 (recomendado) ou a rota
    automática (não recomendada agora, mas a decisão é dele se quiser mesmo
    assim).
 5. **Quando ligar de verdade** — nada disto liga sozinho; o botão só existe
    quando ele pedir pra eu construir.
+
+**Mais decisões, da task 20260901-039 (ver §9-§13):**
+
+6. **Confirmar o `marginMode` da conta demo** (§11) — já vem no snapshot do
+   agente (`connectors/xm_mt5_bridge.py:452-455`), só falta olhar; decide qual
+   das duas políticas de conflito vale.
+7. **Aprovar os DOIS `strategyId` e os DOIS magics** (Setup123 e Storm123,
+   §9/§10) — mesma mudança de uma linha da decisão 1, só que duas linhas.
+
+---
+
+## 9. Ativação independente por estratégia — já existe, verificado no código
+
+O requisito ("cada estratégia liga/desliga por si, a mesma conta") **já é como o
+Meridian funciona hoje**, de propósito — não é o TradingDegens que precisa
+construir isso, é o Meridian que já entrega:
+
+- `broker_strategy_activations` (`db/schema.ts:63`, `drizzle/meta/0005_snapshot.json:430`)
+  tem **CHAVE PRIMÁRIA COMPOSTA `(connection_id, strategy_id)`** — cada
+  estratégia tem a SUA PRÓPRIA linha, estruturalmente independente das outras.
+  Ligar `tradingdegens-storm123` não toca a linha de `tradingdegens-setup123`
+  nem a de `pyr-cycle-atr`, pela própria forma da tabela.
+- `enabled` tem **`default: false`** — qualquer estratégia nova nasce
+  DESLIGADA. Não é uma convenção que eu preciso lembrar de seguir; é o
+  schema que garante.
+- `mode` tem **`default: 'confirm_each_order'`**, e a rota que liga a
+  estratégia (`PATCH /api/accounts/{id}/strategies/{strategyId}`,
+  `[id]/strategies/[strategyId]/route.ts:58`) CALCULA o modo assim:
+  `strategyId === PYR_STRATEGY_ID ? PYR_AUTO_MODE : "confirm_each_order"` —
+  **só o Pyr-Cycle pode entrar em modo automático; qualquer outro
+  `strategyId`, incluindo os dois do TradingDegens, é FORÇADO a
+  `confirm_each_order`** pelo próprio servidor, mesmo que alguém tente ligar
+  diferente. Isso é o "opt-in explícito" do pedido, garantido pelo código do
+  Meridian, não por uma promessa do TradingDegens.
+- Ligar (`active: true`) só é aceito se `gate.demo && gate.online`
+  (linha 54) — a trava de conta demo do §1 continua valendo ANTES de
+  qualquer estratégia poder ser ativada, não só antes de cada ordem.
+
+**Nada a construir aqui.** Registrar `tradingdegens-setup123` e
+`tradingdegens-storm123` em `EXECUTABLE_STRATEGIES` (§2) já basta pra cada um
+ganhar seu próprio toggle, seu próprio estado persistido, seu próprio "desligado
+por padrão" — de graça, pela mesma tabela que o Pyr-Cycle usa.
+
+---
+
+## 10. Magic number por estratégia — a correção que a task 039 pediu
+
+**O que eu tinha proposto (§4) estava incompleto**, e o achado no código
+explica por quê: `xm_mt5_bridge.py:661` carimba `"magic": 260811` **fixo, pra
+qualquer `strategy_id`** — não é um magic "do Meridian" que o TradingDegens
+herdaria junto, é literalmente o número do Pyr-Cycle, hardcoded. Sem mudar
+isso, Setup123 e Storm123 sairiam os DOIS com 260811 — nem entre eles, nem
+contra o Pyr-Cycle, dava pra separar pelo magic sozinho (o `comment` ainda
+separaria, mas o pedido é explícito: quer o magic também).
+
+**A mudança necessária** (pequena, no agente Python): trocar o `260811` fixo
+por uma tabela `strategy_id -> magic`, mantendo `260811` como o valor pra
+`"pyr-cycle-atr"` (compatibilidade — não pode mudar o magic de ordens/posições
+que já existem) e adicionando uma entrada por estratégia nova.
+
+**Faixa proposta, deliberadamente longe de `260811`** (pra nunca confundir os
+dois de relance no histórico do MT5 — `260811` vs `260812` diferem em um
+dígito e convidam erro de leitura):
+
+| strategy_id | magic |
+|---|---|
+| `pyr-cycle-atr` (Meridian, existente) | `260811` (não mexe) |
+| `tradingdegens-setup123` | **`270101`** |
+| `tradingdegens-storm123` | **`270102`** |
+| *(reservado pra métodos futuros do TradingDegens)* | `270103`–`270110` |
+
+Documentado aqui como a fonte da verdade da faixa — se o Samyr aprovar, é
+este o número que entra no agente.
+
+---
+
+## 11. Conflito entre estratégias na mesma conta — política declarada
+
+**O caso é real e vai acontecer**, como o Samyr mediu: no dia 01/09, AAOI
+tinha Storm123 de VENDA e Setup123 de COMPRA no mesmo diário — dois sinais
+vivos, direções opostas, mesmo símbolo.
+
+### 11.1. O primeiro gate não é hedge — é a fila de UM SÓ POR VEZ
+
+Achado que nem o README nem o estudo anterior cobriam: a fila de ordens só
+aceita **UM comando pendente por CONEXÃO (conta), não por estratégia**:
+
+```sql
+-- orders/route.ts:119 e _pyr-auto.ts:67-70, o MESMO padrão nos dois
+WHERE connection_id = ? AND status IN ('queued', 'processing')
+```
+
+Se Setup123 acabou de enfileirar uma ordem e ela ainda está `queued`/
+`processing` (o agente faz polling a cada 15s — `PUSH_INTERVAL`), uma
+tentativa de Storm123 enfileirar NA MESMA HORA recebe `order_already_pending`
+(409) — não importa que sejam símbolos ou direções diferentes. Isso já
+elimina a corrida de "as duas chegam exatamente juntas": elas nunca chegam
+literalmente juntas na fila, sempre em sequência. O que falta declarar é o
+que acontece DEPOIS que a fila libera — se o MT5 aceita a segunda ordem.
+
+### 11.2. Isso depende do `marginMode` da conta — já reportado, falta olhar
+
+O agente JÁ ENVIA o modo de margem da conta no snapshot
+(`xm_mt5_bridge.py:452-455`):
+
+```python
+"marginMode": _enum_label(account.margin_mode, [
+    ("ACCOUNT_MARGIN_MODE_RETAIL_NETTING", "retail_netting"),
+    ("ACCOUNT_MARGIN_MODE_EXCHANGE", "exchange"),
+    ("ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", "retail_hedging"),
+])
+```
+
+**Eu NÃO tenho acesso à conta demo do Samyr pra ler esse campo** — só o
+próprio agente, já rodando no `samyr-srv`, sabe o valor de verdade. É por
+isso que o pedido pede "verificado na conta demo antes de assumir": não dá
+pra eu confirmar de aqui, e não vou fingir que confirmei. O Samyr olha isso
+no snapshot da conexão no painel do Meridian (ou em Ferramentas > Opções, na
+aba Conta, do próprio MT5) — um minuto, não precisa de mim.
+
+**A política, pros dois casos possíveis** (o Meridian já reporta qual é —
+não preciso adivinhar, só ramificar em cima do valor real):
+
+- **`retail_hedging`** (comum em corretoras internacionais tipo XM, mas
+  NÃO confirmado pra esta conta): **hedge PERMITIDO.** As duas posições
+  convivem — MT5 hedging suporta long e short simultâneos no mesmo símbolo
+  como posições distintas, e com magics diferentes (§10) cada uma continua
+  separável no histórico e no cálculo de resultado. É a comparação MAIS
+  JUSTA: nenhuma estratégia perde a entrada por causa da outra ter chegado
+  primeiro.
+- **`retail_netting`** (comum em contas reguladas por certas jurisdições,
+  ex. EUA): hedge é **IMPOSSÍVEL platôrmicamente** — a segunda ordem em
+  direção oposta NETEIA contra a primeira (reduz ou inverte a posição em vez
+  de abrir uma segunda). Aqui a política é **BLOQUEAR o segundo sinal**
+  enquanto o primeiro estiver aberto, com o motivo declarado na tela
+  ("Storm123 sinalizou venda em AAOI, mas Setup123 já tem uma posição de
+  compra aberta na mesma conta em modo netting — ordem bloqueada pra não
+  misturar os dois resultados"). **Este não é um comportamento novo que eu
+  estou inventando**: é o MESMO padrão que o Pyr-Cycle já usa consigo mesmo
+  — `xm_mt5_bridge.py:275-277`, `elif opposite_side: status = "hold"; reason
+  = f"Direcao {side} aguarda a saida de {len} perna(s) oposta(s); hedge
+  bloqueado"`. O Meridian já tem a convenção; o TradingDegens só a repete
+  pro par Setup123×Storm123.
+
+**Por que não "o conflito impede as duas" (a terceira opção que o pedido
+listava):** bloquear os DOIS sinais jogaria fora até o que já estava
+funcionando (ex.: Setup123 já executando havia dias) só porque Storm123
+mudou de ideia depois — pior que as outras duas opções nos dois regimes de
+conta.
+
+---
+
+## 12. Tamanho de posição equivalente entre estratégias
+
+Mesma régua do paper trading interno (DA-154/155): banca fixa (US\$100 por
+padrão, configurável) por OPERAÇÃO, nunca um lote fixo — `lote = banca /
+(preço_de_entrada × unidade_do_lote)`, computado **para cada sinal,
+independentemente**, usando o preço de entrada DAQUELE sinal.
+
+Isso já é como o `scripts/mt5_sinais_dry_run.py` (task 036) calcula — a
+mesma fórmula vale pros dois `strategyId` sem mudança nenhuma; o que muda é
+só QUAL preço de entrada entra na conta (o gatilho de cada método, que já é
+diferente por natureza — Setup123 e Storm123 raramente compartilham o mesmo
+gatilho pro mesmo símbolo). Sem isso, a estratégia com o gatilho mais caro
+(menos unidades por US\$100) pareceria "menor" só pela aritmética, não pelo
+método — e a comparação deixaria de ser justa.
+
+---
+
+## 13. Como o track record da demo separa por estratégia
+
+A pergunta que fecha o requisito: se as duas rodarem juntas, dá pra saber
+DEPOIS quem ganhou o quê? Sim, por DUAS chaves independentes que já
+convivem em cada posição/ordem, sem precisar de nada novo:
+
+1. **O `comment`** (`"Meridian:tradingdegens-setup123"` /
+   `"Meridian:tradingdegens-storm123"`) — já é como o Pyr-Cycle se filtra
+   hoje (`orders/route.ts:110`), funciona em QUALQUER modo de margem.
+2. **O `magic`** (`270101`/`270102`, §10) — mais rápido de ler direto no
+   histórico do MT5 sem abrir o comentário de cada posição.
+
+O TradingDegens lê o histórico de NEGÓCIOS FECHADOS do snapshot do agente —
+`recentDeals`/`historySummary`, já enviados a cada 15s, construídos por
+`_history()` (`xm_mt5_bridge.py:357-386`) a partir de `mt5.history_deals_get`
+(90 dias por padrão), com `magic`/`comment` por negócio (o mesmo par que as
+posições abertas também carregam) — e agrupa por essas duas chaves pra produzir o
+MESMO tipo de resumo que o paper trading interno já produz (PnL, acerto,
+curva de equity) — só que agora com execução real de demo por trás, em vez
+do ledger idealizado. Isso é trabalho de APRESENTAÇÃO no TradingDegens
+(ler o snapshot, separar por magic, mostrar ao lado do paper interno pra
+comparação) — não exige NENHUMA mudança adicional no Meridian além do que
+já está proposto (§2, §9, §10).
+
+**Um limite a declarar**: `recentDeals` só traz os **últimos 100 negócios
+dos últimos 90 dias** (`_history(days=90)`, `recent[:100]`) — pra uma
+comparação que dure mais que isso, o TradingDegens precisa GRAVAR o que já
+leu (o mesmo padrão do `scans.jsonl` append-only que o paper interno já
+usa), não confiar em reconsultar o snapshot pra sempre.
