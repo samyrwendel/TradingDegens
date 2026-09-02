@@ -799,6 +799,13 @@ details.section[open] > summary::before { content: "▾"; }
    "vivo", e a legenda existe pra decodificar o que está na tela, não pra contradizê-la.
    Mesmo token do card: uma definição de fantasma, não três. */
 .chart-legend .sw.sw-fantasma { opacity: var(--alfa-fantasma); }
+/* NÍVEL de setup encerrado/invalidado: a PALAVRA apaga junto com a amostra. A cor da
+   amostra já vem esmaecida do `planZones` (o fantasma é resolvido lá, uma vez), então
+   a opacidade cai só sobre o TEXTO — se caísse na linha inteira a amostra levaria o
+   esmaecimento duas vezes e deixaria de casar com a linha desenhada no canvas, que é
+   a única razão de a legenda existir. Mesmo token de todo fantasma: `--muted` a .84
+   sobre o painel mede 4,55:1, acima do piso de 4,5:1. */
+.chart-legend .lg-fantasma .lg-txt { opacity: var(--alfa-fantasma); }
 /* PONTO-TRAÇO = STORM123 nos níveis. Depois que stop e alvo do Storm passaram a ser
    vermelho e verde (cor = significado, DA-078 regra 3), a cor deixou de dizer de quem
    é a linha — quem diz é o ritmo do traço, e a legenda tem de mostrá-lo, senão ela

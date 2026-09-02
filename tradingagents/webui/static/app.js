@@ -3780,9 +3780,14 @@ function chartLegendHtml(chart, actionable) {
   // verde (cor = significado), duas linhas da legenda passam a ter a mesma cor de
   // duas do plano; é o ponto-traço que diz de quem é cada uma, e ele precisa estar
   // AQUI, onde se decodifica o gráfico, e não só no gráfico.
+  // A LINHA INTEIRA da legenda apaga, não só a amostra. A amostra herda a cor pelo
+  // `z.color`; a PALAVRA ao lado ficava em contraste cheio, e uma legenda acesa
+  // descrevendo um nível apagado lê como "este ainda vale".
   zones.forEach((z) => niveis.push(
-    `<span class="lg"><span class="sw band${z.familia === "storm" ? " storm" : ""}" ` +
-    `style="background:${z.color}"></span>${escapeHtml(z.tag)}</span>`));
+    `<span class="lg${z.fantasma ? " lg-fantasma" : ""}">` +
+    `<span class="sw band${z.familia === "storm" ? " storm" : ""}" ` +
+    `style="background:${z.color}"></span>` +
+    `<span class="lg-txt">${escapeHtml(z.tag)}</span></span>`));
   // NÍVEL RECUSADO ENTRA NA LEGENDA (DA-123). A legenda descreve o desenho, e a
   // AUSÊNCIA de um nível que o leitor espera encontrar é parte do desenho: sem
   // esta linha, "cadê o alvo?" não tem resposta em lugar nenhum do gráfico. A
@@ -5013,6 +5018,98 @@ function ehExploratorio(tf) {
 // de-duplicated: in "aguardar recuo" the buy zone and the pullback are the same
 // rising average, so only one green band is drawn. A trigger-point pullback is a
 // line the 1-2-3 already draws, so it is dropped here. Empty when no plan/levels.
+// ══════════ O FANTASMA É DO SETUP INTEIRO (DA-150) ═══════════════════════════
+//
+// A DA-140 tirou o desfecho da cor do MARCADOR, mas metade do setup continuava
+// gritando: no print do Samyr, um Storm123 ENCERRADO NO ALVO tinha o texto em
+// fantasma e, logo abaixo, "Storm p2 · alvo (TP)" em VERDE cheio, "gatilho" em
+// AZUL e "stop (SL)" em VERMELHO cheio. Palavras dele: *"todas essas cores desse
+// setup devem ficar fantasmas como o texto encerrado no alvo, indicando que todo o
+// setup é fantasma e não ativo"*. Metade dizendo "acabou" e metade dizendo "estou
+// valendo" é pior que qualquer uma das duas sozinha.
+//
+// A REGRA: **não existe elemento vivo dentro de um setup morto.** O estado é do
+// SETUP e se propaga a tudo que pertence a ele — etiqueta, linha, faixa, pílula do
+// eixo, amostra da legenda, ponto numerado.
+//
+// UM PONTO DE DECISÃO, e é aqui. A tentação era apagar elemento a elemento no
+// desenho — e aí o próximo nível que alguém acrescentar nasce VIVO por esquecimento.
+// Em vez disso a COR JÁ SAI FANTASMA de `planZones`: quem consome (a faixa no
+// canvas, a linha, a pílula do eixo, a amostra da legenda) não sabe que existe
+// fantasma, e herda de graça. Um nível novo herda também, sem ninguém lembrar.
+//
+// E O FANTASMA É POR SETUP, NÃO POR GRÁFICO. No caso real do AAPL há um Storm
+// encerrado e um Setup123 vivo na MESMA tela: os níveis do vivo continuam vivos, e
+// é esse contraste que faz a regra valer a pena.
+
+// Qual SETUP é dono de cada nível. `recuo` é setup PRÓPRIO (a faixa da média não
+// morre porque o 1-2-3 morreu), e por isso não herda o fantasma de ninguém.
+const DONO_123 = "123", DONO_STORM = "storm", DONO_RECUO = "recuo";
+
+// Escurece uma cor em direção ao fundo. O canvas é PRETO PURO, então "esmaecer" é
+// multiplicar — e fazer isso NA COR (em vez de mexer no alpha de cada desenho)
+// é o que permite que TODO consumidor herde sem saber que herdou.
+function escurece(hex, fator) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const r = Math.round(((n >> 16) & 255) * fator);
+  const g = Math.round(((n >> 8) & 255) * fator);
+  const b = Math.round((n & 255) * fator);
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+// Preto ou claro sobre a pílula, pelo que MEDE mais contraste. A régua escrevia
+// preto sobre a cor da zona sempre — o que só funcionava porque toda cor de zona
+// era clara. Com o fantasma escurecendo a cor, preto sobre o cinza do invalidado
+// media 3,35:1: o número do nível ficaria ilegível justamente onde o olho vai
+// procurar preço. O texto da pílula não é decoração: é o preço.
+function _lumCanal(v) {
+  const c = v / 255;
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function luminancia(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+  if (!m) return 1;
+  const n = parseInt(m[1], 16);
+  return 0.2126 * _lumCanal((n >> 16) & 255)
+       + 0.7152 * _lumCanal((n >> 8) & 255)
+       + 0.0722 * _lumCanal(n & 255);
+}
+function textoSobre(bg) {
+  const L = luminancia(bg);
+  const contrasteComPreto = (L + 0.05) / 0.05;
+  return contrasteComPreto >= 4.5 ? "#000000" : "#f2f5fa";
+}
+
+// A FASE do setup dono do nível — a MESMA `patFase` que pinta o marcador, para os
+// dois nunca discordarem sobre se o setup acabou.
+function faseDoDono(a, dono) {
+  if (dono === DONO_STORM) return patFase(((a || {}).storm || {}).pattern);
+  if (dono === DONO_123) return patFase((a || {}).pattern);
+  return null;                       // o recuo à média tem vida própria
+}
+
+// Aplica o fantasma na cor do nível, uma vez, para todos os consumidores.
+//
+//   invalidado → CINZA (nunca chegou a ser trade; não há lado a lembrar)
+//   encerrado  → a cor do PAPEL, esmaecida (o nível continua dizendo o que era;
+//                a opacidade diz que já foi)
+//
+// Mesma gramática do marcador na DA-140 — de propósito: um stop fantasma e um
+// ponto fantasma do mesmo setup têm de parecer a mesma coisa.
+function fantasmaDaCor(cor, fase) {
+  if (fase !== "morto" && fase !== "ganho" && fase !== "perda") return null;
+  return escurece(fase === "morto" ? COR_FANTASMA : cor, ALFA_FANTASMA);
+}
+function aplicaFantasmaNasZonas(a, zonas) {
+  return zonas.map((z) => {
+    const fase = faseDoDono(a, z.dono);
+    const cor = fantasmaDaCor(z.color, fase);
+    return cor ? { ...z, color: cor, fantasma: true, fase } : z;
+  });
+}
+
 function planZones(a) {
   if (!a) return [];
   const out = [];
@@ -5023,7 +5120,10 @@ function planZones(a) {
   // Sem a camada do plano, o gráfico é o do Storm — se ELA estiver ligada. Com as
   // duas desligadas o gráfico fica só com as velas, e é isso mesmo: ele pediu pra
   // não ver nível nenhum. (O chão que impede a ABERTURA vazia é o `iniciaCamadas`.)
-  if (!vePlano) return camadaVisivel("storm") ? planZonesStorm(a, out, marcar) : out;
+  if (!vePlano) {
+    return aplicaFantasmaNasZonas(
+      a, camadaVisivel("storm") ? planZonesStorm(a, out, marcar) : out);
+  }
   // A zona da média é o setup do RECUO — NUNCA sai rotulada só "compra", porque
   // o 1-2-3 de compra é OUTRO setup, com outro gatilho, desenhado no mesmo gráfico.
   // Era essa colisão de nome que fazia o ZEC-USD 4h parecer contradição: a faixa
@@ -5041,7 +5141,7 @@ function planZones(a) {
     // em menos letra; a longa continua na legenda, que tem a linha inteira.
     const curto = `recuo ${buy.ma_label || "média"}`;
     out.push({ ...buy, color: fora ? ZONE_COLORS.inativa : ZONE_COLORS.buy,
-               inactive: fora, familia: "plano",
+               inactive: fora, familia: "plano", dono: DONO_RECUO,
                tag: nomeiaTag(fora ? `${nome} — não ativa agora` : nome, "plano", marcar),
                // a etiqueta CURTA é a que o gráfico estreito desenha: se ela não se
                // nomeia, o telefone volta a ter faixa anônima com duas famílias
@@ -5054,7 +5154,7 @@ function planZones(a) {
   const rz = a.realize_zone;
   if (rz && rz.price != null && rz.role !== "gatilho") {
     const rzColor = rz.role === "resistencia" ? ZONE_COLORS.resist : ZONE_COLORS.realize;
-    out.push({ ...rz, color: rzColor, familia: "plano",
+    out.push({ ...rz, color: rzColor, familia: "plano", dono: DONO_RECUO,
                tag: nomeiaTag(rz.role_label || "realização (alvo)", "plano", marcar),
                tagCurto: nomeiaTag(rz.role === "resistencia" ? "resistência" : "realização",
                                    "plano", marcar) });
@@ -5067,8 +5167,11 @@ function planZones(a) {
     if (twin) {
       twin.tag = nomeiaTag("realização = alvo (TP)", "plano", marcar);
       twin.tagCurto = nomeiaTag("alvo", "plano", marcar); twin.color = ZONE_COLORS.target;
+      // a faixa passou a ser o ALVO do 1-2-3: o dono muda junto, senão ela
+      // continuaria viva depois de o padrão que a nomeia ter acabado
+      twin.dono = DONO_123;
     } else {
-      out.push({ ...tg, color: ZONE_COLORS.target, familia: "plano",
+      out.push({ ...tg, color: ZONE_COLORS.target, familia: "plano", dono: DONO_123,
                  tag: nomeiaTag("alvo (TP)", "plano", marcar),
                  tagCurto: nomeiaTag("alvo", "plano", marcar) });
     }
@@ -5078,13 +5181,13 @@ function planZones(a) {
   const inv = a.invalidation;
   if (inv && inv.price != null) {
     out.push({ label: inv.label, price: inv.price, low: null, high: null,
-               color: ZONE_COLORS.invalid, familia: "plano",
+               color: ZONE_COLORS.invalid, familia: "plano", dono: DONO_123,
                tag: nomeiaTag("invalidação", "plano", marcar), dash: [2, 3] });
   }
   const st = a.stop;
   if (st && st.price != null) {
     out.push({ label: st.label, price: st.price, low: null, high: null,
-               color: ZONE_COLORS.stop, familia: "plano",
+               color: ZONE_COLORS.stop, familia: "plano", dono: DONO_123,
                tag: nomeiaTag("stop (SL)", "plano", marcar),
                tagCurto: nomeiaTag("stop", "plano", marcar), dash: [6, 4] });
   }
@@ -5105,6 +5208,7 @@ function planZones(a) {
   const pj = a.projecao_p3;
   if (pj && pj.low != null && pj.high != null) {
     out.push({ ...pj, color: ZONE_COLORS.projecao, familia: "plano", inactive: true,
+               dono: DONO_RECUO,
                tag: nomeiaTag(`onde o ponto 3 precisa nascer (${pj.direcao})`, "plano", marcar),
                tagCurto: nomeiaTag("ponto 3 a formar", "plano", marcar) });
   }
@@ -5114,10 +5218,12 @@ function planZones(a) {
   // só desenha o recuo separado quando é uma FAIXA distinta da compra (não o
   // gatilho-ponto do 1-2-3, que a própria marcação do padrão já traça)
   if (pb && pb.price != null && isBand && pb.price !== buyPrice) {
-    out.push({ ...pb, color: ZONE_COLORS.pullback, familia: "plano",
+    out.push({ ...pb, color: ZONE_COLORS.pullback, familia: "plano", dono: DONO_RECUO,
                tag: nomeiaTag("recuo a aguardar", "plano", marcar) });
   }
-  return out;
+  // ÚLTIMA COISA, e é o que faz a regra valer pra nível que ainda não existe: todo
+  // nível sai daqui já com a cor do ESTADO do seu setup.
+  return aplicaFantasmaNasZonas(a, out);
 }
 
 // NÍVEIS DO STORM — outra leitura, outra cor, e o nome dela no rótulo. Só quando o
@@ -5149,6 +5255,7 @@ function planZonesStorm(a, out, marcar) {
   const stLinha = (price, tag, curto, color) => {
     if (price == null) return;
     out.push({ label: tag, price, low: null, high: null, familia: "storm",
+               dono: DONO_STORM,
                color, tag, tagCurto: curto, dash: TRACO_STORM });
   };
   // O stop é UM (comum às duas entradas); gatilho e alvo são de CADA leitura, e por
@@ -5452,6 +5559,14 @@ function drawPriceChart(canvas, chart, a) {
   canvas.dataset.v0 = v0; canvas.dataset.v1 = v1; canvas.dataset.n = n;
 
   const zones = planZones(a);
+  // A COR DE CADA NÍVEL FICA OBSERVÁVEL, com o dono e a fase que a decidiram (mesmo
+  // padrão de `dataset.levelLabels` e `dataset.pat123`). "Nível de setup encerrado
+  // sai apagado" é regra de tela, e a única forma de um teste provar que ela vale
+  // pro nível que alguém adicionar amanhã é medir a SAÍDA do `planZones`, não uma
+  // lista de níveis escrita à mão no teste.
+  canvas.dataset.zonas = JSON.stringify(zones.map((z) => ({
+    tag: z.tag, cor: z.color, dono: z.dono || null,
+    fantasma: !!z.fantasma, fase: z.fase || null })));
   const price = a && a.price != null ? a.price : null;
 
   // price range across candles + MAs + pattern levels + plan zones + current
@@ -5511,10 +5626,10 @@ function drawPriceChart(canvas, chart, a) {
   zones.forEach((z) => {
     const hasBand = z.low != null && z.high != null && z.high > z.low;
     if (hasBand) {
-      axisPills.push({ y: y(z.high), text: fmtAxis(z.high), bg: z.color, fg: "#000000" });
-      axisPills.push({ y: y(z.low), text: fmtAxis(z.low), bg: z.color, fg: "#000000" });
+      axisPills.push({ y: y(z.high), text: fmtAxis(z.high), bg: z.color, fg: textoSobre(z.color) });
+      axisPills.push({ y: y(z.low), text: fmtAxis(z.low), bg: z.color, fg: textoSobre(z.color) });
     } else if (z.price != null) {
-      axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: "#000000" });
+      axisPills.push({ y: y(z.price), text: fmtAxis(z.price), bg: z.color, fg: textoSobre(z.color) });
     }
   });
   // A pílula é do que está DESENHADO. Com a camada do plano desligada o gatilho do
@@ -5640,7 +5755,11 @@ function drawPriceChart(canvas, chart, a) {
       // o chip verde diz "o retorno supera o risco" — é ganho, e ganho tem UMA cor
       // na tela (ZONE_COLORS.buy == --green). Era o terceiro literal do verde do
       // alvo solto no arquivo (task 20260831-005).
-      const rrCol = rrTem && !rrRuim(rrPlan.rr) ? ZONE_COLORS.buy : "#e6e9ef";
+      // O CHIP É DO PLANO 1-2-3, e portanto do mesmo dono das zonas do plano: se
+      // aquele padrão já é história, o número dele é história junto. Mesma função
+      // que pinta os níveis — o chip não tem regra própria de fantasma.
+      const _rrBase = rrTem && !rrRuim(rrPlan.rr) ? ZONE_COLORS.buy : "#e6e9ef";
+      const rrCol = fantasmaDaCor(_rrBase, faseDoDono(a, DONO_123)) || _rrBase;
       // A cor do chip fica OBSERVÁVEL (mesmo padrão do dataset.levelLabels): "verde só
       // quando o retorno supera o risco" é regra de tela, e regra de tela que não se
       // mede volta sozinha na próxima mudança de layout.
