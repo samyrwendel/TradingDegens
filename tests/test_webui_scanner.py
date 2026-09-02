@@ -73,6 +73,9 @@ def test_acionado_longe_e_em_movimento_nao_em_gatilho(fake_fetch):
 
 
 def test_invalidou_quando_preco_alem_do_ponto_3(fake_fetch):
+    """O FALLBACK: ``pat`` sem ``ciclo``/``invalidado`` (plano ANTIGO, de antes da
+    task 013) cai na conta local por preço. É o chão do detector ausente — não a
+    régua que uma run atual usa (essa é a de baixo, por FECHAMENTO)."""
     # COMPRA: setup morre ao PERDER o ponto 3 (preço < invalidação).
     fake_fetch({("C", "1d"): _plan(_pat(trigger=110.0), price=88.0, invalidation=95.0)})
     assert scan_symbol("C", "2026-08-28", frames=("1d",))["melhor"]["estado"] == "invalidou"
@@ -80,6 +83,52 @@ def test_invalidou_quando_preco_alem_do_ponto_3(fake_fetch):
     fake_fetch({("V", "1d"): _plan(_pat(direction="venda", trigger=90.0),
                                    price=105.0, invalidation=95.0)})
     assert scan_symbol("V", "2026-08-28", frames=("1d",))["melhor"]["estado"] == "invalidou"
+
+
+# ══════════ INVALIDAÇÃO É DE FECHAMENTO, NUNCA DE PAVIO (DA-153, precisa a 031) ═
+#
+# O Samyr, sozinho: *"ou ele ainda não invalidou pq não fechou o dia?"* — sim, e é
+# a régua que ``_primeira_barra_alem`` (price_structure.py) já usa: "a primeira
+# barra que FECHA além do nível", pela mesma razão que o stop leva folga de ATR —
+# não ser tirado por sombra. Uma run ATUAL sempre carrega ``ciclo``/``invalidado``
+# no pattern (``Pattern123.to_dict``, sempre presentes) — e é esse par que
+# ``_estado_do_ciclo``/``"invalidado" in pat`` consulta ANTES de cair no fallback
+# de preço acima. O teste acima usa ``_pat()`` puro (sem esses campos) de
+# propósito: ele mede o fallback, não uma run real — os dois de baixo medem a run
+# real, com os campos que ela sempre manda.
+
+
+def _pat_com_ciclo(*, direction="compra", state="formando", trigger=100.0,
+                    ciclo="vivo", invalidado=False):
+    """Um ``pat`` como uma run ATUAL o serializa — com ``ciclo``/``invalidado``,
+    nunca ausentes (``Pattern123.to_dict``). ``_pat()`` acima os omite de
+    propósito, pra testar o fallback isolado; aqui eles vêm sempre."""
+    return {"direction": direction, "state": state, "trigger": trigger,
+            "ciclo": ciclo, "invalidado": invalidado}
+
+
+def test_pavio_alem_da_invalidacao_SEM_fechar_continua_vivo(fake_fetch):
+    """O preço (pavio/intrabar) já passou do ponto 3, mas nenhuma barra FECHOU
+    além dele — o detector não confirmou (``ciclo="vivo"``, ``invalidado=False``).
+    O setup continua respirando: não pode sair como ``invalidou``."""
+    fake_fetch({("C", "1d"): _plan(
+        _pat_com_ciclo(trigger=110.0, ciclo="vivo", invalidado=False),
+        price=88.0, invalidation=95.0)})   # 88 < 95: intrabar já perfurou
+    estado = scan_symbol("C", "2026-08-28", frames=("1d",))["melhor"]["estado"]
+    assert estado != "invalidou", ("pavio intrabar matou um setup que respira", estado)
+    assert estado == "formando", estado   # longe do gatilho (20%), nunca acionou
+
+
+def test_fechamento_ALEM_da_invalidacao_confirma_e_sai_da_faixa(fake_fetch):
+    """A barra FECHOU além do ponto 3 (``ciclo="invalidado_sem_acionar"``,
+    ``invalidado=True``) — mesmo que o PREÇO atual (pavio de volta) esteja do
+    lado vivo, o fechamento já decidiu: o padrão morreu e "voltou continua
+    morto" (mesma regra do card, DA-125/task 013)."""
+    fake_fetch({("C", "1d"): _plan(
+        _pat_com_ciclo(trigger=110.0, ciclo="invalidado_sem_acionar", invalidado=True),
+        price=200.0, invalidation=95.0)})   # preço ATUAL do lado vivo — não importa
+    estado = scan_symbol("C", "2026-08-28", frames=("1d",))["melhor"]["estado"]
+    assert estado == "invalidou", ("fechamento confirmado tem de mandar", estado)
 
 
 def test_estado_formando_sem_setup(fake_fetch):
