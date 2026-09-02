@@ -142,6 +142,10 @@ def test_o_aviso_aparece_no_degraded_da_run_123(tmp_path, monkeypatch):
     monkeypatch.setattr(rm, "fetch_actionable_plan",
                         lambda t, d, tf="1d", method="padrao":
                         {"price": 100.0, "pattern": None, "setup_state": "sem_setup"})
+    # Sem isto o worker bateria de verdade no calendário de balanço (task 044) —
+    # o mesmo cuidado que os stubs acima já tomam com preço/plano.
+    monkeypatch.setattr(rm, "earnings_window_status",
+                        lambda ticker, date, window_days, asset_type: {})
     monkeypatch.setattr(AnalysisRunner, "detect_asset_type", lambda self, t: "stock")
 
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},

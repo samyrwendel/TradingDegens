@@ -24,8 +24,10 @@ from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
+from tradingagents.agents.utils.erick_method import _EARNINGS_WINDOW_DAYS
 from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
+from tradingagents.dataflows.earnings_calendar import earnings_window_status
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
 from tradingagents.webui import agenda, ask as ask_module, execucao, sinais, timeutil
 from tradingagents.webui.ciclo_legado import completa_ciclo
@@ -481,6 +483,10 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         # (price @ analysis, horizon, timeframe, buy/realize/pullback zones), all
         # from the same cached series — "sem nível definido", never a fake number.
         "actionable": {},
+        # Filled by the runner for every asset (task 20260901-044): calendário de
+        # resultados tri-state (data/dias/dentro-da-janela) — {} até o runner
+        # preencher, nunca inventado.
+        "earnings": {},
         # THE single frozen reference price (date-guarded daily close); the runner
         # fills it from ``actionable`` so cover/UI/consumers share one price.
         "as_of_price": None,
@@ -1127,6 +1133,9 @@ class AnalysisRunner:
                 "derivatives_report": "",
                 "price_chart": chart or {},
                 "actionable": plan or {},
+                "earnings": earnings_window_status(
+                    run.ticker, run.date, _EARNINGS_WINDOW_DAYS, run.asset_type
+                ),
                 "as_of_price": (plan or {}).get("price"),
                 # Cotação ATUAL + a sessão dela (só em run de hoje) — ver
                 # :meth:`_cotacao_da_run`.
@@ -1306,6 +1315,13 @@ class AnalysisRunner:
             # estava ausente (ver :func:`plano_com_storm`).
             run.result["actionable"] = plano_com_storm(
                 run.ticker, run.date, run.timeframe, method
+            )
+            # Calendário de resultados tri-state pra QUALQUER método (task
+            # 20260901-044) — mesma leitura que o Erick já consulta como fator
+            # TIER 3 (:func:`erick_method._earnings_read`), só que aqui exposta
+            # como campo estruturado pra tela em vez de presa na prosa do relatório.
+            run.result["earnings"] = earnings_window_status(
+                run.ticker, run.date, _EARNINGS_WINDOW_DAYS, run.asset_type
             )
             # THE single frozen reference price of the run (date-guarded daily close,
             # the same one the chart/verdict/fundamentals-anchor use). One canonical

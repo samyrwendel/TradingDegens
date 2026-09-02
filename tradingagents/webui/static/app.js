@@ -1176,6 +1176,7 @@ function renderResult(snap) {
     $("revalLinha").classList.add("hidden");
     $("headPrice").classList.add("hidden");
     $("headLevels").classList.add("hidden");   // run com erro não tem gatilho nem cotação a mostrar
+    if ($("earningsBanner")) $("earningsBanner").classList.add("hidden");
     $("verdictTf").classList.add("hidden");
     $("degradedBanner").classList.add("hidden");
     $("exportPdfBtn").classList.add("hidden");  // nada de análise pra exportar num run com erro
@@ -1292,6 +1293,7 @@ function renderResult(snap) {
   _revalVoo = null;
   _openLive = r.live_price || null;
   renderHeadPrice(r.actionable, _openLive);
+  renderEarnings(r.earnings, _openMethod, !!(r.erick_report && r.erick_report.trim()));
   renderSetupCards(r.actionable);
   // A ESCADA vem do RESULTADO da run (foi computada junto da análise, $0 de LLM):
   // uma análise antiga, sem o campo, simplesmente não a mostra — nada de escada
@@ -4038,6 +4040,59 @@ function renderTfSelector() {
 // "fonte" aqui é último recurso pra dado irrecuperável — não o caso normal.
 function degradedName(d) {
   return escapeHtml((d && (d.label || d.report_key)) || "fonte");
+}
+
+// Calendário de resultados (task 20260901-044). TRÊS estados possíveis, e o
+// requisito central é que "não sei" (fonte fora do ar) NUNCA se pareça com "não
+// tem" (empresa sem data publicada) — ignorância não é a mesma coisa que
+// segurança. Por isso os três usam tratamento visual DIFERENTE: janela aberta
+// (risco conhecido) e fonte indisponível (risco não medido) levam ênfase — uma
+// com borda sólida, a outra com borda tracejada, pra não colidir com o veredito
+// de compra/venda (que já é quem manda no verde/vermelho sólido, DA-140) — e "sem
+// balanço" fica discreto (cinza, sem borda). Sempre por PALAVRA antes de cor.
+function earningsHtml(earnings, method, erickAtivo) {
+  if (!earnings || earnings.status == null) return "";   // cripto: sem calendário
+  const janela = earnings.window_days;
+  let cls = "earn-seguro";
+  let texto = "";
+  if (earnings.status === "fonte_indisponivel") {
+    cls = "earn-desconhecido";
+    texto = "Calendário de balanço INDISPONÍVEL — não deu pra saber se o resultado sai em breve. " +
+      "Não é o mesmo que \"sem balanço\": trate como risco NÃO MEDIDO.";
+  } else if (earnings.status === "sem_agenda") {
+    texto = "Sem data de balanço publicada — nenhum risco de evento conhecido.";
+  } else if (earnings.in_window) {
+    cls = "earn-risco";
+    const quando = earnings.days_ahead === 0
+      ? "HOJE" : `em ${earnings.days_ahead} dia${earnings.days_ahead === 1 ? "" : "s"} (${earnings.date})`;
+    texto = `Próximo balanço ${quando} — DENTRO da janela de risco (${janela} dias).`;
+  } else {
+    const dias = earnings.days_ahead;
+    texto = `Próximo balanço em ${earnings.date}${Number.isInteger(dias) ? ` (${dias} dias)` : ""} — fora da janela de risco (${janela} dias).`;
+  }
+  // Item 4 (task 044): onde o Erick usa isto como fator, o traço vira EXPLÍCITO
+  // aqui — hoje só existia dentro da prosa longa do relatório. Gramática exata do
+  // TIER 3 em erick_method._tier3: só ``na_janela is True`` desce um degrau de
+  // peso; fora da janela ou não medido não mexe no peso (mas a fonte caída AINDA
+  // assim custa o fator inteiro, e isso também se diz).
+  if (erickAtivo && method === "erick") {
+    if (earnings.status === "fonte_indisponivel") {
+      texto += " Método Erick: sem este dado, o fator de balanço (TIER 3) ficou de fora da leitura.";
+    } else if (earnings.in_window) {
+      texto += " Método Erick: fator TIER 3 — reduz o peso da posição um degrau (nunca a direção).";
+    } else {
+      texto += " Método Erick: considerado (TIER 3) — fora da janela, sem efeito no peso.";
+    }
+  }
+  return `<div class="earn-badge ${cls}"><b>Calendário de resultados</b> — ${escapeHtml(texto)}</div>`;
+}
+
+function renderEarnings(earnings, method, erickAtivo) {
+  const el = $("earningsBanner");
+  if (!el) return;
+  const html = earningsHtml(earnings, method, erickAtivo);
+  el.innerHTML = html;
+  el.classList.toggle("hidden", !html);
 }
 
 // Banner de fonte degradada. Separa as DUAS coisas que o motor reporta pelo mesmo
@@ -9212,6 +9267,20 @@ function scanCarimboDoAtivo(a) {
   return `<span class="scan-tk-quando" title="${escapeHtml(tit)}">${escapeHtml(txt)}</span>`;
 }
 
+// Marca de balanço iminente NA FAIXA (task 20260901-044, item 3): "se couber sem
+// poluir" — por isso só aparece quando HÁ risco a avisar (dentro da janela). "Sem
+// balanço" e "não sei" ficam mudos aqui de propósito: a lista já é densa, e o
+// estado completo (os TRÊS) só é obrigatório na tela de análise (o requisito
+// central). Uma vez por ATIVO, não por frame — mesma leitura em toda linha dele.
+function scanEarningsFlagHtml(a) {
+  const e = a && a.earnings;
+  if (!e || !e.in_window) return "";
+  const quando = e.days_ahead === 0 ? "hoje" : `em ${e.days_ahead}d`;
+  const tit = `Próximo balanço ${e.days_ahead === 0 ? "HOJE" : `em ${e.days_ahead} dia(s)`}` +
+    (e.date ? ` (${e.date})` : "") + ` — dentro da janela de risco (${e.window_days} dias).`;
+  return `<span class="scan-tk-earn" title="${escapeHtml(tit)}">balanço ${quando}</span>`;
+}
+
 // A linha PERMANENTE que diz de quando é o que está na tela. Fica enquanto houver
 // scan pintado — inclusive depois que a varredura nova chega, porque "a hora do
 // scan exibido é obrigatória": o painel abre com o último resultado conhecido, e
@@ -9938,7 +10007,7 @@ function paintScan(data) {
         `<li class="scan-line-row ${f.estado} ${f.direction || ""}" data-open="${escapeHtml(a.ticker)}|${escapeHtml(f.frame)}">` +
         scanTfBadge(f.frame) +
         `<b class="scan-tk-inline">${escapeHtml(a.ticker)}</b>` +
-        (scanCarimboDoAtivo(a) || "") +
+        (scanCarimboDoAtivo(a) || "") + scanEarningsFlagHtml(a) +
         `<span class="scan-price">$${scanFmt(f.price)}</span>` +
         `<span class="scan-dist">${f.dist_txt || "—"}</span>` +
         scanEstadoChip(f.estado, f.direction, f.andado_pct) +
@@ -9965,7 +10034,7 @@ function paintScan(data) {
       // (CARDS segue com os rótulos por célula — lá não há cabeçalho de coluna.)
       return `<li class="scan-row ${(a.melhor || {}).estado} ${(a.melhor || {}).direction || ""}">` +
         `<b class="scan-tk" data-open="${escapeHtml(a.ticker)}|${escapeHtml((a.melhor || {}).frame || "")}">${escapeHtml(a.ticker)}` +
-        (scanCarimboDoAtivo(a) || "") + `</b>` +
+        (scanCarimboDoAtivo(a) || "") + scanEarningsFlagHtml(a) + `</b>` +
         rows + `</li>`;
     }).join("") ||
       `<li class="scan-vazio">nada casa com <b>${escapeHtml(_scanBusca || "o filtro")}</b></li>`;

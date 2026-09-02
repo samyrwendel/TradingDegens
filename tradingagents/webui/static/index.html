@@ -333,6 +333,13 @@
             <div class="head-price hidden" id="headPrice"></div>
           </div>
         </div>
+        <!-- Calendário de resultados (task 20260901-044): data do próximo balanço,
+             dias até lá, e se cai dentro da janela que o método considera. Fica
+             ABERTO (não no detalhe de execução) porque é dado que decide se o plano
+             ainda vale — mesma razão do head-price acima. Os TRÊS estados (tem
+             dentro da janela / não tem / não deu pra saber) são visualmente
+             distintos: "não sei" nunca se parece com "não tem" (ver renderEarnings). -->
+        <div class="earnings-banner hidden" id="earningsBanner"></div>
         <!-- Metadado de PRODUÇÃO (data · tipo · método por extenso · custo · tempo):
              não decide nada, é rastro de execução — quem opera não repete o método
              já grande no badge acima nem confere o custo (é sempre $0 nos métodos

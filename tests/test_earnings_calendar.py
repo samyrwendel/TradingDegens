@@ -240,3 +240,74 @@ def test_o_cache_novo_e_usado_de_verdade(cache_real, fake_yf, monkeypatch):
     monkeypatch.setattr(_FakeTicker, "get_earnings_dates",
                         lambda self, limit=16: nunca(self.symbol, limit))
     assert ec.get_next_earnings("NVDA", base) == primeiro
+
+
+# ------------------------------------- earnings_window_status (task 044) -------
+@pytest.mark.unit
+def test_window_status_ok_dentro_da_janela(fake_yf):
+    out = ec.earnings_window_status("NVDA", "2026-08-20", 21, "stock")
+    assert out["status"] == ec.STATUS_OK
+    assert out["date"] == "2026-08-26"
+    assert out["days_ahead"] == 6
+    assert out["in_window"] is True
+    assert out["window_days"] == 21
+
+
+@pytest.mark.unit
+def test_window_status_ok_fora_da_janela(fake_yf):
+    out = ec.earnings_window_status("NVDA", "2026-06-01", 21, "stock")
+    assert out["status"] == ec.STATUS_OK
+    assert out["in_window"] is False
+
+
+@pytest.mark.unit
+def test_window_status_hoje_sempre_dentro(fake_yf):
+    out = ec.earnings_window_status("NVDA", "2026-08-26", 21, "stock")
+    assert out["days_ahead"] == 0
+    assert out["in_window"] is True
+
+
+@pytest.mark.unit
+def test_window_status_sem_agenda_e_false_nao_none(fake_yf):
+    """"sem agenda" É informação (não há risco de evento conhecido) — vira
+    ``False``, nunca ``None`` (que aqui significa especificamente "não sei")."""
+    out = ec.earnings_window_status("NVDA", "2027-01-01", 21, "stock")
+    assert out["status"] == ec.STATUS_SEM_AGENDA
+    assert out["in_window"] is False
+    assert out["date"] is None
+
+
+@pytest.mark.unit
+def test_window_status_fonte_indisponivel_e_none_nao_false(monkeypatch):
+    """O CENTRAL do task 044: ignorância nunca se traveste de "sem risco" —
+    ``in_window`` fica ``None``, nunca ``False``, quando a fonte caiu."""
+    monkeypatch.setattr(ec, "get_next_earnings_status",
+                        lambda sym, cd: (None, ec.STATUS_FONTE_INDISPONIVEL))
+    out = ec.earnings_window_status("AMD", "2026-08-01", 21, "stock")
+    assert out["status"] == ec.STATUS_FONTE_INDISPONIVEL
+    assert out["in_window"] is None
+    assert out["date"] is None
+
+
+@pytest.mark.unit
+def test_window_status_cripto_nao_consulta_nada(monkeypatch):
+    def nunca(*a, **k):
+        raise AssertionError("earnings_window_status consultou o calendário pra cripto")
+
+    monkeypatch.setattr(ec, "get_next_earnings_status", nunca)
+    out = ec.earnings_window_status("BTC-USD", "2026-08-01", 21, "crypto")
+    assert out == {"status": None, "date": None, "days_ahead": None,
+                    "in_window": None, "window_days": 21}
+
+
+@pytest.mark.unit
+def test_window_status_dias_none_fica_none_nao_false(fake_yf, monkeypatch):
+    """Data presente sem dias calculáveis (caso raro do ``_days_ahead`` do
+    erick_method): ``in_window`` não pode virar ``False`` por ignorância."""
+    ev, status = ec.get_next_earnings_status("NVDA", "2026-08-01")
+    ev = dict(ev)
+    ev.pop("days_ahead", None)
+    monkeypatch.setattr(ec, "get_next_earnings_status", lambda sym, cd: (ev, status))
+    out = ec.earnings_window_status("NVDA", "2026-08-01", 21, "stock")
+    assert out["days_ahead"] is None
+    assert out["in_window"] is None

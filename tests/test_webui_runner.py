@@ -252,6 +252,51 @@ def test_stock_run_has_no_derivatives_report(tmp_path):
     assert snap["result"]["derivatives_report"] == ""
 
 
+# ---------------------- calendário de resultados (task 20260901-044) -----------
+def test_extract_result_earnings_defaults_empty():
+    assert extract_result({}, "Hold")["earnings"] == {}
+
+
+def test_full_run_attaches_earnings_field(tmp_path, monkeypatch):
+    """O método completo (padrão/erick) preenche ``result["earnings"]`` — mesma
+    leitura tri-state que o Erick já usa internamente como fator, exposta como
+    campo estruturado pra tela (reusa o cache DA-058, sem fetch novo)."""
+    fake = {"status": "ok", "date": "2026-09-10", "days_ahead": 5,
+            "in_window": True, "window_days": 21}
+    chamadas = []
+
+    def fake_earnings(ticker, date, window_days, asset_type):
+        chamadas.append((ticker, date, window_days, asset_type))
+        return fake
+
+    monkeypatch.setattr(runner_module, "earnings_window_status", fake_earnings)
+    monkeypatch.setattr(runner_module, "plano_com_storm", lambda t, d, tf, method: {})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path), graph_factory=_factory())
+    run_id = runner.start("AAPL", "2026-08-22")
+    snap = _wait(runner, run_id)
+    assert snap["result"]["earnings"] == fake
+    assert chamadas == [("AAPL", "2026-08-22", runner_module._EARNINGS_WINDOW_DAYS, "stock")]
+
+
+def test_structural_run_attaches_earnings_field(tmp_path, monkeypatch):
+    """O atalho estrutural (setup123/storm123, $0 de LLM) TAMBÉM preenche
+    ``result["earnings"]`` — o dado é do ATIVO, não do pipeline que rodou."""
+    fake = {"status": "sem_agenda", "date": None, "days_ahead": None,
+            "in_window": False, "window_days": 21}
+    monkeypatch.setattr(runner_module, "earnings_window_status", lambda *a, **k: fake)
+    monkeypatch.setattr(runner_module, "plano_com_storm", lambda t, d, tf, method: {})
+    monkeypatch.setattr(runner_module, "fetch_price_chart",
+                        lambda t, d, tf="1d", method="padrao": {})
+    monkeypatch.setattr(runner_module, "leitura_multiframe",
+                        lambda ticker, date, asset_type, method, timeframe: {})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path))
+    run_id = runner.start("AAPL", "2026-08-22", method="setup123", reuse=False)
+    snap = _wait(runner, run_id)
+    assert snap["result"]["earnings"] == fake
+
+
 def test_history_is_watchlist_that_only_grows(tmp_path):
     # Lista de observação (task 011): history() mostra UM item por ticker já pesquisado,
     # persistente e SÓ CRESCE — um ativo antigo (fora da janela dos 25 runs) continua

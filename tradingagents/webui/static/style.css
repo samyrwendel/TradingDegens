@@ -1072,6 +1072,21 @@ details.section[open] > summary::before { content: "▾"; }
 }
 .degraded-banner .dg-btn:hover { color: #fff; background: var(--panel); border-color: var(--text); }
 
+/* Calendário de resultados (task 20260901-044). Três estados, três tratamentos —
+   nunca só cor (a palavra sempre abre a frase primeiro, DA-078). "Não sei" reusa o
+   MESMO âmbar do banner de fonte degradada acima (mesmo significado: risco não
+   medido, não erro) e ganha borda TRACEJADA — a estrutura, não só a cor, separa
+   "não sei" de "não tem" (cinza, sem borda) e de "risco confirmado" (vermelho). */
+.earn-badge {
+  margin: 4px 0 12px; padding: 9px 13px; font-size: var(--fs-12); line-height: 1.5;
+  border-radius: var(--radius); border: 1px solid var(--border); color: var(--muted); background: transparent;
+}
+.earn-badge b { color: var(--text); }
+.earn-badge.earn-risco { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+.earn-badge.earn-risco b { color: var(--red); }
+.earn-badge.earn-desconhecido { border: 1px dashed #5c4a17; color: #ffd479; background: #2a2410; }
+.earn-badge.earn-desconhecido b { color: #ffd479; }
+
 /* Carimbo do veredito (task 016): banner âmbar quando os insumos tinham
    inconsistência na hora da decisão — o juiz recebeu os DADOS VERIFICADOS, e isto
    avisa o leitor + lista o que divergiu. Discreto, mas visível ao lado do veredito. */
@@ -2704,6 +2719,13 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 .scan-tk-quando {
   margin-left: 6px; font-size: var(--fs-10); line-height: 1; color: var(--muted);
   font-weight: var(--fw-med); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* Balanço dentro da janela, na faixa (task 20260901-044). Só existe quando há
+   risco a avisar — por isso pode puxar --red sem colidir com a direção do setup
+   (DA-140): não é o marcador de compra/venda da linha, é um aviso à parte. */
+.scan-tk-earn {
+  margin-left: 6px; font-size: var(--fs-10); line-height: 1; color: var(--red);
+  font-weight: var(--fw-bold); white-space: nowrap;
 }
 /* A linha que diz o que está acontecendo com a ATUALIZAÇÃO — e, quando ela
    falha, de quando é o dado que ficou na tela. Discreta por padrão; vermelha

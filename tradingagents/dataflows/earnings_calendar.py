@@ -160,6 +160,46 @@ def get_next_earnings(symbol: str, curr_date: str) -> dict | None:
     return get_next_earnings_status(symbol, curr_date)[0]
 
 
+def earnings_window_status(
+    symbol: str, curr_date: str, window_days: int, asset_type: str = "stock",
+) -> dict:
+    """Leitura tri-state PRONTA PRA TELA (não markdown): data, dias até lá, e se
+    cai dentro de ``window_days`` — reusa o cache de :func:`get_next_earnings_status`
+    (DA-058), nenhum fetch novo por chamada.
+
+    Cripto não tem calendário de resultados (mesma regra de
+    :func:`build_earnings_section`): ``status`` volta ``None`` sem consultar nada.
+
+    ``in_window`` segue a MESMA disciplina tri-state do resto do módulo:
+    ``True``/``False`` quando dá pra saber, ``None`` quando a fonte caiu ou a data
+    não tem dias calculáveis — nunca ``False`` por ignorância (ignorância não é
+    "sem risco").
+    """
+    if asset_type == "crypto":
+        return {"status": None, "date": None, "days_ahead": None,
+                "in_window": None, "window_days": window_days}
+
+    ev, status = get_next_earnings_status(symbol, curr_date)
+    out: dict = {"status": status, "date": None, "days_ahead": None,
+                 "in_window": None, "window_days": window_days}
+    if status == STATUS_SEM_AGENDA:
+        out["in_window"] = False
+        return out
+    if status != STATUS_OK or not isinstance(ev, dict):
+        return out
+    out["date"] = str(ev.get("date") or "")[:10]
+    if ev.get("is_today"):
+        out["days_ahead"] = 0
+        out["in_window"] = True
+        return out
+    dias = ev.get("days_ahead")
+    out["days_ahead"] = dias
+    # ``dias`` ausente é o mesmo caso raro do ``_days_ahead`` do erick_method (data
+    # presente sem dias calculáveis): fica ``None`` — não vira "fora da janela".
+    out["in_window"] = (dias <= window_days) if isinstance(dias, int) else None
+    return out
+
+
 def _reported_earnings(symbol: str, curr_date: str) -> dict | None:
     """Resultado reportado do âncora (Finnhub), fail-open → None. Seam p/ monkeypatch."""
     try:

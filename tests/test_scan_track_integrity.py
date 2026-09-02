@@ -108,6 +108,8 @@ def _plans(monkeypatch):
         monkeypatch.setattr(sc, "build_price_chart",
                             lambda t, d, bars=260, timeframe="1d", method="padrao": {"candles": []})
         monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+        monkeypatch.setattr(sc, "earnings_window_status",
+                            lambda symbol, curr_date, window_days, asset_type="stock": {})
     return install
 
 
@@ -152,6 +154,8 @@ def _serie(monkeypatch, candles, preco=None, capture=None):
 
     monkeypatch.setattr(sc, "build_price_chart", chart)
     monkeypatch.setattr(sc, "_live_price", lambda ticker: preco)
+    monkeypatch.setattr(sc, "earnings_window_status",
+                        lambda symbol, curr_date, window_days, asset_type="stock": {})
 
 
 def _c(d, h, low):

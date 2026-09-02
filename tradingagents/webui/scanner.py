@@ -33,11 +33,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tradingagents.agents.utils.erick_method import _EARNINGS_WINDOW_DAYS
+from tradingagents.dataflows.earnings_calendar import earnings_window_status
 from tradingagents.dataflows.price_structure import (
     build_actionable_plan_dict,
     build_price_chart,
     build_storm_plan_dict,
 )
+from tradingagents.dataflows.symbol_utils import crypto_base
 from tradingagents.webui import timeutil
 
 logger = logging.getLogger(__name__)
@@ -460,7 +463,11 @@ def scan_symbol(ticker: str, date: str, frames: tuple = SCAN_FRAMES) -> dict[str
     # a lado (1d, 4h e 1h), sem hierarquia entre eles.
     best = min(rows, key=lambda r: (_URGENCIA.get(r.get("estado"), 9), -_resto(r),
                                     r.get("dist_pct") if r.get("dist_pct") is not None else 9.9))
-    return {"ticker": ticker, "frames": rows, "melhor": best}
+    # Calendário de resultados, UMA vez por ativo (não por frame — o balanço não
+    # muda com o timeframe). Cripto não tem (task 20260901-044).
+    asset_type = "crypto" if crypto_base(ticker) else "stock"
+    earnings = earnings_window_status(ticker, date, _EARNINGS_WINDOW_DAYS, asset_type)
+    return {"ticker": ticker, "frames": rows, "melhor": best, "earnings": earnings}
 
 
 # A ESCADA COMPLETA de UM ativo (task 20260831-012): os cinco frames que o método

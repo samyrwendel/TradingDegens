@@ -41,7 +41,9 @@ def _pat(direction="compra", state="formando", trigger=100.0):
 @pytest.fixture
 def fake_fetch(monkeypatch):
     """Seam: mapa (ticker, frame) -> plan. Chart vazio (preço vem do plan).
-    Live price desligado (None) — o teste é offline; o price do plan é a fonte."""
+    Live price desligado (None) — o teste é offline; o price do plan é a fonte.
+    Earnings também desligado (fonte indisponível, fail-open) — sem isso cada
+    símbolo falso ("A"/"B"/"C") bateria de verdade no yfinance."""
     def install(plans):
         monkeypatch.setattr(
             sc, "build_actionable_plan_dict",
@@ -50,6 +52,13 @@ def fake_fetch(monkeypatch):
         monkeypatch.setattr(sc, "build_price_chart",
                             lambda t, d, bars=260, timeframe="1d", method="padrao": {"candles": []})
         monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+        monkeypatch.setattr(
+            sc, "earnings_window_status",
+            lambda symbol, curr_date, window_days, asset_type="stock": {
+                "status": "fonte_indisponivel", "date": None, "days_ahead": None,
+                "in_window": None, "window_days": window_days,
+            },
+        )
     return install
 
 
@@ -138,6 +147,46 @@ def test_estado_formando_sem_setup(fake_fetch):
     assert scan_symbol("A", "2026-08-28", frames=("1d",))["melhor"]["estado"] == "sem_setup"
 
 
+# ---------------------------- calendário de resultados (task 044) --------------
+def test_scan_symbol_carrega_earnings_uma_vez_por_ativo_nao_por_frame(monkeypatch):
+    """A leitura é do ATIVO, não do frame — chamar 1x mesmo com N frames evita
+    N chamadas ao cache (DA-058) pro mesmo dado."""
+    monkeypatch.setattr(sc, "build_actionable_plan_dict",
+                        lambda t, d, timeframe="1d", method="padrao": _plan(setup_state="sem_setup"))
+    monkeypatch.setattr(sc, "build_price_chart",
+                        lambda t, d, bars=260, timeframe="1d", method="padrao": {"candles": []})
+    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    chamadas = []
+
+    def fake_earnings(symbol, curr_date, window_days, asset_type="stock"):
+        chamadas.append((symbol, asset_type))
+        return {"status": "ok", "date": "2026-09-10", "days_ahead": 5,
+                "in_window": True, "window_days": window_days}
+
+    monkeypatch.setattr(sc, "earnings_window_status", fake_earnings)
+    r = scan_symbol("A", "2026-08-28", frames=("1w", "1d", "4h", "1h"))
+    assert len(chamadas) == 1, chamadas
+    assert chamadas[0] == ("A", "stock")
+    assert r["earnings"]["in_window"] is True
+
+
+def test_scan_symbol_cripto_marca_asset_type(monkeypatch):
+    monkeypatch.setattr(sc, "build_actionable_plan_dict",
+                        lambda t, d, timeframe="1d", method="padrao": _plan(setup_state="sem_setup"))
+    monkeypatch.setattr(sc, "build_price_chart",
+                        lambda t, d, bars=260, timeframe="1d", method="padrao": {"candles": []})
+    monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    vistos = []
+
+    def fake_earnings(symbol, curr_date, window_days, asset_type="stock"):
+        vistos.append(asset_type)
+        return {}
+
+    monkeypatch.setattr(sc, "earnings_window_status", fake_earnings)
+    scan_symbol("BTC-USD", "2026-08-28", frames=("1d",))
+    assert vistos == ["crypto"]
+
+
 def test_estado_sem_dado_degraded_never_invents(fake_fetch):
     """Plano degradado (sem_dado/intradiario_indisponivel) → sem_dado com motivo."""
     fake_fetch({("A", "1d"): _plan(None, price=None, setup_state="sem_dado")})
@@ -185,6 +234,8 @@ def test_chart_so_e_buscado_quando_serve_de_fallback(monkeypatch):
                          "setup_state": "ativo"})
     monkeypatch.setattr(sc, "build_price_chart", nunca)
     monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    monkeypatch.setattr(sc, "earnings_window_status",
+                        lambda symbol, curr_date, window_days, asset_type="stock": {})
     r = scan_symbol("A", "2026-08-28", frames=("1d",))
     assert r["melhor"]["estado"] == "em_gatilho"
 
@@ -199,6 +250,8 @@ def test_sem_preco_no_plan_o_chart_ENTRA_como_fallback(monkeypatch):
                         lambda t, d, timeframe="1d", method="padrao":
                         {"candles": [{"c": 100.0}]})
     monkeypatch.setattr(sc, "_live_price", lambda ticker: None)
+    monkeypatch.setattr(sc, "earnings_window_status",
+                        lambda symbol, curr_date, window_days, asset_type="stock": {})
     r = scan_symbol("A", "2026-08-28", frames=("1d",))
     assert r["melhor"]["estado"] == "em_gatilho" and r["melhor"]["price"] == 100.0
 
