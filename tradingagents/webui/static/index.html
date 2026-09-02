@@ -181,6 +181,10 @@
           <button type="button" class="h-tab" data-filter="stock">Ações</button>
           <button type="button" class="h-tab" data-filter="crypto">Cripto</button>
         </div>
+        <!-- Filtro por OPORTUNIDADE (DA-156): combina com a aba acima (E, não OU —
+             "Cripto + Na entrada" filtra os dois ao mesmo tempo). Escondido até
+             existir scan salvo com o que contar — renderHistoryOpFilter() decide. -->
+        <div class="scan-filters hidden" id="historyOpFilter"></div>
         <ul class="history" id="history"></ul>
       </details>
     </aside>

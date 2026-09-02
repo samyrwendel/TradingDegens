@@ -6731,6 +6731,10 @@ function renderAssetTimeline(ticker, currentId) {
 let _todayManaus = "";
 let _historyFilter = "all";
 let _historyQuery = "";   // busca por ticker ou nome (case-insensitive)
+// FILTRO POR OPORTUNIDADE (DA-156). Um dos `estado` de SINAL_SECOES ("entrada" /
+// "a_caminho" / "passou" / "conflito") ou `null` (desligado) — combina com
+// `_historyFilter` (E, não OU): "Cripto + Na entrada" tem de filtrar os dois.
+let _historyOpFilter = null;
 
 // "Atualizar" (reanalisar hoje preservando o método) foi ABSORVIDO pela barra de
 // reanálise (task 018): o método aberto fica destacado (is-open) e clicá-lo roda na
@@ -6926,6 +6930,69 @@ function bindHistoryTabs() {
     });
   }
 }
+
+// FILTRO POR OPORTUNIDADE (DA-156). "depois cria um botão para listar por
+// oportunidade compra venda em gatilho" — o dado já existe (`sinais.oportunidades`,
+// a mesma conta que a faixa do card e o painel de Sinais usam) e já está
+// carregado (`/api/scan/salvo` — zero chamada nova). O filtro é só apresentação
+// sobre ele.
+//
+// MESMA TAXONOMIA DO PAINEL DE SINAIS (SINAL_SECOES: entrada/a_caminho/passou/
+// conflito), de propósito — dois vocabulários de "oportunidade" na mesma tela
+// era o defeito que virou padrão hoje (a faixa já teve o dela unificada nas
+// tasks 031/032/DA-152), e inventar um terceiro aqui repetiria.
+//
+// CRITÉRIO DE AGREGAÇÃO, declarado (no title de cada chip, não escondido): um
+// ativo entra no grupo se TIVER PELO MENOS UMA oportunidade — qualquer frame,
+// qualquer método — naquele estado. "AAPL está na entrada" não diz sozinho QUAL
+// frame/método; isso é o que a faixa do card já mostra, marcador por marcador.
+//
+// CONCORDA COM A FAIXA (DA-152): `sinais.oportunidades` já exclui `invalidou` e
+// `concluido` da conta de leitura VIVA — o mesmo padrão morto que a faixa não
+// deixa mais ocupar vaga de oportunidade não aparece aqui como oportunidade
+// também. Nenhuma regra nova, é a MESMA fonte.
+function _tickersPorEstadoDeOportunidade() {
+  const ops = ((faixaFonte() || {}).oportunidades) || [];
+  const out = new Map();   // estado -> Set<ticker>
+  ops.forEach((o) => {
+    if (!o.ticker || !o.estado) return;
+    if (!out.has(o.estado)) out.set(o.estado, new Set());
+    out.get(o.estado).add(o.ticker);
+  });
+  return out;
+}
+
+function renderHistoryOpFilter() {
+  const host = $("historyOpFilter");
+  if (!host) return;
+  const porEstado = _tickersPorEstadoDeOportunidade();
+  const total = [...porEstado.values()].reduce((n, s) => n + s.size, 0);
+  // SEM SCAN SALVO AINDA, SEM FILTRO: um chip com contagem 0 prometeria "há
+  // como filtrar" quando não há nem dado carregado — a mesma regra que já
+  // vale pra faixa de frames (DA-133).
+  if (!total) { host.classList.add("hidden"); host.innerHTML = ""; return; }
+  host.classList.remove("hidden");
+  const chip = (key, label, n, titulo) => {
+    const active = _historyOpFilter === key;
+    const cls = `scan-filter${active ? " is-active" : ""}`;
+    return `<button type="button" class="${cls}" data-op-filter="${key}" ` +
+      `title="${escapeHtml(titulo)}">${escapeHtml(label)} <b>${n}</b></button>`;
+  };
+  const allChip = _historyOpFilter
+    ? `<button type="button" class="scan-filter all" data-op-filter="">Todos</button>` : "";
+  host.innerHTML = allChip + SINAL_SECOES
+    .filter((sec) => (porEstado.get(sec.key) || _SET_VAZIO).size > 0)
+    .map((sec) => chip(sec.key, sec.titulo, (porEstado.get(sec.key) || _SET_VAZIO).size,
+      `${sec.nota} — conta o ativo se QUALQUER frame ou método dele estiver neste ` +
+      `estado (veja a faixa do card pra saber qual)`))
+    .join("");
+  host.querySelectorAll("[data-op-filter]").forEach((b) => b.addEventListener("click", () => {
+    _historyOpFilter = b.dataset.opFilter || null;
+    paintHistory();   // re-repinta a lista E os chips (esta função roda de novo)
+  }));
+}
+
+const _SET_VAZIO = new Set();
 
 // Nome da empresa/ativo por símbolo — TICKER ( Nome ). Resolve async via /api/names
 // (Yahoo search, cacheado no backend); aqui um cache de sessão evita re-perguntar.
@@ -7326,6 +7393,7 @@ function abreDaFaixa(spec) {
 function paintHistory() {
   const ul = $("history");
   if (!ul) return;
+  renderHistoryOpFilter();   // os chips acompanham toda repintura (mesmo dado da faixa)
   const runs = _allRuns || [];
   if (!runs.length) { ul.innerHTML = '<li class="empty">Nenhuma análise ainda.</li>'; return; }
   // A lateral é a LISTA DE ATIVOS, não o log de execuções: um item por ticker,
@@ -7423,6 +7491,11 @@ function paintHistory() {
       flagHtml +
       `</li>`;
   };
+  // OS TICKERS do estado de oportunidade ativo, uma vez só (não por linha) — o
+  // filtro combina com a aba e a busca (E, não OU): "Cripto + Na entrada" pede
+  // as três condições juntas.
+  const opTickers = _historyOpFilter
+    ? (_tickersPorEstadoDeOportunidade().get(_historyOpFilter) || _SET_VAZIO) : null;
   const filtered = runs.filter((r) => {
     // 1) aba (Todos/Ações/Cripto)
     if (_historyFilter !== "all" && (r.asset_type === "crypto") !== (_historyFilter === "crypto")) return false;
@@ -7435,6 +7508,8 @@ function paintHistory() {
       const name = (_nameCache.get((r.ticker || "").toUpperCase()) || "").toLowerCase();
       if (!t.includes(q) && !name.includes(q)) return false;
     }
+    // 3) oportunidade (DA-156): pelo menos um frame/método do ativo no estado pedido.
+    if (opTickers && !opTickers.has((r.ticker || "").toUpperCase())) return false;
     return true;
   });
   // um por ticker (o mais recente; a API já devolve do mais novo pro mais velho)
@@ -7444,9 +7519,14 @@ function paintHistory() {
     if (!seen.has(k)) seen.set(k, { run: r, n: 0 });
     seen.get(k).n += 1;
   });
+  const opSecao = SINAL_SECOES.find((s) => s.key === _historyOpFilter);
   ul.innerHTML = seen.size
     ? [...seen.values()].map(({ run, n }) => item(run, n)).join("")
-    : `<li class="empty">${_historyQuery ? `Nenhum ativo casando “${escapeHtml(_historyQuery)}”.` : "Nenhuma análise nesta aba."}</li>`;
+    // ESTADO VAZIO ÚTIL: "nenhum ativo em X agora" é informação (o filtro
+    // funcionou e não achou nada); uma lista em branco sem dizer por quê não é.
+    : `<li class="empty">${opSecao
+        ? `Nenhum ativo em “${escapeHtml(opSecao.titulo)}” agora.`
+        : (_historyQuery ? `Nenhum ativo casando “${escapeHtml(_historyQuery)}”.` : "Nenhuma análise nesta aba.")}</li>`;
   [...ul.children].forEach((li) => {
     const id = li.getAttribute("data-id");
     if (id) li.addEventListener("click", () => openRun(id));
