@@ -704,6 +704,32 @@ def _dia(v: Any) -> str:
     return str(v or "")[:10]
 
 
+def _desde_do_toque(ts: Any, frame: str) -> str:
+    """O carimbo a partir do qual um toque CONTA — por frame (task 20260902-040).
+
+    Diário/semanal: a barra não tem hora, então o mesmo-dia fica de fora (a barra do
+    dia inclui as horas ANTERIORES ao gatilho) — a regra de sempre. INTRADIÁRIO: a
+    barra carrega hora e o log também, as duas em UTC (``intraday._yf_intraday_to_df``
+    e os klines da Binance são UTC naive), então HÁ base comum e a janela começa na
+    barra SEGUINTE à do log. Pular o dia inteiro descartava justamente as horas que
+    decidem um trade de 1h: no ledger de 28/08→02/09/2026, 3 dos 4 stops do 1-2-3 em
+    1h eram alvos tocados no mesmo dia, horas depois do log (o stop veio no dia
+    seguinte). Fechamento já gravado não muda: o ledger é append-only e o primeiro
+    fechamento manda.
+    """
+    if not ts:
+        return ""
+    if frame in ("1d", "1w"):
+        return _dia(ts)
+    try:
+        t = datetime.fromisoformat(str(ts))
+    except ValueError:
+        return _dia(ts)
+    if t.tzinfo is not None:
+        t = t.astimezone(timezone.utc).replace(tzinfo=None)
+    return t.strftime("%Y-%m-%d %H:%M")
+
+
 def _chave(e: dict[str, Any]) -> str:
     """Identidade de um gatilho logado — o que amarra o fechamento à entrada.
 
@@ -834,7 +860,8 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     não uma comparação com o preço de agora, que muda todo dia. Janela crescendo
     (``date`` avança) nunca desfaz um toque anterior: o primeiro achado manda.
 
-    Janela: barras de dias ESTRITAMENTE POSTERIORES ao dia do log. O log carrega
+    Janela: barras ESTRITAMENTE POSTERIORES ao carimbo do log — o DIA no diário, a
+    BARRA no intradiário (ver :func:`_desde_do_toque`). No diário, o log carrega
     hora UTC e o candle carrega o relógio do mercado — sem base comum, contar o
     próprio dia do log poderia creditar um TP que aconteceu ANTES do gatilho ser
     flagrado. Um acerto inflado é o pior erro possível num painel que existe pra
@@ -851,8 +878,12 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     if not desde_dia:
         return None
     for c in candles:
-        dia = _dia(c.get("d"))
-        if not dia or dia <= desde_dia:
+        rotulo = str(c.get("d") or "")
+        dia = _dia(rotulo)
+        # ``desde_dia`` pode vir COM HORA (intradiário — :func:`_desde_do_toque`):
+        # compara-se no mesmo comprimento, data com data e minuto com minuto. Com a
+        # data só, o mesmo-dia inteiro continua de fora, como sempre foi.
+        if not dia or rotulo[:len(desde_dia)] <= desde_dia:
             continue
         hi, lo = c.get("h"), c.get("l")
         if hi is None or lo is None:
@@ -955,7 +986,7 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
         price = live if live is not None else (plan or {}).get("price")
         v["preco_agora"] = price
 
-        toque = _primeiro_toque(candles, desde, tp, sl, venda)
+        toque = _primeiro_toque(candles, _desde_do_toque(e.get("ts"), frame), tp, sl, venda)
         if toque:
             v.update(toque)
             v["fechado"] = True
