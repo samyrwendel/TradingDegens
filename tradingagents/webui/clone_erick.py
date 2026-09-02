@@ -120,15 +120,25 @@ def _capital_de(est: dict[str, Any]) -> float | None:
     return v if v > 0 else None
 
 
-def configurar_capital(valor: float, *, dir: str | os.PathLike | None = None) -> float:
-    """Define o capital do clone e (RE)ARMA a baseline — ligar o clone recomeça a
-    história ali: a próxima leitura vira a baseline (zero operação) e só o que mudar
-    DEPOIS conta. ``valor`` tem de ser positivo."""
+def configurar_capital(valor: float, moeda: str, *,
+                       dir: str | os.PathLike | None = None) -> float:
+    """Define o capital + a MOEDA do clone e (RE)ARMA a baseline — ligar o clone
+    recomeça a história ali: a próxima leitura vira a baseline (zero operação) e só
+    o que mudar DEPOIS conta. ``valor`` tem de ser positivo.
+
+    ``moeda`` é OBRIGATÓRIA e explícita — mesma disciplina do capital, sem default
+    inventado (task 20260902-064): a fonte é 100% em dólar (MSFT/ASTS cotados em
+    USD), mas o valor não é assumido, é declarado por quem ativa. Se a moeda mudar
+    depois, é um novo ``configurar_capital()`` com a moeda nova — nunca inferida
+    remontando o histórico."""
     v = float(valor)
     if v <= 0:
         raise ValueError("capital do clone tem de ser positivo")
+    m = (moeda or "").strip().upper()
+    if not m:
+        raise ValueError("moeda do clone tem de ser informada explicitamente (ex.: 'USD')")
     est = _carrega_estado(dir)
-    est.update({"capital": v, "baseline": None, "baseline_lido_em": None,
+    est.update({"capital": v, "moeda": m, "baseline": None, "baseline_lido_em": None,
                 "ativado_em": datetime.now(timezone.utc).isoformat()})
     _grava_estado(est, dir)
     return v
@@ -141,6 +151,10 @@ def estado(dir: str | os.PathLike | None = None) -> dict[str, Any]:
     return {
         "estado": "ativo" if cap is not None else "armado",
         "capital": cap,
+        # moeda só existe se ATIVADO por configurar_capital() — o atalho de
+        # semear capital via env (_CAPITAL_ENV) nunca declara moeda, e "ativo
+        # sem moeda declarada" é honesto: None, não um USD assumido.
+        "moeda": est.get("moeda") if cap is not None else None,
         "ativado_em": est.get("ativado_em"),
         "baseline_definida": bool(est.get("baseline")),
     }

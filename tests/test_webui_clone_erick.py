@@ -84,7 +84,7 @@ def test_sem_capital_o_clone_fica_armado(tmp_path):
 
 
 def test_configurar_capital_ativa_e_rearma_baseline(tmp_path):
-    C.configurar_capital(12345.0, dir=tmp_path)
+    C.configurar_capital(12345.0, "USD", dir=tmp_path)
     est = C.estado(dir=tmp_path)
     assert est["estado"] == "ativo"
     assert est["capital"] == 12345.0
@@ -93,15 +93,53 @@ def test_configurar_capital_ativa_e_rearma_baseline(tmp_path):
 
 def test_capital_nao_positivo_e_recusado(tmp_path):
     with pytest.raises(ValueError):
-        C.configurar_capital(0, dir=tmp_path)
+        C.configurar_capital(0, "USD", dir=tmp_path)
     with pytest.raises(ValueError):
-        C.configurar_capital(-100, dir=tmp_path)
+        C.configurar_capital(-100, "USD", dir=tmp_path)
 
 
 def test_capital_do_env_semeia_quando_estado_nao_tem(tmp_path, monkeypatch):
     monkeypatch.setenv("CLONE_ERICK_CAPITAL", "5000")
     assert C.estado(dir=tmp_path)["estado"] == "ativo"
     assert C.estado(dir=tmp_path)["capital"] == 5000.0
+
+
+# ── moeda: explícita, sem default, gravada junto do capital (task 20260902-064) ──
+def test_configurar_capital_grava_moeda_explicita(tmp_path):
+    C.configurar_capital(6000.0, "USD", dir=tmp_path)
+    est = C.estado(dir=tmp_path)
+    assert est["moeda"] == "USD"
+
+
+def test_moeda_normalizada_para_maiuscula(tmp_path):
+    C.configurar_capital(6000.0, "usd", dir=tmp_path)
+    assert C.estado(dir=tmp_path)["moeda"] == "USD"
+
+
+def test_moeda_ausente_ou_vazia_e_recusada(tmp_path):
+    with pytest.raises(ValueError):
+        C.configurar_capital(6000.0, "", dir=tmp_path)
+    with pytest.raises(ValueError):
+        C.configurar_capital(6000.0, "   ", dir=tmp_path)
+
+
+def test_trocar_moeda_e_um_comando_novo_nao_arqueologia(tmp_path):
+    """Se a moeda declarada estiver errada, a correção é chamar configurar_capital()
+    de novo com a moeda certa — nunca editar o estado na mão nem inferir do
+    histórico. Reconfigurar também rearma a baseline (mesma regra do capital)."""
+    C.configurar_capital(6000.0, "USD", dir=tmp_path)
+    C.configurar_capital(6000.0, "BRL", dir=tmp_path)
+    est = C.estado(dir=tmp_path)
+    assert est["moeda"] == "BRL"
+    assert est["baseline_definida"] is False
+
+
+def test_capital_do_env_nao_declara_moeda(tmp_path, monkeypatch):
+    """O atalho de semear capital via env (sem configurar_capital()) nunca declara
+    moeda — "ativo sem moeda" é honesto (None), não um USD assumido em silêncio."""
+    monkeypatch.setenv("CLONE_ERICK_CAPITAL", "5000")
+    assert C.estado(dir=tmp_path)["estado"] == "ativo"
+    assert C.estado(dir=tmp_path)["moeda"] is None
 
 
 # ── observar: armado não opera; ativação nasce vazia; só o futuro conta ──────────
@@ -118,7 +156,7 @@ def test_dente_ativacao_nao_semeia_a_carteira_atual(tmp_path):
     """DENTE 2: ligar o clone NÃO abre as posições que ele já tem. A primeira leitura
     pós-ativação é só a baseline — zero operação. Quebra se alguém semear do
     snapshot atual."""
-    C.configurar_capital(CAP, dir=tmp_path)
+    C.configurar_capital(CAP, "USD", dir=tmp_path)
     atual = _atual([_ativo("MSFT", 22, 381), _ativo("BE", 21, 181),
                     _ativo("GOOGL", 30, 327),
                     {"ticker": "CASH", "classe": "Caixa", "qtd": 5000,
@@ -132,7 +170,7 @@ def test_dente_ativacao_nao_semeia_a_carteira_atual(tmp_path):
 
 
 def test_so_mudancas_apos_ativacao_viram_operacao(tmp_path):
-    C.configurar_capital(CAP, dir=tmp_path)
+    C.configurar_capital(CAP, "USD", dir=tmp_path)
     base = [_ativo("MSFT", 22, 381),
             {"ticker": "CASH", "classe": "Caixa", "qtd": 40000, "precoMedio": 1, "entrada": "-"}]
     C.observar(_atual(base), dir=tmp_path,
@@ -150,7 +188,7 @@ def test_so_mudancas_apos_ativacao_viram_operacao(tmp_path):
 
 
 def test_leitura_degradada_nao_move_o_clone(tmp_path):
-    C.configurar_capital(CAP, dir=tmp_path)
+    C.configurar_capital(CAP, "USD", dir=tmp_path)
     r = C.observar(_atual([_ativo("MSFT", 22, 381)], degradado=True), dir=tmp_path,
                    preco_fn=lambda t, c: {"price": 500.0})
     assert r["ops"] == []
@@ -226,7 +264,7 @@ def _base_e_cash():
 def test_dente_conflito_de_carimbo_detectado_e_registrado(tmp_path):
     """DENTE: ele mexe na carteira mas NÃO move o `atualizado` → a data da fonte é
     suspeita e a operação fica MARCADA; nunca se escolhe em silêncio qual crer."""
-    C.configurar_capital(CAP, dir=tmp_path)
+    C.configurar_capital(CAP, "USD", dir=tmp_path)
     d1 = datetime(2026, 9, 1, 10, tzinfo=timezone.utc).timestamp()
     d2 = datetime(2026, 9, 2, 10, tzinfo=timezone.utc).timestamp()
     C.observar(_atual(_base_e_cash(), atualizado="27/08/2026", lido_em=d1), dir=tmp_path,
@@ -241,7 +279,7 @@ def test_dente_conflito_de_carimbo_detectado_e_registrado(tmp_path):
 
 
 def test_carimbo_que_anda_nao_e_conflito(tmp_path):
-    C.configurar_capital(CAP, dir=tmp_path)
+    C.configurar_capital(CAP, "USD", dir=tmp_path)
     d1 = datetime(2026, 9, 1, 10, tzinfo=timezone.utc).timestamp()
     d2 = datetime(2026, 9, 2, 10, tzinfo=timezone.utc).timestamp()
     C.observar(_atual(_base_e_cash(), atualizado="27/08/2026", lido_em=d1), dir=tmp_path,
