@@ -461,12 +461,14 @@ def test_sem_serie_o_trade_fica_ABERTO_nunca_fechado_no_escuro(tmp_path, monkeyp
 
 def _v(veredito="bateu_tp", direction="compra", trigger=100.0, tp=110.0, sl=95.0,
       rr=2.0, entrada=None, ts="2026-08-20T12:00:00+00:00", fechado_em="2026-08-25",
-      ticker="C", frame="1d", setup="123"):
+      ticker="C", frame="1d", setup="123", preco_agora=None):
     v = {"veredito": veredito, "direction": direction, "trigger": trigger, "tp": tp,
         "sl": sl, "rr": rr, "ts": ts, "fechado_em": fechado_em, "ticker": ticker,
         "frame": frame, "setup": setup}
     if entrada is not None:
         v["entrada"] = entrada
+    if preco_agora is not None:
+        v["preco_agora"] = preco_agora
     return v
 
 
@@ -578,3 +580,106 @@ def test_scan_verdicts_banca_padrao_quando_nao_pedida(tmp_path, monkeypatch):
     _serie(monkeypatch, {}, {})
     out = scan_verdicts(log, "2026-08-28")
     assert out["paper"]["banca_por_trade"] == sc._BANCA_PADRAO == 100.0
+
+
+# ══════════ A CARTEIRA VIRTUAL (DA-155) ═══════════════════════════════════════
+#
+# Paper trading não é só recalcular o passado — é acompanhar a posição
+# SIMULADA enquanto ela vive: posições ABERTAS com PnL não realizado (marcado
+# a mercado pelo preço de agora), somando num SALDO ao lado do que já fechou.
+# O "reset" da simulação é um MARCO de tempo, nunca um apagão do ledger.
+
+
+def test_pnl_paper_aberto_marca_a_mercado_com_o_preco_de_agora():
+    aberto = sc._pnl_paper_aberto(
+        _v(veredito="andamento_lucro", trigger=100.0, preco_agora=108.0), banca=100.0)
+    assert aberto["pnl_usd"] == 8.0 and aberto["pnl_pct"] == 8.0   # (108-100)/100
+
+
+def test_pnl_paper_aberto_None_para_fechado_ou_sem_preco_agora():
+    assert sc._pnl_paper_aberto(_v(veredito="bateu_tp"), banca=100.0) is None
+    fechado = _v(veredito="andamento_lucro")
+    fechado.pop("preco_agora", None)   # nunca teve preco_agora carimbado
+    assert sc._pnl_paper_aberto(fechado, banca=100.0) is None
+
+
+def test_apos_marco_sem_marco_tudo_conta():
+    assert sc._apos_marco(_v(ts="2020-01-01T00:00:00+00:00"), None) is True
+
+
+def test_apos_marco_filtra_por_ts_lexicografico():
+    marco = "2026-08-22T00:00:00+00:00"
+    antes = _v(ts="2026-08-20T12:00:00+00:00")
+    depois = _v(ts="2026-08-25T12:00:00+00:00")
+    assert sc._apos_marco(antes, marco) is False
+    assert sc._apos_marco(depois, marco) is True
+
+
+def test_carteira_paper_soma_realizado_e_nao_realizado():
+    verdicts = [
+        _v(veredito="bateu_tp", ticker="C1", fechado_em="2026-08-22"),           # +$10
+        _v(veredito="bateu_sl", ticker="C2", fechado_em="2026-08-23"),           # -$5
+        _v(veredito="andamento_lucro", ticker="C3", trigger=100.0, preco_agora=104.0),  # +$4 não realizado
+        _v(veredito="sem_dado", ticker="C4"),   # nem fechado nem aberto: fora
+    ]
+    c = sc._carteira_paper(verdicts, banca=100.0, marco=None)
+    assert c["n_fechadas"] == 2 and c["n_abertas"] == 1
+    assert c["realizado_usd"] == 5.0            # 10 - 5
+    assert c["nao_realizado_usd"] == 4.0
+    assert c["saldo_usd"] == 9.0                # 5 + 4
+    assert c["abertas"][0]["ticker"] == "C3" and c["abertas"][0]["pnl_usd"] == 4.0
+
+
+def test_carteira_paper_marco_exclui_gatilhos_ANTERIORES(tmp_path):
+    marco = "2026-08-22T00:00:00+00:00"
+    verdicts = [
+        _v(veredito="bateu_tp", ticker="VELHO", ts="2026-08-10T00:00:00+00:00"),   # antes do marco
+        _v(veredito="bateu_tp", ticker="NOVO", ts="2026-08-25T00:00:00+00:00"),    # depois
+    ]
+    c = sc._carteira_paper(verdicts, banca=100.0, marco=marco)
+    assert c["n_fechadas"] == 1
+    assert c["curva_equity"][0]["ticker"] == "NOVO"
+
+
+def test_carteira_paper_sem_nada_declara_saldo_zero_nao_None():
+    """Carteira NOVA (marco recém-posto, nada aconteceu ainda desde ele): saldo
+    é $0 declarado — não confundir com "não sei", que seria None."""
+    c = sc._carteira_paper([], banca=100.0, marco="2026-09-01T00:00:00+00:00")
+    assert c["saldo_usd"] == 0.0
+    assert c["n_fechadas"] == 0 and c["n_abertas"] == 0
+    assert c["abertas"] == []
+
+
+def test_scan_verdicts_expoe_carteira_com_marco(tmp_path, monkeypatch):
+    """Fim a fim: scan_verdicts recebe o marco e ele filtra a carteira — o
+    resumo "agregado" (LEDGER INTEIRO) não é afetado, só out["paper"]["carteira"]."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-10T12:00:00+00:00", "ticker": "VELHO", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0, "rr": 2.0},
+        {"ts": "2026-08-25T12:00:00+00:00", "ticker": "NOVO", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0, "rr": 2.0},
+    ])
+    _serie(monkeypatch,
+          {"VELHO": [_c("2026-08-11", 111.0, 100.0)],
+           "NOVO": [_c("2026-08-26", 111.0, 100.0)]},
+          {"VELHO": 105.0, "NOVO": 105.0})
+    out = scan_verdicts(log, "2026-08-28", banca=100.0, marco="2026-08-22T00:00:00+00:00")
+    assert out["paper"]["agregado"]["n"] == 2         # o relatório do ledger inteiro
+    assert out["paper"]["carteira"]["n_fechadas"] == 1   # a carteira, só desde o marco
+    assert out["paper"]["carteira"]["marco"] == "2026-08-22T00:00:00+00:00"
+
+
+def test_paper_wallet_store_marco_none_ate_resetar(tmp_path):
+    from tradingagents.webui.store import PaperWalletStore
+    w = PaperWalletStore(tmp_path)
+    assert w.marco() is None
+    novo = w.resetar("2026-09-01T12:00:00+00:00")
+    assert novo == "2026-09-01T12:00:00+00:00"
+    assert w.marco() == "2026-09-01T12:00:00+00:00"
+
+
+def test_paper_wallet_store_persiste_em_disco(tmp_path):
+    from tradingagents.webui.store import PaperWalletStore
+    PaperWalletStore(tmp_path).resetar("2026-09-01T12:00:00+00:00")
+    reaberta = PaperWalletStore(tmp_path)   # nova instância, mesmo diretório
+    assert reaberta.marco() == "2026-09-01T12:00:00+00:00"

@@ -19,7 +19,7 @@ import threading
 import time
 import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
@@ -65,7 +65,12 @@ from tradingagents.webui.scanner import (
     scan_verdicts,
     scan_watchlist,
 )
-from tradingagents.webui.store import HistoryStore, ScanSnapshotStore, WatchlistStore
+from tradingagents.webui.store import (
+    HistoryStore,
+    PaperWalletStore,
+    ScanSnapshotStore,
+    WatchlistStore,
+)
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
 _ANALYST_ORDER = ("market", "social", "news", "fundamentals")
@@ -904,6 +909,9 @@ class AnalysisRunner:
         # leitura) + log append-only dos gatilhos flagrados (track record $0).
         self.watchlist_store = WatchlistStore(self.store.base, store)
         self.scan_log = ScanLog(self.store.base / "scans.jsonl")
+        # O MARCO da carteira virtual do paper trading (DA-155) — reset é mover
+        # a fronteira pro AGORA, nunca apagar o ledger acima.
+        self.paper_wallet = PaperWalletStore(self.store.base)
         # O ÚLTIMO scan completo em disco: é o que a tela pinta na abertura, antes
         # de a varredura nova terminar. O memo abaixo dura 5s e morre com o
         # processo; este sobrevive ao restart (ver :class:`ScanSnapshotStore`).
@@ -3068,9 +3076,22 @@ class AnalysisRunner:
         ``banca``: posição fixa em dólares do PnL de paper (DA-154); ``None``/valor
         inválido cai no padrão de :data:`scanner._BANCA_PADRAO` dentro de
         :func:`scan_verdicts` — nunca um erro por um número de tela mal digitado.
+
+        O MARCO da carteira virtual (DA-155) vem do :class:`PaperWalletStore` — é
+        o runner quem junta o ledger com o marco, o scanner nem sabe que existe
+        um arquivo de config por trás.
         """
         return scan_verdicts(self.scan_log, date,
-                             banca=banca if banca is not None else _BANCA_PADRAO)
+                             banca=banca if banca is not None else _BANCA_PADRAO,
+                             marco=self.paper_wallet.marco())
+
+    def paper_wallet_resetar(self) -> str:
+        """REINICIA a carteira virtual do paper trading — empurra o marco pro
+        AGORA (UTC, mesmo formato do ``ts`` que o ledger grava). O ledger não
+        perde uma linha: os gatilhos de antes continuam lá, só saem da leitura
+        da carteira (ver :class:`PaperWalletStore`)."""
+        agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return self.paper_wallet.resetar(agora)
 
     def resolve_names(self, symbols: list[str]) -> dict[str, str]:
         """Batch symbol -> display name for the UI chips/header (fail-open)."""

@@ -840,7 +840,8 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     return None
 
 
-def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO) -> dict[str, Any]:
+def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
+                  marco: str | None = None) -> dict[str, Any]:
     """Re-avalia cada gatilho logado — FECHADO pelo ledger, ABERTO pelo preço de hoje.
 
     **Fechado é fato gravado, não conta refeita.** Quando a série mostra o primeiro
@@ -867,6 +868,14 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO) -> dict
     **PnL de paper** (DA-154): expectativa em R é abstrata e não soma. Com ``banca``
     dólares de posição fixa por operação, o resultado vira dinheiro — comparável
     entre setups, somável numa curva de equity. Ver :func:`_pnl_paper_resumo`.
+
+    **A CARTEIRA VIRTUAL** (DA-155): PAPER TRADING é acompanhar a operação
+    simulada enquanto ela VIVE, não só recalcular o passado — nenhuma ordem
+    real é enviada a lugar nenhum. ``marco`` (``PaperWalletStore``, lido pelo
+    runner) é a fronteira de tempo: só gatilhos com ``ts >= marco`` entram no
+    saldo. Isso é o que "resetar a simulação" resolve sem violar o ledger
+    append-only — reiniciar empurra o marco pro agora, nenhuma linha do
+    ``scans.jsonl`` é apagada. Ver :func:`_carteira_paper`.
 
     Só leitura de série cacheada, $0 de LLM.
     """
@@ -983,6 +992,11 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO) -> dict
             for nome in SETUPS_DO_LEDGER},
         "por_frame": {frame: _pnl_paper_resumo(vs, banca_efetiva)
                       for frame, vs in _agrupa_por_frame(n).items()},
+        # A CARTEIRA VIRTUAL (DA-155): abertas + fechadas, filtradas pelo marco
+        # da simulação (ver docstring). É diferente do "agregado" acima — aquele
+        # é o relatório do LEDGER INTEIRO; a carteira é o saldo DESDE que a
+        # simulação começou (ou foi reiniciada).
+        "carteira": _carteira_paper(verdicts, banca_efetiva, marco),
     }
     return out
 
@@ -1116,3 +1130,75 @@ def _pnl_paper_resumo(fechados: list[dict[str, Any]], banca: float) -> dict[str,
         "curva_equity": curva,
     })
     return base
+
+
+def _pnl_paper_aberto(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
+    """PnL NÃO REALIZADO de uma posição que ainda está ABERTA (``andamento_lucro``/
+    ``andamento_prejuizo`` — os dois estados que o motor de vereditos já produz;
+    esta função só os MARCA A MERCADO com a mesma régua de posição fixa do
+    fechado, usando o ``preco_agora`` que o veredito já carrega). ``None`` pra
+    qualquer coisa que não seja uma posição aberta de verdade."""
+    if v.get("veredito") not in ("andamento_lucro", "andamento_prejuizo"):
+        return None
+    entrada = v.get("entrada") if v.get("entrada") is not None else v.get("trigger")
+    preco = v.get("preco_agora")
+    if entrada is None or preco is None:
+        return None
+    try:
+        entrada, preco = float(entrada), float(preco)
+    except (TypeError, ValueError):
+        return None
+    if entrada <= 0:
+        return None
+    variacao = (preco - entrada) / entrada
+    if v.get("direction") == "venda":
+        variacao = -variacao
+    return {
+        "ticker": v.get("ticker"), "setup": v.get("setup"), "frame": v.get("frame"),
+        "direction": v.get("direction"), "veredito": v.get("veredito"),
+        "ts": v.get("ts"), "entrada": entrada, "preco_agora": preco,
+        "pnl_pct": round(variacao * 100, 2), "pnl_usd": round(banca * variacao, 2),
+    }
+
+
+def _apos_marco(v: dict[str, Any], marco: str | None) -> bool:
+    """O gatilho entra na carteira virtual? Sem marco (nunca resetada), TUDO
+    entra — o marco só existe pra RESTRINGIR a partir de um reset."""
+    if not marco:
+        return True
+    return str(v.get("ts") or "") >= marco
+
+
+def _carteira_paper(verdicts: list[dict[str, Any]], banca: float,
+                    marco: str | None) -> dict[str, Any]:
+    """A CARTEIRA VIRTUAL do paper trading (DA-155) — o que torna o número VIVO
+    em vez de um relatório do passado: saldo = realizado (fechados desde o
+    marco) + não-realizado (abertas, marcadas a mercado agora), e a lista de
+    POSIÇÕES ABERTAS ao lado — os mesmos ``andamento_lucro``/``andamento_prejuizo``
+    que o track record já calculava, só que agora com apresentação.
+
+    Nunca soma com a carteira do Erick (tasks 026/027) — aquela é REAL, de
+    OUTRA pessoa, lida de fonte externa; esta é a SIMULAÇÃO dos sinais do
+    próprio produto. Somar as duas faria o saldo mentir sobre de onde vem cada
+    dólar."""
+    do_marco = [v for v in verdicts if _apos_marco(v, marco)]
+    fechados = [v for v in do_marco if v.get("veredito") in ("bateu_tp", "bateu_sl")]
+    abertos_raw = [v for v in do_marco
+                   if v.get("veredito") in ("andamento_lucro", "andamento_prejuizo")]
+    resumo = _pnl_paper_resumo(fechados, banca)
+    abertas = [a for a in (_pnl_paper_aberto(v, banca) for v in abertos_raw) if a is not None]
+    abertas.sort(key=lambda a: a["ts"] or "", reverse=True)   # mais recente primeiro
+    nao_realizado = round(sum(a["pnl_usd"] for a in abertas), 2) if abertas else None
+    realizado = resumo["pnl_total_usd"]
+    return {
+        "marco": marco,
+        "banca_por_trade": banca,
+        "nivel": resumo["nivel"],
+        "n_fechadas": resumo["n"],
+        "n_abertas": len(abertas),
+        "realizado_usd": realizado,
+        "nao_realizado_usd": nao_realizado,
+        "saldo_usd": round((realizado or 0.0) + (nao_realizado or 0.0), 2),
+        "abertas": abertas,
+        "curva_equity": resumo["curva_equity"],
+    }

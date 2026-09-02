@@ -10006,6 +10006,61 @@ function pnlBlocoHtml(nome, b) {
 // dois métodos em toda outra superfície (faixa, launcher).
 const SETUPS_DO_LEDGER_FRONT = ["123", "storm"];
 
+// A CARTEIRA VIRTUAL (DA-155) — o que faz o "paper" da task 034 virar PAPER
+// TRADING de verdade: não só o RELATÓRIO do ledger inteiro (histórico abaixo),
+// mas o SALDO simulado, vivo, com posições ABERTAS (PnL não realizado, marcado
+// a mercado com o preço de agora — reusa andamento_lucro/andamento_prejuizo,
+// que o motor de vereditos já produzia) ao lado das fechadas.
+//
+// NUNCA CONFUNDIR com a carteira do Erick (`erickPanel`, tasks 026/027): aquela
+// é REAL, de OUTRA pessoa, lida de fonte externa. Esta é a SIMULAÇÃO dos sinais
+// do próprio produto — painel diferente, sem soma nenhuma entre as duas.
+function fmtMarco(marco) {
+  if (!marco) return "desde o primeiro gatilho logado";
+  const d = new Date(marco);
+  return Number.isNaN(d.getTime()) ? "desde o primeiro gatilho logado"
+    : `desde ${d.toLocaleDateString("pt-BR")}`;
+}
+
+function posicaoAbertaHtml(a) {
+  const cls = a.pnl_usd > 0 ? "ok" : (a.pnl_usd < 0 ? "bad" : "");
+  const sinal = a.pnl_usd > 0 ? "+" : "";
+  const nome = _SETUP_NOME[a.setup] || a.setup || "";
+  return `<li class="scan-row"><span class="scan-line">` +
+    `<b>${escapeHtml(a.ticker || "")}</b><span class="scan-frame">${escapeHtml(tfNome(a.frame) || a.frame || "")}</span>` +
+    `<span>${escapeHtml(nome)} · ${a.direction === "venda" ? "↓" : "↑"} entrada ${scanFmt(a.entrada)}</span>` +
+    `<span class="scan-dist">agora ${scanFmt(a.preco_agora)}</span>` +
+    `<span class="scan-chip ${cls}">${sinal}$${scanFmt(a.pnl_usd)} (${sinal}${scanFmt(a.pnl_pct)}%)</span>` +
+    `</span></li>`;
+}
+
+function carteiraPaperHtml(paper) {
+  const c = paper.carteira;
+  if (!c) return "";
+  const saldoCls = c.saldo_usd > 0 ? "ok" : (c.saldo_usd < 0 ? "bad" : "");
+  const saldoSinal = c.saldo_usd > 0 ? "+" : "";
+  const realizado = c.realizado_usd == null ? "—" : `${c.realizado_usd > 0 ? "+" : ""}$${scanFmt(c.realizado_usd)}`;
+  const naoRealizado = c.nao_realizado_usd == null ? "—" : `${c.nao_realizado_usd > 0 ? "+" : ""}$${scanFmt(c.nao_realizado_usd)}`;
+  const abertas = (c.abertas || []).map(posicaoAbertaHtml).join("");
+  // RESET é SÓ-DONO (o servidor barra com 403 de qualquer jeito; escondido pro
+  // público não promete um botão que não funciona) — e NUNCA apaga o ledger,
+  // só empurra o marco: o servidor recusa e o ledger continua íntegro mesmo
+  // que alguém force a chamada por fora da tela.
+  const resetBtn = _isOwner
+    ? ` <button type="button" id="scanPaperResetBtn" class="ghost-btn" ` +
+      `title="Zera o SALDO simulado — o histórico de gatilhos no ledger não é apagado, só sai da leitura da carteira">reiniciar simulação</button>`
+    : "";
+  return `<h3 class="ek-sec">Paper trading — carteira virtual</h3>` +
+    `<p class="hint">Simulação — NENHUMA ordem real é enviada a lugar nenhum. ` +
+    `Não é a carteira do Erick (essa é real, de outra fonte, e fica noutro painel — as duas nunca somam).</p>` +
+    `<div class="scan-summary">saldo simulado: <b class="${saldoCls}">${saldoSinal}$${scanFmt(c.saldo_usd)}</b>` +
+    `<span class="hint"> — realizado ${realizado} + não realizado ${naoRealizado} · ${fmtMarco(c.marco)}</span>${resetBtn}</div>` +
+    pnlCurvaHtml(c.curva_equity) +
+    (abertas
+      ? `<div class="scan-summary hint">${c.n_abertas} posição(ões) aberta(s) agora — PnL não realizado, a mercado</div><ul class="scan-list">${abertas}</ul>`
+      : '<div class="scan-summary hint">nenhuma posição aberta agora</div>');
+}
+
 function trackPaperHtml(data) {
   const paper = data && data.paper;
   if (!paper) return "";
@@ -10015,7 +10070,8 @@ function trackPaperHtml(data) {
     .filter(([, b]) => b && b.n > 0)
     .map(([f, b]) => `${escapeHtml(tfNome(f))}: ${b.pnl_total_usd > 0 ? "+" : ""}$${scanFmt(b.pnl_total_usd)} (n=${b.n})`)
     .join(" · ");
-  return `<h3 class="ek-sec">PnL de paper</h3>` +
+  return carteiraPaperHtml(paper) +
+    `<h3 class="ek-sec">histórico do ledger inteiro</h3>` +
     `<div class="scan-summary hint">${escapeHtml(paper.premissa)}` +
     ` — banca <input type="number" id="scanTrackBanca" min="1" step="1" ` +
     `value="${escapeHtml(String(paper.banca_por_trade))}" title="Banca por operação, em dólares"> ` +
@@ -10073,6 +10129,22 @@ async function loadScanTrack() {
       // Enter recalcula sem esperar o blur (change só dispara ao sair do campo).
       bancaInput.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") bancaInput.blur();
+      });
+    }
+    const resetBtn = $("scanPaperResetBtn");
+    if (resetBtn) {
+      resetBtn.addEventListener("click", async () => {
+        // CONFIRMAÇÃO: zera o SALDO simulado (o marco pula pro agora), e isso
+        // não volta — o ledger por baixo continua intacto, mas a tela some com
+        // o histórico da carteira até aqui.
+        if (!confirm("Reiniciar a simulação? O saldo simulado volta a $0 — "
+          + "o histórico de gatilhos no ledger NÃO é apagado, só sai da leitura "
+          + "da carteira a partir de agora.")) return;
+        try {
+          const r = await apiPost("/api/scan/paper/reset", {});
+          if (!r.ok) throw new Error((await r.json()).error || "falha ao reiniciar");
+          await loadScanTrack();
+        } catch (e) { alert(e.message); }
       });
     }
   } catch (e) { box.innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`; }

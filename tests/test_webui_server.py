@@ -645,6 +645,60 @@ def test_watchlist_owner_edits(tmp_path):
         os.environ.pop("TRADINGDEGENS_OWNER_TOKEN", None)
 
 
+def test_paper_reset_publico_e_403_dono_reseta_o_marco(tmp_path):
+    """A carteira virtual (DA-155): reiniciar é SÓ-DONO, mesma gramática da
+    edição da watchlist — e reseta de VERDADE (o marco muda, persistido em
+    disco), não um placebo que só limpa a tela."""
+    import os
+
+    from tradingagents.webui.auth import OwnerAuth
+    from tradingagents.webui.store import HistoryStore
+
+    os.environ["TRADINGDEGENS_OWNER_TOKEN"] = "pw-paper"
+    try:
+        runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                                store=HistoryStore(tmp_path), graph_factory=_factory())
+        httpd = make_server("127.0.0.1", 0, runner=runner, auth=OwnerAuth())
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{port}"
+        try:
+            # sem sessão: 403, e o ledger/marco não mudam
+            req = urllib.request.Request(
+                base + "/api/scan/paper/reset", data=b"{}",
+                headers={"Content-Type": "application/json"})
+            try:
+                urllib.request.urlopen(req, timeout=5)
+                raise AssertionError("reset devia ser 403 sem dono")
+            except urllib.error.HTTPError as e:
+                assert e.code == 403
+
+            status, antes = _get(base, "/api/scan/verdicts")
+            assert status == 200 and antes["paper"]["carteira"]["marco"] is None
+
+            op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+
+            def post(path, payload):
+                r = urllib.request.Request(base + path, data=json.dumps(payload).encode(),
+                                           headers={"Content-Type": "application/json"})
+                with op.open(r, timeout=5) as resp:
+                    return resp.status, json.loads(resp.read())
+
+            assert post("/api/login", {"password": "pw-paper"})[0] == 200
+            status, body = post("/api/scan/paper/reset", {})
+            assert status == 200 and body["ok"] is True and body["marco"]
+
+            status, depois = _get(base, "/api/scan/verdicts")
+            assert depois["paper"]["carteira"]["marco"] == body["marco"]
+            # persistiu de verdade — outra instância do store lê o mesmo marco
+            from tradingagents.webui.store import PaperWalletStore
+            assert PaperWalletStore(tmp_path).marco() == body["marco"]
+        finally:
+            httpd.shutdown()
+    finally:
+        os.environ.pop("TRADINGDEGENS_OWNER_TOKEN", None)
+
+
 @pytest.mark.parametrize("payload,porque", [
     ({"method": "setup123", "compare": True},
      "setup123+compare caía em start_compare (Padrão × Erick × meta-juiz) na chave do servidor"),

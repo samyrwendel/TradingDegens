@@ -356,3 +356,45 @@ class ScanSnapshotStore:
 
     def _escrever(self, estado: dict[str, Any]) -> None:
         HistoryStore._atomic_write(self.path, estado)
+
+
+class PaperWalletStore:
+    """O MARCO da carteira virtual do paper trading (DA-155) — a data a partir da
+    qual os gatilhos do ledger contam pro saldo simulado.
+
+    NÃO é um saldo: o saldo é sempre DERIVADO, lendo o ``scans.jsonl`` inteiro
+    (``scanner._carteira_paper``) — persistir um número aqui do lado abriria a
+    porta pra ele divergir do ledger que o sustenta. O que este arquivo guarda é
+    só a FRONTEIRA de tempo.
+
+    Isso é o que resolve "resetar a simulação" sem violar o ledger append-only
+    (disciplina da task 008): reiniciar não apaga nada, só empurra o marco pra
+    AGORA — os gatilhos de antes continuam gravados, só saem da leitura da
+    carteira. Um arquivo ausente (nunca resetado) lê como ``None`` — "desde
+    sempre", o ledger inteiro conta.
+    """
+
+    def __init__(self, base_dir: str | os.PathLike):
+        self.path = Path(base_dir) / "paper_wallet.json"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+
+    def marco(self) -> str | None:
+        """O ``ts`` (mesmo formato do ledger) a partir do qual a carteira conta;
+        ``None`` quando nunca foi resetada — a carteira lê o ledger inteiro."""
+        with self._lock:
+            if not self.path.exists():
+                return None
+            try:
+                with open(self.path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                return None
+            return (data or {}).get("marco") or None
+
+    def resetar(self, marco: str) -> str:
+        """Grava o novo marco (o chamador carimba ``marco`` — mesmo formato de
+        ``ScanLog.record``, pra a comparação lexicográfica com ``ts`` valer)."""
+        with self._lock:
+            HistoryStore._atomic_write(self.path, {"marco": marco})
+        return marco

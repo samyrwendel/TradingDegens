@@ -730,6 +730,15 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 self._send_json({"ok": True, "tickers": tickers})
                 return
+            if path == "/api/scan/paper/reset":
+                # REINICIAR a carteira virtual do paper trading (DA-155): SÓ-DONO,
+                # mesma gramática da edição da watchlist. Empurra o marco pro agora
+                # — o ledger (scans.jsonl) não perde uma linha, ele é append-only.
+                if not self._owner_or_403():
+                    return
+                marco = self.runner.paper_wallet_resetar()
+                self._send_json({"ok": True, "marco": marco})
+                return
             if path == "/api/subscription/oauth/start":
                 # Conectar via LINK (task 019): SÓ-DONO. Gera PKCE, guarda o verifier
                 # server-side (state→verifier, em memória) e devolve a URL de

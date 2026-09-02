@@ -1,4 +1,4 @@
-"""PnL de paper no Track record (DA-154).
+"""PnL de paper no Track record (DA-154) + a carteira virtual (DA-155).
 
 Proposta do Samyr: *"pensei em fazer o cálculo como se em cada operação abrisse
 com 100 dólares... como se fosse paper"*. O painel de Track record (`#scanTrack`,
@@ -7,6 +7,12 @@ soma. Aqui ele ganha o PnL em dólares por posição FIXA (não risco fixo — a
 perda por trade varia com a distância do stop, e isso tem de estar dito na
 tela), separado por Setup123/Storm123, com a curva de equity e o gate de N que
 o índice de confiabilidade já usa.
+
+DA-155 nomeou o que estava sendo construído — PAPER TRADING, não "estatística
+do scan" — e cresceu o escopo: a CARTEIRA VIRTUAL acompanha a simulação
+enquanto ela VIVE (posições abertas com PnL não realizado, saldo evoluindo),
+com o vocabulário e o aviso ("nenhuma ordem real") que o nome exige, e sem
+NUNCA se confundir com a carteira REAL do Erick (outro painel, `#erickPanel`).
 """
 
 import json
@@ -62,11 +68,25 @@ _VERDICTS = {
             "storm": _bloco(2),   # abaixo do gate de N — sem PnL, só a ressalva
         },
         "por_frame": {"1d": _bloco(8, total=10.0, pct=1.25, medio=1.25, curva=_CURVA)},
+        "carteira": {
+            "marco": "2026-08-15T00:00:00+00:00", "banca_por_trade": 100.0,
+            "nivel": "preliminar", "n_fechadas": 8, "n_abertas": 2,
+            "realizado_usd": 10.0, "nao_realizado_usd": 6.5, "saldo_usd": 16.5,
+            "abertas": [
+                {"ticker": "AAPL", "setup": "123", "frame": "1d", "direction": "compra",
+                 "veredito": "andamento_lucro", "entrada": 220.0, "preco_agora": 228.6,
+                 "pnl_pct": 3.91, "pnl_usd": 3.91},
+                {"ticker": "SOL-USD", "setup": "storm", "frame": "4h", "direction": "venda",
+                 "veredito": "andamento_prejuizo", "entrada": 140.0, "preco_agora": 142.6,
+                 "pnl_pct": -1.86, "pnl_usd": -1.86},
+            ],
+            "curva_equity": _CURVA,
+        },
     },
 }
 
 
-def _abre(page, base_url, verdicts=None, capturados=None):
+def _abre(page, base_url, verdicts=None, capturados=None, owner=False):
     payload = verdicts if verdicts is not None else _VERDICTS
 
     def handler(route):
@@ -82,6 +102,11 @@ def _abre(page, base_url, verdicts=None, capturados=None):
     page.route(re.compile(r"/api/scan/verdicts"), handler)
     page.goto(base_url, wait_until="domcontentloaded")
     page.wait_for_function("() => typeof showScanTrack === 'function'")
+    if owner:
+        # simula a sessão de dono só pro FRONT decidir mostrar o botão — o
+        # gate de verdade é o servidor (403 sem cookie real, testado à parte
+        # em test_webui_server.py::test_paper_reset_publico_e_403...).
+        page.evaluate("() => { _isOwner = true; }")
     page.evaluate("() => { document.getElementById('scanPanel').classList.remove('hidden'); }")
     page.evaluate("async () => { await showScanTrack(); }")
     page.wait_for_selector("#scanTrackBanca", state="attached", timeout=10000)
@@ -118,8 +143,10 @@ def test_por_setup_com_numeros_e_gate_de_amostra(base):
         assert "Setup123" in txt and "Storm123" in txt, txt
         assert "$10" in txt.replace(",", ".") or "10,00" in txt, txt   # total do 123
         # Storm123 (n=2) não pode mostrar total nenhum — só a ressalva. A linha
-        # dele é uma só (cada bloco é um <div>); pega ela, não o resto da tela.
-        linha_storm = next(li for li in txt.splitlines() if "Storm123" in li)
+        # dele é uma só (cada bloco é um <div>); "Storm123:" (com dois-pontos) a
+        # distingue da linha de POSIÇÃO ABERTA (que também cita "Storm123", como
+        # o método da posição, sem dois-pontos depois do nome).
+        linha_storm = next(li for li in txt.splitlines() if "Storm123:" in li)
         assert "insuficiente" in linha_storm.lower(), linha_storm
         assert "$" not in linha_storm, linha_storm
         browser.close()
@@ -168,4 +195,103 @@ def test_trocar_a_banca_reconsulta_com_o_novo_valor(base):
             page.wait_for_timeout(50)
         assert len(capturados) == 2, capturados
         assert "banca=250" in capturados[1], capturados[1]
+        browser.close()
+
+
+# ══════════ A CARTEIRA VIRTUAL (DA-155) ═══════════════════════════════════════
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_nomenclatura_de_paper_trading_e_o_aviso_de_ordem_simulada(base):
+    """O nome importa (o Samyr nomeou): PAPER TRADING / simulação, com o aviso
+    de que nenhuma ordem real é enviada — sem isso um leitor apressado pode
+    achar que é dinheiro de verdade."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        txt = page.inner_text("#scanTrack").lower()
+        assert "paper trading" in txt or "paper" in txt, txt
+        assert "simula" in txt, txt
+        assert "nenhuma ordem real" in txt, txt
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_nunca_confunde_com_a_carteira_do_erick(base):
+    """As duas convivem na TELA (painéis diferentes), mas NUNCA no mesmo
+    painel nem somando saldo — a carteira virtual não pode citar "Erick" como
+    se fosse a fonte do saldo, só como esclarecimento de que são coisas
+    diferentes, e o texto do Erick tem de morar no painel DELE."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        assert page.query_selector("#erickPanel") is not None, "painel do Erick some do DOM"
+        # os dois painéis são elementos DIFERENTES — nunca o mesmo container
+        same = page.evaluate(
+            "() => document.getElementById('erickPanel') === document.getElementById('scanTrack')")
+        assert same is False
+        # #erickPanel não tem NADA da carteira virtual dentro dele
+        erick_txt = page.inner_text("#erickPanel")
+        assert "saldo simulado" not in erick_txt.lower()
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_saldo_e_posicoes_abertas_com_pnl_nao_realizado(base):
+    """Posições ABERTAS (reusando andamento_lucro/andamento_prejuizo) aparecem
+    com PnL NÃO REALIZADO, e o saldo soma realizado + não realizado."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base)
+        txt = page.inner_text("#scanTrack")
+        assert "saldo simulado" in txt.lower()
+        assert "16,5" in txt.replace(".", ",") or "16,50" in txt, txt
+        assert "AAPL" in txt and "SOL-USD" in txt   # as duas posições abertas
+        assert "2 posiç" in txt, txt   # "2 posição(ões) aberta(s)"
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_botao_de_reset_so_aparece_pro_DONO(base):
+    """Público não vê o botão de reiniciar (o servidor também barra com 403 —
+    ver test_webui_server.py — mas escondê-lo pro público evita prometer uma
+    ação que não vai funcionar)."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, owner=False)
+        assert page.query_selector("#scanPaperResetBtn") is None
+        browser.close()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, owner=True)
+        assert page.query_selector("#scanPaperResetBtn") is not None
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_reset_pede_confirmacao_e_chama_o_endpoint_certo(base):
+    """O clique PEDE confirmação (é uma ação que zera o saldo simulado que a
+    tela mostra) e, confirmado, chama POST /api/scan/paper/reset — nunca
+    mexe no ledger direto do cliente."""
+    chamadas = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        page.on("dialog", lambda d: d.accept())
+
+        def reset_handler(route):
+            chamadas.append(route.request.method)
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"ok": True, "marco": "2026-09-01T00:00:00+00:00"}))
+
+        page.route(re.compile(r"/api/scan/paper/reset"), reset_handler)
+        _abre(page, base, owner=True)
+        page.click("#scanPaperResetBtn")
+        page.wait_for_timeout(300)
+        assert chamadas == ["POST"], chamadas
         browser.close()
