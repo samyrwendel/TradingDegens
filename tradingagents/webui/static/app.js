@@ -9941,13 +9941,96 @@ function trackExpectancyHtml(data) {
     `<span class="hint"> — R:R médio ${data.rr_medio} · precisa de ${eq} pra empatar · base: ${data.n_com_rr} fechado(s) com R:R, ${p} de acerto neles</span></div>`;
 }
 
-async function showScanTrack() {
+// PnL DE PAPER NO TRACK RECORD (DA-154). Proposta do Samyr: "como se fosse
+// paper" — abrir cada gatilho com uma banca FIXA em dólares, pra a expectativa
+// em R (abstrata) virar dinheiro (comparável entre setups, somável numa curva).
+//
+// POSIÇÃO FIXA ≠ RISCO FIXO, e isso tem de estar na TELA: com banca fixa a
+// perda por trade varia com a distância do stop — quem lê "paper" por padrão
+// espera risco fixo (arriscar sempre o mesmo tanto), e aqui não é isso.
+let _trackBanca = null;   // null = usa o padrão do servidor (100)
+
+// A NOMEAÇÃO dos setups é a MESMA da faixa/launcher (CAMADA_NOME_TODAS usa
+// "Setup123"/"Storm123") — dois vocabulários pro mesmo par seria a lista dizendo
+// "123" e o card dizendo "Setup123" sobre o mesmo dado.
+const _SETUP_NOME = { "123": "Setup123", storm: "Storm123" };
+
+// A CURVA DE EQUITY em SVG inline — mesma técnica da carteira do Erick
+// (erickCurvaHtml): poucos pontos, sem biblioteca. A amplitude inclui SEMPRE o
+// zero (mesmo que todo trade fechado dê lucro, ou todos dêem prejuízo): é a
+// linha de partida de toda banca, e escondê-la deixaria "só lucro" e "lucro
+// pequeno" com o mesmo desenho.
+function pnlCurvaHtml(curva) {
+  const vals = (curva || []).map((c) => Number(c.equity_usd)).filter((n) => Number.isFinite(n));
+  if (vals.length < 2) return "";
+  const min = Math.min(0, ...vals), max = Math.max(0, ...vals), amp = (max - min) || 1;
+  const W = 100, H = 28;
+  const d = vals.map((v, i) => `${i === 0 ? "M" : "L"}${(i / (vals.length - 1)) * W},` +
+    `${H - ((v - min) / amp) * H}`).join(" ");
+  const sobe = vals[vals.length - 1] >= 0;
+  return `<div class="ek-curva">` +
+    `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(
+      `curva de equity do paper, ${vals.length} trade(s) fechado(s), de $${scanFmt(vals[0])} a $${scanFmt(vals[vals.length - 1])}`)}">` +
+    `<path d="${d}" fill="none" stroke-width="1.2" vector-effect="non-scaling-stroke" ` +
+    `class="${sobe ? "compra" : "venda"}"></path></svg>` +
+    `<span class="ek-curva-n">$${scanFmt(vals[0])} → <b>$${scanFmt(vals[vals.length - 1])}</b></span></div>`;
+}
+
+// UM BLOCO de PnL (agregado, ou de um setup): número só quando a amostra
+// sustenta (mesmo gate de N do índice de confiabilidade — n<5 nem mostra
+// total, 5≤n<20 mostra com a ressalva "preliminar" ao lado).
+function pnlBlocoHtml(nome, b) {
+  if (!b || b.n === 0) {
+    return `<div class="scan-summary hint">${escapeHtml(nome)}: nenhum gatilho fechado ainda</div>`;
+  }
+  if (b.nivel === "insuficiente") {
+    return `<div class="scan-summary hint">${escapeHtml(nome)}: amostra insuficiente (n=${b.n}) — sem PnL ainda</div>`;
+  }
+  const cls = b.pnl_total_usd > 0 ? "ok" : (b.pnl_total_usd < 0 ? "bad" : "");
+  const sinal = b.pnl_total_usd > 0 ? "+" : "";
+  const ressalva = b.nivel === "preliminar" ? ' <span class="hint">(preliminar)</span>' : "";
+  const melhor = b.melhor_trade
+    ? `${escapeHtml(b.melhor_trade.ticker || "")} ${b.melhor_trade.pnl_usd > 0 ? "+" : ""}$${scanFmt(b.melhor_trade.pnl_usd)}`
+    : "—";
+  const pior = b.pior_trade
+    ? `${escapeHtml(b.pior_trade.ticker || "")} $${scanFmt(b.pior_trade.pnl_usd)}` : "—";
+  return `<div class="scan-summary"><b>${escapeHtml(nome)}</b>: ` +
+    `<b class="${cls}">${sinal}$${scanFmt(b.pnl_total_usd)}</b> (${sinal}${scanFmt(b.pnl_total_pct)}%) ` +
+    `em ${b.n} trade(s)${ressalva}` +
+    `<span class="hint"> — médio $${scanFmt(b.pnl_medio_usd)} · melhor ${melhor} · pior ${pior}</span></div>` +
+    pnlCurvaHtml(b.curva_equity);
+}
+
+// O PAR ["123","storm"] espelhado no front: SETUPS_DO_LEDGER é do backend
+// (Python), e a lista aqui é a ORDEM em que os blocos aparecem — a mesma dos
+// dois métodos em toda outra superfície (faixa, launcher).
+const SETUPS_DO_LEDGER_FRONT = ["123", "storm"];
+
+function trackPaperHtml(data) {
+  const paper = data && data.paper;
+  if (!paper) return "";
+  const porSetup = SETUPS_DO_LEDGER_FRONT
+    .map((s) => pnlBlocoHtml(_SETUP_NOME[s] || s, (paper.por_setup || {})[s])).join("");
+  const porFrame = Object.entries(paper.por_frame || {})
+    .filter(([, b]) => b && b.n > 0)
+    .map(([f, b]) => `${escapeHtml(tfNome(f))}: ${b.pnl_total_usd > 0 ? "+" : ""}$${scanFmt(b.pnl_total_usd)} (n=${b.n})`)
+    .join(" · ");
+  return `<h3 class="ek-sec">PnL de paper</h3>` +
+    `<div class="scan-summary hint">${escapeHtml(paper.premissa)}` +
+    ` — banca <input type="number" id="scanTrackBanca" min="1" step="1" ` +
+    `value="${escapeHtml(String(paper.banca_por_trade))}" title="Banca por operação, em dólares"> ` +
+    `por trade</div>` +
+    pnlBlocoHtml("agregado", paper.agregado) + porSetup +
+    (porFrame ? `<div class="scan-summary hint">por frame — ${porFrame}</div>` : "");
+}
+
+async function loadScanTrack() {
   const box = $("scanTrack");
-  box.classList.toggle("hidden");
-  if (box.classList.contains("hidden")) return;
   box.innerHTML = '<span class="hint">re-avaliando gatilhos…</span>';
   try {
-    const res = await fetch("/api/scan/verdicts?date=" + encodeURIComponent($("date").value || ""));
+    const qs = new URLSearchParams({ date: $("date").value || "" });
+    if (_trackBanca != null) qs.set("banca", String(_trackBanca));
+    const res = await fetch("/api/scan/verdicts?" + qs.toString());
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "falha");
     const taxa = data.taxa_acerto == null ? "—" : `${Math.round(data.taxa_acerto * 100)}%`;
@@ -9978,8 +10061,28 @@ async function showScanTrack() {
     box.innerHTML = `<div class="scan-summary"><b>${taxa}</b> de acerto em ${data.n_fechados || 0} gatilho(s) fechado(s)` +
       `${data.taxa_acerto == null ? ' <span class="hint">(nenhum fechado ainda — os abertos aparecem abaixo)</span>' : ""}</div>` +
       trackExpectancyHtml(data) +
+      trackPaperHtml(data) +
       (rows ? `<ul class="scan-list">${rows}</ul>` : '<span class="hint">nenhum gatilho flagrado ainda — escaneie que os em-gatilho passam a ser medidos</span>');
+    const bancaInput = $("scanTrackBanca");
+    if (bancaInput) {
+      bancaInput.addEventListener("change", () => {
+        const v = parseFloat(bancaInput.value);
+        _trackBanca = Number.isFinite(v) && v > 0 ? v : null;
+        loadScanTrack();
+      });
+      // Enter recalcula sem esperar o blur (change só dispara ao sair do campo).
+      bancaInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") bancaInput.blur();
+      });
+    }
   } catch (e) { box.innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`; }
+}
+
+async function showScanTrack() {
+  const box = $("scanTrack");
+  box.classList.toggle("hidden");
+  if (box.classList.contains("hidden")) return;
+  await loadScanTrack();
 }
 
 function bindScan() {

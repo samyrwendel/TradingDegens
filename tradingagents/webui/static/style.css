@@ -2940,6 +2940,14 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 .scan-go { padding: 5px 12px; border-radius: 2px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; font-size: .82rem; font-weight: var(--fw-bold); }
 .scan-go:hover { color: #fff; border-color: var(--accent); background: var(--panel); }
 .scan-track { margin-top: 10px; }
+/* A BANCA do PnL de paper (DA-154): número curto, inline no texto da premissa —
+   não é um formulário à parte, é UM valor que a frase já enuncia. */
+.scan-track input[type="number"] {
+  width: 64px; padding: 2px 6px; border-radius: 0; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text); font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.scan-track input[type="number"]:focus { outline: none; border-color: var(--accent); }
 .ghost-btn { opacity: .8; }
 
 /* ============ SINAIS DE ENTRADA (DA-117) ====================================

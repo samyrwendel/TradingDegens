@@ -58,6 +58,7 @@ from tradingagents.webui.progress import (
 from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.resume_store import ActiveRunStore
 from tradingagents.webui.scanner import (
+    _BANCA_PADRAO,
     ScanLog,
     _setup_da_entrada,
     ordenar_e_resumir,
@@ -3057,14 +3058,19 @@ class AnalysisRunner:
             salvo["oportunidades"] = sinais.oportunidades(salvo)
         return salvo
 
-    def scan_track_record(self, date: str) -> dict[str, Any]:
+    def scan_track_record(self, date: str, banca: float | None = None) -> dict[str, Any]:
         """Re-avalia os gatilhos logados contra o preço da data dada.
 
         A lista da watchlist NÃO entra: o track record é do que foi LOGADO, e tirar
         um ticker da watchlist não apaga o trade que já aconteceu. O parâmetro era
         recebido e ignorado — a lista era montada a cada chamada pra nada.
+
+        ``banca``: posição fixa em dólares do PnL de paper (DA-154); ``None``/valor
+        inválido cai no padrão de :data:`scanner._BANCA_PADRAO` dentro de
+        :func:`scan_verdicts` — nunca um erro por um número de tela mal digitado.
         """
-        return scan_verdicts(self.scan_log, date)
+        return scan_verdicts(self.scan_log, date,
+                             banca=banca if banca is not None else _BANCA_PADRAO)
 
     def resolve_names(self, symbols: list[str]) -> dict[str, str]:
         """Batch symbol -> display name for the UI chips/header (fail-open)."""

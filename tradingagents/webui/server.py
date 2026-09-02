@@ -611,7 +611,15 @@ class _Handler(BaseHTTPRequestHandler):
                 # preço de hoje (bateu TP / bateu SL / andamento) + taxa de acerto.
                 qs = parse_qs(urlparse(self.path).query)
                 date = (qs.get("date", [""])[0] or "").strip() or timeutil.today()
-                self._send_json(self.runner.scan_track_record(date))
+                # BANCA do PnL de paper (DA-154) — configurável, 100 é só o chão. Um
+                # valor ilegível/negativo não derruba a rota: cai no padrão dentro de
+                # scan_verdicts, a mesma disciplina que o resto do endpoint já segue.
+                banca_raw = (qs.get("banca", [""])[0] or "").strip()
+                try:
+                    banca = float(banca_raw) if banca_raw else None
+                except ValueError:
+                    banca = None
+                self._send_json(self.runner.scan_track_record(date, banca=banca))
             elif path == "/api/subscription/status":
                 # Status da assinatura do dono (task 017; multi-provedor 020): SÓ-DONO.
                 # Público → 403. Devolve só metadados (conectada?/quando/fonte por

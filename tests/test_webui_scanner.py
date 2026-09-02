@@ -449,3 +449,132 @@ def test_sem_serie_o_trade_fica_ABERTO_nunca_fechado_no_escuro(tmp_path, monkeyp
     out = scan_verdicts(log, "2026-08-28")
     assert out["verdicts"][0]["fechado"] is False
     assert out["n_fechados"] == 0
+
+
+# ══════════ PAPER TRADING NO TRACK RECORD (DA-154) ═══════════════════════════
+#
+# A proposta do Samyr: "como se fosse paper" — POSIÇÃO FIXA em dólares por
+# operação, não RISCO fixo. Quantidade = banca/entrada; resultado = variação
+# percentual do preço × banca — a perda por trade VARIA com a distância do
+# stop, o oposto de "arriscar sempre a mesma banca".
+
+
+def _v(veredito="bateu_tp", direction="compra", trigger=100.0, tp=110.0, sl=95.0,
+      rr=2.0, entrada=None, ts="2026-08-20T12:00:00+00:00", fechado_em="2026-08-25",
+      ticker="C", frame="1d", setup="123"):
+    v = {"veredito": veredito, "direction": direction, "trigger": trigger, "tp": tp,
+        "sl": sl, "rr": rr, "ts": ts, "fechado_em": fechado_em, "ticker": ticker,
+        "frame": frame, "setup": setup}
+    if entrada is not None:
+        v["entrada"] = entrada
+    return v
+
+
+def test_pnl_paper_trade_compra_bateu_tp_e_bateu_sl():
+    # COMPRA bateu TP: quantidade = 100/100 = 1, ganha (110-100)/100 = 10% = $10.
+    ganho = sc._pnl_paper_trade(_v(veredito="bateu_tp"), banca=100.0)
+    assert ganho["pnl_usd"] == 10.0 and ganho["pnl_pct"] == 10.0
+    # COMPRA bateu SL: perde (95-100)/100 = -5% = -$5 — NÃO é -$100 (não é risco fixo).
+    perda = sc._pnl_paper_trade(_v(veredito="bateu_sl"), banca=100.0)
+    assert perda["pnl_usd"] == -5.0 and perda["pnl_pct"] == -5.0
+
+
+def test_pnl_paper_trade_venda_inverte_o_sinal():
+    # VENDA bateu TP (preço CAIU até o alvo abaixo): lucro, sinal invertido.
+    v = _v(veredito="bateu_tp", direction="venda", trigger=100.0, tp=90.0, sl=105.0)
+    ganho = sc._pnl_paper_trade(v, banca=100.0)
+    assert ganho["pnl_usd"] == 10.0, ganho     # (90-100)/100 = -10%, invertido = +10%
+    v = _v(veredito="bateu_sl", direction="venda", trigger=100.0, tp=90.0, sl=105.0)
+    perda = sc._pnl_paper_trade(v, banca=100.0)
+    assert perda["pnl_usd"] == -5.0, perda     # (105-100)/100 = +5%, invertido = -5%
+
+
+def test_pnl_paper_trade_usa_ENTRADA_quando_o_log_a_carimba():
+    """Storm carimba ``entrada`` (o ponto de entrada real, não sempre o gatilho) —
+    o PnL tem de usar essa referência, não o trigger, quando ela existe."""
+    v = _v(veredito="bateu_tp", trigger=100.0, entrada=105.0, tp=115.0)
+    p = sc._pnl_paper_trade(v, banca=100.0)
+    assert p["pnl_usd"] == round(100.0 * (115.0 - 105.0) / 105.0, 2), p
+
+
+def test_pnl_paper_trade_None_para_aberto_e_sem_base():
+    assert sc._pnl_paper_trade(_v(veredito="andamento_lucro"), banca=100.0) is None
+    assert sc._pnl_paper_trade(_v(veredito="sem_dado"), banca=100.0) is None
+    v = _v(veredito="bateu_tp", trigger=None, entrada=None)
+    assert sc._pnl_paper_trade(v, banca=100.0) is None
+
+
+def test_pnl_risco_fixo_e_a_leitura_ALTERNATIVA():
+    """Se arriscasse a banca inteira por trade: ganha rr×banca no alvo, perde a
+    banca inteira no stop — DIFERENTE do PnL de posição fixa (a pergunta é outra)."""
+    ganho = sc._pnl_paper_trade(_v(veredito="bateu_tp", rr=2.0), banca=100.0)
+    assert ganho["pnl_risco_fixo_usd"] == 200.0
+    assert ganho["pnl_risco_fixo_usd"] != ganho["pnl_usd"]
+    perda = sc._pnl_paper_trade(_v(veredito="bateu_sl", rr=2.0), banca=100.0)
+    assert perda["pnl_risco_fixo_usd"] == -100.0
+
+
+def test_pnl_paper_resumo_curva_de_equity_e_CRONOLOGICA():
+    """A curva soma na ORDEM DO FECHAMENTO, não na ordem em que os trades chegam
+    — um fechado antes tem de aparecer antes na curva, mesmo se veio depois na
+    lista de entrada."""
+    trades = [
+        _v(veredito="bateu_tp", fechado_em="2026-08-27", ticker="B"),   # +$10, 2º
+        _v(veredito="bateu_sl", fechado_em="2026-08-25", ticker="A"),   # -$5, 1º
+    ]
+    r = sc._pnl_paper_resumo(trades, banca=100.0)
+    assert [c["ticker"] for c in r["curva_equity"]] == ["A", "B"]
+    assert r["curva_equity"][0]["equity_usd"] == -5.0
+    assert r["curva_equity"][1]["equity_usd"] == 5.0     # -5 + 10
+    assert r["pnl_total_usd"] == 5.0
+    assert r["pnl_medio_usd"] == 2.5
+    assert r["melhor_trade"]["ticker"] == "B" and r["pior_trade"]["ticker"] == "A"
+    # % sobre o capital empregado: banca=100 × n=2 trades = 200 empregados, +5 total
+    assert r["pnl_total_pct"] == 2.5
+
+
+def test_pnl_paper_resumo_gate_de_N_igual_ao_da_confiabilidade():
+    from tradingagents.webui.execucao import _N_MINIMO, _N_OPERAVEL
+    assert sc._pnl_paper_resumo([], banca=100.0)["nivel"] == "insuficiente"
+    quatro = [_v(ticker=str(i)) for i in range(_N_MINIMO - 1)]
+    assert sc._pnl_paper_resumo(quatro, banca=100.0)["nivel"] == "insuficiente"
+    dez = [_v(ticker=str(i)) for i in range(_N_MINIMO)]
+    assert sc._pnl_paper_resumo(dez, banca=100.0)["nivel"] == "preliminar"
+    vinte = [_v(ticker=str(i)) for i in range(_N_OPERAVEL)]
+    assert sc._pnl_paper_resumo(vinte, banca=100.0)["nivel"] == "operavel"
+
+
+def test_pnl_paper_resumo_sem_trade_nenhum_declara_vazio_nao_inventa():
+    r = sc._pnl_paper_resumo([], banca=100.0)
+    assert r == {"n": 0, "nivel": "insuficiente", "banca_por_trade": 100.0,
+                "pnl_total_usd": None, "pnl_total_pct": None, "pnl_medio_usd": None,
+                "melhor_trade": None, "pior_trade": None, "curva_equity": []}
+
+
+def test_scan_verdicts_expoe_paper_por_setup_e_por_frame(tmp_path, monkeypatch):
+    """Fim a fim: um gatilho do 1-2-3 fecha em TP, e ``out["paper"]`` aparece com
+    a MESMA decomposição do acerto (agregado/por_setup/por_frame), com a banca
+    que foi pedida — não o padrão, quando um valor é passado."""
+    log = _log_com_ts(tmp_path, [
+        {"ts": "2026-08-20T12:00:00+00:00", "ticker": "C", "frame": "1d",
+         "trigger": 100.0, "direction": "compra", "tp": 110.0, "sl": 95.0,
+         "rr": 2.0, "setup": "123"},
+    ])
+    _serie(monkeypatch, {"C": [_c("2026-08-21", 111.0, 100.0)]}, {"C": 105.0})
+    out = scan_verdicts(log, "2026-08-28", banca=50.0)
+    paper = out["paper"]
+    assert paper["banca_por_trade"] == 50.0
+    assert "posição FIXA" in paper["premissa"] and "sem custos" in paper["premissa"]
+    assert paper["agregado"]["n"] == 1
+    assert paper["agregado"]["pnl_total_usd"] == 5.0   # 50 × (110-100)/100
+    assert paper["por_setup"]["123"]["pnl_total_usd"] == 5.0
+    assert paper["por_setup"]["storm"]["n"] == 0
+    assert paper["por_frame"]["1d"]["pnl_total_usd"] == 5.0
+    assert "4h" not in paper["por_frame"]      # sem fechado nesse frame: some, não n=0
+
+
+def test_scan_verdicts_banca_padrao_quando_nao_pedida(tmp_path, monkeypatch):
+    log = _log_com_ts(tmp_path, [])
+    _serie(monkeypatch, {}, {})
+    out = scan_verdicts(log, "2026-08-28")
+    assert out["paper"]["banca_por_trade"] == sc._BANCA_PADRAO == 100.0

@@ -712,6 +712,28 @@ def _chave(e: dict[str, Any]) -> str:
 # 1-2-3 do Stormer (DA-081) — outro detector, outro stop, outro alvo.
 SETUPS_DO_LEDGER = ("123", "storm")
 
+# Gate de amostra — DO TRACK RECORD, importado por ``execucao.confiabilidade`` (não
+# uma segunda constante lá: dois limiares com valores diferentes seria a lista
+# dizendo "n insuficiente" e o card dizendo "operável" sobre a MESMA amostra —
+# tanto pro acerto quanto pro PnL de paper, DA-154). Convenção estatística
+# declarada, `a calibrar`: com N<5 o intervalo de uma proporção cobre quase [0,1]
+# e não informa; em N=10, p=0,5, o Wilson 95% ainda é ~±30pp; só perto de 20-30
+# ele aperta pra algo acionável. Não vêm do corpus — vêm de "não exibir número
+# que o intervalo desmente".
+_N_MINIMO = 5
+_N_OPERAVEL = 20
+
+# PAPER TRADING NO TRACK RECORD (DA-154). A proposta do Samyr: "como se fosse
+# paper" — POSIÇÃO FIXA em dólares por operação, não RISCO fixo. Com banca=100 a
+# quantidade sai de banca/entrada e o resultado é (saída−entrada)/entrada × banca
+# — a perda por trade VARIA com a distância do stop (ela não é ±100 sempre). É a
+# escolha certa pra COMPARAR setups (mesma régua pros dois), mas tem de ser dita
+# na tela — quem lê "paper" acha risco fixo por padrão. Configurável (o parâmetro
+# ``banca`` de :func:`scan_verdicts`), 100 é só o chão.
+_BANCA_PADRAO = 100.0
+_PREMISSA_PAPER = ("paper: posição FIXA em dólares por operação (não risco fixo — "
+                   "a perda varia com a distância do stop) · sem custos · sem slippage")
+
 
 def _setup_da_entrada(e: dict[str, Any]) -> str:
     """De qual setup veio um gatilho logado. Entrada sem carimbo é do 1-2-3: quando
@@ -818,7 +840,7 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     return None
 
 
-def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
+def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO) -> dict[str, Any]:
     """Re-avalia cada gatilho logado — FECHADO pelo ledger, ABERTO pelo preço de hoje.
 
     **Fechado é fato gravado, não conta refeita.** Quando a série mostra o primeiro
@@ -841,6 +863,10 @@ def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
     perto e o stop é longe: com R:R 0,13 é preciso acertar 88,5% só pra empatar. O
     painel passa a devolver a expectativa em múltiplos de risco (R) e o acerto de
     equilíbrio ao lado — ver :func:`_expectativa`.
+
+    **PnL de paper** (DA-154): expectativa em R é abstrata e não soma. Com ``banca``
+    dólares de posição fixa por operação, o resultado vira dinheiro — comparável
+    entre setups, somável numa curva de equity. Ver :func:`_pnl_paper_resumo`.
 
     Só leitura de série cacheada, $0 de LLM.
     """
@@ -941,6 +967,23 @@ def scan_verdicts(log: ScanLog, date: str) -> dict[str, Any]:
         }
         bloco.update(_expectativa(fech))
         out["por_setup"][nome] = bloco
+
+    # PAPER TRADING (DA-154): mesma decomposição do acerto/expectativa acima —
+    # agregado, por setup e por frame (o R:R varia muito entre 1h e semanal, e
+    # somar os dois esconderia isso). Banca declarada e sempre presente, mesmo
+    # com n=0 — é o que permite a tela dizer "amostra insuficiente" em vez de
+    # calar a seção inteira.
+    banca_efetiva = float(banca) if banca and banca > 0 else _BANCA_PADRAO
+    out["paper"] = {
+        "banca_por_trade": banca_efetiva,
+        "premissa": _PREMISSA_PAPER,
+        "agregado": _pnl_paper_resumo(n, banca_efetiva),
+        "por_setup": {nome: _pnl_paper_resumo(
+            [v for v in n if v.get("setup") == nome], banca_efetiva)
+            for nome in SETUPS_DO_LEDGER},
+        "por_frame": {frame: _pnl_paper_resumo(vs, banca_efetiva)
+                      for frame, vs in _agrupa_por_frame(n).items()},
+    }
     return out
 
 
@@ -972,3 +1015,104 @@ def _expectativa(fechados: list[dict[str, Any]]) -> dict[str, Any]:
         "n_com_rr": len(com_rr),
         "acerto_com_rr": round(p, 4),
     }
+
+
+def _agrupa_por_frame(fechados: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Fechados agrupados por frame — só os frames com o que mostrar aparecem
+    (frame sem nenhum fechado some, em vez de virar um bloco n=0 sem sentido)."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for v in fechados:
+        out.setdefault(str(v.get("frame") or "1d"), []).append(v)
+    return out
+
+
+def _pnl_paper_trade(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
+    """PnL de UM trade fechado, POSIÇÃO FIXA (não risco fixo — ver :data:`_PREMISSA_PAPER`).
+
+    Quantidade = ``banca / entrada``; resultado = variação percentual do preço ×
+    banca. A ENTRADA é ``entrada`` quando o log a carimbou (Storm, que referencia
+    o ponto de entrada real) ou o ``trigger`` (1-2-3 — a entrada É o gatilho). A
+    SAÍDA é o nível que o veredito diz que foi tocado: o alvo publicável
+    (:func:`_tp_publicavel`, nunca um alvo degenerado) em ``bateu_tp``, o stop em
+    ``bateu_sl``. ``None`` pra qualquer coisa que não seja um fechado de verdade
+    ou que não tenha preço suficiente pra calcular — número inventado é pior que
+    a ausência dele.
+
+    ``pnl_risco_fixo_usd`` é a LEITURA ALTERNATIVA que a mesma banca responde de
+    graça: "se eu arriscasse ``banca`` por trade" — ganha ``rr·banca`` no alvo,
+    perde ``banca`` no stop. As duas convivem porque respondem perguntas
+    diferentes (comparar setups × dimensionar risco), e nenhuma é `a` resposta.
+    """
+    veredito = v.get("veredito")
+    if veredito not in ("bateu_tp", "bateu_sl"):
+        return None
+    entrada = v.get("entrada") if v.get("entrada") is not None else v.get("trigger")
+    saida = _tp_publicavel(v) if veredito == "bateu_tp" else v.get("sl")
+    if entrada is None or saida is None:
+        return None
+    try:
+        entrada, saida = float(entrada), float(saida)
+    except (TypeError, ValueError):
+        return None
+    if entrada <= 0:
+        return None
+    variacao = (saida - entrada) / entrada
+    if v.get("direction") == "venda":
+        variacao = -variacao
+    rr = v.get("rr")
+    pnl_risco_fixo_usd = None
+    if rr is not None:
+        try:
+            pnl_risco_fixo_usd = round(banca * (float(rr) if veredito == "bateu_tp" else -1.0), 2)
+        except (TypeError, ValueError):
+            pnl_risco_fixo_usd = None
+    return {
+        "ts": v.get("fechado_em") or _dia(v.get("ts")),
+        "ticker": v.get("ticker"), "setup": v.get("setup"), "frame": v.get("frame"),
+        "veredito": veredito,
+        "pnl_pct": round(variacao * 100, 2),
+        "pnl_usd": round(banca * variacao, 2),
+        "pnl_risco_fixo_usd": pnl_risco_fixo_usd,
+    }
+
+
+def _pnl_paper_resumo(fechados: list[dict[str, Any]], banca: float) -> dict[str, Any]:
+    """O resumo de PnL de paper de um grupo (agregado, de um setup, ou de um frame).
+
+    O ``nivel`` usa o MESMO gate de :data:`_N_MINIMO`/:data:`_N_OPERAVEL` do
+    índice de confiabilidade — dois limiares divergentes diriam "acerto operável,
+    PnL insuficiente" sobre a mesma amostra. A CURVA DE EQUITY é cronológica (pelo
+    dia do FECHAMENTO — ``fechado_em``, não o dia do gatilho): é a pergunta "isso
+    daria dinheiro, no tempo?", e um trade fechado antes de outro que abriu depois
+    tem de vir primeiro na curva."""
+    trades = [t for t in (_pnl_paper_trade(v, banca) for v in fechados) if t is not None]
+    trades.sort(key=lambda t: t["ts"] or "")
+    n = len(trades)
+    nivel = "insuficiente" if n < _N_MINIMO else ("preliminar" if n < _N_OPERAVEL else "operavel")
+    base = {"n": n, "nivel": nivel, "banca_por_trade": banca,
+            "pnl_total_usd": None, "pnl_total_pct": None, "pnl_medio_usd": None,
+            "melhor_trade": None, "pior_trade": None, "curva_equity": []}
+    if not trades:
+        return base
+    equity = 0.0
+    curva = []
+    for t in trades:
+        equity = round(equity + t["pnl_usd"], 2)
+        curva.append({"ts": t["ts"], "ticker": t["ticker"], "pnl_usd": t["pnl_usd"],
+                      "equity_usd": equity})
+    total = round(sum(t["pnl_usd"] for t in trades), 2)
+    melhor = max(trades, key=lambda t: t["pnl_usd"])
+    pior = min(trades, key=lambda t: t["pnl_usd"])
+    base.update({
+        "pnl_total_usd": total,
+        # % sobre o CAPITAL EMPREGADO (banca × n trades, sem reaproveitar equity
+        # entre eles — cada operação abre com a MESMA banca fixa, não composta).
+        "pnl_total_pct": round(total / (banca * n) * 100, 2) if banca > 0 else None,
+        "pnl_medio_usd": round(total / n, 2),
+        "melhor_trade": {"ticker": melhor["ticker"], "pnl_usd": melhor["pnl_usd"],
+                         "pnl_pct": melhor["pnl_pct"]},
+        "pior_trade": {"ticker": pior["ticker"], "pnl_usd": pior["pnl_usd"],
+                       "pnl_pct": pior["pnl_pct"]},
+        "curva_equity": curva,
+    })
+    return base

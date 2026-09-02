@@ -30,19 +30,21 @@ from typing import Any
 # ── constantes emprestadas do scanner, pra o card decidir igual à lista ──────────
 # Importadas de lá de propósito: dois limiares com o mesmo nome e valores diferentes
 # seria a lista dizendo "em gatilho" e o card dizendo "aguardar" sobre o mesmo preço.
-from tradingagents.webui.scanner import _GATILHO_TOL, _RR_RESIDUAL, SETUPS_DO_LEDGER
+# ``_N_MINIMO``/``_N_OPERAVEL`` moraram aqui até a DA-154: o PnL de paper do track
+# record precisava do MESMO gate, e uma segunda cópia é a porta pra divergirem.
+from tradingagents.webui.scanner import (
+    _GATILHO_TOL,
+    _N_MINIMO,
+    _N_OPERAVEL,
+    _RR_RESIDUAL,
+    SETUPS_DO_LEDGER,
+)
 
 # Piso de R:R-de-agora pra o card dizer ENTRAR. **`a calibrar por backtest`** — a spec
 # é explícita de que este número é convenção, não corpus. 1,0 é o mínimo defensável
 # (retorno pelo menos igual ao risco); mexer nele é decisão do Samyr, não do código.
 _PISO_RR_ENTRAR = 1.0
 
-# Gate de amostra do índice de confiabilidade. **Convenção estatística declarada**,
-# `a calibrar`: com N<5 o intervalo de uma proporção cobre quase [0,1] e não informa;
-# em N=10, p=0,5, o Wilson 95% ainda é ~±30pp; só perto de 20-30 ele aperta pra algo
-# acionável. Não vêm do corpus — vêm de "não exibir número que o intervalo desmente".
-_N_MINIMO = 5
-_N_OPERAVEL = 20
 _Z_95 = 1.959963984540054
 
 
