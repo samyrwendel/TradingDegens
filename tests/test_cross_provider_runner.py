@@ -37,11 +37,51 @@ def test_advanced_without_model_pulls_catalog_default():
 
 
 @pytest.mark.unit
-def test_simple_mode_untouched_without_advanced_flag():
-    ov = {"provider": "openai", "allow_server_key": True}
+def test_simple_mode_public_provider_untouched_without_advanced_flag():
+    """Sem ``allow_server_key`` (não-dono/BYOK), o simples continua respeitando o
+    ``provider`` do override byte-a-byte — o default do dono (task 20260902-050,
+    ver o teste abaixo) NÃO se aplica a quem não é dono."""
+    ov = {"provider": "openai", "allow_server_key": False}
     cfg = apply_llm_overrides(_BASE, ov)
     assert "deep_think_provider" not in cfg and "quick_think_provider" not in cfg
     assert cfg["llm_provider"] == "openai"
+
+
+@pytest.mark.unit
+def test_owner_simple_mode_defaults_to_subscription_ignoring_stale_provider():
+    """DONO em modo simples (sem ``advanced``) SEM chave própria: o default é a
+    assinatura (claude-cli, $0/token) — task 20260902-050. Isto vale mesmo com um
+    ``provider`` preenchido no override: sem credencial nenhuma anexada, ele não é
+    escolha ativa do dono, é resto do BYOK salvo no navegador de antes do login
+    (localStorage sobrevive ao login e o front reenvia em toda requisição)."""
+    ov = {"provider": "openai", "allow_server_key": True}
+    cfg = apply_llm_overrides(_BASE, ov)
+    assert "deep_think_provider" not in cfg and "quick_think_provider" not in cfg
+    assert cfg["llm_provider"] == "claude-cli"
+    # modelo do provedor ANTERIOR (formato incompatível) não sobrevive à troca —
+    # o catálogo do claude-cli fornece o default.
+    assert cfg["deep_think_llm"] != "gpt-5.5"
+    assert cfg["quick_think_llm"] != "gpt-5.4-mini"
+
+
+@pytest.mark.unit
+def test_owner_simple_mode_with_own_key_keeps_explicit_provider():
+    """Dono que cola a PRÓPRIA chave em modo simples: escolha explícita e honrada —
+    o default da assinatura só vale sem credencial nenhuma anexada."""
+    ov = {"provider": "openai", "allow_server_key": True, "api_key": "sk-own"}
+    cfg = apply_llm_overrides(_BASE, ov)
+    assert cfg["llm_provider"] == "openai"
+    assert cfg["llm_api_key"] == "sk-own"
+
+
+@pytest.mark.unit
+def test_owner_simple_mode_no_override_at_all_defaults_to_subscription():
+    """Dono que nunca abriu o BYOK (nenhum override, nem sequer ``provider``) —
+    navegador novo, primeiro login: ainda assim cai na assinatura, não na env do
+    servidor pra o que a config do servidor mandar (ex.: 'openai' do DEFAULT_CONFIG)."""
+    ov = {"allow_server_key": True}
+    cfg = apply_llm_overrides(_BASE, ov)
+    assert cfg["llm_provider"] == "claude-cli"
 
 
 # ------------------------------------------------ levels_credential_error -------

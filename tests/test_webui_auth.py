@@ -110,11 +110,15 @@ def test_run_allowed_for_owner_uses_server_env(tmp_path):
     captured = []
     runner = AnalysisRunner(base_config=_base(tmp_path), store=HistoryStore(tmp_path),
                             graph_factory=_capturing_factory(captured))
-    # allow_server_key=True simula a sessão do dono: roda e cai na env (sem llm_api_key)
+    # allow_server_key=True simula a sessão do dono: roda sem colar chave nenhuma.
+    # Task 20260902-050: o default do dono em modo simples é a ASSINATURA
+    # (claude-cli, $0/token) — não mais a env do servidor pro provider da config
+    # base (aqui "openai"), que é o que rodava disfarçado de "dono" antes desta task.
     snap = _wait(runner, runner.start("AAPL", "2026-08-22",
                                       overrides={"allow_server_key": True}))
     assert snap["status"] == "done"
-    assert "llm_api_key" not in captured[0]  # usa a env do servidor, não uma chave injetada
+    assert "llm_api_key" not in captured[0]      # sem chave injetada (nem própria, nem env)
+    assert captured[0]["llm_provider"] == "claude-cli"
 
 
 def test_run_allowed_with_user_key_without_owner(tmp_path):
@@ -232,12 +236,14 @@ def test_http_owner_login_then_run_uses_server_key(tmp_path):
         assert code == 200 and body["owner"] is True
         _, cfg = _get(op, base, "/api/config")
         assert cfg["owner"] is True
-        # agora roda SEM colar chave -> usa a env do servidor
+        # agora roda SEM colar chave -> default da assinatura (task 20260902-050),
+        # não mais a env do servidor pro provider da config base.
         code, body = _post(op, base, "/api/analyze", {"ticker": "AAPL", "date": "2026-08-22"})
         assert code == 200
         snap = _run_to_end(op, base, body["run_id"])
         assert snap["status"] == "done"
-        assert "llm_api_key" not in captured[0]  # env do servidor, não uma chave do corpo
+        assert "llm_api_key" not in captured[0]  # sem chave injetada (nem própria, nem env)
+        assert captured[0]["llm_provider"] == "claude-cli"
         # a senha e a chave do servidor nunca aparecem nas respostas
         blob = json.dumps([body, cfg], default=str)
         assert "abrakadabra" not in blob

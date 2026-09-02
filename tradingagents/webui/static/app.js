@@ -1803,12 +1803,36 @@ function renderLaunchBar() {
 // do config (#cfgQuick/#cfgDeep). O cross-provider por nível (task 027) segue no
 // config, alcançável pelo link "avançado" do popover — mantido "junto".
 
+// Dono em modo SIMPLES (sem "avançado") e sem chave própria colada: o backend
+// (runner.py::apply_llm_overrides, task 20260902-050) roda pela ASSINATURA por
+// padrão, ignorando o `provider` salvo — espelha aqui, senão a tela promete um
+// provedor/modelo que a run não usa.
+function _ownerSubscriptionDefault() {
+  return !!(_isOwner && !_llmCfg.advanced && !_llmCfg.apiKey);
+}
+
 // Provedor efetivo de um nível: cada nível tem o seu (task 017). Config antiga
 // (provedor único, pré-017) cai no `provider` salvo — migra sozinha ao abrir o painel.
 function _effLevelProvider(level) {
   const c = _llmCfg || {};
+  if (_ownerSubscriptionDefault()) return "claude-cli";
   return (level === "deep" ? c.deepProvider : c.quickProvider) || c.provider ||
     (_llmMeta && _llmMeta.default_provider) || "";
+}
+
+// Modelo efetivo de um nível: espelha o mesmo descarte do backend — um modelo
+// salvo enquanto o `provider` era outro (BYOK de antes do login) é do FORMATO
+// daquele provedor e nunca chega a rodar; sem `provider` salvo (dono que só
+// escolheu um modelo pelo chip simples do launcher, sem nunca abrir o BYOK) o
+// modelo já é deste provedor e fica.
+function _effLevelModel(level) {
+  const c = _llmCfg || {};
+  const raw = (level === "deep" ? c.deepModel : c.quickModel) || "";
+  if (_ownerSubscriptionDefault()) {
+    const prior = (c.provider || "").toLowerCase();
+    if (prior && prior !== "claude-cli") return "";
+  }
+  return raw;
 }
 
 // Modelo padrão do provedor pra um nível (mostrado quando o campo está vazio).
@@ -1831,7 +1855,7 @@ function renderLaunchModels() {
   const chip = (level) => {
     const icon = level === "deep" ? "pesado" : "rápido";
     const lead = level === "deep" ? "pesado" : "rápido";
-    const set = (level === "deep" ? _llmCfg.deepModel : _llmCfg.quickModel) || "";
+    const set = _effLevelModel(level);
     const eff = set || _providerDefaultModel(level);
     const shown = eff ? _shortModel(eff) : "padrão";
     const prov = _effLevelProvider(level);
@@ -7869,10 +7893,19 @@ function renderKeyOwnership() {
 // launcher, a nota da chave e o corpo da requisição já falam por-nível, sem esperar o
 // usuário clicar em Salvar. Não mexe se algum provedor salvo está escondido (owner-only
 // com sessão deslogada): ali a tela não representa a escolha do dono.
+//
+// DONO é a exceção (task 20260902-050): pra ele, um `provider` sozinho sem os dois
+// níveis já separados NÃO é escolha nenhuma — é resto do BYOK salvo de antes do
+// login (o mesmo raciocínio do backend em apply_llm_overrides). Promover isso a
+// `advanced:true` aqui TRAVARIA a config nesse provedor pra sempre: uma vez migrado,
+// o simples-mode nunca mais vê `c.provider` vazio de novo, então o default da
+// assinatura nunca dispara. Sem migrar, o fallback de exibição (_effLevelProvider)
+// já cobre o painel avançado sozinho — nada quebra, só não vira permanente.
 function migrateSingleProviderConfig() {
   const c = _llmCfg || {};
   if (!c.provider || (c.quickProvider && c.deepProvider)) return false;
   if (_savedProviderHidden()) return false;
+  if (_isOwner && !c.advanced) return false;
   c.quickProvider = c.quickProvider || _cfgLevelProvider("quick") || c.provider;
   c.deepProvider = c.deepProvider || _cfgLevelProvider("deep") || c.provider;
   c.quickBaseUrl = c.quickBaseUrl || c.baseUrl || "";
@@ -7976,8 +8009,13 @@ async function refreshSubscriptionStatus() {
     SUB_PROVIDERS.forEach((p) => applySubRowState(p, providers[p.key] || {}));
     // Estado de assinatura por provedor (task 014): alimenta a sugestão do claude-cli.
     _subConnected = {};
-    Object.keys(providers).forEach((k) => { _subConnected[k] = !!(providers[k] || {}).connected; });
+    _subSource = {};
+    Object.keys(providers).forEach((k) => {
+      _subConnected[k] = !!(providers[k] || {}).connected;
+      _subSource[k] = (providers[k] || {}).source || null;
+    });
     maybeSuggestClaudeCli();
+    updateConfigBadge();      // fonte (app/servidor) pode ter mudado o rótulo "assinatura Claude"
   } catch (e) { /* rede: mantém como está */ }
 }
 
@@ -8174,7 +8212,15 @@ function updateConfigBadge() {
   if (!lbl || !btn) return;
   btn.classList.remove("has-key", "is-owner");
   if (_isOwner) {
-    lbl.textContent = "dono";                       // usa a chave do servidor
+    // Modo simples sem chave própria: o default agora é a ASSINATURA (task
+    // 20260902-050) — o rótulo tem que dizer isso, nunca mais "chave: openrouter"
+    // (o que sobrava quando o `provider` salvo do BYOK pré-login vazava pra cá).
+    if (_ownerSubscriptionDefault() && _subConnected.anthropic) {
+      const fonte = _subSource.anthropic === "server" ? "servidor" : "app";
+      lbl.textContent = `assinatura Claude ($0/token · ${fonte})`;
+    } else {
+      lbl.textContent = "dono";                     // avançado/BYOK explícito, ou sem assinatura conectada
+    }
     btn.classList.add("is-owner");
   } else if (_llmCfg.apiKey) {
     const prov = _llmCfg.provider || (_llmMeta && _llmMeta.default_provider) || "";
@@ -8189,15 +8235,19 @@ function updateConfigBadge() {
   if (act) {
     const lvl = (level, icon) => {
       const prov = _effLevelProvider(level);
-      const model = (level === "deep" ? _llmCfg.deepModel : _llmCfg.quickModel)
-        || _providerDefaultModel(level) || "padrão";
+      const model = _effLevelModel(level) || _providerDefaultModel(level) || "padrão";
       return `${icon} ${prov || "?"} · ${model}`;
     };
     const par = `${lvl("quick", "rápido")}   ${lvl("deep", "pesado")}`;
     if (!_isOwner && !_llmCfg.apiKey) {
       act.textContent = "Sem chave — informe a sua acima ou entre como dono para rodar.";
     } else {
-      const fonte = _llmCfg.apiKey ? "sua chave" : "chave do servidor (dono)";
+      // "chave do servidor (dono)" descrevia rodar na API key da env do servidor —
+      // não é mais o default do dono (task 20260902-050): sem chave própria e sem
+      // avançado, o default é a assinatura, e o rótulo tem que dizer isso.
+      const fonte = _llmCfg.apiKey ? "sua chave"
+        : _ownerSubscriptionDefault() ? "assinatura ($0/token)"
+        : "chave do servidor (dono)";
       act.textContent = `Ativo: ${fonte} · ${par}`;
     }
   }
@@ -8285,6 +8335,9 @@ function setCfgStatus(msg, kind) {
 // Assinatura conectada por provedor (task 014): povoado por refreshSubscriptionStatus.
 // _subConnected.anthropic = a assinatura Claude está conectada (via CLI/OAuth).
 let _subConnected = {};
+// De QUEM veio a conexão de cada provedor — "app" (OAuth pela tela) ou "server"
+// (CLI da box já logado, task 020) — usado pelo rótulo "assinatura Claude (…)".
+let _subSource = {};
 
 // Troca do provedor de UM nível (task 014 → primária na 017): o modelo daquele nível
 // vai pro FORMATO do novo provedor e o combo lista os modelos DELE (ao vivo se der,

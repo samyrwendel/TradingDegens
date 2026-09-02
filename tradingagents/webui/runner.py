@@ -287,6 +287,12 @@ def _provider_catalog_models(provider: str) -> list[dict[str, str]]:
     return list(seen.values())
 
 
+# Default do DONO logado em modo simples (task 20260902-050): a assinatura
+# ($0/token via claude-cli), não a env do servidor. Ver o bloco em
+# apply_llm_overrides que força este provider.
+_OWNER_DEFAULT_PROVIDER = "claude-cli"
+
+
 def apply_llm_overrides(base_config: dict[str, Any],
                         overrides: dict[str, Any] | None) -> dict[str, Any]:
     """Config efetiva = base_config + overrides BYOK da requisição (dict novo).
@@ -296,9 +302,40 @@ def apply_llm_overrides(base_config: dict[str, Any],
     servidor (usuário sem chave roda na env do servidor — a chave que o grafo lê
     quando ``llm_api_key`` está ausente). Trocar de provedor sem nomear modelo
     puxa o padrão do catálogo daquele provedor, pra o modelo casar com a chave.
-    O dict retornado nunca é persistido; a ``api_key`` fica só em memória."""
+    O dict retornado nunca é persistido; a ``api_key`` fica só em memória.
+
+    DONO em modo SIMPLES (``allow_server_key`` True, sem ``advanced``) SEM chave
+    própria anexada (``api_key``) sempre resolve pra ``claude-cli`` (a assinatura,
+    task 20260902-050) — mesmo que ``provider`` venha preenchido no override. Um
+    ``provider`` sem credencial nenhuma junto não é uma escolha ativa do dono: é
+    o resto do BYOK salvo no navegador de antes do login (localStorage sobrevive
+    ao login), reenviado em toda requisição — e sem isso o dono corria por padrão
+    na env do servidor pra um provedor pago (ex.: OpenRouter) sem saber. Só dois
+    sinais contam como escolha deliberada e destravam outro provedor: uma chave
+    própria colada (``api_key``) ou o modo avançado (``advanced`` — exige abrir o
+    painel e escolher provedor por nível de propósito). Não-dono é inalterado:
+    a checagem de credencial por-nível (:func:`levels_credential_error`) continua
+    sendo o gate real; aqui é só o DEFAULT de quem já passou o gate sem escolher.
+
+    Quando o override troca o provedor de verdade (havia um ``provider`` diferente
+    de ``claude-cli`` no pedido), ``deep_model``/``quick_model``/``base_url`` são
+    descartados junto: pertencem ao FORMATO/endpoint do provedor anterior (ex.:
+    ``vendor/modelo`` do OpenRouter) e sobreviveriam à troca só pra 404 no client
+    da assinatura — o catálogo do claude-cli fornece o default. Sem ``provider``
+    algum no override (dono que nunca abriu o BYOK, só escolheu um modelo pelo
+    chip simples do launcher — esse fluxo grava só o modelo, não o provider), o
+    modelo já pertence a este provedor e é preservado."""
     config = dict(base_config)
     ov = overrides or {}
+    if (ov.get("allow_server_key") is True and not ov.get("advanced")
+            and not ov.get("api_key")):
+        prior_provider = (ov.get("provider") or "").strip().lower()
+        ov = dict(ov)
+        ov["provider"] = _OWNER_DEFAULT_PROVIDER
+        if prior_provider and prior_provider != _OWNER_DEFAULT_PROVIDER:
+            ov.pop("deep_model", None)
+            ov.pop("quick_model", None)
+            ov.pop("base_url", None)
     provider = (ov.get("provider") or "").strip().lower()
     if provider:
         prev_provider = (config.get("llm_provider") or "").lower()
