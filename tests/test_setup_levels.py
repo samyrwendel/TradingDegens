@@ -259,7 +259,7 @@ _PLAN_FOR_SURFACES = {
     "price": 140.0,
     "realize_zone": {"label": "topo anterior 2026-05-13", "low": 108.0,
                      "high": 112.0, "price": 110.0, "role": "alvo",
-                     "role_label": "realização (alvo)"},
+                     "role_label": "realização parcial"},
     "pattern": {"p1": {"date": "2026-01-05", "price": 118.0},
                 "p2": {"date": "2026-02-10", "price": 152.0},
                 "p3": {"date": "2026-03-08", "price": 131.0},

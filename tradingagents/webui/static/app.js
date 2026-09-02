@@ -2820,15 +2820,25 @@ function renderSetupCards(a) {
         dentro ? "dentro da faixa desenhada no gráfico"
                : "fora da faixa desenhada — não é entrada agora"));
     }
-    // Região de realização: é o alvo DESTA leitura. Quando ela é o próprio gatilho
-    // do 1-2-3 (``role: gatilho``), o número já é do outro card — e aí não sai aqui.
+    // Região de realização: PARADA NO CAMINHO desta leitura, nunca o DESTINO — essa
+    // palavra é do alvo (TP) do 1-2-3, e "realização (alvo)" chamava as duas coisas
+    // do mesmo jeito ("o que é essa faixa amarela... se o Alvo está no TP acima?",
+    // DA-151). Quando ela é o próprio gatilho do 1-2-3 (``role: gatilho``), o número
+    // já é do outro card — e aí não sai aqui.
     const rz = a.realize_zone;
     if (rz && rz.price != null && rz.role !== "gatilho") {
       const tp = a.target || {};
       const mesmo = tp.price === rz.price && tp.same_as_realize;
-      rows.push(scRow(rz.role_label || "realização (alvo)", fmtNum(rz.price),
+      // A LEITURA ÚTIL, quando as duas paradas existem e são DIFERENTES: dizer que
+      // o alvo é mais adiante é o que transforma "duas faixas com nomes parecidos"
+      // em "o caminho até X passa por uma parada em Y–Z" (pedido do Samyr).
+      const relacao = !mesmo && rz.role === "alvo" && tp.price != null
+        ? `${rz.label || "topo anterior"} — parada no caminho; o alvo (TP) é mais ` +
+          `adiante, em ${fmtNum(tp.price)}`
+        : (rz.label || "");
+      rows.push(scRow(rz.role_label || "realização parcial", fmtNum(rz.price),
         mesmo ? "as duas leituras convergem neste nível: é também o alvo do 1-2-3"
-              : (rz.label || "")));
+              : relacao));
     }
     // Faixa de compra cobrindo a de realização é setup degenerado, e o backend
     // carimba isso; some da tela seria esconder o defeito, não corrigi-lo.
@@ -5147,15 +5157,16 @@ function planZones(a) {
                // nomeia, o telefone volta a ter faixa anônima com duas famílias
                tagCurto: nomeiaTag(fora ? `${curto} (inativa)` : curto, "plano", marcar) });
   }
-  // A região de realização só se chama "alvo" quando de fato é: num setup de VENDA
-  // ela é o topo acima (resistência, nunca o alvo de um short) e, quando coincide
-  // com o gatilho do 1-2-3, a linha do próprio padrão já a desenha — não se traça
-  // o mesmo nível duas vezes. O backend carimba esse papel em ``role``.
+  // A região de realização NUNCA se chama "alvo" sozinha (DA-151): essa palavra é
+  // do alvo (TP) do padrão, e as duas colidiam com o mesmo nome na mesma tela. Num
+  // setup de VENDA ela é o topo acima (resistência, nunca o alvo de um short) e,
+  // quando coincide com o gatilho do 1-2-3, a linha do próprio padrão já a desenha
+  // — não se traça o mesmo nível duas vezes. O backend carimba esse papel em ``role``.
   const rz = a.realize_zone;
   if (rz && rz.price != null && rz.role !== "gatilho") {
     const rzColor = rz.role === "resistencia" ? ZONE_COLORS.resist : ZONE_COLORS.realize;
     out.push({ ...rz, color: rzColor, familia: "plano", dono: DONO_RECUO,
-               tag: nomeiaTag(rz.role_label || "realização (alvo)", "plano", marcar),
+               tag: nomeiaTag(rz.role_label || "realização parcial", "plano", marcar),
                tagCurto: nomeiaTag(rz.role === "resistencia" ? "resistência" : "realização",
                                    "plano", marcar) });
   }
@@ -7274,6 +7285,16 @@ function abreDaFaixa(spec) {
   $("ticker").value = tk;
   if (frame) _barTf = frame;
   _barMethod = metodo;
+  // A LINHA CLICADA É A ESCOLHA — e ela pesa mais que a preferência pegajosa de
+  // leitura da DA-143. Sem isto, quem tocou a leitura do Storm numa análise
+  // anterior via a faixa do 123 seguia vendo o Storm: o cabeçalho abria certo
+  // (Setup123), mas `iniciaCamadas` lia a sessão e ignorava o método pedido —
+  // o gráfico desenhava a leitura errada, e ela nem era a mais fraca das duas,
+  // era só a última tocada. Clicar numa linha nomeada é pedir AQUELA leitura;
+  // limpar a sessão devolve a run recém-aberta ao padrão do método (DA-151).
+  try { sessionStorage.removeItem(_CHAVE_CAMADAS); } catch (e) { /* aba privada */ }
+  _camadas = null;
+  _camadasTocado = false;
   renderLaunchBar();
   $("analyzeForm").requestSubmit();
 }

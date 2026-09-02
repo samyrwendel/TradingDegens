@@ -32,7 +32,7 @@ def _plano(**over):
         "stop": {"price": 210.53, "basis": "invalidação + folga de 0.5·ATR14"},
         "target": {"price": 237.11, "label": "topo anterior 2026-07-02"},
         "realize_zone": {"price": 219.35, "role": "alvo",
-                         "role_label": "realização (alvo)", "label": "resistência"},
+                         "role_label": "realização parcial", "label": "resistência"},
         "buy_zone": {"price": 211.27, "ma_label": "MMS20"},
         "risk_reward": {"entry": 218.56, "entry_basis": "gatilho", "risk": 8.03,
                         "reward": 18.55, "rr": 2.31, "note": None},

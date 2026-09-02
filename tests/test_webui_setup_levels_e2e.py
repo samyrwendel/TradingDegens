@@ -173,7 +173,7 @@ def test_compra_mostra_invalidacao_stop_alvo_e_rr(live_server):
             assert out["card"].count("1,02:1") == 1, out["card"]
             assert "1,02" not in out["note"], out["note"]
             # a realização que É o gatilho não vira uma segunda faixa
-            assert "realização (alvo)" not in out["zones"]
+            assert "realização parcial" not in out["zones"]
             # PINTADO no candle: cada nível com rótulo E preço no próprio gráfico
             assert "invalidação 131,00" in out["painted"]
             assert "stop (SL) 128,50" in out["painted"]
@@ -198,7 +198,7 @@ def test_alvo_igual_a_realizacao_desenha_uma_faixa_so(live_server):
                          "state": "acionado", "direction": "compra"},
                 realize_zone={"label": "topo anterior 2025-11-20", "price": 176.0,
                               "low": 173.5, "high": 178.5, "band_basis": "±0.5·ATR14",
-                              "role": "alvo", "role_label": "realização (alvo)"},
+                              "role": "alvo", "role_label": "realização parcial"},
                 target={"label": "topo anterior 2025-11-20", "price": 176.0,
                         "low": 173.5, "high": 178.5, "band_basis": "±0.5·ATR14",
                         "same_as_realize": True},
@@ -208,11 +208,51 @@ def test_alvo_igual_a_realizacao_desenha_uma_faixa_so(live_server):
             tags = out["zones"]
             assert tags.count("realização = alvo (TP)") == 1
             assert "alvo (TP)" not in tags          # não há uma SEGUNDA faixa de alvo
-            assert "realização (alvo)" not in tags  # nem a etiqueta antiga sozinha
+            assert "realização parcial" not in tags  # nem a etiqueta sozinha
             assert "mesmo nível da região de realização" in out["card"]
             # e no candle sai UM rótulo só, dizendo que são o mesmo nível
             pintados = [t for t in out["painted"] if "176,00" in t]
             assert pintados == ["realização = alvo (TP) 176,00"]
+        finally:
+            browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
+def test_realizacao_diferente_do_alvo_diz_que_e_PARADA_NO_CAMINHO(live_server):
+    """O caso do print do Samyr (AAOI): preço dentro da faixa de realização, alvo
+    (TP) do 1-2-3 mais adiante. "realização (alvo)" e "alvo (TP)" nomeavam as duas
+    coisas de "alvo" e ele perguntou pra que servia a faixa amarela — a tela nunca
+    dizia que uma é PARADA e a outra é DESTINO (DA-151).
+
+    A LEITURA ÚTIL que ele pediu: "o caminho até o alvo passa por uma resistência
+    em Y–Z" — aqui: realização 150,00–154,00, alvo mais adiante em 176,00."""
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1100, "height": 900})
+        try:
+            page.goto(live_server)
+            page.wait_for_selector("#priceChart", state="attached")
+            # A explicação da relação mora no card do RECUO À MÉDIA (mesmo lugar da
+            # DA-140 já colocava a região de realização) — precisa da faixa da média
+            # pra existir, senão o card inteiro some da tela.
+            plan = _plan(
+                buy_zone={"label": "MMS50 — preço abaixo da média", "price": 130.0,
+                         "low": 126.0, "high": 134.0, "band_basis": "±0.5·ATR14",
+                         "ma_label": "MMS50", "active_now": True, "distance_pct": -7.1},
+                realize_zone={
+                    "label": "topo anterior 2026-02-10", "price": 152.0,
+                    "low": 150.0, "high": 154.0, "band_basis": "±0.5·ATR14",
+                    "role": "alvo", "role_label": "realização parcial"})
+            out = _seed(page, plan)
+            _shot(page, "depois-realizacao-parada-no-caminho.png")
+            tags = out["zones"]
+            # nenhuma das duas se chama "alvo" sozinha — cada uma com nome próprio
+            assert "realização parcial" in tags
+            assert "alvo (TP)" in tags
+            assert "realização (alvo)" not in tags
+            # o card diz a RELAÇÃO: a realização é parada, o alvo é mais adiante
+            assert "parada no caminho" in out["card"], out["card"]
+            assert "176,00" in out["card"]  # o preço do alvo aparece na explicação
         finally:
             browser.close()
 
@@ -249,7 +289,7 @@ def test_venda_nao_herda_esqueleto_de_long(live_server):
             out = _seed(page, plan)
             _shot(page, "depois-venda.png")
             assert "topo anterior (resistência)" in out["zones"]
-            assert "realização (alvo)" not in out["zones"]   # topo NÃO é alvo de short
+            assert "realização parcial" not in out["zones"]   # topo NÃO é alvo de short
             assert "alvo (TP)" in out["zones"]
             assert "voltar acima" in out["card"]
             assert "fundo anterior" in out["card"]

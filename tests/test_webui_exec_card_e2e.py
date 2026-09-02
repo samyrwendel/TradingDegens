@@ -51,7 +51,7 @@ _PLANO_CRWD = {
              "basis": "invalidação + folga de 0.5·ATR14"},
     "target": {"label": "topo anterior 2026-07-02", "price": 237.11,
                "same_as_realize": False},
-    "realize_zone": {"price": 219.35, "role": "alvo", "role_label": "realização (alvo)",
+    "realize_zone": {"price": 219.35, "role": "alvo", "role_label": "realização parcial",
                      "label": "resistência acima"},
     "buy_zone": {"label": "MMS20", "price": 211.27, "low": 208.0, "high": 214.0,
                  "ma_label": "MMS20", "setup": "recuo_media",

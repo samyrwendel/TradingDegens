@@ -1708,11 +1708,20 @@ def _risk_reward(
 
 
 # Papel da região de realização quando existe um 1-2-3 na tela. Sem padrão ela é
-# o alvo de sempre; com padrão pode ser o MESMO nível do alvo, o próprio gatilho
-# (aí a linha do 1-2-3 já a desenha) ou, num setup de venda, apenas a resistência
-# acima — jamais o "alvo" de um short.
+# uma parada de realização PARCIAL de sempre; com padrão pode ser o MESMO nível do
+# alvo, o próprio gatilho (aí a linha do 1-2-3 já a desenha) ou, num setup de
+# venda, apenas a resistência acima — jamais o "alvo" de um short.
+#
+# "alvo" NUNCA nomeia esta linha sozinho (DA-151): ela é o TOPO ANTERIOR mais
+# próximo, alargado em ATR — o primeiro lugar onde JÁ houve vendedor, útil pra
+# realização PARCIAL. O alvo (TP) do 1-2-3 é outra coisa: o DESTINO do padrão,
+# calculado da amplitude/projeção. As duas convivem no mesmo plano quando o
+# padrão existe (o print que motivou isto: realização 112,42–125,08 com o preço
+# DENTRO dela, alvo TP em 173,41 — parada no caminho × destino, não duas
+# variações do mesmo "alvo"). "realização (alvo)" chamava as duas coisas de
+# "alvo" e o leitor não tinha como distinguir sem abrir o código.
 _REALIZE_ROLE = {
-    "alvo": "realização (alvo)",
+    "alvo": "realização parcial",
     "gatilho": "realização = gatilho do 1-2-3",
     "resistencia": "topo anterior (resistência)",
 }

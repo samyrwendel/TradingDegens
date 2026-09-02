@@ -422,7 +422,7 @@ def test_quando_as_duas_leituras_convergem_num_nivel_as_duas_dizem_isso(base):
     plano = json.loads(json.dumps(_ACT))
     plano["realize_zone"] = {"label": "topo anterior 2026-07-02", "price": 856.72,
                              "low": 850.0, "high": 863.0, "band_basis": "±0.5·ATR14",
-                             "role": "alvo", "role_label": "realização (alvo)"}
+                             "role": "alvo", "role_label": "realização parcial"}
     plano["target"]["same_as_realize"] = True
     with sync_playwright() as p:
         browser = p.chromium.launch()
