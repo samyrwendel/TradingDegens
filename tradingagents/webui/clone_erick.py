@@ -1,38 +1,50 @@
-"""Carteira-ESPELHO em PAPER que CLONA as entradas e saídas do Erick (task
-20260902-055) — replica MECANICAMENTE o que ele faz, não modela o raciocínio dele.
+"""Carteira-ESPELHO em PAPER que CLONA as PRÓXIMAS entradas e saídas do Erick
+(tasks 20260902-055/056) — replica MECANICAMENTE o que ele faz, não modela o
+raciocínio dele.
 
-**O que este módulo NÃO faz.** Não lê método, não gera parecer, não decide nada.
-Ele consome as MUDANÇAS que :func:`alertas_tg.mudancas` já detecta (entrou / saiu /
-aumentou / reduziu, por ticker) e transforma cada uma numa OPERAÇÃO de paper na
-nossa carteira virtual. Nenhuma execução de dinheiro real — só ledger.
+**Nasce VAZIA e só segue o futuro (task 056).** O Samyr fechou o desenho: uma
+carteira do zero, com um capital que ELE vai definir, que segue SÓ as próximas
+entradas e saídas. Consequência dura: NÃO se replicam as posições que ele já tem
+hoje (nada de abrir MSFT e o resto do snapshot atual), e NÃO há backfill nem
+reconstrução de histórico — o track record do clone começa do zero e cresce com os
+eventos reais. Isso não pede marcação nova: é exatamente a semântica que
+:func:`alertas_tg.mudancas` já tem ("sem leitura anterior devolve ``[]`` — a
+PRIMEIRA leitura não é mudança"). O clone guarda a SUA PRÓPRIA baseline; a primeira
+leitura depois de ligado é só a baseline (zero operação), e daí pra frente cada
+mudança vira operação.
 
-**A REGRA INEGOCIÁVEL (e o Samyr pagou caro por ela).** O preço de entrada do clone
-é o preço REAL no instante em que NÓS detectamos a mudança — via
-:func:`live_price.fetch_live_price` —, NUNCA o ``precoMedio`` dele, NUNCA o preço do
-dia em que ele entrou. Usar o preço dele faria o clone "lucrar" o movimento que já
-tinha acontecido antes de sabermos: é exatamente o bug que as tasks 035/044/047
-desenterraram (o "+6" virou +9 quando a entrada passou a ser o preço de verdade). O
-``precoMedio`` dele é gravado no ledger SÓ como campo de auditoria — a prova de que
-NÃO é ele que entra na conta.
+**Por que esse desenho é mais honesto.** Começando do zero e só com evento futuro, o
+clone não tem como creditar movimento que já aconteceu — que é justamente a família
+de bug que dominou o dia (tasks 035/044/047, o "+6" que virou +9 quando a entrada
+passou a ser o preço de verdade).
+
+**O CAPITAL é PARÂMETRO, sem default inventado (task 056).** Enquanto o Samyr não
+disser o valor, o clone fica ARMADO e PARADO — e diz isso, em vez de estrear com um
+número chutado (não é o aporte de 70k dele). Configurado via
+:func:`configurar_capital` (ou o env ``CLONE_ERICK_CAPITAL``), configurar (re)arma a
+baseline: a ativação recomeça a história ali.
+
+**A REGRA INEGOCIÁVEL do preço.** O preço de entrada do clone é o preço REAL do
+instante em que NÓS detectamos a mudança — via :func:`live_price.fetch_live_price`
+—, NUNCA o ``precoMedio`` dele, NUNCA o preço do dia em que ele entrou. O
+``precoMedio`` dele é gravado no ledger SÓ como auditoria — a prova de que NÃO é ele
+que entra na conta. Teste-dente em ``test_webui_clone_erick``.
 
 **Replica o PESO, não a quantidade.** Capital diferente: a quantidade dele não
-transporta. O clone mira o ``peso_agora`` — o pct do capital que aquela posição vale
-DEPOIS da mudança — aplicado a um bankroll nominal fixo (:data:`CLONE_CAPITAL`). O
-RETORNO em % é invariante à escala do bankroll; o número só serve pra pesar as
-posições entre si.
+transporta. O clone mira o ``peso_agora`` (pct do capital DEPOIS da mudança)
+aplicado ao capital CONFIGURADO. O retorno em % é invariante à escala do capital.
 
-**A DEFASAGEM é gravada em cada operação.** A detecção é periódica (o alerta roda de
-hora em hora, e o timer diário às 09:15), então existe um atraso entre o que ele faz
-e o que a gente vê. Cada op carrega a data da mudança DELE (grosseira — ``entrada``
-por posição nova, ``atualizado`` do snapshot para os ajustes) contra a data/preço da
-NOSSA entrada, e a defasagem em dias. É esse campo que separa "seguir o Erick" de
-"ter feito o que o Erick fez". Sem ele o clone mente a favor.
+**A DEFASAGEM é gravada em cada operação, na cadência REAL.** A detecção roda a cada
+HORA (task 053 — não mais o diário 09:15), então o atraso máximo entre o que ele faz
+e o que a gente vê caiu de ~24h pra ~1h. Cada op grava o instante EXATO da nossa
+detecção (``ts``, com hora) contra a data (grosseira) da mudança dele; nenhum piso de
+24h/09:15 é assumido. É esse campo que separa "seguir o Erick" de "ter feito o que o
+Erick fez".
 
-O saldo é sempre DERIVADO do ledger append-only (mesma disciplina da carteira
-virtual do scan, DA-155): :func:`replay` relê as operações do zero; nunca há um saldo
-persistido à parte pra divergir. E o resumo declara os TRÊS estados (DA-157): tem
-número / não tem mudança ainda / detectou mas sem cotação — "amostra insuficiente"
-nunca é "0%" disfarçado.
+O saldo é sempre DERIVADO do ledger append-only (disciplina da carteira virtual do
+scan, DA-155): :func:`replay` relê as operações do zero. O resumo declara os estados
+(DA-157): armado / sem mudança ainda / detectou sem cotação / tem número —
+"amostra insuficiente" nunca é "0%" disfarçado, e "armado" nunca é "rendeu 0".
 """
 
 from __future__ import annotations
@@ -44,26 +56,83 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-# Bankroll NOMINAL do clone. NÃO é o dinheiro dele nem o nosso — é só o escalador que
-# transforma "peso (pct do capital)" em tamanho de posição. O retorno em % que o
-# resumo reporta é invariante a este número; ele existe só pra as posições terem
-# peso relativo entre si. 70000 casa com o `aporteInicial` do snapshot dele por
-# conveniência de leitura, não porque o valor importe.
-CLONE_CAPITAL = 70000.0
+from tradingagents.webui import alertas_tg as A
 
-# Só-DM, conteúdo de assinatura: o ledger é dado nosso (operações de paper), mora no
-# runtime como o resto do estado dos alertas — nunca no repo.
+# Env pelo qual o serviço pode injetar o capital (o Samyr define o valor). NÃO há
+# default: capital ausente = clone armado e parado.
+_CAPITAL_ENV = "CLONE_ERICK_CAPITAL"
+
 _MESES = {"jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
           "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12}
 
 
-def _base_dir() -> Path:
-    return Path(os.environ.get("CLONE_ERICK_DIR")
+def _base_dir(dir: str | os.PathLike | None = None) -> Path:
+    return Path(dir) if dir else Path(os.environ.get("CLONE_ERICK_DIR")
                 or (Path.home() / ".tradingagents" / "clone-erick"))
 
 
-def ledger_path() -> Path:
-    return _base_dir() / "operacoes.jsonl"
+def ledger_path(dir: str | os.PathLike | None = None) -> Path:
+    return _base_dir(dir) / "operacoes.jsonl"
+
+
+def _estado_path(dir: str | os.PathLike | None = None) -> Path:
+    return _base_dir(dir) / "estado.json"
+
+
+# ── estado do clone: capital + baseline (a carteira dele na ativação) ───────────
+def _carrega_estado(dir: str | os.PathLike | None = None) -> dict[str, Any]:
+    p = _estado_path(dir)
+    if not p.exists():
+        return {}
+    with contextlib.suppress(OSError, ValueError):
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    return {}
+
+
+def _grava_estado(est: dict[str, Any], dir: str | os.PathLike | None = None) -> None:
+    p = _estado_path(dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(est, ensure_ascii=False), encoding="utf-8")
+
+
+def _capital_de(est: dict[str, Any]) -> float | None:
+    """O capital CONFIGURADO — do estado, ou do env como semente; nunca um default.
+    Valor não-positivo ou ilegível é tratado como ausente (armado)."""
+    cru = est.get("capital")
+    if cru is None:
+        cru = os.environ.get(_CAPITAL_ENV)
+    try:
+        v = float(cru)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def configurar_capital(valor: float, *, dir: str | os.PathLike | None = None) -> float:
+    """Define o capital do clone e (RE)ARMA a baseline — ligar o clone recomeça a
+    história ali: a próxima leitura vira a baseline (zero operação) e só o que mudar
+    DEPOIS conta. ``valor`` tem de ser positivo."""
+    v = float(valor)
+    if v <= 0:
+        raise ValueError("capital do clone tem de ser positivo")
+    est = _carrega_estado(dir)
+    est.update({"capital": v, "baseline": None,
+                "ativado_em": datetime.now(timezone.utc).isoformat()})
+    _grava_estado(est, dir)
+    return v
+
+
+def estado(dir: str | os.PathLike | None = None) -> dict[str, Any]:
+    """Resumo do estado operacional do clone, sem inventar número."""
+    est = _carrega_estado(dir)
+    cap = _capital_de(est)
+    return {
+        "estado": "ativo" if cap is not None else "armado",
+        "capital": cap,
+        "ativado_em": est.get("ativado_em"),
+        "baseline_definida": bool(est.get("baseline")),
+    }
 
 
 # ── datas & defasagem ──────────────────────────────────────────────────────────
@@ -80,17 +149,16 @@ def _parse_data_dele(txt: str | None) -> tuple[date | None, str]:
 
     Ele escreve "jul/2026" (mês) na ``entrada`` e "27/08/2026" (dia) no
     ``atualizado``. A granularidade viaja junto porque é honestidade: uma defasagem
-    calculada contra um mês inteiro não é a mesma coisa que contra um dia.
+    contra um mês inteiro não é a mesma coisa que contra um dia. (A nossa detecção,
+    por outro lado, é EXATA — a cadência horária dá o instante, gravado em ``ts``.)
     """
     s = (txt or "").strip().lower()
     if not s or s == "-":
         return None, "ausente"
-    # dd/mm/aaaa
     with contextlib.suppress(Exception):
         if s.count("/") == 2 and s.replace("/", "").isdigit():
             d, m, a = (int(x) for x in s.split("/"))
             return date(a, m, d), "dia"
-    # mmm/aaaa (mês por extenso abreviado)
     if "/" in s:
         mes_txt, _, ano_txt = s.partition("/")
         mes = _MESES.get(mes_txt[:3])
@@ -121,7 +189,7 @@ def _preco_real(ticker: str, classe: str | None) -> dict[str, Any] | None:
     return fetch_live_price(sym)
 
 
-PrecoFn = Callable[[str, str | None], "dict[str, Any] | None"]
+PrecoFn = Callable[[str, "str | None"], "dict[str, Any] | None"]
 
 
 # ── uma mudança detectada → uma operação de clone ───────────────────────────────
@@ -129,9 +197,9 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
                   preco_info: dict[str, Any] | None) -> dict[str, Any]:
     """Constrói a operação de paper a partir de UMA mudança detectada + o preço REAL.
 
-    Função pura (sem I/O) de propósito: é aqui que a regra "o preço é o REAL da
-    detecção, nunca o ``precoMedio`` dele" vive, e é aqui que o teste-dente morde.
-    ``preco_info`` é o retorno de :func:`live_price.fetch_live_price` (ou ``None``).
+    Função pura (sem I/O): é aqui que a regra "o preço é o REAL da detecção, nunca o
+    ``precoMedio`` dele" vive, e é aqui que o teste-dente morde. ``preco_info`` é o
+    retorno de :func:`live_price.fetch_live_price` (ou ``None``).
     """
     ticker = str(m.get("ticker") or "").upper()
     classe = m.get("classe") or ""
@@ -151,9 +219,9 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
         if preco is not None and preco <= 0:
             preco = None
 
-    # Data da mudança DELE: pra uma posição nova, a `entrada` dela é o sinal mais
-    # específico; pros ajustes (aumentou/reduziu/saiu) não há data por-operação, então
-    # o `atualizado` do snapshot é o melhor proxy do "quando ele mexeu".
+    # Data da mudança DELE: pra posição nova, a `entrada` dela é o sinal mais
+    # específico; pros ajustes (aumentou/reduziu/saiu) não há data por-operação,
+    # então o `atualizado` do snapshot é o melhor proxy do "quando ele mexeu".
     if tipo == "entrou":
         base_txt, base_nome = dele.get("entrada"), "entrada"
     else:
@@ -178,7 +246,8 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
         "preco_rotulo": (preco_info or {}).get("rotulo"),
         "incluido": incluido,
         "motivo_exclusao": None if incluido else "sem cotação real na detecção",
-        # ── DEFASAGEM (o que separa seguir de ter feito) ──
+        # ── DEFASAGEM (o que separa seguir de ter feito) — detecção EXATA (ts,
+        # cadência horária) contra a data grosseira dele. ──
         "dele_entrada": dele.get("entrada"),
         "dele_atualizado": atualizado,
         "defasagem_base": base_nome,
@@ -186,7 +255,7 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
         "defasagem_dias": _defasagem(d_det, d_dele),
         # ── AUDITORIA: o preço DELE fica gravado SÓ pra provar que não é ele que
         # entra na conta. Se um dia alguém trocar `preco` por isto, o teste-dente
-        # (test_clone_erick) quebra. ──
+        # quebra. ──
         "dele_precoMedio": dele.get("precoMedio"),
         "qtd_antes_dele": m.get("qtd_antes"),
         "qtd_agora_dele": m.get("qtd_agora"),
@@ -197,12 +266,12 @@ def op_de_mudanca(m: dict[str, Any], atual: dict[str, Any] | None,
 def registrar(mudou: list[dict[str, Any]], atual: dict[str, Any] | None, *,
               preco_fn: PrecoFn | None = None,
               path: str | os.PathLike | None = None) -> list[dict[str, Any]]:
-    """Transforma cada mudança detectada numa operação e ANEXA ao ledger.
+    """Transforma cada mudança detectada numa operação e ANEXA ao ledger (baixo
+    nível — não decide ativação; quem gatilha é :func:`observar`).
 
-    O caixa nunca vira operação (não é posição — é o residual de toda compra/venda,
-    mesma regra do ``formata_carteira``). ``preco_fn(ticker, classe)`` é injetável
-    pra o teste poder cravar um preço REAL diferente do ``precoMedio`` dele; o
-    default busca a cotação viva. Devolve as operações gravadas.
+    O caixa nunca vira operação (não é posição — é o residual de toda compra/venda).
+    ``preco_fn(ticker, classe)`` é injetável pra o teste cravar um preço REAL
+    diferente do ``precoMedio`` dele; o default busca a cotação viva.
     """
     if not mudou:
         return []
@@ -236,19 +305,58 @@ def carrega_ledger(path: str | os.PathLike | None = None) -> list[dict[str, Any]
     return out
 
 
-# ── saldo DERIVADO do ledger (replay) ───────────────────────────────────────────
-def replay(ops: list[dict[str, Any]],
-           precos_atuais: dict[str, float] | None = None) -> dict[str, Any]:
-    """Relê o ledger do zero e devolve o estado da carteira-espelho.
+# ── o gatilho: observar uma leitura e clonar o que mudou DESDE a ativação ────────
+def observar(atual: dict[str, Any] | None, *, preco_fn: PrecoFn | None = None,
+             dir: str | os.PathLike | None = None) -> dict[str, Any]:
+    """Consome UMA leitura da carteira dele e devolve o que o clone fez com ela.
 
-    Dimensiona cada posição pelo PESO ALVO aplicado ao bankroll nominal
-    (:data:`CLONE_CAPITAL`) e realiza PnL sempre contra os NOSSOS preços reais de
-    entrada — nunca contra o preço dele. ``precos_atuais`` (ticker→preço) marca as
-    posições abertas a mercado pro não-realizado; ausente, marca a custo (0 de
-    não-realizado, honesto: sem cotação não se afirma lucro).
+    Três caminhos, nesta ordem:
+      • **ARMADO** (sem capital): não faz nada — nem baseline. O clone só liga
+        quando o Samyr definir o capital; até lá é "armado, aguardando capital".
+      • **PRIMEIRA leitura pós-ativação** (capital definido, sem baseline): grava a
+        baseline e NÃO opera — é aqui que "nasce vazia, não replica o que ele já
+        tem" acontece, reusando a semântica do ``mudancas`` (primeira leitura = []).
+      • **Leituras seguintes**: ``mudancas(baseline, atual)`` → operações no ledger,
+        e a baseline avança pra ``atual``.
+    """
+    if not atual or atual.get("degradado"):
+        # leitura ruim/requentada não move o clone (mesma disciplina do alerta).
+        return {"estado": estado(dir)["estado"], "ops": [],
+                "motivo": "leitura ausente ou degradada"}
+    est = _carrega_estado(dir)
+    cap = _capital_de(est)
+    if cap is None:
+        return {"estado": "armado", "ops": [],
+                "motivo": "clone armado, aguardando o capital que o Samyr vai "
+                          "definir — nenhuma operação até lá"}
+    carteira_atual = atual.get("carteira")
+    if not est.get("baseline"):
+        est["baseline"] = carteira_atual
+        est.setdefault("ativado_em", datetime.now(timezone.utc).isoformat())
+        _grava_estado(est, dir)
+        return {"estado": "ativo", "ops": [],
+                "nota": "baseline da ativação gravada — a carteira nasce vazia, as "
+                        "posições atuais dele NÃO são replicadas"}
+    mudou = A.mudancas({"carteira": est.get("baseline")}, atual)
+    ops = registrar(mudou, atual, preco_fn=preco_fn, path=ledger_path(dir))
+    est["baseline"] = carteira_atual
+    _grava_estado(est, dir)
+    return {"estado": "ativo", "ops": ops}
+
+
+# ── saldo DERIVADO do ledger (replay) ───────────────────────────────────────────
+def replay(ops: list[dict[str, Any]], capital: float,
+           precos_atuais: dict[str, float] | None = None) -> dict[str, Any]:
+    """Relê o ledger do zero e devolve o estado da carteira-espelho, dado o
+    ``capital`` CONFIGURADO (sem default: quem chama tem de saber o valor).
+
+    Dimensiona cada posição pelo PESO ALVO aplicado ao capital e realiza PnL sempre
+    contra os NOSSOS preços reais de entrada — nunca contra o preço dele.
+    ``precos_atuais`` (ticker→preço) marca as abertas a mercado; ausente, marca a
+    custo (0 de não-realizado, honesto: sem cotação não se afirma lucro).
     """
     precos_atuais = precos_atuais or {}
-    cap = CLONE_CAPITAL
+    cap = float(capital)
     cash = cap
     pos: dict[str, dict[str, float]] = {}
     realizado = 0.0
@@ -310,7 +418,7 @@ def replay(ops: list[dict[str, Any]],
                       "preco_atual": pa}
     equity = cash + valor_posicoes
     return {
-        "capital_nominal": cap,
+        "capital": cap,
         "cash": cash,
         "realizado": realizado,
         "nao_realizado": nao_realizado,
@@ -321,25 +429,28 @@ def replay(ops: list[dict[str, Any]],
     }
 
 
-# ── resumo com os TRÊS estados (DA-157) ─────────────────────────────────────────
-def resumo(ops: list[dict[str, Any]],
+# ── resumo com os estados honestos (DA-157 + o estado ARMADO da task 056) ───────
+def resumo(ops: list[dict[str, Any]], capital: float | None,
            precos_atuais: dict[str, float] | None = None) -> dict[str, Any]:
-    """Quanto o clone renderia até hoje — ou por que ainda não dá pra dizer.
-
-    Nunca devolve "0%" travestido de "sem dado" (DA-157): distingue "não detectou
-    mudança ainda" de "detectou mas sem cotação real" de "tem número".
-    """
+    """Quanto o clone rendeu (do zero, com os eventos reais) — ou por que ainda não
+    dá pra dizer. Nunca "0%" travestido de "sem dado" (DA-157), e "armado" nunca é
+    "rendeu 0" (task 056)."""
+    if capital is None:
+        return {"estado": "armado",
+                "motivo": "clone armado, aguardando o capital do Samyr — sem "
+                          "capital não há carteira nem retorno a reportar"}
     if not ops:
         return {"estado": "amostra_insuficiente",
-                "motivo": "nenhuma mudança detectada ainda — o clone só abre "
-                          "posição quando a carteira dele muda entre duas leituras"}
+                "motivo": "clone ativo, mas nenhuma mudança detectada desde a "
+                          "ativação — o track record começa do zero e cresce com "
+                          "os eventos reais"}
     incluidas = [o for o in ops if o.get("incluido") and o.get("preco")]
     if not incluidas:
         return {"estado": "amostra_insuficiente",
                 "motivo": f"{len(ops)} mudança(s) detectada(s), mas nenhuma com "
                           "cotação real no instante da detecção — sem preço nosso "
                           "não se afirma retorno"}
-    r = replay(ops, precos_atuais)
+    r = replay(ops, capital, precos_atuais)
     return {"estado": "ok", **r,
             "n_ops_total": len(ops),
             "n_ops_sem_preco": len(ops) - len(incluidas)}

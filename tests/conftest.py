@@ -120,6 +120,9 @@ def _isola_clone_erick(monkeypatch, tmp_path_factory):
     from tradingagents.webui import clone_erick as _ce
 
     monkeypatch.setenv("CLONE_ERICK_DIR", str(tmp_path_factory.mktemp("clone-erick")))
+    # capital NÃO semeado por default: o clone fica ARMADO nos testes que não o
+    # configuram de propósito (task 056) — nenhum começa com um número chutado.
+    monkeypatch.delenv("CLONE_ERICK_CAPITAL", raising=False)
     monkeypatch.setattr(_ce, "_preco_real", lambda ticker, classe: None)
 
 
