@@ -719,6 +719,26 @@ def _chave(e: dict[str, Any]) -> str:
 # 1-2-3 do Stormer (DA-081) — outro detector, outro stop, outro alvo.
 SETUPS_DO_LEDGER = ("123", "storm")
 
+
+def _estrutura_do_gatilho(e: dict[str, Any]) -> tuple:
+    """A ESTRUTURA por trás de um gatilho — o que NÃO muda enquanto o padrão vive.
+
+    :func:`_chave` identifica a LINHA (ts + gatilho); esta identifica o PADRÃO:
+    setup, ativo, frame, direção e o STOP — o nível estrutural (ponto 2 no Storm,
+    ponto 3 + folga no 1-2-3), que não se move enquanto o padrão existe. Dois
+    gatilhos com a mesma estrutura são a MESMA ordem sendo reajustada, não dois
+    trades. Foi lendo o ponto 3 num candle ainda aberto que o Storm diário do BTC
+    virou 12 linhas (30-31/08/2026): o gatilho perseguia a máxima do dia, o stop
+    ficou parado em 76.909,35, e o track record cobrou 12 × −1R por UM padrão
+    (task 20260902-040). A dedup do ``scan_portfolio`` passa a olhar as duas chaves.
+    """
+    try:
+        sl = round(float(e.get("sl")), 6)
+    except (TypeError, ValueError):
+        sl = None
+    return (_setup_da_entrada(e), e.get("ticker"), str(e.get("frame") or "1d"),
+            e.get("direction"), sl)
+
 # Gate de amostra — DO TRACK RECORD, importado por ``execucao.confiabilidade`` (não
 # uma segunda constante lá: dois limiares com valores diferentes seria a lista
 # dizendo "n insuficiente" e o card dizendo "operável" sobre a MESMA amostra —

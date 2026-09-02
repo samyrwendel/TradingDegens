@@ -62,6 +62,7 @@ from tradingagents.webui.resume_store import ActiveRunStore
 from tradingagents.webui.scanner import (
     _BANCA_PADRAO,
     ScanLog,
+    _estrutura_do_gatilho,
     _setup_da_entrada,
     ordenar_e_resumir,
     scan_verdicts,
@@ -2821,8 +2822,14 @@ class AnalysisRunner:
         na chave o segundo seria descartado como repetido do primeiro (ou pior: com
         gatilhos iguais por coincidência, um sumiria).
         """
+        entradas = self.scan_log.entries()
         known = {(_setup_da_entrada(e), e.get("ticker"), e.get("frame"), e.get("trigger"))
-                 for e in self.scan_log.entries()}
+                 for e in entradas}
+        # SEGUNDA CHAVE — a ESTRUTURA (setup, ativo, frame, direção, stop). O gatilho
+        # lido de um candle ainda aberto muda a cada passada e furava a chave acima:
+        # um padrão, 12 linhas (task 20260902-040). Um padrão que já está no ledger
+        # não re-entra com outro gatilho — é a mesma ordem, reajustada.
+        estruturas = {_estrutura_do_gatilho(e) for e in entradas}
         novos = 0
         sem_dado = 0
         for s in result.get("ativos", []):
@@ -2832,28 +2839,33 @@ class AnalysisRunner:
                 # passada (:meth:`ScanLog.record_pass`).
                 if f.get("estado") == "sem_dado":
                     sem_dado += 1
+                linha = {**f, "ticker": s["ticker"], "setup": "123"}
                 if (f.get("estado") == "em_gatilho"
-                        and ("123", s["ticker"], f.get("frame"), f.get("trigger")) not in known):
-                    self.scan_log.record({**f, "ticker": s["ticker"], "setup": "123"})
+                        and ("123", s["ticker"], f.get("frame"), f.get("trigger")) not in known
+                        and _estrutura_do_gatilho(linha) not in estruturas):
+                    self.scan_log.record(linha)
                     known.add(("123", s["ticker"], f.get("frame"), f.get("trigger")))
+                    estruturas.add(_estrutura_do_gatilho(linha))
                     novos += 1
                 # O STORM loga o SEU gatilho, com a SUA identidade — e só quando o
                 # Éden autoriza: gatilho que a regra proíbe operar não é trade, e
                 # jogá-lo no ledger contaminaria a taxa de acerto com o que
                 # ninguém teria operado.
                 st = f.get("storm") or {}
+                # ``st["entrada"]`` é o RÓTULO da leitura escolhida
+                # (``ponto2``/``ponto3``/``ponto2e3``, de :func:`_storm_row` —
+                # o que a célula do scan mostra), não um preço. O ledger
+                # espera preço em ``entrada`` (:func:`_pnl_paper_trade`): sem
+                # essa troca o PnL em USD do Storm saía sempre em branco
+                # (task 20260902-035). O preço da MESMA leitura é ``trigger``.
+                linha_st = {**st, "ticker": s["ticker"], "frame": f.get("frame"),
+                            "setup": "storm", "entrada": st.get("trigger")}
                 if (st.get("estado") == "em_gatilho" and st.get("opera")
-                        and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known):
-                    # ``st["entrada"]`` é o RÓTULO da leitura escolhida
-                    # (``ponto2``/``ponto3``/``ponto2e3``, de :func:`_storm_row` —
-                    # o que a célula do scan mostra), não um preço. O ledger
-                    # espera preço em ``entrada`` (:func:`_pnl_paper_trade`): sem
-                    # essa troca o PnL em USD do Storm saía sempre em branco
-                    # (task 20260902-035). O preço da MESMA leitura é ``trigger``.
-                    self.scan_log.record({**st, "ticker": s["ticker"],
-                                          "frame": f.get("frame"), "setup": "storm",
-                                          "entrada": st.get("trigger")})
+                        and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known
+                        and _estrutura_do_gatilho(linha_st) not in estruturas):
+                    self.scan_log.record(linha_st)
                     known.add(("storm", s["ticker"], f.get("frame"), st.get("trigger")))
+                    estruturas.add(_estrutura_do_gatilho(linha_st))
                     novos += 1
         return {"gatilhos": novos, "sem_dado": sem_dado,
                 "lidos": len(result.get("ativos", []))}

@@ -33,6 +33,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -2263,7 +2264,8 @@ def _storm_estado(h, lo, c, idx_p3: int, trigger: float, compra: bool) -> str:
     return "acionado" if last_close < trigger else "rompeu_retracou"
 
 
-def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
+def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d",
+               ultima_em_formacao: bool = False) -> StormPattern | None:
     """O 1-2-3 Storm mais RECENTE em qualquer direção, lido em 3 candles seguidos.
 
     Compra (fundo) — as três condições da spec, nesta ordem:
@@ -2280,6 +2282,16 @@ def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
     — são dois pontos de entrada do MESMO padrão, e cada um tem o seu gatilho e o
     seu estado. A task 022 colapsava os dois no mais conservador (o máximo dos dois
     na compra); colapsar escondia justamente a leitura que entra antes.
+
+    ``ultima_em_formacao=True`` diz que a ÚLTIMA barra ainda está sendo escrita
+    (leitura ao vivo): ela pode ROMPER um gatilho — é o que ``_storm_estado`` lê
+    nela — mas NÃO pode ser o ponto 3. O ponto 3 é um candle que FECHOU acima do
+    fechamento do ponto 2 (spec do Stormer; é a condição 3 acima), e a máxima de
+    um candle aberto é um número que muda a cada tick: o gatilho "rompimento da
+    máxima do ponto 3" lido dela PERSEGUE o preço. Medido no ledger (task
+    20260902-040): um único padrão diário do BTC (p2 = 28/08/2026, stop 76.909,35)
+    virou 12 linhas "em_gatilho" entre 30 e 31/08, cada uma com o gatilho a
+    0,03-0,40% da máxima corrente do dia — e 12 × −1R no track record.
     """
     if len(df) < 3:
         return None
@@ -2288,7 +2300,10 @@ def _storm_123(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> StormPattern | None:
     lo = df["Low"].astype(float).values
     c = df["Close"].astype(float).values
     best: tuple[int, int, int, str] | None = None
-    for i in range(len(df) - 2):
+    # O ponto 3 (índice i+2) só pode ser uma barra FECHADA: com a última em
+    # formação, o último índice elegível recua um (ver docstring).
+    ultimo_i = len(df) - (3 if ultima_em_formacao else 2)
+    for i in range(ultimo_i):
         a, b, d = i, i + 1, i + 2
         if (c[a] >= o[a]                                  # 1. alta ou lateral
                 and lo[b] < lo[a] and lo[b] < lo[d]       # 2. o fundo
@@ -2502,6 +2517,24 @@ def _storm_qualidade(
                        f"{onde} da MME {_STORM_EMA_LENTA}")}
 
 
+def _ultima_barra_em_formacao(curr_date: str) -> bool:
+    """A última barra da série é a que está SENDO ESCRITA?
+
+    Numa leitura AO VIVO (``curr_date`` é hoje, em UTC, ou depois) a fonte devolve
+    a barra corrente — o diário de hoje no Yahoo, o kline aberto na Binance e no
+    yfinance intradiário. Numa data passada a última barra daquele dia já fechou.
+    É a mesma régua de ``intraday._load_crypto_intraday`` (``is_live`` =
+    ``as_of.date() >= today``). Custo declarado: no DIÁRIO de uma AÇÃO, depois do
+    fechamento do pregão a barra de hoje já está completa e ainda assim só vira
+    ponto 3 amanhã — um dia de atraso, contra um gatilho que persegue o preço.
+    Data ilegível cai no lado seguro (não inventa ponto 3).
+    """
+    try:
+        return pd.to_datetime(curr_date).date() >= datetime.now(timezone.utc).date()
+    except (ValueError, TypeError):
+        return True
+
+
 def build_storm_plan(
     symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
 ) -> dict[str, Any]:
@@ -2516,7 +2549,7 @@ def build_storm_plan(
     price = round(float(df["Close"].astype(float).iloc[-1]), 2) if len(df) else None
     as_of = df["Date"].iloc[-1].strftime(fmt) if len(df) else None
     eden = _eden(df)
-    pat = _storm_123(df, fmt)
+    pat = _storm_123(df, fmt, ultima_em_formacao=_ultima_barra_em_formacao(curr_date))
     col_l = f"EMA{_STORM_EMA_LENTA}"
     ema_lenta_no_p3 = None
     if pat is not None and eden.get("disponivel") and col_l in df.columns:
