@@ -1,0 +1,14 @@
+[Unit]
+Description=Timer diário — alerta de mudança na carteira do Erick (task 20260902-051)
+
+[Timer]
+# 09:15 Manaus (GMT-4) = 13:15 UTC. Logo depois do alert-contas (09:00) — a fonte
+# do Erick é atualizada à mão por ele e o cache local já tem TTL de 24h
+# (tradingagents/dataflows/erick_carteira.py), então um horário fixo por dia basta;
+# bater de hora em hora seria abusar de servidor alheio pra reler o mesmo byte.
+OnCalendar=*-*-* 13:15:00 UTC
+Persistent=true
+Unit=tg-alertas-carteira.service
+
+[Install]
+WantedBy=timers.target
