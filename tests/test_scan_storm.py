@@ -240,12 +240,22 @@ def test_o_api_chart_devolve_o_storm_quando_o_metodo_e_storm(tmp_path, monkeypat
     assert v["actionable"].get("storm", {}).get("opera") is True, v["actionable"]
     assert chamadas == ["4h"], ("o Storm é lido no frame PEDIDO", chamadas)
 
-    # E NUM MÉTODO QUE NÃO É STORM ELE TAMBÉM VEM (task 033, supersede a regra antiga
-    # de "a leitura não se cola em quem não a pediu"). Aquela regra produziu o defeito
-    # que o Samyr reportou: numa análise Padrão o Storm não estava desligado, estava
-    # AUSENTE — sem payload não há camada, e sem camada não há como anunciar nem ligar.
-    # Quem decide o que é DESENHADO continua sendo a camada, na tela (DA-088).
+    # NUM MÉTODO QUE NÃO É STORM, com a flag da tela no padrão da DA-184 (Storm123
+    # desligado), ele NÃO viaja — nem a leitura roda (chamadas fica vazia). A regra
+    # da task 033 (Storm sempre ao lado de qualquer método) só vale com a flag ON.
     chamadas.clear()
     v2 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
-    assert (v2["actionable"] or {}).get("storm", {}).get("opera") is True, v2["actionable"]
+    assert (v2["actionable"] or {}).get("storm") is None, v2["actionable"]
+    assert chamadas == [], ("flag OFF: o Storm nem é lido pra um método que não é o dele", chamadas)
+
+    # Com a flag LIGADA (o dono religou, DA-184) volta a regra da task 033: E NUM
+    # MÉTODO QUE NÃO É STORM ELE TAMBÉM VEM — supersede "a leitura não se cola em
+    # quem não a pediu", que produziu o defeito que o Samyr reportou (numa análise
+    # Padrão o Storm não estava desligado, estava AUSENTE — sem payload não há
+    # camada, e sem camada não há como anunciar nem ligar). Quem decide o que é
+    # DESENHADO continua sendo a camada, na tela (DA-088).
+    r.estrategias_set("storm", True)
+    chamadas.clear()
+    v3 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
+    assert (v3["actionable"] or {}).get("storm", {}).get("opera") is True, v3["actionable"]
     assert chamadas == ["4h"], ("no frame pedido, também fora da run do Storm", chamadas)

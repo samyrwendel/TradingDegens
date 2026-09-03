@@ -730,6 +730,26 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 self._send_json({"ok": True, "tickers": tickers})
                 return
+            if path == "/api/estrategias":
+                # LIGA/DESLIGA um setup na TELA (DA-184): SÓ-DONO, mesma gramática da
+                # watchlist. Leitura é pública (vem em GET /api/config); só a EDIÇÃO
+                # é gateada — é o dono quem decide o que a tela de todo mundo mostra.
+                if not self._owner_or_403():
+                    return
+                body = self._read_json_body()
+                nome = (body.get("setup") or "").strip().lower()
+                ativo = body.get("ativo")
+                if not nome or not isinstance(ativo, bool):
+                    self._send_json(
+                        {"error": "informe setup e ativo (bool)"}, 400)
+                    return
+                try:
+                    estrategias = self.runner.estrategias_set(nome, ativo)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                self._send_json({"ok": True, "estrategias": estrategias})
+                return
             if path == "/api/scan/paper/reset":
                 # REINICIAR a carteira virtual do paper trading (DA-155): SÓ-DONO,
                 # mesma gramática da edição da watchlist. Empurra o marco pro agora

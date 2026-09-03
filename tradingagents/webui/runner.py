@@ -61,6 +61,7 @@ from tradingagents.webui.report_sanitizer import sanitize_result
 from tradingagents.webui.resume_store import ActiveRunStore
 from tradingagents.webui.scanner import (
     _BANCA_PADRAO,
+    SETUPS_DO_LEDGER,
     ScanLog,
     _estrutura_do_gatilho,
     _setup_da_entrada,
@@ -69,6 +70,7 @@ from tradingagents.webui.scanner import (
     scan_watchlist,
 )
 from tradingagents.webui.store import (
+    EstrategiaStore,
     HistoryStore,
     PaperWalletStore,
     ScanSnapshotStore,
@@ -675,7 +677,7 @@ def leitura_multiframe(ticker: str, date: str, asset_type: str, method: str,
 
 
 def plano_com_storm(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
-                    method: str = "padrao") -> dict[str, Any]:
+                    method: str = "padrao", *, incluir_storm: bool = True) -> dict[str, Any]:
     """O plano da tela: família Padrão/Erick + a leitura do Storm SEMPRE ao lado.
 
     O Storm viajava só na run do método dele. O efeito na tela era o oposto do que
@@ -689,9 +691,15 @@ def plano_com_storm(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
     pede — **desenhar só o método aberto** — e ainda assim ANUNCIAR que a outra
     existe, com um clique pra ligar. Disponível-e-desligado é um estado; ausente é
     outro, e só um deles o usuário consegue desfazer.
+
+    ``incluir_storm=False`` (DA-184): a flag de estratégia da tela desligou o
+    Storm123 — sem a chave no payload, o card, a camada e o aviso da DA-099 não
+    têm o que ler (todos são condicionados à PRESENÇA de ``storm`` no plano, não a
+    uma segunda checagem espalhada pela tela). O detector em si nem roda.
     """
     p = dict(fetch_actionable_plan(ticker, date, timeframe, method) or {})
-    p["storm"] = fetch_storm_plan(ticker, date, timeframe)
+    if incluir_storm:
+        p["storm"] = fetch_storm_plan(ticker, date, timeframe)
     return p
 
 
@@ -953,6 +961,10 @@ class AnalysisRunner:
         # leitura) + log append-only dos gatilhos flagrados (track record $0).
         self.watchlist_store = WatchlistStore(self.store.base, store)
         self.scan_log = ScanLog(self.store.base / "scans.jsonl")
+        # Flag de estratégia por setup na TELA (DA-184), owner-only — 123 ligado,
+        # Storm123 desligado por padrão. Nunca lida pelo motor (scan_agendado,
+        # dry-run MT5): só o servidor a consulta pra moldar o que devolve ao front.
+        self.estrategia_store = EstrategiaStore(self.store.base)
         # O MARCO da carteira virtual do paper trading (DA-155) — reset é mover
         # a fronteira pro AGORA, nunca apagar o ledger acima.
         self.paper_wallet = PaperWalletStore(self.store.base)
@@ -1157,7 +1169,12 @@ class AnalysisRunner:
         try:
             chart = fetch_price_chart(run.ticker, run.date, run.timeframe,
                                       "storm" if storm else "padrao")
-            plan = plano_com_storm(run.ticker, run.date, run.timeframe, "padrao")
+            # A flag da tela (DA-184) só esconde o Storm quando ele viaja como
+            # LEITURA AO LADO de outro método; uma run PEDIDA como storm123 (ação
+            # explícita, não o chip escondido do launcher) sempre o recebe — senão
+            # a própria run que o pediu ficaria sem o que desenhar.
+            plan = plano_com_storm(run.ticker, run.date, run.timeframe, "padrao",
+                                   incluir_storm=storm or self._storm_visivel())
             run.result = {
                 "verdict": None,
                 "final_decision": "",
@@ -1350,9 +1367,11 @@ class AnalysisRunner:
             )
             # O Storm entra AQUI também: sem ele no payload, uma análise Padrão ou
             # Erick não tinha nem o botão da camada — a leitura não estava desligada,
-            # estava ausente (ver :func:`plano_com_storm`).
+            # estava ausente (ver :func:`plano_com_storm`). Com a flag da tela
+            # desligada (DA-184) ele volta a ficar ausente de propósito.
             run.result["actionable"] = plano_com_storm(
-                run.ticker, run.date, run.timeframe, method
+                run.ticker, run.date, run.timeframe, method,
+                incluir_storm=self._storm_visivel(),
             )
             # Calendário de resultados tri-state pra QUALQUER método (task
             # 20260901-044) — mesma leitura que o Erick já consulta como fator
@@ -2766,6 +2785,56 @@ class AnalysisRunner:
     def watchlist_set(self, tickers: list) -> list[dict[str, Any]]:
         return self.watchlist_store.set([str(t) for t in tickers])
 
+    def estrategias_get(self) -> dict[str, bool]:
+        """Flag de estratégia por setup (DA-184) — leitura PÚBLICA: é o que decide
+        se o front desenha o chip/card/camada/coluna daquele setup, e isso a tela
+        precisa saber mesmo sem o dono logado."""
+        return self.estrategia_store.get()
+
+    def estrategias_set(self, nome: str, ativo: bool) -> dict[str, bool]:
+        """Liga/desliga um setup na tela — SÓ-DONO (o servidor gateia; ver
+        ``server.py``). Não toca o motor: scan agendado e dry-run MT5 continuam
+        gravando o setup no ledger com a flag desligada."""
+        return self.estrategia_store.set(nome, ativo)
+
+    def _setups_visiveis(self) -> frozenset[str]:
+        return frozenset(k for k, v in self.estrategia_store.get().items() if v)
+
+    def _storm_visivel(self) -> bool:
+        return "storm" in self._setups_visiveis()
+
+    def _scan_para_tela(self, result: dict[str, Any]) -> dict[str, Any]:
+        """O que o SERVIDOR devolve ao front (DA-184) — filtro de SAÍDA, não de
+        motor: quando chega aqui o scan já rodou, o ledger já gravou o que tinha
+        que gravar (:meth:`_registrar_gatilhos`) e o último conhecido em disco já
+        foi atualizado com o resultado INTEIRO (:meth:`_guardar_ultimo`). Isto só
+        molda o JSON que o cliente recebe — ligar a estratégia de novo não exige
+        nova varredura, o dado cheio segue em disco.
+
+        Recalcula ``oportunidades`` sobre o conjunto (possivelmente reduzido): uma
+        oportunidade do Storm não pode sobreviver escondida atrás de uma leitura
+        que o próprio scan não desenha mais.
+        """
+        if self._storm_visivel():
+            if "oportunidades" not in result and result.get("ativos"):
+                result = dict(result)
+                result["oportunidades"] = sinais.oportunidades(result)
+            return result
+        out = dict(result)
+        ativos = []
+        for a in (result.get("ativos") or []):
+            a2 = dict(a)
+            a2["frames"] = [{k: v for k, v in (f or {}).items() if k != "storm"}
+                            for f in (a.get("frames") or [])]
+            melhor = a.get("melhor")
+            a2["melhor"] = ({k: v for k, v in melhor.items() if k != "storm"}
+                            if isinstance(melhor, dict) else melhor)
+            ativos.append(a2)
+        out["ativos"] = ativos
+        if ativos:
+            out["oportunidades"] = sinais.oportunidades(out)
+        return out
+
     def scan_portfolio(self, date: str) -> dict[str, Any]:
         """Varre a watchlist (1d+4h+1h) — $0 de LLM, só plano determinístico.
 
@@ -2818,14 +2887,16 @@ class AnalysisRunner:
             # acima já devolveu este mesmo objeto, e regravá-lo seria I/O à toa
             # dentro do lock — sem mudar um byte do arquivo. Esta varredura é
             # COMPLETA (a watchlist inteira), e é isso que ``completa=True`` afirma.
+            # SEMPRE com o resultado INTEIRO (motor intocado, DA-184): a flag de
+            # estratégia só entra depois, ao moldar o que vai pro cliente.
             self._guardar_ultimo(result, universo=tickers, completa=True)
             # As OPORTUNIDADES (a leitura de DECISÃO da varredura) são derivadas,
             # não guardadas: o último conhecido mistura passadas e precisa
-            # recalculá-las sobre o conjunto mesclado. Aqui elas viajam no memo
-            # junto do resultado — é aritmética pura sobre ~60 linhas.
-            result["oportunidades"] = sinais.oportunidades(result)
-            self._scan_memo = (date, time.time(), result)
-            return result
+            # recalculá-las sobre o conjunto mesclado. É :meth:`_scan_para_tela`
+            # quem as computa agora — sobre o conjunto que de fato vai pro cliente.
+            tela = self._scan_para_tela(result)
+            self._scan_memo = (date, time.time(), tela)
+            return tela
 
     def _guardar_ultimo(self, result: dict[str, Any], *, universo: list[str],
                         completa: bool, sessao: str | None = None) -> None:
@@ -2987,11 +3058,13 @@ class AnalysisRunner:
         date = (date or "").strip() or timeutil.today()
         if not ticker:
             raise ValueError("ticker vazio")
-        plan = plano_com_storm(ticker, date, timeframe, method)
+        plan = plano_com_storm(ticker, date, timeframe, method,
+                               incluir_storm=self._storm_visivel())
         # O track record é fail-open: um ledger vazio ou ilegível não pode derrubar o
         # card — ele só faz o índice dizer que não há amostra, que é a verdade.
         try:
-            track = scan_verdicts(self.scan_log, date) or {}
+            track = scan_verdicts(self.scan_log, date,
+                                  visiveis=self._setups_visiveis()) or {}
             por_setup = track.get("por_setup") or {}
         except Exception:  # noqa: BLE001
             logger.warning("track record indisponível para o card de execução")
@@ -3141,12 +3214,14 @@ class AnalysisRunner:
         uma lista vazia que se leria como "não há nada em gatilho".
         """
         salvo = self.scan_snapshot.get()
-        if salvo.get("ativos"):
-            # Derivadas na SAÍDA, nunca no arquivo: o último conhecido funde
-            # passadas diferentes, e uma lista de oportunidades gravada junto
-            # descreveria o conjunto de quando foi gravada, não o de agora.
-            salvo["oportunidades"] = sinais.oportunidades(salvo)
-        return salvo
+        if not salvo.get("ativos"):
+            return salvo
+        # Derivadas na SAÍDA, nunca no arquivo: o último conhecido funde
+        # passadas diferentes, e uma lista de oportunidades gravada junto
+        # descreveria o conjunto de quando foi gravada, não o de agora. O disco
+        # guarda o INTEIRO (motor intocado); :meth:`_scan_para_tela` é quem decide
+        # o que a flag de estratégia deixa o cliente ver (DA-184).
+        return self._scan_para_tela(salvo)
 
     def scan_track_record(self, date: str, banca: float | None = None) -> dict[str, Any]:
         """Re-avalia os gatilhos logados contra o preço da data dada.
@@ -3162,10 +3237,17 @@ class AnalysisRunner:
         O MARCO da carteira virtual (DA-155) vem do :class:`PaperWalletStore` — é
         o runner quem junta o ledger com o marco, o scanner nem sabe que existe
         um arquivo de config por trás.
+
+        ``visiveis`` (DA-184) — os setups com tela=ON: o agregado, o `por_setup` e
+        a carteira paper só contam os visíveis; o `metodo_frame` (DA-183) continua
+        decompondo TODOS, é medição e não vitrine. O gatilho fechando (escrita no
+        ledger) já aconteceu dentro de :func:`scan_verdicts` sobre TODAS as linhas,
+        antes desse recorte — a flag nunca impede o ledger de aprender um desfecho.
         """
         return scan_verdicts(self.scan_log, date,
                              banca=banca if banca is not None else _BANCA_PADRAO,
-                             marco=self.paper_wallet.marco())
+                             marco=self.paper_wallet.marco(),
+                             visiveis=self._setups_visiveis())
 
     def paper_wallet_resetar(self) -> str:
         """REINICIA a carteira virtual do paper trading — empurra o marco pro
@@ -3194,6 +3276,10 @@ class AnalysisRunner:
             # a chave em si — só o provider/modelo padrão do servidor (o fallback)
             # e SE existe env de fallback pro provider default (sem revelar valor).
             "llm": self._llm_config_info(),
+            # Flag de estratégia por setup (DA-184) — leitura PÚBLICA: é o que
+            # decide se o launcher desenha o chip do Storm123 e se o scan/track
+            # record desenham a coluna/card dele. O TOGGLE (POST) é só do dono.
+            "estrategias": self.estrategias_get(),
         }
 
     # Provedores oferecidos na UI de config (BYOK). Campos:
@@ -3301,7 +3387,11 @@ class AnalysisRunner:
         # Mesma montagem do worker: o 1-2-3/recuo saem da família Padrão e o Storm
         # entra AO LADO, nunca no lugar (DA-077/DA-081).
         def _plano(tf: str) -> dict[str, Any]:
-            return plano_com_storm(ticker, date, tf, method)
+            # Flag da tela (DA-184): esconde o Storm como leitura AO LADO; uma
+            # análise cujo MÉTODO já é storm123 continua recebendo a dele.
+            return plano_com_storm(ticker, date, tf, method,
+                                   incluir_storm=method == "storm123"
+                                   or self._storm_visivel())
 
         chart = fetch_price_chart(ticker, date, timeframe, method)
         plan = _plano(timeframe)

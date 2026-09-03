@@ -2390,6 +2390,17 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 .subscription-box .sub-state { font-size: var(--fs-12); color: var(--muted); white-space: nowrap; }
 .subscription-box .sub-state.ok { color: var(--green); }
 
+/* Estratégia na tela (DA-184) — só-dono, mesma estética da owner-box/subscription-box */
+.estrat-box {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+  margin: 4px 0 14px; background: var(--panel-2);
+}
+.estrat-toggle {
+  display: flex; align-items: center; gap: 8px; font-size: var(--fs-14);
+  color: var(--text); cursor: pointer; margin-bottom: 6px;
+}
+.estrat-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+
 /* Botões da owner-box / assinatura no design system do app (task 019): antes eram
    .cfg-test/.cfg-clear "soltos" (só cor, sem base) e saíam com cara de default. Agora
    compartilham a base (altura/raio/fonte do "Analisar/Salvar") e três variantes:
@@ -2768,6 +2779,14 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
     minmax(72px, 1.4fr)      /* TP / motivo */
     minmax(56px, 1fr)        /* R:R     */
     minmax(96px, 1.2fr);     /* Storm   */
+}
+/* Storm123 desligado na tela (DA-184): uma coluna a menos — a grade some, não fica
+   em branco. Mesmas 9 faixas de cima, só sem a última (a do Storm). */
+.scan-list.sem-storm .scan-line-row, .scan-list.sem-storm .scan-line-head {
+  grid-template-columns:
+    38px minmax(72px, 1.2fr) minmax(64px, 1fr) minmax(48px, 0.8fr)
+    minmax(108px, 1.1fr) minmax(64px, 1fr) minmax(64px, 1fr)
+    minmax(72px, 1.4fr) minmax(56px, 1fr);
 }
 .scan-line-row {
   cursor: pointer;

@@ -53,6 +53,19 @@
       </div>
     </div>
 
+    <!-- Estratégia na TELA (DA-184): SÓ o dono logado vê e edita — hoje só o
+         Storm123 tem toggle (Setup123 fica sempre ligado). Não é uma tela nova,
+         é uma linha a mais no painel de config que já é owner-gated. -->
+    <div class="estrat-box hidden" id="estrategiaBox">
+      <label class="estrat-toggle">
+        <input type="checkbox" id="estStormToggle" />
+        <span>Storm123 na tela</span>
+      </label>
+      <span class="config-note">Desligado por padrão (DA-184) — o motor continua
+        detectando e gravando no ledger; isto só esconde chip, card, coluna e
+        camada do gráfico.</span>
+    </div>
+
     <!-- Conectar assinatura (task 017; multi-provedor 020): SÓ o dono logado vê e usa.
          Três provedores (ChatGPT/Claude/Gemini), cada linha com botão OAuth no estilo
          do app; ao conectar, a linha COLAPSA pra "conectada · Desconectar". O token

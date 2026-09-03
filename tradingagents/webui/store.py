@@ -398,3 +398,45 @@ class PaperWalletStore:
         with self._lock:
             HistoryStore._atomic_write(self.path, {"marco": marco})
         return marco
+
+
+class EstrategiaStore:
+    """Flag de estratégia por setup — visibilidade na TELA (DA-184), owner-only.
+
+    NÃO desliga o motor: o scan agendado (``AnalysisRunner.scan_agendado``) e o
+    dry-run MT5 nunca leem este arquivo — só o servidor, ao montar a resposta pro
+    front, decide o que mostrar. Ausência de arquivo = o padrão da DA-184 (Setup123
+    ligado, Storm123 desligado). Mesmo molde do :class:`WatchlistStore`: JSON
+    atômico + lock, fail-open pro padrão em qualquer leitura ruim.
+    """
+
+    PADRAO = {"123": True, "storm": False}
+
+    def __init__(self, base_dir: str | os.PathLike):
+        self.path = Path(base_dir) / "estrategias.json"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+
+    def get(self) -> dict[str, bool]:
+        with self._lock:
+            if self.path.exists():
+                try:
+                    with open(self.path, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    if isinstance(data, dict):
+                        out = dict(self.PADRAO)
+                        out.update({k: bool(v) for k, v in data.items() if k in self.PADRAO})
+                        return out
+                except (OSError, json.JSONDecodeError):
+                    pass  # arquivo corrompido → cai no padrão
+        return dict(self.PADRAO)
+
+    def set(self, nome: str, ativo: bool) -> dict[str, bool]:
+        nome = (nome or "").strip().lower()
+        if nome not in self.PADRAO:
+            raise ValueError(f"estratégia desconhecida: {nome!r}")
+        atual = self.get()
+        atual[nome] = bool(ativo)
+        with self._lock:
+            HistoryStore._atomic_write(self.path, atual)
+        return atual

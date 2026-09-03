@@ -270,7 +270,7 @@ def test_full_run_attaches_earnings_field(tmp_path, monkeypatch):
         return fake
 
     monkeypatch.setattr(runner_module, "earnings_window_status", fake_earnings)
-    monkeypatch.setattr(runner_module, "plano_com_storm", lambda t, d, tf, method: {})
+    monkeypatch.setattr(runner_module, "plano_com_storm", lambda t, d, tf, method, **kw: {})
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path), graph_factory=_factory())
     run_id = runner.start("AAPL", "2026-08-22")
@@ -285,7 +285,7 @@ def test_structural_run_attaches_earnings_field(tmp_path, monkeypatch):
     fake = {"status": "sem_agenda", "date": None, "days_ahead": None,
             "in_window": False, "window_days": 21}
     monkeypatch.setattr(runner_module, "earnings_window_status", lambda *a, **k: fake)
-    monkeypatch.setattr(runner_module, "plano_com_storm", lambda t, d, tf, method: {})
+    monkeypatch.setattr(runner_module, "plano_com_storm", lambda t, d, tf, method, **kw: {})
     monkeypatch.setattr(runner_module, "fetch_price_chart",
                         lambda t, d, tf="1d", method="padrao": {})
     monkeypatch.setattr(runner_module, "leitura_multiframe",

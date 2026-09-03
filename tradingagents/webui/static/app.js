@@ -36,6 +36,12 @@ let _llmMeta = null;           // catálogo de providers vindo de /api/config
 // do servidor (cookie de sessão HttpOnly) — nunca de fachada no cliente.
 let _isOwner = false;
 let _ownerLoginEnabled = false;
+// Flag de estratégia por setup na TELA (DA-184) — vem de /api/config (leitura
+// pública; a EDIÇÃO é só do dono, POST /api/estrategias). O padrão aqui é só o
+// chão ANTES do primeiro /api/config responder (evita o chip do Storm piscar
+// ligado por um instante no primeiríssimo paint); o servidor manda por cima.
+let _estrategias = { "123": true, storm: false };
+function estrategiaOn(nome) { return !!(_estrategias && _estrategias[nome]); }
 
 function loadLlmCfg() {
   try { _llmCfg = JSON.parse(localStorage.getItem(_LLM_CFG_KEY) || "{}") || {}; }
@@ -1771,13 +1777,15 @@ function renderLaunchBar() {
   // MÉTODO numa linha só (task 034): os cinco apps de referência concordam — nenhum
   // empilha método/timeframe em duas fileiras. A ordem é a de sempre (os que rodam
   // MODELO primeiro, os ESTRUTURAIS por último).
+  // Storm123 (DA-184): flag de estratégia da tela — OFF por padrão, o launcher
+  // fica com QUATRO chips em vez de cinco (o toggle do dono, na config, religa).
   const metodos = [
     ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
     ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
     ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
     ["setup123", "Setup123", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
     ["storm123", "Storm123", "O 1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
-  ];
+  ].filter(([m]) => m !== "storm123" || estrategiaOn("storm"));
   mEl.innerHTML = metodos.map(([m, label, title]) => {
     const active = m === _barMethod;
     const cls = ["lb-method", m, active ? "is-active" : ""].filter(Boolean).join(" ");
@@ -7707,6 +7715,10 @@ async function applyConfig() {
     preparaCarteiraErick();
     _ownerLoginEnabled = !!cfg.owner_login_enabled;
     if (cfg.llm) { _llmMeta = cfg.llm; renderConfigPanel(); }
+    // Flag de estratégia por setup (DA-184): se mudou desde o último /api/config
+    // (o dono ligou/desligou em outra aba, ou é o boot), o launcher reflete na hora.
+    if (cfg.estrategias) { _estrategias = cfg.estrategias; renderLaunchBar(); }
+    renderEstrategiaToggle();
     updateConfigBadge();
     updateDateChip();   // chip reflete "Hoje" com a data do servidor (Manaus)
   } catch (e) {
@@ -8434,6 +8446,9 @@ function bindConfig() {
   $("ownerLoginBtn").addEventListener("click", ownerLogin);
   $("ownerPass").addEventListener("keydown", (e) => { if (e.key === "Enter") ownerLogin(); });
   $("ownerLogoutBtn").addEventListener("click", ownerLogout);
+  // Estratégia na tela (DA-184): SÓ-DONO (a caixa só aparece logado).
+  const estStorm = $("estStormToggle");
+  if (estStorm) estStorm.addEventListener("change", () => toggleEstrategiaStorm(estStorm.checked));
   // Conectar assinatura: só-dono (a seção só aparece logado). As linhas por provedor
   // (task 020) são montadas e "wired" em buildSubscriptionRows(); caminho principal =
   // botão OAuth (task 019), colar token vira fallback avançado (task 017 preservada).
@@ -9098,6 +9113,36 @@ function erickCurvaHtml(h) {
     </div>`;
 }
 
+// Estratégia na TELA (DA-184): caixa SÓ-DONO — liga/desliga o Storm123 sem tocar
+// o motor (o scan agendado e o dry-run MT5 nunca leem esta flag, só o servidor ao
+// moldar o que devolve pro front). O estado vem de /api/config (cfg.estrategias).
+function renderEstrategiaToggle() {
+  const box = $("estrategiaBox");
+  const cb = $("estStormToggle");
+  if (!box || !cb) return;
+  box.classList.toggle("hidden", !_isOwner);
+  cb.checked = estrategiaOn("storm");
+}
+
+async function toggleEstrategiaStorm(ativo) {
+  try {
+    const res = await apiPost("/api/estrategias", { setup: "storm", ativo });
+    if (!res.ok) throw new Error("falhou");
+    const data = await res.json();
+    _estrategias = data.estrategias || _estrategias;
+  } catch (e) {
+    // Sem confirmação do servidor a caixa não pode afirmar o que não aconteceu:
+    // volta pro estado de antes do clique.
+    _estrategias = { ..._estrategias, storm: !ativo };
+  }
+  renderEstrategiaToggle();
+  renderLaunchBar();
+  // O scan já pintado na tela também é um "storm no JSON servido" — reflete a
+  // troca sem esperar o dono clicar em "Escanear" de novo.
+  _scanData = null;
+  loadScanSalvo();
+}
+
 // O BOTÃO SÓ EXISTE PRO DONO, e só depois de a rota confirmar. Duas condições, e a
 // segunda importa: `owner` sozinho não garante que ESTA instância tem a credencial
 // configurada — sem ela a rota devolve 404 e o botão não deve aparecer prometendo
@@ -9583,7 +9628,7 @@ function scanLevelsHtml(f) {
 // Os rótulos por célula (gatilho, SL, TP) saem: quem diz o que é cada
 // coluna é o CABEÇALHO, e a célula fica com o número — é isso que faz a coluna ser
 // lida como coluna. No modo CARDS os rótulos ficam (lá não há cabeçalho).
-const SCAN_COLUNAS = [
+const SCAN_COLUNAS_BASE = [
   ["tf", "Timeframe do candle"],
   ["ativo", "Sigla do ativo"],
   ["preço", "Preço no fechamento do candle"],
@@ -9593,15 +9638,20 @@ const SCAN_COLUNAS = [
   ["SL", "Stop loss"],
   ["TP", "Alvo publicável — ou o motivo de não haver"],
   ["R:R", "Risco/retorno"],
-  // O STORM é outro SETUP (DA-081), não outra leitura deste: outro detector, outro
-  // ponto 2, outro stop, outro alvo, e um filtro com poder de VETO. Por isso ele
-  // ganha COLUNA — some-lo às células do 1-2-3 misturaria dois métodos no mesmo
-  // número, que é exatamente o que a task 008 provou não descrever trade nenhum.
-  ["Storm123", "O 1-2-3 do Stormer + filtro Éden — setup DIFERENTE do Setup123 desta lista"],
 ];
+// O STORM é outro SETUP (DA-081), não outra leitura deste: outro detector, outro
+// ponto 2, outro stop, outro alvo, e um filtro com poder de VETO. Por isso ele
+// ganha COLUNA — some-lo às células do 1-2-3 misturaria dois métodos no mesmo
+// número, que é exatamente o que a task 008 provou não descrever trade nenhum.
+// Com a flag da tela desligada (DA-184) a coluna nem existe — o servidor já não
+// manda `f.storm` nessa hora, então nem sobraria dado pra ela mostrar.
+const SCAN_COLUNA_STORM = ["Storm123", "O 1-2-3 do Stormer + filtro Éden — setup DIFERENTE do Setup123 desta lista"];
+function scanColunas() {
+  return estrategiaOn("storm") ? [...SCAN_COLUNAS_BASE, SCAN_COLUNA_STORM] : SCAN_COLUNAS_BASE;
+}
 
 function scanCabecalhoHtml() {
-  return `<li class="scan-line-head" aria-hidden="false">` + SCAN_COLUNAS.map(([nome, ajuda]) =>
+  return `<li class="scan-line-head" aria-hidden="false">` + scanColunas().map(([nome, ajuda]) =>
     `<span class="scan-col" title="${escapeHtml(ajuda)}">${escapeHtml(nome)}</span>`).join("") + `</li>`;
 }
 
@@ -9625,6 +9675,13 @@ function scanCk(nome) {
   return `<span class="scan-ck">${escapeHtml(nome)}</span>`;
 }
 
+// Célula do Storm: a coluna inteira não desenha com a flag desligada (DA-184) —
+// só chamar :func:`scanStormCellHtml` manteria as colunas alinhadas ao cabeçalho
+// de :func:`scanColunas`, que já perdeu a última.
+function scanStormColunaHtml(f) {
+  return estrategiaOn("storm") ? scanStormCellHtml(f) : "";
+}
+
 function scanLineCellsHtml(f) {
   const vazia = `<span class="scan-cell"></span>`;
   const hasLevels = (f.estado === "em_gatilho" || f.estado === "em_movimento") && f.trigger != null;
@@ -9635,14 +9692,14 @@ function scanLineCellsHtml(f) {
       ? `<span class="scan-cell scan-motivo" title="premissa rompida — o preço perdeu o nível de invalidação">` +
         scanCk("invalidação") + `<b>${scanFmt(f.invalidacao)}</b></span>`
       : vazia;
-    return vazia + vazia + motivo + vazia + scanStormCellHtml(f);
+    return vazia + vazia + motivo + vazia + scanStormColunaHtml(f);
   }
   const tp = f.tp != null
     ? `<span class="scan-cell num">${scanCk("TP")}<b>${scanFmt(f.tp)}</b></span>`
     : `<span class="scan-cell scan-note" title="${escapeHtml("sem alvo — " + (f.rr_note || "nível de alvo indefinido"))}">sem alvo</span>`;
   return `<span class="scan-cell num">${scanCk("gatilho")}<b>${scanFmt(f.trigger)}</b></span>` +
     `<span class="scan-cell num">${scanCk("SL")}<b>${scanFmt(f.sl)}</b></span>` + tp +
-    scanRrCellHtml(f) + scanStormCellHtml(f);
+    scanRrCellHtml(f) + scanStormColunaHtml(f);
 }
 
 // Rótulo curto do estado do Storm na célula da tabela. "vetado" é o estado que só
@@ -10054,6 +10111,9 @@ function paintScan(data) {
   const ul = $("scanList");
   ul.classList.toggle("is-lista", _scanView === "lista");
   ul.classList.toggle("is-sinais", _scanView === "sinais");
+  // Storm123 desligado (DA-184): a grade da TABELA tem uma coluna a menos —
+  // sem isto a última faixa (a do Storm) ficaria em branco em vez de sumir.
+  ul.classList.toggle("sem-storm", !estrategiaOn("storm"));
   if (_scanView === "sinais") {
     // Os chips de estado são do DADO (em gatilho / formando / invalidou). Deixá-los
     // ligados aqui daria dois jeitos de esconder a mesma linha, com vocabulários

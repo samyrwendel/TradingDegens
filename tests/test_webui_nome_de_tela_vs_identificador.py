@@ -117,10 +117,14 @@ def base(tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_os_chips_da_barra_dizem_Setup123_e_Storm123(base):
+def test_os_chips_da_barra_dizem_Setup123_e_Storm123(base, tmp_path):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
+        # Storm123 na tela é OFF por padrão (DA-184) — liga direto no arquivo que o
+        # EstrategiaStore lê (sem depender de sessão de dono no E2E) pra este teste,
+        # que é sobre RÓTULO × VALOR dos dois chips, continuar cobrindo o Storm.
+        (tmp_path / "estrategias.json").write_text('{"123": true, "storm": true}')
         page.goto(base, wait_until="networkidle")
         page.wait_for_selector("#launchMethods .lb-method")
         m = page.evaluate("""() => [...document.querySelectorAll('#launchMethods .lb-method')]

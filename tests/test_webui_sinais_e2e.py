@@ -47,6 +47,10 @@ def base(tmp_path):
     pelo portão) nunca precisa acontecer.
     """
     shutil.copy(_FIXTURE, tmp_path / "last_scan.json")
+    # Storm123 na tela é OFF por padrão (DA-184); este arquivo testa a VISÃO DE
+    # SINAIS (agrupamento, confluência), não a flag — liga o Storm pra continuar
+    # exercitando os cards que a fixture real de 31/08 traz dele.
+    (tmp_path / "estrategias.json").write_text('{"123": true, "storm": true}')
     runner = AnalysisRunner(
         base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
                      "deep_think_llm": "x", "quick_think_llm": "y"},

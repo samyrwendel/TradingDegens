@@ -75,6 +75,11 @@ _SCAN = {
 
 @pytest.fixture
 def base(tmp_path):
+    # Storm123 na tela é OFF por padrão (DA-184); este arquivo testa a GRADE da
+    # tabela (alinhamento, colunas), não a flag — liga o Storm pra continuar
+    # exercitando as DEZ colunas (a coluna a menos com a flag OFF tem cobertura
+    # própria em test_webui_estrategia_flag_e2e.py).
+    (tmp_path / "estrategias.json").write_text('{"123": true, "storm": true}')
     runner = AnalysisRunner(
         base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
                      "deep_think_llm": "x", "quick_think_llm": "y"},

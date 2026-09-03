@@ -88,6 +88,9 @@ _SCAN = {
 
 @pytest.fixture
 def base(tmp_path):
+    # Storm123 na tela é OFF por padrão (DA-184); este arquivo testa COR, não a
+    # flag — liga o Storm pra continuar exercitando o card/chip dele.
+    (tmp_path / "estrategias.json").write_text('{"123": true, "storm": true}')
     runner = AnalysisRunner(
         base_config={"results_dir": str(tmp_path), "llm_provider": "openai",
                      "deep_think_llm": "x", "quick_think_llm": "y"},

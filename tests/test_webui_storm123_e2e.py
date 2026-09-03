@@ -210,26 +210,38 @@ def _abre(page, base_url, storm, largura=1500):
     page.wait_for_timeout(120)
 
 
+_JS_CHIPS_BARRA = """() => ({
+  metodos: [...document.querySelectorAll('#launchMethods .lb-method')]
+    .map(b => b.dataset.method),
+  rotulos: [...document.querySelectorAll('#launchMethods .lb-method')]
+    .map(b => b.innerText.trim()),
+})"""
+
+
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_storm_tem_chip_proprio_na_barra(base):
+def test_o_storm_tem_chip_proprio_na_barra(base, tmp_path):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 1000})
         page.goto(base, wait_until="networkidle")
         page.wait_for_selector("#launchMethods .lb-method")
-        m = page.evaluate("""() => ({
-          metodos: [...document.querySelectorAll('#launchMethods .lb-method')]
-            .map(b => b.dataset.method),
-          rotulos: [...document.querySelectorAll('#launchMethods .lb-method')]
-            .map(b => b.innerText.trim()),
-        })""")
-        # UMA fileira só desde a task 034 (revertendo o empilhamento em duas
-        # fileiras da 022) — os 5 apps de referência (Quantfury/Krystal/
-        # CoinMarketCap) concordam: nenhum estica método em duas linhas.
-        assert m["metodos"] == ["padrao", "erick", "compare", "setup123", "storm123"], m
-        assert "Storm123" in m["rotulos"], m
-        # e o chip do Storm NÃO é o chip do 1-2-3 (são métodos, não uma flag)
-        assert m["metodos"].count("storm123") == 1 and m["metodos"].count("setup123") == 1
+        m = page.evaluate(_JS_CHIPS_BARRA)
+        # Storm123 OFF por padrão (DA-184): QUATRO chips numa fileira só (task
+        # 034, revertendo o empilhamento em duas fileiras da 022) — sem o Storm.
+        assert m["metodos"] == ["padrao", "erick", "compare", "setup123"], m
+        assert "Storm123" not in m["rotulos"], m
+
+        # O dono religa (DA-184, POST /api/estrategias — aqui direto no arquivo
+        # que o EstrategiaStore lê, pra não depender de sessão de login no E2E):
+        # o chip do Storm volta, e continua sendo o SEU método, não uma flag do
+        # 1-2-3 (são setups diferentes, task 022).
+        (tmp_path / "estrategias.json").write_text('{"123": true, "storm": true}')
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#launchMethods .lb-method")
+        m2 = page.evaluate(_JS_CHIPS_BARRA)
+        assert m2["metodos"] == ["padrao", "erick", "compare", "setup123", "storm123"], m2
+        assert "Storm123" in m2["rotulos"], m2
+        assert m2["metodos"].count("storm123") == 1 and m2["metodos"].count("setup123") == 1
         browser.close()
 
 

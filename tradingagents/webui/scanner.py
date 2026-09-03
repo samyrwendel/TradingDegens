@@ -952,8 +952,18 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool,
 
 
 def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
-                  marco: str | None = None) -> dict[str, Any]:
+                  marco: str | None = None,
+                  visiveis: frozenset[str] | set[str] | None = None) -> dict[str, Any]:
     """Re-avalia cada gatilho logado — FECHADO pelo ledger, ABERTO pelo preço de hoje.
+
+    ``visiveis`` (DA-184, flag de estratégia da TELA — ``None`` = todos, o padrão
+    de sempre): filtra o RELATÓRIO — agregado, ``por_setup`` e a carteira paper —
+    pros setups com tela=ON. Não filtra a DETECÇÃO DE FECHAMENTO logo abaixo: todo
+    gatilho, visível ou não, continua sendo comparado à série e tendo o desfecho
+    APENDADO no ledger (``log.record_close``) — a flag esconde da vitrine, nunca do
+    motor. ``metodo_frame`` (DA-183) também ignora o filtro de propósito: é a
+    medição que decide se um setup escondido volta a ficar visível, e ela precisa
+    dos dois lados pra isso.
 
     **Fechado é fato gravado, não conta refeita.** Quando a série mostra o primeiro
     toque em TP ou SL (:func:`_primeiro_toque`), o veredito é APENDADO no próprio
@@ -1073,9 +1083,16 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
 
     for v in verdicts:
         v["setup"] = _setup_da_entrada(v)
-    n = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
+    # A TELA (DA-184): ``visiveis=None`` mantém o comportamento de sempre (todos).
+    # Com a flag desligando um setup, ele já saiu da SELEÇÃO acima de ``verdicts``
+    # pro relatório — mas ``verdicts`` (o cheio) sobrevive pra alimentar
+    # ``metodo_frame`` embaixo, que é medição e ignora a flag de propósito.
+    visiveis_efetivo = (frozenset(SETUPS_DO_LEDGER) if visiveis is None
+                        else frozenset(visiveis))
+    verdicts_tela = [v for v in verdicts if v["setup"] in visiveis_efetivo]
+    n = [v for v in verdicts_tela if v.get("veredito") in ("bateu_tp", "bateu_sl")]
     acerto = (sum(1 for v in n if v["veredito"] == "bateu_tp") / len(n)) if n else None
-    out = {"verdicts": verdicts, "n_fechados": len(n), "taxa_acerto": acerto}
+    out = {"verdicts": verdicts_tela, "n_fechados": len(n), "taxa_acerto": acerto}
     out.update(_expectativa(n))
     # POR SETUP, além do agregado. Dois setups com stops, alvos e R:R construídos por
     # regras diferentes somados num número só não descrevem nenhum dos dois — é a
@@ -1083,7 +1100,9 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
     # agora ao lado da decomposição, e cada uma com a SUA base declarada.
     out["por_setup"] = {}
     for nome in SETUPS_DO_LEDGER:
-        do_setup = [v for v in verdicts if v.get("setup") == nome]
+        if nome not in visiveis_efetivo:
+            continue
+        do_setup = [v for v in verdicts_tela if v.get("setup") == nome]
         fech = [v for v in do_setup if v.get("veredito") in ("bateu_tp", "bateu_sl")]
         bloco = {
             "n": len(do_setup),
@@ -1106,18 +1125,20 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
         "agregado": _pnl_paper_resumo(n, banca_efetiva),
         "por_setup": {nome: _pnl_paper_resumo(
             [v for v in n if v.get("setup") == nome], banca_efetiva)
-            for nome in SETUPS_DO_LEDGER},
+            for nome in SETUPS_DO_LEDGER if nome in visiveis_efetivo},
         "por_frame": {frame: _pnl_paper_resumo(vs, banca_efetiva)
                       for frame, vs in _agrupa_por_frame(n).items()},
         # A CARTEIRA VIRTUAL (DA-155): abertas + fechadas, filtradas pelo marco
         # da simulação (ver docstring). É diferente do "agregado" acima — aquele
         # é o relatório do LEDGER INTEIRO; a carteira é o saldo DESDE que a
         # simulação começou (ou foi reiniciada).
-        "carteira": _carteira_paper(verdicts, banca_efetiva, marco),
+        "carteira": _carteira_paper(verdicts_tela, banca_efetiva, marco),
         # MÉTODO × FRAME (task 013): o recorte que o gate lê — n de trades REAIS
         # (gatilho tocado + fechado), acerto, E[R] e PnL nas DUAS leituras, dedup
         # por estrutura, separando o que conta a partir do marco do histórico
-        # anterior ("antes da régua"). É aqui que "acerto alto ≠ lucro" fica visível.
+        # anterior ("antes da régua"). SEMPRE do ``verdicts`` CHEIO (DA-183/184):
+        # este painel é medição, decompõe os dois setups independente da flag —
+        # é ele que decide se um setup escondido volta a ficar visível.
         "metodo_frame": _metodo_frame(verdicts, banca_efetiva, marco),
     }
     return out
