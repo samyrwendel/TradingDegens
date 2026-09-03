@@ -440,3 +440,32 @@ class EstrategiaStore:
         with self._lock:
             HistoryStore._atomic_write(self.path, atual)
         return atual
+
+
+def _carteira_dono_path(path: str | os.PathLike | None = None) -> Path:
+    return Path(path) if path else Path(os.environ.get("CARTEIRA_DONO_PATH")
+        or (Path.home() / ".tradingagents" / "carteira-dono.json"))
+
+
+def carteira_dono_tickers(path: str | os.PathLike | None = None) -> list[dict[str, Any]]:
+    """``[{ticker, asset_type?}]`` da carteira do DONO (task 20260903-021) — arquivo
+    PRÓPRIO em ``~/.tradingagents/carteira-dono.json``, fora do ``watchlist.json``
+    curado na tela (:class:`WatchlistStore`). Editado à mão pelo dono: não há
+    endpoint HTTP de escrita, então "owner-gated" aqui é o dono ser quem tem shell
+    na máquina — a mesma garantia do resto de ``~/.tradingagents``.
+
+    Fail-open: arquivo ausente ou ilegível devolve lista vazia — quem consome isto
+    (:func:`agenda.watchlist_efetiva`) cai de volta na watchlist manual sozinha,
+    nunca quebra por causa deste arquivo. Mesmo molde de override do
+    ``clone_erick._base_dir`` (env var ``CLONE_ERICK_DIR``): env pra isolar teste,
+    argumento explícito vence tudo.
+    """
+    p = _carteira_dono_path(path)
+    if not p.exists():
+        return []
+    try:
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return list((data or {}).get("tickers") or [])

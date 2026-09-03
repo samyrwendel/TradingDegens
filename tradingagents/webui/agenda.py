@@ -114,6 +114,29 @@ def proxima_passada(agora: datetime, frames: tuple[str, ...] = SCAN_FRAMES,
     return atual if atual > agora else alvo
 
 
+def watchlist_efetiva(manual: list[dict[str, Any]],
+                      extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Watchlist manual (curada na tela) UNIDA com tickers de fora — hoje a carteira
+    do dono (:func:`store.carteira_dono_tickers`, task 20260903-021: o Storm acertou
+    o MSFT 4h e o trade não tinha onde entrar porque o ticker não estava coberto).
+
+    Dedup por ticker: o item da watchlist MANUAL vence quando o mesmo ticker
+    aparece nas duas (ela carrega metadado — ``asset_type``, ``count`` — que a
+    lista externa não tem); tickers extras novos entram no fim, na ordem em que
+    vieram. Não é gravado em lugar nenhum — recalculado a cada passada, então
+    editar qualquer uma das duas fontes já vale na próxima.
+    """
+    vistos = {str(w.get("ticker") or "").strip().upper()
+             for w in manual if w.get("ticker")}
+    out = list(manual)
+    for w in extra:
+        t = str(w.get("ticker") or "").strip().upper()
+        if t and t not in vistos:
+            vistos.add(t)
+            out.append(w)
+    return out
+
+
 def alvos_da_passada(watchlist: list[dict[str, Any]], sessao: str) -> list[str]:
     """Quais tickers varrer AGORA: cripto sempre; ação só com o mercado ativo.
 

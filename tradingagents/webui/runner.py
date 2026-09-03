@@ -75,6 +75,7 @@ from tradingagents.webui.store import (
     PaperWalletStore,
     ScanSnapshotStore,
     WatchlistStore,
+    carteira_dono_tickers,
 )
 
 # Default analyst order; crypto drops fundamentals (no balance sheet for a coin).
@@ -2880,7 +2881,8 @@ class AnalysisRunner:
             memo = self._scan_memo
             if memo and memo[0] == date and time.time() - memo[1] < _SCAN_MEMO_TTL:
                 return memo[2]
-            tickers = [w.get("ticker") for w in self.watchlist_store.get() if w.get("ticker")]
+            manual = self.watchlist_store.get()
+            tickers = [w.get("ticker") for w in manual if w.get("ticker")]
             result = scan_watchlist(tickers, date)
             self._registrar_gatilhos(result)
             # CAMADA 2 (disco). Só o caminho FRESCO grava: o retorno pelo memo
@@ -2889,7 +2891,15 @@ class AnalysisRunner:
             # COMPLETA (a watchlist inteira), e é isso que ``completa=True`` afirma.
             # SEMPRE com o resultado INTEIRO (motor intocado, DA-184): a flag de
             # estratégia só entra depois, ao moldar o que vai pro cliente.
-            self._guardar_ultimo(result, universo=tickers, completa=True)
+            # ``universo`` (o que SOBREVIVE no último conhecido) é mais largo que
+            # ``tickers`` (o que esta varredura de fato leu): sem isso, um clique
+            # manual em "Escanear" apagaria do painel o MSFT/META que só a agenda
+            # cobre via carteira do dono (task 20260903-021) — a passada agendada
+            # roda de hora em hora e não é ela quem escreve por último.
+            universo = [w.get("ticker") for w in
+                       agenda.watchlist_efetiva(manual, carteira_dono_tickers())
+                       if w.get("ticker")]
+            self._guardar_ultimo(result, universo=universo, completa=True)
             # As OPORTUNIDADES (a leitura de DECISÃO da varredura) são derivadas,
             # não guardadas: o último conhecido mistura passadas e precisa
             # recalculá-las sobre o conjunto mesclado. É :meth:`_scan_para_tela`
@@ -3015,7 +3025,11 @@ class AnalysisRunner:
         from tradingagents.dataflows.live_price import fetch_live_price
 
         agora = timeutil.today()
-        watch = self.watchlist_store.get()
+        # Watchlist manual UNIDA com a carteira do dono (task 20260903-021): o
+        # Storm acertou o MSFT 4h e o gatilho não tinha onde entrar porque o
+        # ticker não estava coberto. Sem gravação nova — recalculado a cada
+        # passada, então editar ``carteira-dono.json`` já vale na próxima.
+        watch = agenda.watchlist_efetiva(self.watchlist_store.get(), carteira_dono_tickers())
         sessao, ref = agenda.sessao_de_mercado(watch, fetch_live_price)
         alvos = agenda.alvos_da_passada(watch, sessao)
         if not alvos:

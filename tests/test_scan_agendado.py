@@ -77,6 +77,35 @@ def test_a_passada_sai_DEPOIS_do_fechamento_nunca_no_segundo_exato():
     assert agenda.ATRASO_POS_FECHAMENTO_S > 0
 
 
+# ───────────── carteira do dono UNIDA à watchlist manual (task 20260903-021) ──
+def test_watchlist_efetiva_agrega_o_que_falta_sem_duplicar():
+    manual = [{"ticker": "AAPL", "asset_type": "stock"},
+             {"ticker": "LINK-USD", "asset_type": "crypto"}]
+    extra = [{"ticker": "MSFT"}, {"ticker": "META"}, {"ticker": "LINK-USD"}]
+    uniao = agenda.watchlist_efetiva(manual, extra)
+    assert [w["ticker"] for w in uniao] == ["AAPL", "LINK-USD", "MSFT", "META"], uniao
+
+
+def test_watchlist_efetiva_a_MANUAL_vence_no_empate():
+    """O mesmo ticker nas duas fontes: o item MANUAL sobrevive — é ele que carrega
+    o metadado (``asset_type``, ``count``) que a lista externa não tem."""
+    manual = [{"ticker": "MSFT", "asset_type": "stock", "count": 17}]
+    extra = [{"ticker": "MSFT"}]
+    uniao = agenda.watchlist_efetiva(manual, extra)
+    assert uniao == [{"ticker": "MSFT", "asset_type": "stock", "count": 17}], uniao
+
+
+def test_watchlist_efetiva_sem_extra_e_a_propria_manual():
+    manual = [{"ticker": "NVDA"}]
+    assert agenda.watchlist_efetiva(manual, []) == manual
+
+
+def test_watchlist_efetiva_ignora_entrada_extra_sem_ticker():
+    manual = [{"ticker": "NVDA"}]
+    extra = [{"asset_type": "stock"}, {"ticker": ""}]
+    assert agenda.watchlist_efetiva(manual, extra) == manual
+
+
 # ───────────────────── ação tem pregão, cripto é 24/7 ─────────────────────────
 _WATCH = [{"ticker": "AAPL", "asset_type": "stock"},
           {"ticker": "BTC-USD", "asset_type": "crypto"},

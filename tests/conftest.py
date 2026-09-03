@@ -126,6 +126,20 @@ def _isola_clone_erick(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(_ce, "_preco_real", lambda ticker, classe: None)
 
 
+@pytest.fixture(autouse=True)
+def _isola_carteira_dono(monkeypatch, tmp_path_factory):
+    """A carteira do dono (``store.carteira_dono_tickers``, task 20260903-021) lê um
+    arquivo fora do ``results_dir`` (``~/.tradingagents/carteira-dono.json``). Sem
+    isolar, a suíte leria o arquivo REAL desta máquina e a watchlist efetiva da
+    agenda passaria a depender de estado de produção — mesma armadilha que a
+    ``_isola_clone_erick`` acima já fecha pro clone. O caminho isolado não existe
+    por padrão: fail-open devolve lista vazia, e os testes que querem tickers
+    extras escrevem o arquivo explicitamente.
+    """
+    monkeypatch.setenv("CARTEIRA_DONO_PATH",
+                       str(tmp_path_factory.mktemp("carteira-dono") / "carteira-dono.json"))
+
+
 @pytest.fixture()
 def mock_llm_client():
     client = MagicMock()

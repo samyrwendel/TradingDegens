@@ -223,6 +223,86 @@ def test_a_AGENDA_grava_o_resultado_em_vez_de_jogar_fora(tmp_path, monkeypatch):
     assert salvo["ultima_passada"]["tickers"] == ["BTC-USD"]
 
 
+def test_agenda_varre_a_carteira_do_dono_mesmo_fora_da_watchlist_manual(tmp_path, monkeypatch):
+    """Task 20260903-021: o Storm acertou o MSFT 4h e o gatilho não tinha onde
+    entrar porque o ticker não estava na watchlist manual da agenda. A passada
+    agendada passa a UNIR a watchlist com a carteira do dono antes de decidir o
+    que varrer — com mercado aberto, os dois entram."""
+    carteira = tmp_path / "carteira-dono.json"
+    carteira.write_text(json.dumps({"tickers": [{"ticker": "MSFT"}, {"ticker": "META"}]}),
+                        encoding="utf-8")
+    monkeypatch.setenv("CARTEIRA_DONO_PATH", str(carteira))
+    varridos = []
+
+    def fake_scan(tickers, date):
+        varridos.append(list(tickers))
+        return _passada(tickers, estado="em_gatilho")
+
+    monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist", fake_scan)
+    monkeypatch.setattr("tradingagents.webui.agenda.sessao_de_mercado",
+                        lambda w, f: ("regular", "AAPL"))
+    r = _runner(tmp_path)
+    r.watchlist_store.set(["AAPL"])
+
+    resultado = r.scan_agendado()
+
+    assert varridos == [["AAPL", "MSFT", "META"]], varridos
+    assert resultado["alvos"] == 3
+    tickers_no_gatilho = {e["ticker"] for e in r.scan_log.entries()}
+    assert {"MSFT", "META"} <= tickers_no_gatilho, tickers_no_gatilho
+    salvo = r.scan_ultimo()
+    assert {a["ticker"] for a in salvo["ativos"]} == {"AAPL", "MSFT", "META"}
+
+
+def test_agenda_nao_duplica_ticker_ja_coberto_pela_watchlist_manual(tmp_path, monkeypatch):
+    """LINK/ZEC (ou qualquer ticker) já cobertos pela watchlist manual não podem
+    ser escaneados duas vezes só porque também estão listados na carteira do dono
+    — a união dedup por ticker (:func:`agenda.watchlist_efetiva`)."""
+    carteira = tmp_path / "carteira-dono.json"
+    carteira.write_text(json.dumps({"tickers": [{"ticker": "LINK-USD"},
+                                               {"ticker": "MSFT"}]}), encoding="utf-8")
+    monkeypatch.setenv("CARTEIRA_DONO_PATH", str(carteira))
+    varridos = []
+
+    def fake_scan(tickers, date):
+        varridos.append(list(tickers))
+        return _passada(tickers)
+
+    monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist", fake_scan)
+    monkeypatch.setattr("tradingagents.webui.agenda.sessao_de_mercado",
+                        lambda w, f: ("regular", "AAPL"))
+    r = _runner(tmp_path)
+    r.watchlist_store.set(["AAPL", "LINK-USD"])
+
+    r.scan_agendado()
+
+    # LINK-USD já estava na manual: entra da watchlist manual, MSFT vem da
+    # carteira, e ninguém aparece duas vezes.
+    assert varridos == [["AAPL", "LINK-USD", "MSFT"]], varridos
+
+
+def test_manual_escanear_nao_apaga_a_carteira_do_dono_do_painel(tmp_path, monkeypatch):
+    """Se um clique manual em "Escanear" restringisse o último conhecido à
+    watchlist manual, o MSFT que só a agenda cobre sumiria do painel na
+    varredura seguinte — a regressão que motivou alargar o ``universo``."""
+    carteira = tmp_path / "carteira-dono.json"
+    carteira.write_text(json.dumps({"tickers": [{"ticker": "MSFT"}]}), encoding="utf-8")
+    monkeypatch.setenv("CARTEIRA_DONO_PATH", str(carteira))
+    monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist",
+                        lambda tickers, date: _passada(tickers, estado="em_gatilho"))
+    monkeypatch.setattr("tradingagents.webui.agenda.sessao_de_mercado",
+                        lambda w, f: ("regular", "AAPL"))
+    r = _runner(tmp_path)
+    r.watchlist_store.set(["AAPL"])
+    r.scan_agendado()
+    assert {a["ticker"] for a in r.scan_ultimo()["ativos"]} == {"AAPL", "MSFT"}
+
+    r.scan_portfolio("2026-08-31")  # o clique manual varre só a watchlist
+
+    assert {a["ticker"] for a in r.scan_ultimo()["ativos"]} == {"AAPL", "MSFT"}, \
+        "o Escanear manual apagou o que a agenda tinha gravado pra fora da watchlist"
+
+
 def test_agenda_depois_da_tela_preserva_a_acao_com_a_hora_dela(tmp_path, monkeypatch):
     """O caso REAL de madrugada: tela varreu tudo às 10h, agenda leu só cripto às 14h."""
     monkeypatch.setattr("tradingagents.webui.runner.scan_watchlist",
