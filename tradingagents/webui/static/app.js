@@ -10288,6 +10288,54 @@ function carteiraPaperHtml(paper) {
       : '<div class="scan-summary hint">nenhuma posição aberta agora</div>');
 }
 
+// A GRADE MÉTODO × FRAME (task 013) — o recorte que o gate de decisão lê. Cada
+// bloco é só trade REAL (gatilho tocado + fechado), DEDUPLICADO por estrutura, com
+// acerto, E[R] e as DUAS leituras de PnL. Acerto alto NÃO é lucro (75% com R:R 0,20
+// dá E[R] negativo) — mostrar acerto sozinho é o que deixava ler errado.
+function metodoFrameBlocoHtml(nome, frame, b) {
+  if (!b || b.n === 0) return "";
+  const acerto = b.taxa_acerto == null ? "—" : `${Math.round(b.taxa_acerto * 100)}%`;
+  const er = b.expectativa_r == null ? "—"
+    : `${b.expectativa_r > 0 ? "+" : ""}${scanFmt(b.expectativa_r)}R`;
+  const erCls = b.expectativa_r == null ? "" : (b.expectativa_r > 0 ? "ok" : "bad");
+  const fixo = b.pnl_fixo_usd == null ? "—"
+    : `${b.pnl_fixo_usd > 0 ? "+" : ""}$${scanFmt(b.pnl_fixo_usd)}`;
+  const risco = b.pnl_risco_fixo_usd == null ? "—"
+    : `${b.pnl_risco_fixo_usd > 0 ? "+" : ""}$${scanFmt(b.pnl_risco_fixo_usd)}`;
+  const ressalva = b.nivel === "insuficiente" ? ' <span class="hint">(amostra insuficiente)</span>'
+    : (b.nivel === "preliminar" ? ' <span class="hint">(preliminar)</span>' : "");
+  return `<div class="scan-summary"><b>${escapeHtml(nome)}</b> · ${escapeHtml(tfNome(frame) || frame)}: ` +
+    `n=${b.n} · acerto ${acerto} · <b class="${erCls}">E[R] ${er}</b>${ressalva}` +
+    `<span class="hint"> — PnL posição fixa ${fixo} · risco fixo ${risco}</span></div>`;
+}
+
+function metodoFrameGradeHtml(grade) {
+  const linhas = [];
+  for (const s of SETUPS_DO_LEDGER_FRONT) {
+    const porFrame = (grade || {})[s];
+    if (!porFrame) continue;
+    for (const [frame, b] of Object.entries(porFrame)) {
+      linhas.push(metodoFrameBlocoHtml(_SETUP_NOME[s] || s, frame, b));
+    }
+  }
+  return linhas.join("");
+}
+
+function metodoFrameHtml(paper) {
+  const mf = paper && paper.metodo_frame;
+  if (!mf) return "";
+  const desde = metodoFrameGradeHtml(mf.desde_marco);
+  const antes = metodoFrameGradeHtml(mf.antes_da_regua);
+  return `<h3 class="ek-sec">Por método × frame — trade real (gatilho tocado + fechado, dedup)</h3>` +
+    `<p class="hint">Acerto alto NÃO é lucro: 75% de acerto com R:R 0,20 dá E[R] negativo. ` +
+    `Por isso as duas leituras de PnL — posição fixa e risco fixo — ao lado do acerto.</p>` +
+    `<div class="scan-summary hint">${fmtMarco(mf.marco)} — o que conta pro gate:</div>` +
+    (desde || '<div class="scan-summary hint">nenhum trade real desde o marco ainda</div>') +
+    (antes
+      ? `<div class="scan-summary hint">antes da régua (histórico — régua velha, visível e intocado):</div>${antes}`
+      : "");
+}
+
 function trackPaperHtml(data) {
   const paper = data && data.paper;
   if (!paper) return "";
@@ -10298,6 +10346,7 @@ function trackPaperHtml(data) {
     .map(([f, b]) => `${escapeHtml(tfNome(f))}: ${b.pnl_total_usd > 0 ? "+" : ""}$${scanFmt(b.pnl_total_usd)} (n=${b.n})`)
     .join(" · ");
   return carteiraPaperHtml(paper) +
+    metodoFrameHtml(paper) +
     `<h3 class="ek-sec">histórico do ledger inteiro</h3>` +
     `<div class="scan-summary hint">${escapeHtml(paper.premissa)}` +
     ` — banca <input type="number" id="scanTrackBanca" min="1" step="1" ` +
@@ -10319,6 +10368,9 @@ async function loadScanTrack() {
     const taxa = data.taxa_acerto == null ? "—" : `${Math.round(data.taxa_acerto * 100)}%`;
     const rows = (data.verdicts || []).slice().reverse().slice(0, 30).map((v) => {
       const vb = { bateu_tp: ["bateu TP", "ok"], bateu_sl: ["bateu SL", "bad"],
+        // Padrão que morreu SEM romper o gatilho (task 013): não é perda — não houve
+        // trade. Terminal, mas fora da taxa de acerto e do PnL.
+        nunca_acionou: ["morreu sem entrar", "warn"],
         andamento_lucro: ["no lucro", "ok"], andamento_prejuizo: ["no prejuízo", "bad"],
         // Série que não alcança o dia do gatilho: pode ter tocado sem ninguém ver.
         // É um estado próprio — chamar isso de "andamento" seria afirmar o que não

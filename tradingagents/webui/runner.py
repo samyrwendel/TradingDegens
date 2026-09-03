@@ -2901,8 +2901,12 @@ class AnalysisRunner:
                 # espera preço em ``entrada`` (:func:`_pnl_paper_trade`): sem
                 # essa troca o PnL em USD do Storm saía sempre em branco
                 # (task 20260902-035). O preço da MESMA leitura é ``trigger``.
+                # O RÓTULO não se perde: vai pro campo PRÓPRIO ``leitura`` — a
+                # decomposição p2/p3 que a DA-079 prometeu e a task 035 apagou ao
+                # sobrecarregar ``entrada``.
                 linha_st = {**st, "ticker": s["ticker"], "frame": f.get("frame"),
-                            "setup": "storm", "entrada": st.get("trigger")}
+                            "setup": "storm", "entrada": st.get("trigger"),
+                            "leitura": st.get("entrada")}
                 if (st.get("estado") == "em_gatilho" and st.get("opera")
                         and ("storm", s["ticker"], f.get("frame"), st.get("trigger")) not in known
                         and _estrutura_do_gatilho(linha_st) not in estruturas):

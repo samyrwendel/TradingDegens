@@ -273,6 +273,49 @@ def test_botao_de_reset_so_aparece_pro_DONO(base):
         browser.close()
 
 
+# ══════════ A GRADE MÉTODO × FRAME (task 20260903-013) ════════════════════════
+
+_METODO_FRAME = dict(_VERDICTS)
+_METODO_FRAME["paper"] = dict(_VERDICTS["paper"])
+_METODO_FRAME["paper"]["metodo_frame"] = {
+    "marco": "2026-09-03T00:00:00+00:00",
+    "banca_por_trade": 100.0,
+    # DESDE o marco: o que conta pro gate — Setup123 1d com acerto ALTO e E[R] NEGATIVO
+    "desde_marco": {
+        "123": {"1d": {"n": 6, "nivel": "preliminar", "taxa_acerto": 0.75,
+                       "expectativa_r": -0.07, "acerto_equilibrio": 0.83, "rr_medio": 0.2,
+                       "n_com_rr": 6, "banca_por_trade": 100.0, "pnl_fixo_usd": 13.57,
+                       "pnl_medio_usd": 2.26, "pnl_risco_fixo_usd": -183.0, "curva_equity": []}},
+    },
+    # ANTES da régua: o histórico do BTC storm 1d, DEDUPLICADO a 1
+    "antes_da_regua": {
+        "storm": {"1d": {"n": 1, "nivel": "insuficiente", "taxa_acerto": 0.0,
+                         "expectativa_r": -1.0, "acerto_equilibrio": 0.33, "rr_medio": 2.0,
+                         "n_com_rr": 1, "banca_por_trade": 100.0, "pnl_fixo_usd": None,
+                         "pnl_medio_usd": None, "pnl_risco_fixo_usd": None, "curva_equity": []}},
+    },
+}
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_metodo_frame_mostra_acerto_er_e_as_duas_leituras_de_pnl(base):
+    """A grade método×frame: acerto ALTO com E[R] NEGATIVO lado a lado, e as duas
+    leituras de PnL (posição fixa E risco fixo) — pra "acerto alto = ganhou" não colar."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        _abre(page, base, verdicts=_METODO_FRAME)
+        txt = page.inner_text("#scanTrack")
+        assert "método" in txt.lower() and "frame" in txt.lower(), txt
+        assert "75%" in txt, txt                       # acerto alto
+        assert "E[R]" in txt and "-0" in txt, txt      # E[R] negativo ao lado
+        assert "risco fixo" in txt.lower() and "posição fixa" in txt.lower(), txt
+        assert "-183" in txt.replace(",", "."), txt    # a leitura risco-fixo do 123
+        # o histórico anterior fica VISÍVEL, rotulado "antes da régua"
+        assert "antes da régua" in txt.lower(), txt
+        browser.close()
+
+
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_reset_pede_confirmacao_e_chama_o_endpoint_certo(base):
     """O clique PEDE confirmação (é uma ação que zera o saldo simulado que a

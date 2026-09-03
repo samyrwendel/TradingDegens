@@ -619,6 +619,12 @@ class ScanLog:
         lição da task 008 (acerto de um grupo com R:R de outro não descreve trade).
         Linha antiga sem ``setup`` é do 1-2-3 — o ledger é append-only e não se
         reescreve; quem lê é que assume o default (:func:`_setup_da_entrada`).
+
+        ``leitura`` é o RÓTULO da leitura do Storm (``ponto2``/``ponto3``, DA-079) —
+        campo PRÓPRIO, porque ``entrada`` virou PREÇO em 02/09 (task 035) e engoliu
+        o rótulo: as 8 linhas novas do Storm não sabiam mais qual das duas entradas
+        eram. Preço em ``entrada``, rótulo em ``leitura`` — os dois convivem sem um
+        sobrescrever o outro. Só o Storm o tem; no 1-2-3 é ausente e o leitor ignora.
         """
         entry = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  "setup": row.get("setup") or "123",
@@ -626,6 +632,8 @@ class ScanLog:
                                             "pattern_state", "trigger", "sl", "tp", "rr")}}
         if row.get("entrada"):
             entry["entrada"] = row.get("entrada")
+        if row.get("leitura"):
+            entry["leitura"] = row.get("leitura")
         self._append(entry)
 
     def record_close(self, chave: str, veredito: str, fechado_em: str,
@@ -765,6 +773,27 @@ def _estrutura_do_gatilho(e: dict[str, Any]) -> tuple:
     return (_setup_da_entrada(e), e.get("ticker"), str(e.get("frame") or "1d"),
             e.get("direction"), sl)
 
+
+def _dedup_por_estrutura(verdicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Uma linha por ESTRUTURA (:func:`_estrutura_do_gatilho`), a PRIMEIRA (mais antiga).
+
+    Doze gatilhos do MESMO padrão são UMA ordem sendo reajustada, não doze trades: o
+    Storm diário do BTC-USD de 30-31/08/2026 rendeu 12 linhas (o gatilho perseguindo
+    a máxima do dia, o stop parado em 76.909,35) e a leitura somava 12 × −1R por um
+    único stop, afundando o agregado. A gravação já deduplica daqui pra frente
+    (``runner._registrar_gatilhos``, task 040); esta função protege a LEITURA das
+    linhas que JÁ estão no ledger append-only. A entrada vem em ordem cronológica
+    (``ScanLog.entries``), então a primeira ocorrência é a original."""
+    visto: set = set()
+    out: list[dict[str, Any]] = []
+    for v in verdicts:
+        est = _estrutura_do_gatilho(v)
+        if est in visto:
+            continue
+        visto.add(est)
+        out.append(v)
+    return out
+
 # Gate de amostra — DO TRACK RECORD, importado por ``execucao.confiabilidade`` (não
 # uma segunda constante lá: dois limiares com valores diferentes seria a lista
 # dizendo "n insuficiente" e o card dizendo "operável" sobre a MESMA amostra —
@@ -852,8 +881,9 @@ def _tp_publicavel(e: dict[str, Any]) -> float | None:
     return float(tp) if ok else None
 
 
-def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) -> dict | None:
-    """O PRIMEIRO toque em TP ou SL na série, varrida em ordem cronológica.
+def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool,
+                    trigger=None) -> dict | None:
+    """O PRIMEIRO toque em TP ou SL na série — MAS só DEPOIS do gatilho ser tocado.
 
     É isto que torna o track record IMUTÁVEL: um trade que tocou o alvo e voltou
     fica ``bateu_tp`` pra sempre, porque o toque é um fato numa barra do passado —
@@ -867,6 +897,19 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     flagrado. Um acerto inflado é o pior erro possível num painel que existe pra
     dizer a taxa de acerto real, então o mesmo-dia fica de fora, declarado.
 
+    GATILHO ANTES DO DESFECHO — a MESMA régua do card (``_morte_e_desfecho``,
+    DA-126): sem entrada não há trade a encerrar. Um padrão que morre ANTES de o
+    preço romper o gatilho (o preço foi ao nível do stop sem nunca acionar) NÃO é
+    ``bateu_sl`` — ninguém operou. Vira ``nunca_acionou``: terminal, mas FORA da
+    taxa de acerto e do PnL, porque não é um trade. Este era o defeito de classe:
+    48 dos 71 gatilhos Storm estavam em `formando` e 30 dos 41 `stops` eram padrão
+    que nunca entrou, contado como perda (análise de 03/09; 8 replicados no cache).
+    O gatilho é testado na MESMA barra do desfecho: um candle que rompe o gatilho e
+    toca o alvo no mesmo passo é entrada+ganho (o grão do ledger é uma barra). Com
+    ``trigger=None`` — setup já ACIONADO no log, cujo gatilho é um nível passado —
+    não se gateia: a entrada já aconteceu, e re-exigir o toque no gatilho velho
+    fabricaria um ``nunca_acionou`` sobre um trade que estava aberto.
+
     TP e SL na MESMA barra: sem tick não dá pra saber a ordem dentro da barra →
     conta ``bateu_sl`` (a leitura pessimista). Também declarado, nunca chutado.
     """
@@ -877,6 +920,7 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
     # aconteceu antes de o setup existir. Sem carimbo, não se conta nada.
     if not desde_dia:
         return None
+    acionado = trigger is None       # sem gatilho a apurar (ou já acionado): já "entrou"
     for c in candles:
         rotulo = str(c.get("d") or "")
         dia = _dia(rotulo)
@@ -888,12 +932,21 @@ def _primeiro_toque(candles: list[dict], desde_dia: str, tp, sl, venda: bool) ->
         hi, lo = c.get("h"), c.get("l")
         if hi is None or lo is None:
             continue
+        # O GATILHO primeiro, DENTRO da barra: rompeu o gatilho aqui → daqui pra
+        # frente (inclusive nesta mesma barra) o alvo/stop encerram um trade REAL.
+        if not acionado and (lo <= trigger if venda else hi >= trigger):
+            acionado = True
         bateu_tp = tp is not None and (lo <= tp if venda else hi >= tp)
         bateu_sl = sl is not None and (hi >= sl if venda else lo <= sl)
-        if bateu_sl:               # empate na barra resolve pelo SL (pessimista)
-            return {"veredito": "bateu_sl", "fechado_em": dia,
-                    "empate_na_barra": bool(bateu_tp)}
-        if bateu_tp:
+        if bateu_sl or bateu_tp:
+            if not acionado:
+                # O preço chegou ao nível do stop/alvo SEM nunca romper o gatilho: o
+                # padrão morreu antes de entrar. Não é perda — não houve trade.
+                return {"veredito": "nunca_acionou", "fechado_em": dia,
+                        "empate_na_barra": False}
+            if bateu_sl:           # empate na barra resolve pelo SL (pessimista)
+                return {"veredito": "bateu_sl", "fechado_em": dia,
+                        "empate_na_barra": bool(bateu_tp)}
             return {"veredito": "bateu_tp", "fechado_em": dia, "empate_na_barra": False}
     return None
 
@@ -986,7 +1039,13 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
         price = live if live is not None else (plan or {}).get("price")
         v["preco_agora"] = price
 
-        toque = _primeiro_toque(candles, _desde_do_toque(e.get("ts"), frame), tp, sl, venda)
+        # O gatilho gateia o desfecho (padrão que morre antes de entrar = ``nunca_acionou``,
+        # não ``bateu_sl``) — MENOS quando o log já era ACIONADO: ali a entrada é o
+        # preço, o ``trigger`` gravado é um nível velho, e re-exigir seu toque
+        # inventaria um ``nunca_acionou`` sobre um trade que estava aberto.
+        gate = trigger if str(e.get("pattern_state")) != "acionado" else None
+        toque = _primeiro_toque(candles, _desde_do_toque(e.get("ts"), frame), tp, sl,
+                                venda, trigger=gate)
         if toque:
             v.update(toque)
             v["fechado"] = True
@@ -1055,6 +1114,11 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
         # é o relatório do LEDGER INTEIRO; a carteira é o saldo DESDE que a
         # simulação começou (ou foi reiniciada).
         "carteira": _carteira_paper(verdicts, banca_efetiva, marco),
+        # MÉTODO × FRAME (task 013): o recorte que o gate lê — n de trades REAIS
+        # (gatilho tocado + fechado), acerto, E[R] e PnL nas DUAS leituras, dedup
+        # por estrutura, separando o que conta a partir do marco do histórico
+        # anterior ("antes da régua"). É aqui que "acerto alto ≠ lucro" fica visível.
+        "metodo_frame": _metodo_frame(verdicts, banca_efetiva, marco),
     }
     return out
 
@@ -1257,6 +1321,71 @@ def _pnl_paper_resumo(fechados: list[dict[str, Any]], banca: float) -> dict[str,
     return base
 
 
+def _bloco_metodo_frame(fechados: list[dict[str, Any]], banca: float) -> dict[str, Any]:
+    """Um bloco método×frame do painel (task 013): só trades REAIS (gatilho tocado +
+    fechado), DEDUPLICADOS por estrutura, com as DUAS leituras de PnL lado a lado.
+
+    Acerto alto NÃO é lucro: 75% de acerto com R:R 0,20 dá E[R] negativo (o Setup123
+    hoje). Por isso o bloco carrega acerto, E[R] (expectativa em risco) E as duas
+    curvas de dinheiro — posição fixa (``pnl_fixo_usd``) e risco fixo
+    (``pnl_risco_fixo_usd`` = ``rr·banca`` no alvo, −``banca`` no stop) — pra a tela
+    não deixar o usuário ler "acerto alto = ganhou". Reusa as mesmas funções do
+    agregado (``_pnl_paper_resumo``/``_expectativa``/``_pnl_paper_trade``): uma régua."""
+    dedup = _dedup_por_estrutura(fechados)
+    resumo = _pnl_paper_resumo(dedup, banca)   # posição fixa + nível + curva de equity
+    exp = _expectativa(dedup)                  # E[R] + acerto de equilíbrio
+    trades = [t for t in (_pnl_paper_trade(v, banca) for v in dedup) if t is not None]
+    risco = [t["pnl_risco_fixo_usd"] for t in trades if t["pnl_risco_fixo_usd"] is not None]
+    n = len(dedup)
+    tp = sum(1 for v in dedup if v.get("veredito") == "bateu_tp")
+    return {
+        "n": n,
+        "nivel": resumo["nivel"],
+        "taxa_acerto": round(tp / n, 4) if n else None,
+        "expectativa_r": exp["expectativa_r"],
+        "acerto_equilibrio": exp["acerto_equilibrio"],
+        "rr_medio": exp["rr_medio"],
+        "n_com_rr": exp["n_com_rr"],
+        "banca_por_trade": banca,
+        "pnl_fixo_usd": resumo["pnl_total_usd"],
+        "pnl_medio_usd": resumo["pnl_medio_usd"],
+        "pnl_risco_fixo_usd": round(sum(risco), 2) if risco else None,
+        "curva_equity": resumo["curva_equity"],
+    }
+
+
+def _metodo_frame(verdicts: list[dict[str, Any]], banca: float,
+                  marco: str | None) -> dict[str, Any]:
+    """A grade MÉTODO × FRAME (task 013) — o recorte que o gate de decisão lê: por
+    setup e por frame, o n de trades REAIS (gatilho tocado + fechado), o acerto, o
+    E[R] e o PnL nas duas leituras, tudo DEDUPLICADO por estrutura.
+
+    Dois recortes de tempo, porque o marco é a DATA DO FIX da régua: ``desde_marco``
+    é o que conta pro gate — medido pela régua nova (gatilho exigido antes do
+    desfecho, dedup por estrutura); ``antes_da_regua`` é o histórico anterior,
+    VISÍVEL e intocado, mas separado porque foi medido pela régua velha (padrão que
+    morria sem entrar contava como stop). O ledger não perde uma linha; o que muda é
+    de que lado da fronteira cada trade é somado."""
+    reais = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
+
+    def grade(subset: list[dict[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for nome in SETUPS_DO_LEDGER:
+            do_setup = [v for v in subset if v.get("setup") == nome]
+            frames = {frame: _bloco_metodo_frame(vs, banca)
+                      for frame, vs in _agrupa_por_frame(do_setup).items()}
+            if frames:
+                out[nome] = frames
+        return out
+
+    return {
+        "marco": marco,
+        "banca_por_trade": banca,
+        "desde_marco": grade([v for v in reais if _apos_marco(v, marco)]),
+        "antes_da_regua": grade([v for v in reais if not _apos_marco(v, marco)]),
+    }
+
+
 def _pnl_paper_aberto(v: dict[str, Any], banca: float) -> dict[str, Any] | None:
     """PnL NÃO REALIZADO de uma posição que ainda está ABERTA (``andamento_lucro``/
     ``andamento_prejuizo`` — os dois estados que o motor de vereditos já produz;
@@ -1306,7 +1435,10 @@ def _carteira_paper(verdicts: list[dict[str, Any]], banca: float,
     OUTRA pessoa, lida de fonte externa; esta é a SIMULAÇÃO dos sinais do
     próprio produto. Somar as duas faria o saldo mentir sobre de onde vem cada
     dólar."""
-    do_marco = [v for v in verdicts if _apos_marco(v, marco)]
+    # DEDUP por estrutura (task 013): a carteira conta ORDENS, não linhas do ledger —
+    # doze re-logs do mesmo padrão são uma posição, não doze. Dedup ANTES de separar
+    # fechadas de abertas, pra a mesma estrutura nunca aparecer nos dois lados.
+    do_marco = _dedup_por_estrutura([v for v in verdicts if _apos_marco(v, marco)])
     fechados = [v for v in do_marco if v.get("veredito") in ("bateu_tp", "bateu_sl")]
     abertos_raw = [v for v in do_marco
                    if v.get("veredito") in ("andamento_lucro", "andamento_prejuizo")]
