@@ -229,3 +229,34 @@ def test_pattern_is_attached_to_plan(synth):
         assert key in p.pattern
     for pt in (p.pattern["p1"], p.pattern["p2"], p.pattern["p3"]):
         assert "date" in pt and "price" in pt
+
+
+# ---------------------------------------------------------------------------
+# EIXO TEMPORAL ÚNICO (DA-205) — o carimbo do último candle sai da FONTE já no
+# fuso da tela (Manaus), offset-aware, no intradiário; só a DATA no diário/semanal.
+#
+# O bug da 019: a série intradiária carrega ``Date`` em UTC-naive (ver
+# ``intraday._yf_intraday_to_df``); ``as_of`` mandava essa hora crua pro front, que
+# a lia como se fosse Manaus — 4h adiantada, um candle no FUTURO do "agora". A
+# conversão vive em ``_as_of_stamp`` e é isto que estes testes fixam.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_as_of_intraday_vira_instante_manaus_offset_aware():
+    """Um candle 4h carimbado 17:30 UTC (o que a série entrega, naive) vira 13:30
+    Manaus, offset-aware — a hora que o usuário lê no relógio dele."""
+    ts = pd.Timestamp("2026-09-03 17:30")   # UTC-naive, como a série intradiária entrega
+    assert ps._as_of_stamp(ts, "4h") == "2026-09-03T13:30-04:00"
+    assert ps._as_of_stamp(pd.Timestamp("2026-09-03 19:30"), "1h") == "2026-09-03T15:30-04:00"
+
+
+@pytest.mark.unit
+def test_as_of_diario_e_semanal_sao_so_a_data_nunca_hora():
+    """A barra do dia/semana é do DIA — hora não tem sentido, e converter a
+    meia-noite naive ainda ROLARIA a data pro dia anterior. Fica só a DATA."""
+    ts = pd.Timestamp("2026-09-03 00:00")
+    assert ps._as_of_stamp(ts, "1d") == "2026-09-03"
+    assert ps._as_of_stamp(ts, "1w") == "2026-09-03"
+    # sem 'T', sem hora, sem fuso: o front nunca inventa horário sobre uma data
+    assert "T" not in ps._as_of_stamp(ts, "1d") and ":" not in ps._as_of_stamp(ts, "1d")

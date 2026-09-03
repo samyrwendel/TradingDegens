@@ -64,7 +64,7 @@ _FRAMES = [
 _MULTIFRAME = {"veredito": "4h", "metodo": "setup123", "frames": _FRAMES, "ms": 2580}
 
 _ACT = {
-    "symbol": "DOT-USD", "price": 0.84, "as_of": "2026-08-31 04:00", "timeframe": "4h",
+    "symbol": "DOT-USD", "price": 0.84, "as_of": "2026-08-31T04:00:00-04:00", "timeframe": "4h",
     "horizon": "dias", "setup_state": "ativo", "setup_source": "123",
     "buy_zone": None, "realize_zone": None, "pullback_zone": None,
     "pattern": {"p1": {"date": "2026-08-25", "price": 0.90},

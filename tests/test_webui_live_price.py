@@ -142,12 +142,20 @@ def test_cripto_nao_tem_pregao(monkeypatch):
     assert out["sessao"] == "24h" and "24h" in out["rotulo"]
 
 
-def test_hora_do_numero_vem_no_fuso_da_BOLSA(monkeypatch):
-    """A hora do servidor não diz nada sobre a sessão; a da bolsa, sim."""
+def test_hora_do_numero_vem_no_eixo_manaus(monkeypatch):
+    """EIXO ÚNICO (DA-205): a hora do número é a de Manaus (o relógio do usuário),
+    offset-aware — não mais a da bolsa carimbada crua, que a tela lia como se fosse
+    local. A bolsa de PROCEDÊNCIA segue nomeada em ``fuso``, pra quem quiser saber
+    de onde o preço veio."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
     _fake_info(monkeypatch, {**_BASE, "marketState": "CLOSED"})
     out = fetch_live_price("MSFT")
-    assert out["as_of"] and ":" in out["as_of"]
-    assert out["fuso"] == "America/New_York"
+    esperado = (datetime.fromtimestamp(_BASE["regularMarketTime"], tz=timezone.utc)
+                .astimezone(ZoneInfo("America/Manaus")).isoformat(timespec="minutes"))
+    assert out["as_of"] == esperado            # instante Manaus, offset-aware
+    assert out["as_of"].endswith("-04:00")     # Manaus é GMT-4 o ano todo
+    assert out["fuso"] == "America/New_York"   # a procedência (a bolsa) segue à parte
 
 
 def test_sessao_desconhecida_nao_inventa_rotulo(monkeypatch):

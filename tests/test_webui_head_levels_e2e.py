@@ -60,10 +60,12 @@ _SNAP = {
                             "note": None, "entry_basis": "gatilho"},
             "invalidation": {"price": 476.25, "meaning": "perde o ponto 3"},
         },
-        # cotação ATUAL com a sessão declarada (o que o runner passou a anexar)
+        # cotação ATUAL com a sessão declarada (o que o runner passou a anexar).
+        # as_of vem no EIXO ÚNICO da tela — Manaus, offset-aware (DA-205); ``fuso``
+        # guarda a bolsa de procedência. 16:00 NY = 16:00 Manaus em agosto (ambos GMT-4).
         "live_price": {"price": 513.53, "change_pct": 1.68, "currency": "USD",
                        "sessao": "fechado", "rotulo": "último fechamento",
-                       "as_of": "28/08 16:00", "regular_price": 513.53,
+                       "as_of": "2026-08-28T16:00:00-04:00", "regular_price": 513.53,
                        "fuso": "America/New_York", "em": _HOJE},
         "price_chart": {}, "degraded": [],
         "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
@@ -159,8 +161,8 @@ def test_o_preco_diz_QUAL_preco_e(base):
         txt = page.inner_text("#headPrice")
         assert "513,53" in txt, txt                     # a cotação atual
         assert "ÚLTIMO FECHAMENTO" in txt.upper(), txt  # DIZENDO que é fechamento
-        assert "28/08 16:00" in txt, txt                # e de quando, no fuso da bolsa
-        assert "505,06" in txt and "27/08" in txt, txt  # o preço da ANÁLISE ao lado
+        assert "28/08 16:00" in txt, txt                # e de quando, no eixo Manaus (DA-205)
+        assert "505,06" in txt and "27/08" in txt, txt  # o preço da ANÁLISE ao lado (candle diário: só data)
         assert "ANÁLISE" in txt.upper(), txt
         browser.close()
 
@@ -210,8 +212,10 @@ _ZEC = {
         "setup123": True, "verdict": "HOLD", "final_decision": "MANTER",
         "timeframe": "4h", "as_of_price": 834.74,
         "actionable": {
-            # as_of REAL da run de produção: no intradiário ele traz a HORA do candle
-            "price": 834.74, "as_of": "2026-08-29 20:00", "setup_state": "setup_ativo",
+            # as_of REAL da run de produção: no intradiário ele traz a HORA do candle,
+            # já no EIXO ÚNICO — instante Manaus offset-aware (DA-205), não mais a hora
+            # UTC crua ("2026-08-29 20:00") que a tela lia como se fosse local.
+            "price": 834.74, "as_of": "2026-08-29T20:00:00-04:00", "setup_state": "setup_ativo",
             "pattern": {"trigger": 834.82, "state": "rompeu_retracou", "direction": "compra"},
             "stop": {"price": 764.76, "basis": "invalidação + folga"},
             "target": {"price": 856.72, "label": "topo anterior"},
@@ -221,7 +225,7 @@ _ZEC = {
         },
         "live_price": {"price": 835.37, "change_pct": 4.32, "currency": "USD",
                        "sessao": "24h", "rotulo": "cotação agora · 24h",
-                       "as_of": "29/08 20:42", "regular_price": 835.37,
+                       "as_of": "2026-08-29T20:42:00-04:00", "regular_price": 835.37,
                        "fuso": "UTC", "em": _HOJE},
         "price_chart": {}, "degraded": [],
         "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
@@ -424,18 +428,58 @@ def test_a_separacao_entre_cotacao_e_analise_tem_peso_visual(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_momento_mostra_a_hora_quando_o_dado_tem_hora_e_nunca_inventa(base):
-    """A hora do candle vinha no as_of e era JOGADA FORA por fmtDate ('em 29/08'),
-    justo o dado que distingue o momento da análise do da cotação — os dois caem no
-    mesmo dia num frame de 4h. Mostrar não é inventar: sem hora no dado, nada aparece."""
+def test_o_carimbo_tem_um_eixo_so_e_recusa_o_futuro(base):
+    """EIXO TEMPORAL ÚNICO (DA-205): `fmtCarimbo` é o único formatador do cabeçalho.
+
+    A PRECISÃO do dado diz o que mostrar — candle de dia/semana chega como DATA e
+    vira "29/08" (hora não tem sentido); candle intradiário e cotação chegam como
+    instante Manaus offset-aware e viram "29/08 20:00", lidos VERBATIM (nunca por
+    Date(), que re-deslocaria pro fuso do navegador).
+
+    A GUARDA de futuro é o que este teste protege: um carimbo depois do "agora" do
+    cabeçalho é fuso trocado (o bug da 019 — candle UTC 4h adiantado). A tela DIZ
+    "horário inconsistente" em vez de mentir a hora. E um instante COM hora mas SEM
+    fuso não é formatado (volta cru): sem fuso não há eixo pra validar."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         _abre_zec(page, base)
-        m = page.evaluate("""() => [
-          fmtMomento('2026-08-29 20:00'), fmtMomento('2026-08-29T20:00:00-04:00'),
-          fmtMomento('2026-08-29'), fmtMomento(''), fmtMomento('nada disso')]""")
-        assert m == ["29/08 20:00", "29/08 20:00", "29/08", "", "nada disso"], m
+        m = page.evaluate("""() => {
+          const AGORA = Date.parse('2026-08-29T20:30:00-04:00');
+          return [
+            fmtCarimbo('2026-08-29', AGORA),                       // candle diário: só a data
+            fmtCarimbo('2026-08-29T20:00:00-04:00', AGORA),        // intradiário Manaus: hora
+            fmtCarimbo('2026-08-29T20:00:00-04:00', null),         // cotação (é o "agora"): sem guarda
+            fmtCarimbo('2026-08-29T23:30:00-04:00', AGORA),        // 3h no FUTURO do agora → aviso
+            fmtCarimbo('2026-08-29 20:00', AGORA),                 // hora SEM fuso → não formata (cru)
+            fmtCarimbo('', null), fmtCarimbo('nada disso', null),
+          ];
+        }""")
+        assert m == ["29/08", "29/08 20:00", "29/08 20:00", "horário inconsistente",
+                     "2026-08-29 20:00", "", "nada disso"], m
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_carimbo_no_futuro_vira_aviso_no_cabecalho(base):
+    """DENTE da 019, na tela inteira: com o as_of da análise no FUTURO do "agora" (o
+    que o candle UTC lido como Manaus produzia — 4h adiantado), o cabeçalho não pode
+    exibir uma hora que ainda não chegou. Ele mostra "horário inconsistente" e a hora
+    mentirosa some da unidade da análise."""
+    futuro = json.loads(json.dumps(_ZEC))
+    # um instante claramente à frente de qualquer "agora" real do navegador
+    futuro["result"]["actionable"]["as_of"] = "2099-01-01T00:00:00-04:00"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1500, "height": 950})
+        _abre_zec(page, base, futuro)
+        m = page.evaluate("""() => {
+          const un = [...document.querySelectorAll('#headPrice .hp-unit')]
+            .map(u => u.innerText.replace(/\\n/g, ' '));
+          return {analise: un[un.length - 1], txt: document.querySelector('#headPrice').innerText};
+        }""")
+        assert "horário inconsistente" in m["analise"], m
+        assert "01/01" not in m["txt"], m   # a hora do futuro não é exibida
         browser.close()
 
 

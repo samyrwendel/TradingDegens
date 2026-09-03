@@ -39,7 +39,7 @@ def base(tmp_path):
 
 # O CRWD do print: preço colado no gatilho p3, dois alvos, faixa de recuo publicada.
 _PLANO_CRWD = {
-    "symbol": "CRWD", "price": 218.40, "as_of": "2026-08-28 17:30",
+    "symbol": "CRWD", "price": 218.40, "as_of": "2026-08-28T17:30:00-04:00",
     "timeframe": "diário (referência)", "horizon": "dias",
     "setup_state": "aguardar_rompimento", "setup_source": "123",
     "pattern": {"p1": {"date": "2026-08-10", "price": 200.0},

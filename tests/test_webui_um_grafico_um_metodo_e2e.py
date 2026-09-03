@@ -84,7 +84,7 @@ _CHART = {
 }
 
 _PLANO = {
-    "symbol": "MSFT", "price": 465.58, "as_of": "2026-08-28 17:30",
+    "symbol": "MSFT", "price": 465.58, "as_of": "2026-08-28T17:30:00-04:00",
     "timeframe": "diário (referência)", "horizon": "dias",
     "setup_state": "aguardar_rompimento", "setup_source": "123",
     "buy_zone": {"label": "MMS50 — preço abaixo da média", "price": 470.0,

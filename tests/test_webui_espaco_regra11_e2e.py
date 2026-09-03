@@ -96,7 +96,7 @@ _SNAP = {
         "verdict": "HOLD", "final_decision": "MANTER", "timeframe": "4h",
         "as_of_price": 465.6,
         "actionable": {
-            "symbol": "AMD", "price": 465.6, "as_of": "2026-08-29 20:00",
+            "symbol": "AMD", "price": 465.6, "as_of": "2026-08-29T20:00:00-04:00",
             "timeframe": "4h", "horizon": "dias", "setup_state": "aguardar_rompimento",
             "setup_source": "123", "buy_zone": None, "realize_zone": None,
             "pullback_zone": None,

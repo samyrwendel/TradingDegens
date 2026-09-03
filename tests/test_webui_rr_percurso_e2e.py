@@ -46,7 +46,7 @@ def base(tmp_path):
 # Os números do print: venda, gatilho 517,35 · stop 526,92 · alvo 460,21.
 def _plano(preco, state, rr):
     return {
-        "symbol": "MSFT", "price": preco, "as_of": "2026-08-28 17:30",
+        "symbol": "MSFT", "price": preco, "as_of": "2026-08-28T17:30:00-04:00",
         "timeframe": "4 horas (intradiário)", "horizon": "dias",
         "setup_state": "aguardar_rompimento", "setup_source": "123",
         "buy_zone": None, "realize_zone": None, "pullback_zone": None,

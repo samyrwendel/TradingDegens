@@ -318,15 +318,33 @@ function verdictHtml(v) {
   return escapeHtml((raw || "—").toUpperCase());
 }
 
-// Um MOMENTO da tira do cabeçalho: "29/08" quando o dado só tem data, "29/08 20:00"
-// quando ele carrega a HORA — que é o caso de um frame intradiário, onde o preço da
-// análise é o de um candle específico. Aceita "2026-08-29", "2026-08-29 20:00" e
-// "2026-08-29T20:00" (as três formas que o backend devolve). Não inventa hora: sem
-// hora no dado, nada aparece.
-function fmtMomento(iso) {
-  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
-  if (!m) return escapeHtml(String(iso || ""));
-  return `${m[3]}/${m[2]}` + (m[4] ? ` ${m[4]}:${m[5]}` : "");
+// UM carimbo pro EIXO TEMPORAL ÚNICO do cabeçalho (DA-205). A PRECISÃO do dado diz
+// o que mostrar, sem a tela ter que adivinhar o frame: candle de dia/semana chega
+// como DATA ("2026-09-03") e vira "03/09" — hora não tem sentido numa barra do dia.
+// Candle intradiário e cotação chegam como instante Manaus OFFSET-AWARE
+// ("2026-09-03T13:30:00-04:00"); a hora é lida VERBATIM da string (nunca por Date(),
+// que a re-deslocaria pro fuso do navegador) e vira "03/09 13:30".
+//
+// GUARDA DE FUTURO: um carimbo de candle NASCE no passado. Se ele cai depois do
+// "agora" do cabeçalho (`agoraMs`), o que houve foi erro de fuso (o bug da 019:
+// candle UTC lido como Manaus, 4h adiantado) — e a tela DIZ "horário inconsistente"
+// em vez de mentir uma hora. A cotação, que É o "agora", passa `agoraMs = null`:
+// não se compara consigo mesma. Um instante COM hora mas SEM fuso não é formatado
+// (volta cru): sem o fuso não há eixo — mostrar cru denuncia, não disfarça.
+const CARIMBO_TOL_MS = 120000;   // folga p/ desencontro relógio × abertura de barra
+const CARIMBO_INCONSISTENTE = "horário inconsistente";
+
+function fmtCarimbo(iso, agoraMs) {
+  const s = String(iso || "");
+  const soData = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (soData) return `${soData[3]}/${soData[2]}`;   // candle diário/semanal: só a data
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2})?([+-]\d{2}:?\d{2}|Z)/);
+  if (!m) return escapeHtml(s);   // sem fuso (ou forma estranha): mostra cru, não inventa hora
+  if (agoraMs != null) {
+    const t = Date.parse(s);
+    if (!isNaN(t) && t > agoraMs + CARIMBO_TOL_MS) return CARIMBO_INCONSISTENTE;
+  }
+  return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`;
 }
 
 // Format a Manaus ISO stamp ("2026-08-23T20:30:00-04:00") for display WITHOUT
@@ -2200,6 +2218,14 @@ function rrMarca(rr) {
 function renderHeadPrice(a, live) {
   const el = $("headPrice");
   const box = $("headLevels");
+  // O "agora" do cabeçalho contra o qual nenhum carimbo pode estar no futuro
+  // (DA-205): o MAIOR entre o relógio real e o instante da cotação mostrada. Um
+  // candle abre SEMPRE no passado, então no fluxo real ele fica abaixo desse teto e
+  // nunca é falso-acusado — o único jeito de passar dele é o bug do fuso trocado
+  // (candle UTC lido como Manaus, 4h adiantado). Usar o MÁXIMO evita tanto o falso
+  // positivo de uma cotação defasada quanto o de um relógio de teste atrás do dado.
+  const cotMs = (live && live.as_of) ? Date.parse(live.as_of) : NaN;
+  const agoraMs = Math.max(Date.now(), isNaN(cotMs) ? 0 : cotMs);
   // O carimbo da análise MUDA de hora quando se troca o frame — "28/08" no diário,
   // "19:30" no 1h, "17:30" no 4h — porque é o ÚLTIMO CANDLE daquele frame. Faz
   // sentido e, sem rótulo, parecia dado inconsistente. Agora a unidade diz o que o
@@ -2210,10 +2236,11 @@ function renderHeadPrice(a, live) {
     ? `<span class="hp-unit hp-ref"><span class="hp-k">análise</span>` +
       `<b>${fmtNum(a.price)}</b>` +
       `<span class="hp-tag">${escapeHtml(candle)}</span>` +
-      // O as_of da análise costuma trazer a HORA do candle no intradiário; ela
-      // estava sendo jogada fora por fmtDate e é justamente o que distingue este
-      // momento do da cotação (os dois caem no mesmo dia).
-      (a.as_of ? `<span class="hp-when">${fmtMomento(a.as_of)}</span>` : "") +
+      // O as_of da análise traz a HORA do candle no intradiário (só a data no
+      // diário/semanal) e distingue este momento do da cotação — os dois caem no
+      // mesmo dia. Passa pelo EIXO ÚNICO (`fmtCarimbo`, DA-205): hora Manaus no
+      // intradiário, futuro vira "horário inconsistente".
+      (a.as_of ? `<span class="hp-when">${fmtCarimbo(a.as_of, agoraMs)}</span>` : "") +
       `</span>`
     : "";
   // A cotação só vale como ATUAL no dia em que foi tirada: o resultado é persistido,
@@ -2222,7 +2249,9 @@ function renderHeadPrice(a, live) {
   const atual = live && live.price != null && (!live.em || !hoje || live.em === hoje)
     ? `<span class="hp-unit hp-live"><b>${fmtNum(live.price)}</b>` +
       `<span class="hp-tag">${escapeHtml(live.rotulo || "cotação")}</span>` +
-      (live.as_of ? `<span class="hp-when">${escapeHtml(live.as_of)}</span>` : "") +
+      // A cotação É o "agora" — passa `null` e não se compara consigo mesma; a hora
+      // vem no MESMO eixo (Manaus) da análise (DA-205).
+      (live.as_of ? `<span class="hp-when">${fmtCarimbo(live.as_of, null)}</span>` : "") +
       `</span>`
     : "";
   // DISTÂNCIA entre as duas (task 037): a cotação agora contra o preço em que a

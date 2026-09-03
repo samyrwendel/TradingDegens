@@ -3659,7 +3659,7 @@
   },
   "actionable": {
    "symbol": "ZEC-USD",
-   "as_of": "2026-08-29 20:00",
+   "as_of": "2026-08-29T20:00:00-04:00",
    "price": 834.74,
    "timeframe": "4 horas (intradiário) (referência)",
    "horizon": "dias para confirmar · semanas a meses para o alvo",

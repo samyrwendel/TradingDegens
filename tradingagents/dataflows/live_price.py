@@ -77,9 +77,15 @@ def _sessao_e_preco(info: dict) -> tuple[str, str, float | None, float | None]:
     return sessao, rotulo, regular, regular
 
 
-def _hora_local(epoch, tz_nome: str | None) -> str | None:
-    """Epoch → ``dd/mm HH:MM`` no fuso da BOLSA (é o relógio que dá sentido ao
-    número; o do servidor não diz nada sobre a sessão)."""
+def _instante_manaus(epoch) -> str | None:
+    """Epoch (segundos UTC) → instante Manaus **offset-aware** (ISO, ex.:
+    ``2026-09-03T15:54:00-04:00``).
+
+    O EIXO da tela é UM só: Manaus (DA-205). A cotação chegava carimbada no fuso da
+    BOLSA (NY/UTC) e o front a mostrava crua, ao lado de uma análise carimbada em
+    OUTRO fuso — dois relógios no mesmo cabeçalho. Aqui a HORA é sempre Manaus (o
+    relógio do usuário); a PROCEDÊNCIA (fuso da bolsa) segue à parte, no campo
+    ``fuso``, para quem quiser saber de onde o número veio."""
     if not epoch:
         return None
     try:
@@ -87,9 +93,7 @@ def _hora_local(epoch, tz_nome: str | None) -> str | None:
         from zoneinfo import ZoneInfo
 
         dt = datetime.fromtimestamp(float(epoch), tz=timezone.utc)
-        if tz_nome:
-            dt = dt.astimezone(ZoneInfo(str(tz_nome)))
-        return dt.strftime("%d/%m %H:%M")
+        return dt.astimezone(ZoneInfo("America/Manaus")).isoformat(timespec="minutes")
     except Exception:  # noqa: BLE001 — hora ausente nunca derruba a cotação
         return None
 
@@ -106,7 +110,8 @@ def fetch_live_price(symbol: str) -> dict[str, Any] | None:
       a frase que a tela mostra — juntos são a resposta a "que preço é esse?";
     * ``regular_price`` — o fechamento/último regular, pra a tela poder mostrar os
       dois quando divergem (é a divergência que o leitor precisa ver);
-    * ``as_of`` — a hora daquele número, no fuso da BOLSA.
+    * ``as_of`` — o instante daquele número, em Manaus e offset-aware (o eixo único
+      da tela, DA-205); ``fuso`` guarda à parte a bolsa de PROCEDÊNCIA.
 
     ``change_pct`` é a variação vs. o fechamento anterior (None quando ausente).
     """
@@ -135,7 +140,7 @@ def fetch_live_price(symbol: str) -> dict[str, Any] | None:
             "currency": currency if isinstance(currency, str) else None,
             "sessao": sessao,
             "rotulo": rotulo,
-            "as_of": _hora_local(info.get(stamp) or info.get("regularMarketTime"), tz_nome),
+            "as_of": _instante_manaus(info.get(stamp) or info.get("regularMarketTime")),
             "regular_price": regular,
             "fuso": tz_nome if isinstance(tz_nome, str) else None,
         }

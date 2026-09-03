@@ -45,7 +45,7 @@ _PONTOS = [{"date": "2026-08-24", "price": 470.0},
 
 def _plano(*, invalidado=False, projecao=None, direcao="venda"):
     return {
-        "symbol": "MSFT", "price": 465.58, "as_of": "2026-08-28 17:30",
+        "symbol": "MSFT", "price": 465.58, "as_of": "2026-08-28T17:30:00-04:00",
         "timeframe": "diário (referência)", "horizon": "dias",
         "setup_state": "aguardar_rompimento", "setup_source": "123",
         "buy_zone": None, "realize_zone": None, "pullback_zone": None,

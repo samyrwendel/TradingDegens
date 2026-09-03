@@ -62,7 +62,7 @@ except Exception:  # noqa: BLE001
 # saiu — setup_source), enquanto o 1-2-3 diz "rompeu e retraçou (não confirmado)".
 # ---------------------------------------------------------------------------
 _ACT = {
-    "symbol": "ZEC-USD", "price": 834.74, "as_of": "2026-08-29 20:00",
+    "symbol": "ZEC-USD", "price": 834.74, "as_of": "2026-08-29T20:00:00-04:00",
     "timeframe": "4h", "horizon": "dias", "setup_state": "ativo",
     "setup_source": "recuo_media",
     "buy_zone": {"label": "MMS50 — preço na média agora", "price": 806.67,

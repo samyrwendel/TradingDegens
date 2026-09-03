@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -89,6 +90,35 @@ def _is_intraday(timeframe: str) -> bool:
 def _date_fmt(timeframe: str) -> str:
     """Intraday points need the time-of-day; daily/weekly are date-only."""
     return "%Y-%m-%d %H:%M" if _is_intraday(timeframe) else "%Y-%m-%d"
+
+
+# O EIXO TEMPORAL da tela é UM só: America/Manaus (DA-205). É o mesmo fuso que
+# ``webui.timeutil`` declara como único relógio do usuário — reafirmado aqui, na
+# fonte do dado, para não arrastar uma dependência de ``webui`` até ``dataflows``.
+_MANAUS = ZoneInfo("America/Manaus")
+
+
+def _as_of_stamp(ts, timeframe: str) -> str:
+    """Carimbo do ÚLTIMO candle para a tela, num eixo temporal ÚNICO (DA-205).
+
+    A série intradiária carrega ``Date`` em **UTC-naive** (ver
+    :func:`tradingagents.dataflows.intraday._yf_intraday_to_df` — a hora do candio
+    vem convertida pra UTC e "desnaturada"). Mandar essa hora crua pro front a fazia
+    ser lida como se fosse Manaus, 4h adiantada — um candle intradiário caía no
+    FUTURO do "agora" da cotação. Aqui ela vira um instante Manaus **offset-aware**
+    (ISO, ex.: ``2026-09-03T13:30:00-04:00``): o front lê a hora verbatim e valida
+    que não é futura, no MESMO eixo do resto do cabeçalho.
+
+    Diário/semanal: a barra é do DIA — hora não tem sentido, e converter a
+    meia-noite naive ainda ROLARIA a data pro dia anterior. Fica só a DATA do candle
+    (``YYYY-MM-DD``), e o front nunca inventa hora sobre ela.
+    """
+    if _is_intraday(timeframe):
+        dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_MANAUS).isoformat(timespec="minutes")
+    return ts.strftime("%Y-%m-%d")
 
 
 def _tf_label(timeframe: str) -> str:
@@ -1790,7 +1820,7 @@ def build_actionable_plan(
     if len(df) <= 2 * _SWING_K + 1:
         return ActionablePlan(
             symbol=symbol,
-            as_of=df["Date"].iloc[-1].strftime(fmt) if len(df) else None,
+            as_of=_as_of_stamp(df["Date"].iloc[-1], timeframe) if len(df) else None,
             price=round(float(df["Close"].iloc[-1]), 2) if len(df) else None,
             timeframe=tf_ref, horizon=_HORIZON["sem_dado"],
             setup_state="sem_dado",
@@ -1798,7 +1828,7 @@ def build_actionable_plan(
         )
 
     price = round(float(df["Close"].iloc[-1]), 2)
-    as_of = df["Date"].iloc[-1].strftime(fmt)
+    as_of = _as_of_stamp(df["Date"].iloc[-1], timeframe)
 
     struct = detect_price_structure(symbol, curr_date, timeframe, method)
     lows, highs = _swings(df, _method_k(method))
@@ -2547,7 +2577,7 @@ def build_storm_plan(
     fmt = _date_fmt(timeframe)
     df = _prep(symbol, curr_date, timeframe)
     price = round(float(df["Close"].astype(float).iloc[-1]), 2) if len(df) else None
-    as_of = df["Date"].iloc[-1].strftime(fmt) if len(df) else None
+    as_of = _as_of_stamp(df["Date"].iloc[-1], timeframe) if len(df) else None
     eden = _eden(df)
     pat = _storm_123(df, fmt, ultima_em_formacao=_ultima_barra_em_formacao(curr_date))
     col_l = f"EMA{_STORM_EMA_LENTA}"
