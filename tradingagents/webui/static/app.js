@@ -10381,11 +10381,51 @@ function metodoFrameGradeHtml(grade) {
   return linhas.join("");
 }
 
+// Os DOIS recortes novos da DA-184 (task 018) — mesma grade método×frame,
+// decomposta por outro eixo. "Storm × ação" e "123 × eden alinhado" são as
+// células que a decisão manda pré-registrar; aqui é só mais uma passada do
+// MESMO bloco (metodoFrameBlocoHtml), sem tabela nova.
+const _CLASSE_NOME = { crypto: "cripto", stock: "ação" };
+function metodoFrameClasseHtml(grade) {
+  const linhas = [];
+  for (const s of SETUPS_DO_LEDGER_FRONT) {
+    const porClasse = (grade || {})[s];
+    if (!porClasse) continue;
+    for (const [classe, porFrame] of Object.entries(porClasse)) {
+      const rotulo = `${_SETUP_NOME[s] || s} · ${_CLASSE_NOME[classe] || classe}`;
+      for (const [frame, b] of Object.entries(porFrame)) {
+        linhas.push(metodoFrameBlocoHtml(rotulo, frame, b));
+      }
+    }
+  }
+  return linhas.join("");
+}
+
+const _EDEN_ALINHAMENTO_NOME = {
+  alinhado: "eden alinhado", contra: "eden contra", neutro: "eden neutro",
+  sem_dado: "eden sem dado",
+};
+function metodoFrameEdenHtml(grade) {
+  const linhas = [];
+  for (const [alinhamento, porFrame] of Object.entries(grade || {})) {
+    const rotulo = `Setup123 · ${_EDEN_ALINHAMENTO_NOME[alinhamento] || alinhamento}`;
+    for (const [frame, b] of Object.entries(porFrame)) {
+      linhas.push(metodoFrameBlocoHtml(rotulo, frame, b));
+    }
+  }
+  return linhas.join("");
+}
+
 function metodoFrameHtml(paper) {
   const mf = paper && paper.metodo_frame;
   if (!mf) return "";
   const desde = metodoFrameGradeHtml(mf.desde_marco);
   const antes = metodoFrameGradeHtml(mf.antes_da_regua);
+  // Recortes DA-184 — só do lado "desde o marco" (o que conta pro gate); o
+  // histórico "antes da régua" já é secundário na leitura de cima, e duplicar
+  // os dois recortes novos ali só multiplicaria ruído sem responder pergunta nova.
+  const classe = metodoFrameClasseHtml((mf.por_classe || {}).desde_marco);
+  const eden = metodoFrameEdenHtml((mf.por_eden || {}).desde_marco);
   return `<h3 class="ek-sec">Por método × frame — trade real (gatilho tocado + fechado, dedup)</h3>` +
     `<p class="hint">Acerto alto NÃO é lucro: 75% de acerto com R:R 0,20 dá E[R] negativo. ` +
     `Por isso as duas leituras de PnL — posição fixa e risco fixo — ao lado do acerto.</p>` +
@@ -10393,6 +10433,12 @@ function metodoFrameHtml(paper) {
     (desde || '<div class="scan-summary hint">nenhum trade real desde o marco ainda</div>') +
     (antes
       ? `<div class="scan-summary hint">antes da régua (histórico — régua velha, visível e intocado):</div>${antes}`
+      : "") +
+    (classe
+      ? `<div class="scan-summary hint">por classe de ativo — mesmos trades, recortados por cripto/ação:</div>${classe}`
+      : "") +
+    (eden
+      ? `<div class="scan-summary hint">Setup123 por Éden do gatilho — mediria se o filtro do Storm ajudaria o 1-2-3:</div>${eden}`
       : "");
 }
 

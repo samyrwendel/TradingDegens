@@ -2632,3 +2632,27 @@ def build_storm_plan_dict(
             "qualidade": None, "motivo": "sem dado para ler o Storm",
             "opera": False, "veto": None,
         }
+
+
+def eden_classe(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME) -> str:
+    """O estado do Éden (DA-184) reduzido a QUATRO valores: ``compra``, ``venda``,
+    ``neutro``, ``sem_dado`` — pra MEDIR fora do Storm, não pra decidir nada.
+
+    É a MESMA :func:`_eden` que o Storm usa, sobre a MESMA série cacheada de
+    :func:`_prep` (o 1-2-3 deste projeto já a lê pra montar o próprio plano —
+    aqui só se pergunta mais uma coisa dela, $0 e sem fetch novo). A pergunta que
+    isto serve: o único ingrediente EXCLUSIVO do Storm filtraria um gatilho do
+    1-2-3 que hoje acerta ≤ passeio aleatório (DA-184)? Zero influência na
+    detecção, no gatilho, no stop ou no alvo do 1-2-3 — é rótulo, não regra.
+    """
+    try:
+        df = _prep(symbol, curr_date, timeframe)
+    except Exception:  # noqa: BLE001 — medição nunca derruba quem chamou
+        return "sem_dado"
+    eden = _eden(df)
+    if not eden.get("disponivel"):
+        return "sem_dado"
+    direcao = eden.get("direcao")
+    if direcao in ("compra", "venda"):
+        return direcao
+    return "neutro"

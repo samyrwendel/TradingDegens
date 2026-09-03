@@ -132,8 +132,9 @@ def test_a_linha_do_123_nao_perdeu_nem_mudou_nenhum_campo(monkeypatch):
         assert campo in linha, f"o campo {campo} do 1-2-3 sumiu da linha"
     assert linha["trigger"] == 110.0 and linha["sl"] == 88.0 and linha["tp"] == 130.0
     assert linha["estado"] == "formando"
-    # e o Storm é UMA chave a mais, numa caixa só dele
-    assert set(linha) - set(_CAMPOS_DO_123) == {"storm"}, set(linha)
+    # e o Storm é uma chave a mais numa caixa só dele; o Éden (DA-184) é OUTRA
+    # chave a mais, rótulo de medição — nenhuma delas MEXE nas do 123 acima.
+    assert set(linha) - set(_CAMPOS_DO_123) == {"storm", "eden"}, set(linha)
     # padrão FORMANDO: o percurso não se aplica, e o campo diz isso com None em vez
     # de um zero que pareceria "não andou nada" medido
     assert linha["andado_pct"] is None and linha["rr_gatilho"] is None, linha

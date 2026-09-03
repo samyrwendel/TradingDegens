@@ -39,6 +39,7 @@ from tradingagents.dataflows.price_structure import (
     build_actionable_plan_dict,
     build_price_chart,
     build_storm_plan_dict,
+    eden_classe,
 )
 from tradingagents.dataflows.symbol_utils import crypto_base
 from tradingagents.webui import timeutil
@@ -344,6 +345,11 @@ def _frame_row(ticker: str, date: str, frame: str,
         # os dois setups no mesmo ativo de relance. Nunca no mesmo campo: misturar os
         # dois numa coluna só faria a taxa de acerto descrever trade nenhum.
         "storm": _storm_row(ticker, date, frame, price),
+        # O ÉDEN no gatilho do 1-2-3 (DA-184) — MEDIÇÃO, não regra: o único
+        # ingrediente exclusivo do Storm (MME 8 × MME 80) rotulando um gatilho do
+        # 123 que hoje acerta ≤ passeio aleatório, pra medir depois se ele filtra
+        # alguma coisa. Zero influência no estado/gatilho/stop/alvo acima.
+        "eden": eden_classe(ticker, date, frame),
     }
 
 
@@ -634,6 +640,13 @@ class ScanLog:
             entry["entrada"] = row.get("entrada")
         if row.get("leitura"):
             entry["leitura"] = row.get("leitura")
+        # O ÉDEN no gatilho (DA-184) — medição, não decisão: linha antiga sem o
+        # campo (append-only) simplesmente não o tem, e quem lê assume "sem_dado"
+        # (:func:`_eden_da_entrada`). Presente pros dois setups: o 1-2-3 ganha o
+        # rótulo aqui pela primeira vez; o Storm já carregava o dele (``eden`` no
+        # payload de :func:`_storm_row`) — este pass-through só o mantém.
+        if row.get("eden"):
+            entry["eden"] = row.get("eden")
         self._append(entry)
 
     def record_close(self, chave: str, veredito: str, fechado_em: str,
@@ -1375,6 +1388,41 @@ def _bloco_metodo_frame(fechados: list[dict[str, Any]], banca: float) -> dict[st
     }
 
 
+def _classe_ativo(ticker: str) -> str:
+    """``crypto``/``stock`` — a MESMA classificação que ``earnings``/``asset_type``
+    já usam pro resto da tela (:func:`crypto_base`), reaproveitada aqui pro recorte
+    "Storm × ação" que a DA-184 manda pré-registrar."""
+    return "crypto" if crypto_base(str(ticker or "")) else "stock"
+
+
+def _agrupa_por_classe(fechados: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for v in fechados:
+        out.setdefault(_classe_ativo(v.get("ticker")), []).append(v)
+    return out
+
+
+def _alinhamento_eden(v: dict[str, Any]) -> str:
+    """``alinhado``/``contra``/``neutro``/``sem_dado`` — o Éden do GATILHO (campo
+    ``eden``, DA-184) comparado à DIREÇÃO do trade. Só o 123 carrega este recorte:
+    é o setup que não usa o Éden pra decidir, e a pergunta é se ele TERIA ajudado.
+    Linha sem o campo (ledger anterior à DA-184, ou qualquer leitura fora do
+    vocabulário esperado) cai em ``sem_dado`` — nunca inventa alinhamento."""
+    eden = v.get("eden")
+    if eden not in ("compra", "venda", "neutro"):
+        return "sem_dado"
+    if eden == "neutro":
+        return "neutro"
+    return "alinhado" if eden == v.get("direction") else "contra"
+
+
+def _agrupa_por_eden(fechados: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for v in fechados:
+        out.setdefault(_alinhamento_eden(v), []).append(v)
+    return out
+
+
 def _metodo_frame(verdicts: list[dict[str, Any]], banca: float,
                   marco: str | None) -> dict[str, Any]:
     """A grade MÉTODO × FRAME (task 013) — o recorte que o gate de decisão lê: por
@@ -1386,7 +1434,12 @@ def _metodo_frame(verdicts: list[dict[str, Any]], banca: float,
     desfecho, dedup por estrutura); ``antes_da_regua`` é o histórico anterior,
     VISÍVEL e intocado, mas separado porque foi medido pela régua velha (padrão que
     morria sem entrar contava como stop). O ledger não perde uma linha; o que muda é
-    de que lado da fronteira cada trade é somado."""
+    de que lado da fronteira cada trade é somado.
+
+    ``por_classe`` e ``por_eden`` (DA-184) são os DOIS recortes que a decisão manda
+    pré-registrar — as células "Storm × ação × S100/T100" e "123 × eden alinhado" —,
+    decompondo os MESMOS ``desde_marco``/``antes_da_regua`` por outro eixo. Somam
+    igual ao total: são a mesma lista de trades, só reagrupada."""
     reais = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
 
     def grade(subset: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1399,11 +1452,45 @@ def _metodo_frame(verdicts: list[dict[str, Any]], banca: float,
                 out[nome] = frames
         return out
 
+    def grade_por_classe(subset: list[dict[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for nome in SETUPS_DO_LEDGER:
+            do_setup = [v for v in subset if v.get("setup") == nome]
+            classes: dict[str, Any] = {}
+            for classe, vs in _agrupa_por_classe(do_setup).items():
+                frames = {frame: _bloco_metodo_frame(fs, banca)
+                          for frame, fs in _agrupa_por_frame(vs).items()}
+                if frames:
+                    classes[classe] = frames
+            if classes:
+                out[nome] = classes
+        return out
+
+    def grade_por_eden(subset: list[dict[str, Any]]) -> dict[str, Any]:
+        do_123 = [v for v in subset if v.get("setup") == "123"]
+        out: dict[str, Any] = {}
+        for alinhamento, vs in _agrupa_por_eden(do_123).items():
+            frames = {frame: _bloco_metodo_frame(fs, banca)
+                      for frame, fs in _agrupa_por_frame(vs).items()}
+            if frames:
+                out[alinhamento] = frames
+        return out
+
+    desde = [v for v in reais if _apos_marco(v, marco)]
+    antes = [v for v in reais if not _apos_marco(v, marco)]
     return {
         "marco": marco,
         "banca_por_trade": banca,
-        "desde_marco": grade([v for v in reais if _apos_marco(v, marco)]),
-        "antes_da_regua": grade([v for v in reais if not _apos_marco(v, marco)]),
+        "desde_marco": grade(desde),
+        "antes_da_regua": grade(antes),
+        "por_classe": {
+            "desde_marco": grade_por_classe(desde),
+            "antes_da_regua": grade_por_classe(antes),
+        },
+        "por_eden": {
+            "desde_marco": grade_por_eden(desde),
+            "antes_da_regua": grade_por_eden(antes),
+        },
     }
 
 
