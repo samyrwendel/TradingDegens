@@ -307,7 +307,8 @@ def wilson(acertos: int, n: int, z: float = _Z_95) -> tuple[float, float] | None
     return (round(max(0.0, centro - meio), 4), round(min(1.0, centro + meio), 4))
 
 
-def confiabilidade(por_setup: dict[str, Any] | None) -> dict[str, Any]:
+def confiabilidade(por_setup: dict[str, Any] | None,
+                   setups: tuple[str, ...] | None = None) -> dict[str, Any]:
     """O índice honesto: **a taxa só aparece quando a amostra a sustenta**.
 
     O motor de track record já existe (:func:`scanner.scan_verdicts`) e já separa por
@@ -329,13 +330,18 @@ def confiabilidade(por_setup: dict[str, Any] | None) -> dict[str, Any]:
     nenhum (lição da task 008).
     """
     out: dict[str, Any] = {"n_minimo": _N_MINIMO, "n_operavel": _N_OPERAVEL, "setups": {}}
-    # OS DOIS SETUPS SEMPRE. Iterar só o que o ledger devolveu fazia o índice SUMIR da
-    # tela quando o track record vinha vazio ou ilegível (o caminho fail-open do
+    # OS SETUPS VISÍVEIS SEMPRE. Iterar só o que o ledger devolveu fazia o índice SUMIR
+    # da tela quando o track record vinha vazio ou ilegível (o caminho fail-open do
     # runner) — e um bloco ausente não diz "não há amostra", diz nada. O gate é a
     # informação: com n=0 a tela declara "amostra insuficiente (n=0)", que é a
-    # verdade, em vez de calar justamente onde a pessoa decide.
-    fonte = {n: (por_setup or {}).get(n) or {} for n in SETUPS_DO_LEDGER}
-    for nome, bloco in {**fonte, **(por_setup or {})}.items():
+    # verdade, em vez de calar justamente onde a pessoa decide. ``setups`` (DA-184,
+    # None = os dois, o padrão de sempre) é a flag de estratégia da tela — Storm123
+    # desligado não pode reaparecer aqui como "sem amostra": ele deixaria de EXISTIR
+    # na tela em outro lugar qualquer e sobreviveria só neste índice.
+    visiveis = tuple(setups) if setups is not None else SETUPS_DO_LEDGER
+    fonte = {n: (por_setup or {}).get(n) or {} for n in visiveis}
+    extras = {n: b for n, b in (por_setup or {}).items() if n in visiveis}
+    for nome, bloco in {**fonte, **extras}.items():
         b = bloco or {}
         n = int(b.get("n_fechados") or 0)
         taxa = b.get("taxa_acerto")
@@ -367,8 +373,12 @@ def confiabilidade(por_setup: dict[str, Any] | None) -> dict[str, Any]:
     return out
 
 
-def card(plan: dict[str, Any] | None, por_setup: dict[str, Any] | None = None) -> dict[str, Any]:
-    """O card inteiro, pronto pra tela: veredito · ordens · saída · proteção · índice."""
+def card(plan: dict[str, Any] | None, por_setup: dict[str, Any] | None = None,
+        setups: tuple[str, ...] | None = None) -> dict[str, Any]:
+    """O card inteiro, pronto pra tela: veredito · ordens · saída · proteção · índice.
+
+    ``setups`` (DA-184): os setups com tela=ON — repassado pra :func:`confiabilidade`
+    filtrar o índice. ``None`` mantém o comportamento de sempre (os dois)."""
     v = veredito_entrada(plan)
     return {
         "veredito": v,
@@ -377,7 +387,7 @@ def card(plan: dict[str, Any] | None, por_setup: dict[str, Any] | None = None) -
         "saida": saida(plan),
         "protecao": protecao(),
         "peso": peso_relativo(plan),
-        "confiabilidade": confiabilidade(por_setup),
+        "confiabilidade": confiabilidade(por_setup, setups=setups),
     }
 
 

@@ -3069,8 +3069,9 @@ class AnalysisRunner:
         except Exception:  # noqa: BLE001
             logger.warning("track record indisponível para o card de execução")
             por_setup = {}
+        setups = tuple(s for s in SETUPS_DO_LEDGER if s in self._setups_visiveis())
         return {"ticker": ticker, "date": date, "timeframe": timeframe,
-                "method": method, "card": execucao.card(plan, por_setup)}
+                "method": method, "card": execucao.card(plan, por_setup, setups=setups)}
 
     def agenda_proxima(self, tf: str, ticker: str = "",
                        asset_type: str = "") -> dict[str, Any]:

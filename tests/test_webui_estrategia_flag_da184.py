@@ -223,6 +223,44 @@ def test_plano_com_storm_incluir_storm_true_e_o_padrao(monkeypatch):
     assert plano["storm"] == {"opera": True}
 
 
+# --------------------------------------------- execucao.card / confiabilidade --
+def test_confiabilidade_default_mostra_os_dois_setups():
+    """DENTE: sem ``setups``, o comportamento é o de sempre — os DOIS setups,
+    mesmo sem amostra (o índice nunca some, é o que o docstring promete)."""
+    from tradingagents.webui import execucao
+
+    out = execucao.confiabilidade({})
+    assert set(out["setups"]) == {"123", "storm"}
+
+
+def test_confiabilidade_com_setups_filtra_storm_fora_do_indice():
+    """Sem isto o índice "confiabilidade por setup" (dentro do card de execução)
+    reaparecia com "Storm123 sem amostra" mesmo com a flag OFF — o card É uma
+    das superfícies que a DA-184 manda esconder."""
+    from tradingagents.webui import execucao
+
+    out = execucao.confiabilidade({"123": {"n_fechados": 30, "taxa_acerto": 0.6},
+                                   "storm": {"n_fechados": 10, "taxa_acerto": 0.4}},
+                                  setups=("123",))
+    assert set(out["setups"]) == {"123"}
+
+
+def test_execution_card_esconde_confiabilidade_do_storm_com_flag_off(tmp_path, monkeypatch):
+    monkeypatch.setattr(rm, "plano_com_storm",
+                        lambda *a, **k: {"setup_state": "aguardar_rompimento"})
+    monkeypatch.setattr(rm, "scan_verdicts", lambda *a, **k: {
+        "por_setup": {"123": {"n_fechados": 30, "taxa_acerto": 0.6},
+                     "storm": {"n_fechados": 10, "taxa_acerto": 0.4}}})
+    runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
+                            store=HistoryStore(tmp_path))
+    out = runner.execution_card("AAPL", "2026-09-03", "1d")
+    assert set(out["card"]["confiabilidade"]["setups"]) == {"123"}
+
+    runner.estrategias_set("storm", True)
+    out2 = runner.execution_card("AAPL", "2026-09-03", "1d")
+    assert set(out2["card"]["confiabilidade"]["setups"]) == {"123", "storm"}
+
+
 # --------------------------------------------------------------- rota HTTP -----
 def _client():
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
