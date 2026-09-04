@@ -40,7 +40,12 @@ def _f(frame, estado, **kw):
             "dist_pct": 0.0015, "dist_txt": "0.15%", "trigger": 512.76, "sl": 471.35,
             "tp": 515.06, "rr": 0.06, "rr_note": None, "pattern_state": "formando",
             "rr_entry": 512.76, "rr_basis": "gatilho", "rr_risco": 41.41,
-            "rr_retorno": 2.3, "rr_residual": False, "invalidacao": 476.25}
+            "rr_retorno": 2.3, "rr_residual": False, "invalidacao": 476.25,
+            # Chave presente = servidor decidiu mostrar (DA-187, por classe do
+            # ticker) — a coluna do Storm agora lê o DADO, não a flag isolada
+            # (ver `scanTemStorm` em app.js); o placeholder é o mesmo "sem
+            # setup" que `_storm_row` grava quando não há 1-2-3 Storm no frame.
+            "storm": {"estado": "sem_dado"}}
     base.update(kw)
     return base
 

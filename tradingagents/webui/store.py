@@ -400,43 +400,79 @@ class PaperWalletStore:
         return marco
 
 
+def _clona(por_setup: dict[str, dict[str, bool]]) -> dict[str, dict[str, bool]]:
+    """Cópia RASA de um nível: sem isto, ``dict(PADRAO)`` copia a referência dos
+    dicionários internos e o toggle de uma sessão vazava pro ``PADRAO`` de classe."""
+    return {nome: dict(por_classe) for nome, por_classe in por_setup.items()}
+
+
 class EstrategiaStore:
-    """Flag de estratégia por setup — visibilidade na TELA (DA-184), owner-only.
+    """Flag de estratégia por setup × CLASSE de ativo — visibilidade na TELA
+    (DA-184/187), owner-only.
 
     NÃO desliga o motor: o scan agendado (``AnalysisRunner.scan_agendado``) e o
     dry-run MT5 nunca leem este arquivo — só o servidor, ao montar a resposta pro
-    front, decide o que mostrar. Ausência de arquivo = o padrão da DA-184 (Setup123
-    ligado, Storm123 desligado). Mesmo molde do :class:`WatchlistStore`: JSON
-    atômico + lock, fail-open pro padrão em qualquer leitura ruim.
+    front, decide o que mostrar. Ausência de arquivo = o padrão da DA-187: Setup123
+    ligado nas duas classes, Storm123 ligado em AÇÕES e desligado em CRIPTO (o
+    Storm em ações foi o único recorte não negativo medido; em cripto 1h ele é
+    inoperável por construção — ver DA-184/187 pro número). Mesmo molde do
+    :class:`WatchlistStore`: JSON atômico + lock, fail-open pro padrão em
+    qualquer leitura ruim.
+
+    Cada setup carrega DOIS toggles (``stock``/``crypto``), não um: a rodada leve
+    da DA-187 trocou o default de GLOBAL pra POR CLASSE, e um toggle só desliga
+    Storm em ações escondia de novo a única célula que media edge.
     """
 
-    PADRAO = {"123": True, "storm": False}
+    _CLASSES = ("stock", "crypto")
+    PADRAO = {
+        "123": {"stock": True, "crypto": True},
+        "storm": {"stock": True, "crypto": False},
+    }
 
     def __init__(self, base_dir: str | os.PathLike):
         self.path = Path(base_dir) / "estrategias.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
-    def get(self) -> dict[str, bool]:
+    def get(self) -> dict[str, dict[str, bool]]:
         with self._lock:
             if self.path.exists():
                 try:
                     with open(self.path, encoding="utf-8") as fh:
                         data = json.load(fh)
                     if isinstance(data, dict):
-                        out = dict(self.PADRAO)
-                        out.update({k: bool(v) for k, v in data.items() if k in self.PADRAO})
-                        return out
+                        return self._normaliza(data)
                 except (OSError, json.JSONDecodeError):
                     pass  # arquivo corrompido → cai no padrão
-        return dict(self.PADRAO)
+        return _clona(self.PADRAO)
 
-    def set(self, nome: str, ativo: bool) -> dict[str, bool]:
+    def _normaliza(self, data: dict) -> dict[str, dict[str, bool]]:
+        """Funde ``data`` sobre o padrão, aceitando o formato ANTIGO (pré-DA-187:
+        ``{"123": true, "storm": false}``, um bool global) ao lado do NOVO
+        (``{"123": {"stock": true, "crypto": true}, ...}``) — um arquivo gravado
+        antes desta task não pode virar erro 500 nem "tudo ligado" por acidente
+        (``bool({...})`` é sempre ``True``, a armadilha que a normalização evita)."""
+        out = _clona(self.PADRAO)
+        for nome, val in data.items():
+            if nome not in out:
+                continue
+            if isinstance(val, dict):
+                out[nome].update({c: bool(val[c]) for c in self._CLASSES if c in val})
+            elif isinstance(val, bool):
+                # formato antigo: um toggle só valia pras duas classes
+                out[nome] = {c: val for c in self._CLASSES}
+        return out
+
+    def set(self, nome: str, ativo: bool, classe: str) -> dict[str, dict[str, bool]]:
         nome = (nome or "").strip().lower()
+        classe = (classe or "").strip().lower()
         if nome not in self.PADRAO:
             raise ValueError(f"estratégia desconhecida: {nome!r}")
+        if classe not in self._CLASSES:
+            raise ValueError(f"classe desconhecida: {classe!r}")
         atual = self.get()
-        atual[nome] = bool(ativo)
+        atual[nome][classe] = bool(ativo)
         with self._lock:
             HistoryStore._atomic_write(self.path, atual)
         return atual

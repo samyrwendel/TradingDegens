@@ -226,22 +226,26 @@ def test_o_storm_tem_chip_proprio_na_barra(base, tmp_path):
         page.goto(base, wait_until="networkidle")
         page.wait_for_selector("#launchMethods .lb-method")
         m = page.evaluate(_JS_CHIPS_BARRA)
-        # Storm123 OFF por padrão (DA-184): QUATRO chips numa fileira só (task
-        # 034, revertendo o empilhamento em duas fileiras da 022) — sem o Storm.
-        assert m["metodos"] == ["padrao", "erick", "compare", "setup123"], m
-        assert "Storm123" not in m["rotulos"], m
+        # Storm123 ON por padrão em AÇÕES (DA-187 — rodada leve da DA-184; foi o
+        # único recorte não negativo medido). A barra fica de pé ANTES de
+        # qualquer ticker aberto (task 034: sem empilhar em duas fileiras), e
+        # sem classe conhecida ainda ela cai no chão "stock" — CINCO chips.
+        assert m["metodos"] == ["padrao", "erick", "compare", "setup123", "storm123"], m
+        assert "Storm123" in m["rotulos"], m
 
-        # O dono religa (DA-184, POST /api/estrategias — aqui direto no arquivo
-        # que o EstrategiaStore lê, pra não depender de sessão de login no E2E):
-        # o chip do Storm volta, e continua sendo o SEU método, não uma flag do
-        # 1-2-3 (são setups diferentes, task 022).
-        (tmp_path / "estrategias.json").write_text('{"123": true, "storm": true}')
+        # O dono desliga a célula EM AÇÕES (POST /api/estrategias — aqui direto
+        # no arquivo que o EstrategiaStore lê, pra não depender de sessão de
+        # login no E2E): o chip do Storm some, e continua sendo o SEU método,
+        # não uma flag do 1-2-3 (são setups diferentes, task 022).
+        (tmp_path / "estrategias.json").write_text(
+            json.dumps({"123": {"stock": True, "crypto": True},
+                       "storm": {"stock": False, "crypto": False}}))
         page.reload(wait_until="networkidle")
         page.wait_for_selector("#launchMethods .lb-method")
         m2 = page.evaluate(_JS_CHIPS_BARRA)
-        assert m2["metodos"] == ["padrao", "erick", "compare", "setup123", "storm123"], m2
-        assert "Storm123" in m2["rotulos"], m2
-        assert m2["metodos"].count("storm123") == 1 and m2["metodos"].count("setup123") == 1
+        assert m2["metodos"] == ["padrao", "erick", "compare", "setup123"], m2
+        assert "Storm123" not in m2["rotulos"], m2
+        assert m2["metodos"].count("setup123") == 1
         browser.close()
 
 

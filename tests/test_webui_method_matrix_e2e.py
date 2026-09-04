@@ -307,10 +307,11 @@ def test_single_bar_layout_no_separate_reanalyze_bar(live_server):
             assert page.locator("#runBtn").count() == 1
             assert page.locator("#rerunBtn").count() == 1
             assert page.locator("#launchTfs button.lb-tf").count() == 5
-            # QUATRO métodos (DA-184: Storm123 desligado na tela por padrão — o
-            # dono religa e o quinto chip volta); numa fileira só desde a task 034
-            # (o empilhamento em duas fileiras da 022 foi revertido).
-            assert page.locator("#launchMethods button.lb-method").count() == 4
+            # CINCO métodos (DA-187: Storm123 ON por padrão em ações — sem ticker
+            # aberto ainda a barra cai no chão "stock"; o dono desliga a célula e
+            # o quinto chip some); numa fileira só desde a task 034 (o
+            # empilhamento em duas fileiras da 022 foi revertido).
+            assert page.locator("#launchMethods button.lb-method").count() == 5
             assert page.locator("#launchMethods .lb-method-row").count() == 0
 
             # sem ativo aberto, o ↻ nasce desabilitado (não há o que reanalisar)
@@ -333,10 +334,11 @@ def test_bar_renders_and_clicks_on_mobile_390(live_server):
         try:
             page.goto(live_server)
             page.wait_for_selector("#launchMethods button.lb-method", state="visible")
-            # QUATRO métodos (DA-184: Storm123 desligado na tela por padrão — o
-            # dono religa e o quinto chip volta); numa fileira só desde a task 034
-            # (o empilhamento em duas fileiras da 022 foi revertido).
-            assert page.locator("#launchMethods button.lb-method").count() == 4
+            # CINCO métodos (DA-187: Storm123 ON por padrão em ações — sem ticker
+            # aberto ainda a barra cai no chão "stock"; o dono desliga a célula e
+            # o quinto chip some); numa fileira só desde a task 034 (o
+            # empilhamento em duas fileiras da 022 foi revertido).
+            assert page.locator("#launchMethods button.lb-method").count() == 5
             assert page.locator("#launchMethods .lb-method-row").count() == 0
             assert page.locator("#launchTfs button.lb-tf").count() == 5
 

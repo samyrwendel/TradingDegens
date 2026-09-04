@@ -237,26 +237,36 @@ def test_o_api_chart_devolve_o_storm_quando_o_metodo_e_storm(tmp_path, monkeypat
         return {"opera": True, "pattern": {"direction": "compra"}, "leituras": []}
     monkeypatch.setattr(R, "fetch_storm_plan", _storm)
 
-    v = r.timeframe_view("AMD", "2026-08-29", "4h", method="storm123")
+    v = r.timeframe_view("BTC-USD", "2026-08-29", "4h", method="storm123")
     assert v["actionable"].get("storm", {}).get("opera") is True, v["actionable"]
     assert chamadas == ["4h"], ("o Storm é lido no frame PEDIDO", chamadas)
 
-    # NUM MÉTODO QUE NÃO É STORM, com a flag da tela no padrão da DA-184 (Storm123
-    # desligado), ele NÃO viaja — nem a leitura roda (chamadas fica vazia). A regra
-    # da task 033 (Storm sempre ao lado de qualquer método) só vale com a flag ON.
+    # NUM MÉTODO QUE NÃO É STORM, em CRIPTO — a classe que a DA-187 deixa
+    # desligada por padrão (inoperável por construção em 1h) —, ele NÃO viaja —
+    # nem a leitura roda (chamadas fica vazia). A regra da task 033 (Storm
+    # sempre ao lado de qualquer método) só vale com a CÉLULA ligada.
     chamadas.clear()
-    v2 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
+    v2 = r.timeframe_view("BTC-USD", "2026-08-29", "4h", method="setup123")
     assert (v2["actionable"] or {}).get("storm") is None, v2["actionable"]
-    assert chamadas == [], ("flag OFF: o Storm nem é lido pra um método que não é o dele", chamadas)
+    assert chamadas == [], ("célula OFF: o Storm nem é lido pra um método que não é o dele", chamadas)
 
-    # Com a flag LIGADA (o dono religou, DA-184) volta a regra da task 033: E NUM
-    # MÉTODO QUE NÃO É STORM ELE TAMBÉM VEM — supersede "a leitura não se cola em
-    # quem não a pediu", que produziu o defeito que o Samyr reportou (numa análise
-    # Padrão o Storm não estava desligado, estava AUSENTE — sem payload não há
-    # camada, e sem camada não há como anunciar nem ligar). Quem decide o que é
-    # DESENHADO continua sendo a camada, na tela (DA-088).
-    r.estrategias_set("storm", True)
+    # Com a CÉLULA religada (o dono liga storm × cripto, DA-184/187) volta a
+    # regra da task 033: E NUM MÉTODO QUE NÃO É STORM ELE TAMBÉM VEM — supersede
+    # "a leitura não se cola em quem não a pediu", que produziu o defeito que o
+    # Samyr reportou (numa análise Padrão o Storm não estava desligado, estava
+    # AUSENTE — sem payload não há camada, e sem camada não há como anunciar
+    # nem ligar). Quem decide o que é DESENHADO continua sendo a camada, na
+    # tela (DA-088).
+    r.estrategias_set("storm", True, "crypto")
     chamadas.clear()
-    v3 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
+    v3 = r.timeframe_view("BTC-USD", "2026-08-29", "4h", method="setup123")
     assert (v3["actionable"] or {}).get("storm", {}).get("opera") is True, v3["actionable"]
     assert chamadas == ["4h"], ("no frame pedido, também fora da run do Storm", chamadas)
+
+    # EM AÇÃO (DA-187), a célula já nasce LIGADA — o Storm acompanha um método
+    # que não é o dele sem precisar de toggle nenhum, o mesmo comportamento que
+    # o cripto só ganhou depois de religar a célula acima.
+    chamadas.clear()
+    v4 = r.timeframe_view("AMD", "2026-08-29", "4h", method="setup123")
+    assert (v4["actionable"] or {}).get("storm", {}).get("opera") is True, v4["actionable"]
+    assert chamadas == ["4h"], ("ação: Storm123 por padrão, sem tocar em flag", chamadas)

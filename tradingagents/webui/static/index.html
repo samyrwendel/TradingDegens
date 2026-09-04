@@ -53,17 +53,22 @@
       </div>
     </div>
 
-    <!-- Estratégia na TELA (DA-184): SÓ o dono logado vê e edita — hoje só o
-         Storm123 tem toggle (Setup123 fica sempre ligado). Não é uma tela nova,
-         é uma linha a mais no painel de config que já é owner-gated. -->
+    <!-- Estratégia na TELA (DA-184/187): SÓ o dono logado vê e edita — hoje só o
+         Storm123 tem toggle (Setup123 fica sempre ligado), um POR CLASSE de
+         ativo (ação/cripto). Não é uma tela nova, é duas linhas a mais no
+         painel de config que já é owner-gated. -->
     <div class="estrat-box hidden" id="estrategiaBox">
       <label class="estrat-toggle">
-        <input type="checkbox" id="estStormToggle" />
-        <span>Storm123 na tela</span>
+        <input type="checkbox" id="estStormToggleStock" />
+        <span>Storm123 em ações</span>
       </label>
-      <span class="config-note">Desligado por padrão (DA-184) — o motor continua
-        detectando e gravando no ledger; isto só esconde chip, card, coluna e
-        camada do gráfico.</span>
+      <label class="estrat-toggle">
+        <input type="checkbox" id="estStormToggleCrypto" />
+        <span>Storm123 em cripto</span>
+      </label>
+      <span class="config-note">Padrão por classe (DA-187) — ligado em ações,
+        desligado em cripto. O motor continua detectando e gravando no ledger nos
+        dois casos; isto só esconde chip, card, coluna e camada do gráfico.</span>
     </div>
 
     <!-- Conectar assinatura (task 017; multi-provedor 020): SÓ o dono logado vê e usa.

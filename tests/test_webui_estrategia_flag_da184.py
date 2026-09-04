@@ -1,15 +1,19 @@
-"""Flag de estratégia por setup — visibilidade na TELA (DA-184).
+"""Flag de estratégia por setup × CLASSE de ativo — visibilidade na TELA
+(DA-184, rodada leve DA-187).
 
-Setup123 fica ligado; Storm123 sai da tela por padrão. O MOTOR nunca lê esta
-flag: o scan agendado (``AnalysisRunner.scan_agendado``) continua detectando e
-gravando ``setup=storm`` no ledger, e o dry-run MT5 mantém strategy_id/magic
-270102 — só o SERVIDOR, ao moldar o que devolve ao front, decide o que some.
-Owner-gated: leitura pública (``GET /api/config``), edição só do dono
-(``POST /api/estrategias``).
+Setup123 fica ligado nas duas classes. Storm123 sai da tela por padrão SÓ em
+CRIPTO — em AÇÕES ele fica ligado (foi o único recorte não negativo medido; em
+cripto 1h ele é inoperável por construção, ver DA-184/187). O MOTOR nunca lê
+esta flag: o scan agendado (``AnalysisRunner.scan_agendado``) continua
+detectando e gravando ``setup=storm`` no ledger, e o dry-run MT5 mantém
+strategy_id/magic 270102 — só o SERVIDOR, ao moldar o que devolve ao front,
+decide o que some. Owner-gated: leitura pública (``GET /api/config``), edição
+só do dono (``POST /api/estrategias``), agora com granularidade setup × classe
+(``classe`` obrigatória no corpo do POST).
 
 Este arquivo cobre a MECÂNICA (store, filtro do relatório, filtro do scan, a
 rota HTTP); a prova VISUAL (print do launcher/card/gráfico com a flag OFF e ON,
-DA-062) é manual, fora da suíte.
+DA-062/187) é manual, fora da suíte.
 """
 
 import json
@@ -33,24 +37,61 @@ pytestmark = pytest.mark.unit
 
 
 # ------------------------------------------------------------- EstrategiaStore --
-def test_padrao_e_123_ligado_storm_desligado(tmp_path):
-    assert EstrategiaStore(tmp_path).get() == {"123": True, "storm": False}
+_PADRAO_DA187 = {"123": {"stock": True, "crypto": True},
+                 "storm": {"stock": True, "crypto": False}}
 
 
-def test_set_persiste_entre_instancias(tmp_path):
-    EstrategiaStore(tmp_path).set("storm", True)
-    assert EstrategiaStore(tmp_path).get() == {"123": True, "storm": True}
+def test_padrao_123_ligado_nas_duas_classes_storm_so_em_acoes(tmp_path):
+    """DA-187: o default deixou de ser um interruptor global — Storm123 nasce
+    ligado em ações (o único recorte não negativo medido) e desligado em
+    cripto (inoperável por construção em 1h)."""
+    assert EstrategiaStore(tmp_path).get() == _PADRAO_DA187
+
+
+def test_set_persiste_entre_instancias_e_so_mexe_na_celula_pedida(tmp_path):
+    EstrategiaStore(tmp_path).set("storm", True, "crypto")
+    got = EstrategiaStore(tmp_path).get()
+    assert got == {"123": {"stock": True, "crypto": True},
+                   "storm": {"stock": True, "crypto": True}}
+    # a célula IRMÃ (storm × stock) não se mexeu — o toggle é POR CÉLULA
+    EstrategiaStore(tmp_path).set("storm", False, "stock")
+    assert EstrategiaStore(tmp_path).get()["storm"] == {"stock": False, "crypto": True}
 
 
 def test_set_setup_desconhecido_rejeita(tmp_path):
     with pytest.raises(ValueError):
-        EstrategiaStore(tmp_path).set("stormer2", True)
+        EstrategiaStore(tmp_path).set("stormer2", True, "stock")
+
+
+def test_set_classe_desconhecida_rejeita(tmp_path):
+    with pytest.raises(ValueError):
+        EstrategiaStore(tmp_path).set("storm", True, "forex")
 
 
 def test_arquivo_corrompido_cai_no_padrao(tmp_path):
     store = EstrategiaStore(tmp_path)
     store.path.write_text("{isto não é json", encoding="utf-8")
-    assert store.get() == {"123": True, "storm": False}
+    assert store.get() == _PADRAO_DA187
+
+
+def test_arquivo_no_formato_ANTIGO_promove_o_bool_pras_duas_classes(tmp_path):
+    """Migração (DA-187): um ``estrategias.json`` gravado ANTES desta task
+    (``{"123": true, "storm": false}``, um bool global) não pode virar erro
+    500 nem "tudo ligado" por acidente — ``bool({...})`` é sempre ``True``,
+    a armadilha que a normalização evita."""
+    store = EstrategiaStore(tmp_path)
+    store.path.write_text(json.dumps({"123": True, "storm": False}), encoding="utf-8")
+    assert store.get() == {"123": {"stock": True, "crypto": True},
+                           "storm": {"stock": False, "crypto": False}}
+
+
+def test_arquivo_no_formato_NOVO_mas_parcial_funde_sobre_o_padrao(tmp_path):
+    """Um arquivo que só grava a célula mexida (o que ``set`` escreve depois de
+    UM toggle) não apaga as outras — ``_normaliza`` funde sobre o padrão."""
+    store = EstrategiaStore(tmp_path)
+    store.path.write_text(json.dumps({"storm": {"stock": False}}), encoding="utf-8")
+    assert store.get() == {"123": {"stock": True, "crypto": True},
+                           "storm": {"stock": False, "crypto": False}}
 
 
 # --------------------------------------------------- scan_verdicts (relatório) --
@@ -145,59 +186,75 @@ def _row(estado="em_gatilho", com_storm=True):
     return row
 
 
-def _resultado_scan(ticker="AAA"):
-    row = _row()
+def _resultado_scan(tickers=("MSFT",)):
+    ativos = []
+    for t in tickers:
+        row = _row()
+        ativos.append({"ticker": t, "melhor": row, "frames": [row]})
     return {"date": "2026-09-03", "frames": ["1h"], "resumo": {},
-           "gerado_em": "2026-09-03T12:00:00-04:00",
-           "ativos": [{"ticker": ticker, "melhor": row, "frames": [row]}]}
+           "gerado_em": "2026-09-03T12:00:00-04:00", "ativos": ativos}
 
 
 @pytest.fixture
 def _stub_scan_watchlist(monkeypatch):
-    monkeypatch.setattr(rm, "scan_watchlist", lambda tickers, date, *a, **k: _resultado_scan())
+    """Fábrica: cada teste escolhe QUAIS tickers o scan devolve — o defeito da
+    DA-187 só aparece com uma classe por vez ou com as duas MISTURADAS na
+    mesma passada (o caso real do print, MSFT + BTC-USD juntos)."""
+    def _usa(tickers=("MSFT",)):
+        monkeypatch.setattr(rm, "scan_watchlist",
+                            lambda tks, date, *a, **k: _resultado_scan(tickers))
+    return _usa
 
 
-def test_scan_para_tela_default_off_esconde_storm_do_json(tmp_path, _stub_scan_watchlist):
-    """Criterio (1)/(6) da task: com a flag no padrão (storm OFF), a chave
-    ``storm`` não aparece em NENHUMA linha do JSON servido ao scan."""
+def test_scan_para_tela_default_mostra_storm_em_acao_e_esconde_em_cripto(
+        tmp_path, _stub_scan_watchlist):
+    """Critério (1) da task: com a flag no padrão da DA-187 (storm ON em ações,
+    OFF em cripto), MSFT e BTC-USD na MESMA passada saem com resultados
+    DIFERENTES — a chave ``storm`` sobrevive numa linha e não na outra."""
+    _stub_scan_watchlist(("MSFT", "BTC-USD"))
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path))
-    runner.watchlist_store.set(["AAA"])
+    runner.watchlist_store.set(["MSFT", "BTC-USD"])
     tela = runner.scan_portfolio("2026-09-03")
-    for ativo in tela["ativos"]:
-        assert "storm" not in (ativo.get("melhor") or {})
-        for f in ativo["frames"]:
-            assert "storm" not in f
-    assert "storm" not in json.dumps(tela)
+    por_ticker = {a["ticker"]: a for a in tela["ativos"]}
+    assert "storm" in por_ticker["MSFT"]["melhor"], "ação: Storm123 visível por padrão"
+    assert all("storm" in f for f in por_ticker["MSFT"]["frames"])
+    assert "storm" not in por_ticker["BTC-USD"]["melhor"], "cripto: escondido por padrão"
+    assert all("storm" not in f for f in por_ticker["BTC-USD"]["frames"])
 
 
 def test_scan_para_tela_ledger_recebe_storm_mesmo_com_flag_off(tmp_path, _stub_scan_watchlist):
-    """Criterio (3): scans.jsonl ganha a linha ``setup=storm`` mesmo com a flag
-    OFF — o motor (``_registrar_gatilhos``) roda ANTES do filtro de tela."""
+    """Criterio (3): scans.jsonl ganha a linha ``setup=storm`` mesmo com a
+    célula (aqui, cripto) OFF — o motor (``_registrar_gatilhos``) roda ANTES
+    do filtro de tela."""
+    _stub_scan_watchlist(("BTC-USD",))
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path))
-    runner.watchlist_store.set(["AAA"])
+    runner.watchlist_store.set(["BTC-USD"])
     runner.scan_portfolio("2026-09-03")
     setups = {e.get("setup") for e in runner.scan_log.entries()}
     assert setups == {"123", "storm"}
 
 
 def test_scan_para_tela_flag_on_devolve_storm_de_volta(tmp_path, _stub_scan_watchlist):
-    """Criterio (2): o dono religa e o Storm volta ao JSON — sem precisar de
-    nova varredura (o dado cheio já está em disco/memo)."""
+    """Criterio (2): o dono religa a célula (storm × cripto, escondida por
+    padrão) e o Storm volta ao JSON — sem precisar de nova varredura (o dado
+    cheio já está em disco/memo)."""
+    _stub_scan_watchlist(("BTC-USD",))
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path))
-    runner.watchlist_store.set(["AAA"])
+    runner.watchlist_store.set(["BTC-USD"])
     runner.scan_portfolio("2026-09-03")     # popula o snapshot em disco
-    runner.estrategias_set("storm", True)
+    runner.estrategias_set("storm", True, "crypto")
     salvo = runner.scan_ultimo()
     assert any("storm" in f for a in salvo["ativos"] for f in a["frames"])
 
 
-def test_scan_ultimo_default_off_tambem_esconde(tmp_path, _stub_scan_watchlist):
+def test_scan_ultimo_default_esconde_so_a_celula_desligada(tmp_path, _stub_scan_watchlist):
+    _stub_scan_watchlist(("BTC-USD",))
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path))
-    runner.watchlist_store.set(["AAA"])
+    runner.watchlist_store.set(["BTC-USD"])
     runner.scan_portfolio("2026-09-03")
     salvo = runner.scan_ultimo()
     assert "storm" not in json.dumps(salvo)
@@ -245,7 +302,9 @@ def test_confiabilidade_com_setups_filtra_storm_fora_do_indice():
     assert set(out["setups"]) == {"123"}
 
 
-def test_execution_card_esconde_confiabilidade_do_storm_com_flag_off(tmp_path, monkeypatch):
+def test_execution_card_esconde_confiabilidade_do_storm_por_classe(tmp_path, monkeypatch):
+    """DA-187: o índice de confiabilidade do card segue a célula da CLASSE do
+    ticker — BTC-USD (cripto) some o Storm por padrão, MSFT (ação) não."""
     monkeypatch.setattr(rm, "plano_com_storm",
                         lambda *a, **k: {"setup_state": "aguardar_rompimento"})
     monkeypatch.setattr(rm, "scan_verdicts", lambda *a, **k: {
@@ -253,11 +312,14 @@ def test_execution_card_esconde_confiabilidade_do_storm_com_flag_off(tmp_path, m
                      "storm": {"n_fechados": 10, "taxa_acerto": 0.4}}})
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                             store=HistoryStore(tmp_path))
-    out = runner.execution_card("AAPL", "2026-09-03", "1d")
+    out = runner.execution_card("BTC-USD", "2026-09-03", "1d")
     assert set(out["card"]["confiabilidade"]["setups"]) == {"123"}
 
-    runner.estrategias_set("storm", True)
-    out2 = runner.execution_card("AAPL", "2026-09-03", "1d")
+    out_acao = runner.execution_card("MSFT", "2026-09-03", "1d")
+    assert set(out_acao["card"]["confiabilidade"]["setups"]) == {"123", "storm"}
+
+    runner.estrategias_set("storm", True, "crypto")
+    out2 = runner.execution_card("BTC-USD", "2026-09-03", "1d")
     assert set(out2["card"]["confiabilidade"]["setups"]) == {"123", "storm"}
 
 
@@ -304,35 +366,58 @@ def test_get_config_expoe_estrategias_leitura_publica(_server):
     op = _client()
     code, cfg = _get(op, _server, "/api/config")
     assert code == 200
-    assert cfg["estrategias"] == {"123": True, "storm": False}
+    assert cfg["estrategias"] == _PADRAO_DA187
 
 
 def test_post_estrategias_sem_login_e_403(_server):
     op = _client()
-    code, body = _post(op, _server, "/api/estrategias", {"setup": "storm", "ativo": True})
+    code, body = _post(op, _server, "/api/estrategias",
+                       {"setup": "storm", "classe": "crypto", "ativo": True})
     assert code == 403
     assert body["error_code"] == "owner_only"
     # e o arquivo não foi tocado
     _, cfg = _get(op, _server, "/api/config")
-    assert cfg["estrategias"]["storm"] is False
+    assert cfg["estrategias"]["storm"] == {"stock": True, "crypto": False}
+
+
+def test_post_estrategias_sem_classe_e_400(_server):
+    """``classe`` é obrigatória desde a DA-187 — o toggle é POR CÉLULA, não
+    mais um interruptor global."""
+    op = _client()
+    _post(op, _server, "/api/login", {"password": "senha-dono-da184"})
+    code, body = _post(op, _server, "/api/estrategias", {"setup": "storm", "ativo": True})
+    assert code == 400
+    assert "error" in body
 
 
 def test_post_estrategias_setup_desconhecido_e_400(_server):
     op = _client()
     _post(op, _server, "/api/login", {"password": "senha-dono-da184"})
-    code, body = _post(op, _server, "/api/estrategias", {"setup": "stormer2", "ativo": True})
+    code, body = _post(op, _server, "/api/estrategias",
+                       {"setup": "stormer2", "classe": "stock", "ativo": True})
     assert code == 400
     assert "error" in body
 
 
-def test_post_estrategias_dono_liga_e_o_config_reflete(_server):
+def test_post_estrategias_classe_desconhecida_e_400(_server):
+    op = _client()
+    _post(op, _server, "/api/login", {"password": "senha-dono-da184"})
+    code, body = _post(op, _server, "/api/estrategias",
+                       {"setup": "storm", "classe": "forex", "ativo": True})
+    assert code == 400
+    assert "error" in body
+
+
+def test_post_estrategias_dono_liga_a_celula_e_o_config_reflete_so_ela(_server):
     op = _client()
     code, body = _post(op, _server, "/api/login", {"password": "senha-dono-da184"})
     assert code == 200 and body["owner"] is True
 
-    code, body = _post(op, _server, "/api/estrategias", {"setup": "storm", "ativo": True})
+    code, body = _post(op, _server, "/api/estrategias",
+                       {"setup": "storm", "classe": "crypto", "ativo": True})
     assert code == 200
-    assert body["estrategias"]["storm"] is True
+    assert body["estrategias"]["storm"] == {"stock": True, "crypto": True}
 
     _, cfg = _get(op, _server, "/api/config")
-    assert cfg["estrategias"] == {"123": True, "storm": True}
+    assert cfg["estrategias"] == {"123": {"stock": True, "crypto": True},
+                                  "storm": {"stock": True, "crypto": True}}

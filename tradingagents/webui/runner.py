@@ -63,6 +63,7 @@ from tradingagents.webui.scanner import (
     _BANCA_PADRAO,
     SETUPS_DO_LEDGER,
     ScanLog,
+    _classe_ativo,
     _estrutura_do_gatilho,
     _setup_da_entrada,
     ordenar_e_resumir,
@@ -1199,7 +1200,8 @@ class AnalysisRunner:
             # explícita, não o chip escondido do launcher) sempre o recebe — senão
             # a própria run que o pediu ficaria sem o que desenhar.
             plan = plano_com_storm(run.ticker, run.date, run.timeframe, "padrao",
-                                   incluir_storm=storm or self._storm_visivel())
+                                   incluir_storm=storm
+                                   or self._storm_visivel(_classe_ativo(run.ticker)))
             run.result = {
                 "verdict": None,
                 "final_decision": "",
@@ -1396,7 +1398,7 @@ class AnalysisRunner:
             # desligada (DA-184) ele volta a ficar ausente de propósito.
             run.result["actionable"] = plano_com_storm(
                 run.ticker, run.date, run.timeframe, method,
-                incluir_storm=self._storm_visivel(),
+                incluir_storm=self._storm_visivel(_classe_ativo(run.ticker)),
             )
             # Card do Método Erick (task 20260904-003) no actionable da run aberta —
             # frame de fundo (1w/1d) mostra o card; menor fica fora_do_frame.
@@ -2815,23 +2817,34 @@ class AnalysisRunner:
     def watchlist_set(self, tickers: list) -> list[dict[str, Any]]:
         return self.watchlist_store.set([str(t) for t in tickers])
 
-    def estrategias_get(self) -> dict[str, bool]:
-        """Flag de estratégia por setup (DA-184) — leitura PÚBLICA: é o que decide
-        se o front desenha o chip/card/camada/coluna daquele setup, e isso a tela
-        precisa saber mesmo sem o dono logado."""
+    def estrategias_get(self) -> dict[str, dict[str, bool]]:
+        """Flag de estratégia por setup × CLASSE (DA-184/187) — leitura PÚBLICA: é
+        o que decide se o front desenha o chip/card/camada/coluna daquele setup
+        NAQUELA classe de ativo, e isso a tela precisa saber mesmo sem o dono
+        logado."""
         return self.estrategia_store.get()
 
-    def estrategias_set(self, nome: str, ativo: bool) -> dict[str, bool]:
-        """Liga/desliga um setup na tela — SÓ-DONO (o servidor gateia; ver
-        ``server.py``). Não toca o motor: scan agendado e dry-run MT5 continuam
-        gravando o setup no ledger com a flag desligada."""
-        return self.estrategia_store.set(nome, ativo)
+    def estrategias_set(self, nome: str, ativo: bool, classe: str) -> dict[str, dict[str, bool]]:
+        """Liga/desliga um setup NUMA CLASSE na tela — SÓ-DONO (o servidor gateia;
+        ver ``server.py``). Não toca o motor: scan agendado e dry-run MT5 continuam
+        gravando o setup no ledger com a célula desligada."""
+        return self.estrategia_store.set(nome, ativo, classe)
 
-    def _setups_visiveis(self) -> frozenset[str]:
-        return frozenset(k for k, v in self.estrategia_store.get().items() if v)
+    def _setups_visiveis(self, classe: str | None = None) -> frozenset[str]:
+        """Os setups com tela=ON. Sem ``classe``: a UNIÃO entre ações e cripto —
+        o recorte AGREGADO (ledger inteiro, várias classes ao mesmo tempo, como
+        :meth:`scan_track_record`) usa este, porque não há UM ticker cuja classe
+        decida sozinha. Com ``classe``: só os visíveis NAQUELA classe — o recorte
+        POR TICKER (:meth:`_worker_estrutural`, :meth:`execution_card`, cada item
+        do scan em :meth:`_scan_para_tela`) usa este, que é o que a DA-187 pediu:
+        Storm123 aparece em MSFT e não aparece em BTC-USD, na MESMA passada."""
+        dados = self.estrategia_store.get()
+        if classe is None:
+            return frozenset(k for k, por_classe in dados.items() if any(por_classe.values()))
+        return frozenset(k for k, por_classe in dados.items() if por_classe.get(classe))
 
-    def _storm_visivel(self) -> bool:
-        return "storm" in self._setups_visiveis()
+    def _storm_visivel(self, classe: str | None = None) -> bool:
+        return "storm" in self._setups_visiveis(classe)
 
     def _scan_para_tela(self, result: dict[str, Any]) -> dict[str, Any]:
         """O que o SERVIDOR devolve ao front (DA-184) — filtro de SAÍDA, não de
@@ -2844,15 +2857,24 @@ class AnalysisRunner:
         Recalcula ``oportunidades`` sobre o conjunto (possivelmente reduzido): uma
         oportunidade do Storm não pode sobreviver escondida atrás de uma leitura
         que o próprio scan não desenha mais.
+
+        O CORTE É POR TICKER, NÃO GLOBAL (DA-187): um scan mistura ações e cripto
+        na MESMA passada, e cada uma tem a SUA visibilidade — MSFT mostra Storm,
+        BTC-USD não, no mesmo JSON.
         """
-        if self._storm_visivel():
-            if "oportunidades" not in result and result.get("ativos"):
+        ativos_brutos = result.get("ativos") or []
+        classes = {_classe_ativo(a.get("ticker")) for a in ativos_brutos}
+        if all(self._storm_visivel(c) for c in classes):
+            if "oportunidades" not in result and ativos_brutos:
                 result = dict(result)
                 result["oportunidades"] = sinais.oportunidades(result)
             return result
         out = dict(result)
         ativos = []
-        for a in (result.get("ativos") or []):
+        for a in ativos_brutos:
+            if self._storm_visivel(_classe_ativo(a.get("ticker"))):
+                ativos.append(a)
+                continue
             a2 = dict(a)
             a2["frames"] = [{k: v for k, v in (f or {}).items() if k != "storm"}
                             for f in (a.get("frames") or [])]
@@ -3101,18 +3123,19 @@ class AnalysisRunner:
         date = (date or "").strip() or timeutil.today()
         if not ticker:
             raise ValueError("ticker vazio")
+        classe = _classe_ativo(ticker)
         plan = plano_com_storm(ticker, date, timeframe, method,
-                               incluir_storm=self._storm_visivel())
+                               incluir_storm=self._storm_visivel(classe))
         # O track record é fail-open: um ledger vazio ou ilegível não pode derrubar o
         # card — ele só faz o índice dizer que não há amostra, que é a verdade.
         try:
             track = scan_verdicts(self.scan_log, date,
-                                  visiveis=self._setups_visiveis()) or {}
+                                  visiveis=self._setups_visiveis(classe)) or {}
             por_setup = track.get("por_setup") or {}
         except Exception:  # noqa: BLE001
             logger.warning("track record indisponível para o card de execução")
             por_setup = {}
-        setups = tuple(s for s in SETUPS_DO_LEDGER if s in self._setups_visiveis())
+        setups = tuple(s for s in SETUPS_DO_LEDGER if s in self._setups_visiveis(classe))
         return {"ticker": ticker, "date": date, "timeframe": timeframe,
                 "method": method, "card": execucao.card(plan, por_setup, setups=setups)}
 
@@ -3282,11 +3305,14 @@ class AnalysisRunner:
         o runner quem junta o ledger com o marco, o scanner nem sabe que existe
         um arquivo de config por trás.
 
-        ``visiveis`` (DA-184) — os setups com tela=ON: o agregado, o `por_setup` e
-        a carteira paper só contam os visíveis; o `metodo_frame` (DA-183) continua
-        decompondo TODOS, é medição e não vitrine. O gatilho fechando (escrita no
-        ledger) já aconteceu dentro de :func:`scan_verdicts` sobre TODAS as linhas,
-        antes desse recorte — a flag nunca impede o ledger de aprender um desfecho.
+        ``visiveis`` (DA-184/187) — os setups com tela=ON em QUALQUER classe (a
+        UNIÃO, sem ``classe`` — este agregado mistura ação e cripto no MESMO
+        recorte, e não há um ticker só cuja classe decida por todos): o agregado,
+        o `por_setup` e a carteira paper só contam os visíveis; o `metodo_frame`
+        (DA-183) continua decompondo TODOS, é medição e não vitrine. O gatilho
+        fechando (escrita no ledger) já aconteceu dentro de :func:`scan_verdicts`
+        sobre TODAS as linhas, antes desse recorte — a flag nunca impede o ledger
+        de aprender um desfecho.
         """
         return scan_verdicts(self.scan_log, date,
                              banca=banca if banca is not None else _BANCA_PADRAO,
@@ -3431,11 +3457,12 @@ class AnalysisRunner:
         # Mesma montagem do worker: o 1-2-3/recuo saem da família Padrão e o Storm
         # entra AO LADO, nunca no lugar (DA-077/DA-081).
         def _plano(tf: str) -> dict[str, Any]:
-            # Flag da tela (DA-184): esconde o Storm como leitura AO LADO; uma
-            # análise cujo MÉTODO já é storm123 continua recebendo a dele.
+            # Flag da tela (DA-184/187): esconde o Storm como leitura AO LADO,
+            # POR CLASSE deste ticker; uma análise cujo MÉTODO já é storm123
+            # continua recebendo a dele.
             return plano_com_storm(ticker, date, tf, method,
                                    incluir_storm=method == "storm123"
-                                   or self._storm_visivel())
+                                   or self._storm_visivel(_classe_ativo(ticker)))
 
         chart = fetch_price_chart(ticker, date, timeframe, method)
         plan = _plano(timeframe)

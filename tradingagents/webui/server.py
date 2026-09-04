@@ -731,20 +731,24 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "tickers": tickers})
                 return
             if path == "/api/estrategias":
-                # LIGA/DESLIGA um setup na TELA (DA-184): SÓ-DONO, mesma gramática da
-                # watchlist. Leitura é pública (vem em GET /api/config); só a EDIÇÃO
-                # é gateada — é o dono quem decide o que a tela de todo mundo mostra.
+                # LIGA/DESLIGA um setup NUMA CLASSE de ativo na TELA (DA-184/187):
+                # SÓ-DONO, mesma gramática da watchlist. Leitura é pública (vem em
+                # GET /api/config); só a EDIÇÃO é gateada — é o dono quem decide o
+                # que a tela de todo mundo mostra. ``classe`` é obrigatória desde a
+                # DA-187 — o toggle passou a ser POR CÉLULA (setup × stock/crypto),
+                # não mais um interruptor global.
                 if not self._owner_or_403():
                     return
                 body = self._read_json_body()
                 nome = (body.get("setup") or "").strip().lower()
+                classe = (body.get("classe") or "").strip().lower()
                 ativo = body.get("ativo")
-                if not nome or not isinstance(ativo, bool):
+                if not nome or not classe or not isinstance(ativo, bool):
                     self._send_json(
-                        {"error": "informe setup e ativo (bool)"}, 400)
+                        {"error": "informe setup, classe (stock/crypto) e ativo (bool)"}, 400)
                     return
                 try:
-                    estrategias = self.runner.estrategias_set(nome, ativo)
+                    estrategias = self.runner.estrategias_set(nome, ativo, classe)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, 400)
                     return
