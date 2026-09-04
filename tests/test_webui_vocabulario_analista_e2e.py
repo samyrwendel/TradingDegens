@@ -1,5 +1,5 @@
 """Vocabulário canônico da tela: FONTE e DIREÇÃO no veredito, R:R fora do morto,
-direção+frame na badge de vigilância (task 20260904-002, DA-205/204/214).
+direção+frame na badge de vigilância (task 20260904-002, DA-190).
 
 Três defeitos do print do AVGO (Samyr, 03/09 19:50):
 

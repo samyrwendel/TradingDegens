@@ -232,7 +232,7 @@ def test_pattern_is_attached_to_plan(synth):
 
 
 # ---------------------------------------------------------------------------
-# EIXO TEMPORAL ÚNICO (DA-205) — o carimbo do último candle sai da FONTE já no
+# EIXO TEMPORAL ÚNICO (DA-193) — o carimbo do último candle sai da FONTE já no
 # fuso da tela (Manaus), offset-aware, no intradiário; só a DATA no diário/semanal.
 #
 # O bug da 019: a série intradiária carrega ``Date`` em UTC-naive (ver

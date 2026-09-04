@@ -61,7 +61,7 @@ _SNAP = {
             "invalidation": {"price": 476.25, "meaning": "perde o ponto 3"},
         },
         # cotação ATUAL com a sessão declarada (o que o runner passou a anexar).
-        # as_of vem no EIXO ÚNICO da tela — Manaus, offset-aware (DA-205); ``fuso``
+        # as_of vem no EIXO ÚNICO da tela — Manaus, offset-aware (DA-193); ``fuso``
         # guarda a bolsa de procedência. 16:00 NY = 16:00 Manaus em agosto (ambos GMT-4).
         "live_price": {"price": 513.53, "change_pct": 1.68, "currency": "USD",
                        "sessao": "fechado", "rotulo": "último fechamento",
@@ -161,7 +161,7 @@ def test_o_preco_diz_QUAL_preco_e(base):
         txt = page.inner_text("#headPrice")
         assert "513,53" in txt, txt                     # a cotação atual
         assert "ÚLTIMO FECHAMENTO" in txt.upper(), txt  # DIZENDO que é fechamento
-        assert "28/08 16:00" in txt, txt                # e de quando, no eixo Manaus (DA-205)
+        assert "28/08 16:00" in txt, txt                # e de quando, no eixo Manaus (DA-193)
         assert "505,06" in txt and "27/08" in txt, txt  # o preço da ANÁLISE ao lado (candle diário: só data)
         assert "ANÁLISE" in txt.upper(), txt
         browser.close()
@@ -213,7 +213,7 @@ _ZEC = {
         "timeframe": "4h", "as_of_price": 834.74,
         "actionable": {
             # as_of REAL da run de produção: no intradiário ele traz a HORA do candle,
-            # já no EIXO ÚNICO — instante Manaus offset-aware (DA-205), não mais a hora
+            # já no EIXO ÚNICO — instante Manaus offset-aware (DA-193), não mais a hora
             # UTC crua ("2026-08-29 20:00") que a tela lia como se fosse local.
             "price": 834.74, "as_of": "2026-08-29T20:00:00-04:00", "setup_state": "setup_ativo",
             "pattern": {"trigger": 834.82, "state": "rompeu_retracou", "direction": "compra"},
@@ -429,7 +429,7 @@ def test_a_separacao_entre_cotacao_e_analise_tem_peso_visual(base):
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 def test_o_carimbo_tem_um_eixo_so_e_recusa_o_futuro(base):
-    """EIXO TEMPORAL ÚNICO (DA-205): `fmtCarimbo` é o único formatador do cabeçalho.
+    """EIXO TEMPORAL ÚNICO (DA-193): `fmtCarimbo` é o único formatador do cabeçalho.
 
     A PRECISÃO do dado diz o que mostrar — candle de dia/semana chega como DATA e
     vira "29/08" (hora não tem sentido); candle intradiário e cotação chegam como

@@ -169,7 +169,7 @@ const VERDICT_PT = {
 const STATUS_PT = { error: "ERRO", running: "RODANDO", done: "CONCLUÍDO" };
 
 // Rótulo DIRECIONAL do rating dos ANALISTAS pro CABEÇALHO (task 20260904-002,
-// DA-205). "AUMENTAR"/"REDUZIR" sozinhos não dizem DE QUÊ: Overweight/Underweight
+// DA-190). "AUMENTAR"/"REDUZIR" sozinhos não dizem DE QUÊ: Overweight/Underweight
 // são ajustes de uma posição COMPRADA; Buy/Sell/Hold já são direcionais. E é o
 // rating dos ANALISTAS — não um sinal de Setup123 —, por isso o cabeçalho o rotula
 // com a FONTE e a ajuda abaixo. Tabela única do veredito direcional (o VERDICT_PT
@@ -365,7 +365,7 @@ function analistaVerdictHtml(v) {
     `${dir} <span class="verdict-orig">(${escapeHtml(raw)})</span>`;
 }
 
-// UM carimbo pro EIXO TEMPORAL ÚNICO do cabeçalho (DA-205). A PRECISÃO do dado diz
+// UM carimbo pro EIXO TEMPORAL ÚNICO do cabeçalho (DA-193). A PRECISÃO do dado diz
 // o que mostrar, sem a tela ter que adivinhar o frame: candle de dia/semana chega
 // como DATA ("2026-09-03") e vira "03/09" — hora não tem sentido numa barra do dia.
 // Candle intradiário e cotação chegam como instante Manaus OFFSET-AWARE
@@ -2266,7 +2266,7 @@ function renderHeadPrice(a, live) {
   const el = $("headPrice");
   const box = $("headLevels");
   // O "agora" do cabeçalho contra o qual nenhum carimbo pode estar no futuro
-  // (DA-205): o MAIOR entre o relógio real e o instante da cotação mostrada. Um
+  // (DA-193): o MAIOR entre o relógio real e o instante da cotação mostrada. Um
   // candle abre SEMPRE no passado, então no fluxo real ele fica abaixo desse teto e
   // nunca é falso-acusado — o único jeito de passar dele é o bug do fuso trocado
   // (candle UTC lido como Manaus, 4h adiantado). Usar o MÁXIMO evita tanto o falso
@@ -2285,7 +2285,7 @@ function renderHeadPrice(a, live) {
       `<span class="hp-tag">${escapeHtml(candle)}</span>` +
       // O as_of da análise traz a HORA do candle no intradiário (só a data no
       // diário/semanal) e distingue este momento do da cotação — os dois caem no
-      // mesmo dia. Passa pelo EIXO ÚNICO (`fmtCarimbo`, DA-205): hora Manaus no
+      // mesmo dia. Passa pelo EIXO ÚNICO (`fmtCarimbo`, DA-193): hora Manaus no
       // intradiário, futuro vira "horário inconsistente".
       (a.as_of ? `<span class="hp-when">${fmtCarimbo(a.as_of, agoraMs)}</span>` : "") +
       `</span>`
@@ -2297,7 +2297,7 @@ function renderHeadPrice(a, live) {
     ? `<span class="hp-unit hp-live"><b>${fmtNum(live.price)}</b>` +
       `<span class="hp-tag">${escapeHtml(live.rotulo || "cotação")}</span>` +
       // A cotação É o "agora" — passa `null` e não se compara consigo mesma; a hora
-      // vem no MESMO eixo (Manaus) da análise (DA-205).
+      // vem no MESMO eixo (Manaus) da análise (DA-193).
       (live.as_of ? `<span class="hp-when">${fmtCarimbo(live.as_of, null)}</span>` : "") +
       `</span>`
     : "";
@@ -2785,7 +2785,7 @@ function stormCardHtml(st, frameDoBloco) {
 // (a MESMA decisão do veredito do analista `erick`, soldada por teste em
 // erick_reading_dict), nas leituras de fundo (1w/1d). O ESTADO é a manchete; a
 // entrada/saída/peso vêm do módulo, sem reimplementar. O "1-2-3" do Erick é uma
-// SEQUÊNCIA DE 3 CANDLES (DA-205), separada do pivô do Setup123.
+// SEQUÊNCIA DE 3 CANDLES (DA-191), separada do pivô do Setup123.
 const _ERICK_ESTADO_CLS = { AGIR: "agir", AGUARDAR: "aguardar", CAIXA: "caixa" };
 function erickCardHtml(er) {
   if (!er || !er.disponivel) return "";
@@ -2833,7 +2833,7 @@ function erickCardHtml(er) {
       `<span class="sc-basis">${escapeHtml(er.saida)}</span></div>`);
   }
   rows.push(scRow("peso relativo", er.peso || "—", er.peso_racional || "", "sc-erick-peso"));
-  // Gatilho: SEQUÊNCIA DE 3 CANDLES do Erick (DA-205), separado do pivô do Setup123
+  // Gatilho: SEQUÊNCIA DE 3 CANDLES do Erick (DA-191), separado do pivô do Setup123
   if (er.pattern_line) {
     rows.push(`<div class="sc-row sc-erick-pat"><span class="sc-basis">` +
       `${escapeHtml("sequência de 3 candles (Erick): " + er.pattern_line)}</span></div>`);
@@ -5559,7 +5559,7 @@ function planZonesStorm(a, out, marcar) {
   // continua com cada número e com a data da invalidação escrita.
   if (ehFantasma(storm.pattern)) return out;
   // ENCERRADO (TP ou stop já consumidos) TAMBÉM NÃO DESENHA GATILHO (task
-  // 20260903-027). O ciclo_de_vida do padrão (DA-202/214) já sabe que o trade
+  // 20260903-027). O ciclo_de_vida do padrão (DA-129) já sabe que o trade
   // terminou, mas o gatilho do Storm é uma LINHA DE NÍVEL (abaixo, `stLinha`), não
   // o `trigger` de `desenha123` — que já se cala sozinho no encerrado do Setup123
   // (o `!historia` da linha ~5664). Sem este espelho, um Storm que já bateu o alvo
@@ -7109,7 +7109,7 @@ function vigilanciaHtml(ticker) {
     // A badge CARREGA direção + frame + nível (task 20260904-002): "venda 1h ·
     // gatilho 366,84 tocado". Sem a direção e o frame, um evento de VENDA aparecia
     // ao lado do veredito COMPRADO dos analistas sem a palavra que os distingue —
-    // e a cor segue a DIREÇÃO (DA-201), não o tipo de nível. Método fica no title.
+    // e a cor segue a DIREÇÃO (DA-190), não o tipo de nível. Método fica no title.
     const dir = a.direcao || "";
     const fr = tfCurto(a.frame) || a.frame || "";
     const nome = _VIG_NIVEL[a.nivel] || a.nivel || "";

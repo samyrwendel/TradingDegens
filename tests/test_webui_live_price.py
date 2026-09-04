@@ -143,7 +143,7 @@ def test_cripto_nao_tem_pregao(monkeypatch):
 
 
 def test_hora_do_numero_vem_no_eixo_manaus(monkeypatch):
-    """EIXO ÚNICO (DA-205): a hora do número é a de Manaus (o relógio do usuário),
+    """EIXO ÚNICO (DA-193): a hora do número é a de Manaus (o relógio do usuário),
     offset-aware — não mais a da bolsa carimbada crua, que a tela lia como se fosse
     local. A bolsa de PROCEDÊNCIA segue nomeada em ``fuso``, pra quem quiser saber
     de onde o preço veio."""

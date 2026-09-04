@@ -3407,7 +3407,7 @@ body.chart-max-aberto { overflow: hidden; }
 .vig-alvo { border-left-color: var(--green); }
 .vig-alvo, .vig-alvo > i { color: var(--green); }
 .vig-gatilho { border-left-color: var(--muted); }
-/* Cor da badge de vigilância pela DIREÇÃO do setup (DA-201, task 20260904-002):
+/* Cor da badge de vigilância pela DIREÇÃO do setup (DA-190, task 20260904-002):
    venda = vermelho (topo/baixa), compra = verde (fundo/alta). Vem DEPOIS das regras
    por-nível de propósito: mesma especificidade, a direção (declarada por último)
    vence — um gatilho de VENDA fica vermelho, não o cinza do nível. */

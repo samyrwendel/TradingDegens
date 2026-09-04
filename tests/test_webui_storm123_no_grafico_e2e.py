@@ -62,7 +62,7 @@ def _storm_encerrado():
     A entrada=preço atual (o defeito da task) faria o R:R do gatilho já superado
     virar "não calculável — o alvo já ficou pra trás da entrada". Aqui o padrão tem
     ``encerrado``/``desfecho`` como o backend grava depois do ciclo_de_vida
-    (DA-202/214) — é o que ensina o gráfico a mostrar ESTADO, não recalcular um
+    (DA-129) — é o que ensina o gráfico a mostrar ESTADO, não recalcular um
     plano que já terminou.
     """
     pat = dict(_STORM["pattern"], encerrado=True, desfecho=_ENCERRADO_STORM,
@@ -312,7 +312,7 @@ def test_a_legenda_declara_o_storm_invalidado(base):
 # Print do Samyr (03/09, MSFT 4h): um Storm que já tinha batido o alvo continuava
 # desenhado como plano VIVO, com o chip do R:R lendo "R:R não calculável — o alvo
 # já ficou pra trás da entrada" — a régua reconstruindo o trade a preço ATUAL em
-# vez de ler o desfecho que o backend já tinha calculado (DA-202/214, mesmo ciclo
+# vez de ler o desfecho que o backend já tinha calculado (DA-129, mesmo ciclo
 # de vida do Setup123). ENCERRADO não é FANTASMA (DA-140): a cor não vira cinza,
 # só esmaece — quem separa os dois é `historia` (aqui) contra `fantasma`
 # (test_storm_invalidado_vira_fantasma_no_grafico, acima).

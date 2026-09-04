@@ -92,14 +92,14 @@ def _date_fmt(timeframe: str) -> str:
     return "%Y-%m-%d %H:%M" if _is_intraday(timeframe) else "%Y-%m-%d"
 
 
-# O EIXO TEMPORAL da tela é UM só: America/Manaus (DA-205). É o mesmo fuso que
+# O EIXO TEMPORAL da tela é UM só: America/Manaus (DA-193). É o mesmo fuso que
 # ``webui.timeutil`` declara como único relógio do usuário — reafirmado aqui, na
 # fonte do dado, para não arrastar uma dependência de ``webui`` até ``dataflows``.
 _MANAUS = ZoneInfo("America/Manaus")
 
 
 def _as_of_stamp(ts, timeframe: str) -> str:
-    """Carimbo do ÚLTIMO candle para a tela, num eixo temporal ÚNICO (DA-205).
+    """Carimbo do ÚLTIMO candle para a tela, num eixo temporal ÚNICO (DA-193).
 
     A série intradiária carrega ``Date`` em **UTC-naive** (ver
     :func:`tradingagents.dataflows.intraday._yf_intraday_to_df` — a hora do candio

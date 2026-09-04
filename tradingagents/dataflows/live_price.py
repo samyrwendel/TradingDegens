@@ -81,7 +81,7 @@ def _instante_manaus(epoch) -> str | None:
     """Epoch (segundos UTC) → instante Manaus **offset-aware** (ISO, ex.:
     ``2026-09-03T15:54:00-04:00``).
 
-    O EIXO da tela é UM só: Manaus (DA-205). A cotação chegava carimbada no fuso da
+    O EIXO da tela é UM só: Manaus (DA-193). A cotação chegava carimbada no fuso da
     BOLSA (NY/UTC) e o front a mostrava crua, ao lado de uma análise carimbada em
     OUTRO fuso — dois relógios no mesmo cabeçalho. Aqui a HORA é sempre Manaus (o
     relógio do usuário); a PROCEDÊNCIA (fuso da bolsa) segue à parte, no campo
@@ -111,7 +111,7 @@ def fetch_live_price(symbol: str) -> dict[str, Any] | None:
     * ``regular_price`` — o fechamento/último regular, pra a tela poder mostrar os
       dois quando divergem (é a divergência que o leitor precisa ver);
     * ``as_of`` — o instante daquele número, em Manaus e offset-aware (o eixo único
-      da tela, DA-205); ``fuso`` guarda à parte a bolsa de PROCEDÊNCIA.
+      da tela, DA-193); ``fuso`` guarda à parte a bolsa de PROCEDÊNCIA.
 
     ``change_pct`` é a variação vs. o fechamento anterior (None quando ausente).
     """
