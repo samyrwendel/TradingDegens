@@ -213,7 +213,10 @@ def test_a_faixa_do_ponto_3_aparece_com_a_condicao_escrita(base, viewport):
         page = browser.new_page(viewport=viewport)
         _abre(page, base, _plano(invalidado=True, projecao=_PROJ))
         m = page.evaluate(_LE)
-        assert "preparação — ponto 3" in m["txt"], m["txt"]
+        # Num setup MORTO a projeção do ponto 3 é um CANDIDATO NOVO, não a
+        # continuação do que já terminou (task 20260904-002): o rótulo diz isso. A
+        # faixa e a condição escrita seguem — só o nome do bloco muda.
+        assert "candidato novo — ponto 3" in m["txt"], m["txt"]
         assert "440,00–470,00" in m["txt"], m["txt"]
         assert "TOPO abaixo de 470,00" in m["txt"], ("a condição, escrita", m["txt"])
         assert "mata a formação" in m["txt"], m["txt"]

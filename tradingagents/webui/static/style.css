@@ -705,6 +705,18 @@ details.section.erick > summary { color: #9cc7f5; }
   color: var(--dim); font-weight: var(--fw-med); font-size: var(--fs-10);
   margin-left: 5px; text-transform: none;
 }
+/* FONTE do veredito (task 20260904-002): "ANALISTAS:" no cabeçalho e "analistas" na
+   lateral rotulam que é rating de analista, não sinal de setup. Cinza e discreto —
+   qualifica a ação sem competir com ela. */
+.verdict-fonte {
+  color: var(--dim); font-weight: var(--fw-med); font-size: var(--fs-12);
+  letter-spacing: .04em; margin-right: 4px; text-transform: none;
+}
+.h-vfonte {
+  display: block; color: var(--dim); font-weight: var(--fw-med);
+  font-size: var(--fs-10); letter-spacing: .02em; text-transform: lowercase;
+  line-height: 1.1;
+}
 /* generic "original term" gloss — pt-BR term leads, English kept in gray beside it */
 .orig {
   color: var(--muted); font-weight: var(--fw-med); font-size: .8em;
@@ -1840,6 +1852,10 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
    lida como "entre nesta faixa" antes de o setup existir */
 .sc-row.sc-prep .sc-k { color: var(--muted); }
 .sc-row.sc-prep .sc-v { color: var(--muted); font-weight: var(--fw-med); }
+/* CANDIDATO NOVO (task 20260904-002): a projeção do ponto 3 num setup MORTO é um
+   padrão novo, não a continuação do que terminou. Um filete tracejado no topo o
+   separa visualmente do desfecho acima. */
+.sc-row.sc-candidato { border-top: 1px dashed var(--border); margin-top: 3px; padding-top: 4px; }
 /* O CARIMBO DE FRAME NO TOPO DO BLOCO (task 20260830-029). Ele estava no rodapé, em
    cinza, DEPOIS dos três cards: quem lia o card do meio não sabia em que timeframe
    aquele stop valia sem rolar até o fim — e o rodapé é o menor peso visual da tela
@@ -3373,6 +3389,14 @@ body.chart-max-aberto { overflow: hidden; }
 .vig-alvo { border-left-color: var(--green); }
 .vig-alvo, .vig-alvo > i { color: var(--green); }
 .vig-gatilho { border-left-color: var(--muted); }
+/* Cor da badge de vigilância pela DIREÇÃO do setup (DA-201, task 20260904-002):
+   venda = vermelho (topo/baixa), compra = verde (fundo/alta). Vem DEPOIS das regras
+   por-nível de propósito: mesma especificidade, a direção (declarada por último)
+   vence — um gatilho de VENDA fica vermelho, não o cinza do nível. */
+.vig-dir-venda { border-left-color: var(--red); }
+.vig-dir-venda, .vig-dir-venda > i { color: var(--red); }
+.vig-dir-compra { border-left-color: var(--green); }
+.vig-dir-compra, .vig-dir-compra > i { color: var(--green); }
 
 /* ══════════ CARTEIRA DO ERICK (DA-148) — painel só-dono ═══════════════════════
    Mesma linguagem do resto: canto reto (DA-070), sem degradê, sem pictograma

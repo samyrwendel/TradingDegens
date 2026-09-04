@@ -151,6 +151,22 @@ const VERDICT_PT = {
 // a failed run), so nothing shows up in English there either.
 const STATUS_PT = { error: "ERRO", running: "RODANDO", done: "CONCLUÍDO" };
 
+// Rótulo DIRECIONAL do rating dos ANALISTAS pro CABEÇALHO (task 20260904-002,
+// DA-205). "AUMENTAR"/"REDUZIR" sozinhos não dizem DE QUÊ: Overweight/Underweight
+// são ajustes de uma posição COMPRADA; Buy/Sell/Hold já são direcionais. E é o
+// rating dos ANALISTAS — não um sinal de Setup123 —, por isso o cabeçalho o rotula
+// com a FONTE e a ajuda abaixo. Tabela única do veredito direcional (o VERDICT_PT
+// curto acima segue nas superfícies estreitas; compare.py::_VERDICT_PT espelha o
+// significado curto na prosa do meta-juiz).
+const VERDICT_ANALISTA = {
+  buy: "COMPRAR",
+  overweight: "AUMENTAR POSIÇÃO COMPRADA",
+  hold: "MANTER",
+  underweight: "REDUZIR POSIÇÃO COMPRADA",
+  sell: "VENDER",
+};
+const VERDICT_FONTE_AJUDA = "rating dos analistas; não é sinal de setup";
+
 // The engine tags each run with an asset class in English ("stock"/"crypto").
 // Show it in pt-BR so the meta row carries no stray English.
 const ASSET_PT = { stock: "ação", crypto: "cripto" };
@@ -316,6 +332,20 @@ function verdictHtml(v) {
   if (VERDICT_PT[key]) return `${VERDICT_PT[key]} <span class="verdict-orig">${escapeHtml(raw)}</span>`;
   if (STATUS_PT[key]) return escapeHtml(STATUS_PT[key]);
   return escapeHtml((raw || "—").toUpperCase());
+}
+
+// O CABEÇALHO do veredito diz a FONTE e a DIREÇÃO (task 20260904-002). "AUMENTAR ·
+// Overweight" ao lado de um Setup123 encerrado se lia como sinal do setup — e não é:
+// é o rating dos ANALISTAS. Aqui vira "ANALISTAS: AUMENTAR POSIÇÃO COMPRADA
+// (Overweight)", com a ajuda explicando que não é sinal de setup. Status (erro/
+// rodando) e rating desconhecido caem no verdictHtml comum.
+function analistaVerdictHtml(v) {
+  const key = verdictKey(v);
+  const dir = VERDICT_ANALISTA[key];
+  if (!dir) return verdictHtml(v);
+  const raw = (v || "").toString();
+  return `<span class="verdict-fonte" title="${escapeHtml(VERDICT_FONTE_AJUDA)}">ANALISTAS:</span> ` +
+    `${dir} <span class="verdict-orig">(${escapeHtml(raw)})</span>`;
 }
 
 // UM carimbo pro EIXO TEMPORAL ÚNICO do cabeçalho (DA-205). A PRECISÃO do dado diz
@@ -1272,7 +1302,7 @@ function renderResult(snap) {
   const estrutural = _METODOS_ESTRUTURAIS.has(_openMethod);
   $("verdictBadge").className = estrutural ? `verdict ${_openMethod}` : verdictClass(r.verdict);
   $("verdictBadge").innerHTML = estrutural
-    ? escapeHtml(methodLabel(_openMethod)) : verdictHtml(r.verdict);
+    ? escapeHtml(methodLabel(_openMethod)) : analistaVerdictHtml(r.verdict);
   renderVerdictCaveat(r.verdict_caveat, r.pre_judge_findings);
   // Data da análise + carimbo de conclusão viram UMA unidade (task 037: eram duas
   // quase-iguais). O nome do método some daqui pros estruturais — já está grande
@@ -2576,6 +2606,10 @@ function stormCardHtml(st, frameDoBloco) {
   // rótulo de cada leitura — e uma `const` usada antes da declaração é
   // ReferenceError em execução, que apagaria o card inteiro em vez de uma linha.
   const encerradoSt = !!(pat && pat.encerrado && pat.desfecho);
+  // ENCERRADO ou INVALIDADO: as leituras não imprimem R:R/risco/retorno — o trade
+  // acabou e a conta a preço atual não é dele (task 20260904-002). Mesma regra do
+  // card do Setup123; o desfecho no topo é que fala.
+  const encerradoOuMortoSt = encerradoSt || (pat ? ehFantasma(pat) : false);
   const dir = pat ? ((PAT_DIR[pat.direction] || [])[1] || "") : "";
   const rows = [];
 
@@ -2674,7 +2708,9 @@ function stormCardHtml(st, frameDoBloco) {
       if (L.trigger != null) rows.push(scRow("gatilho", fmtNum(L.trigger), L.label || ""));
       const tp = L.target || {};
       if (tp.price != null) rows.push(scRow("alvo (TP)", fmtNum(tp.price), tp.label || ""));
-      rows.push(rrLinha(L.risk_reward || {}, (L.risk_reward || {}).entry_basis || ""));
+      if (!encerradoOuMortoSt) {
+        rows.push(rrLinha(L.risk_reward || {}, (L.risk_reward || {}).entry_basis || ""));
+      }
     });
   } else {
     rows.push(`<div class="sc-row sc-sem-txt">Nenhum 1-2-3 Storm na janela lida ` +
@@ -2775,6 +2811,12 @@ function renderSetupCards(a) {
     // card, e uma const usada antes da declaração é ReferenceError em tempo de
     // execução — o card inteiro sumiria em vez de sair sem uma linha
     const morto = ehFantasma(pat);
+    // ENCERRADO (chegou ao alvo/stop) OU INVALIDADO: o trade acabou, e a conta de
+    // risco/retorno a preço atual não é dele (task 20260904-002). O R:R "nunca some"
+    // (invariante da linha do R:R) vale pro setup VIVO; no morto quem fala é o
+    // desfecho lá em cima, e a projeção do ponto 3 vira CANDIDATO NOVO, não a
+    // continuação do setup morto.
+    const encerradoOuMorto = !!(pat.encerrado && pat.desfecho) || morto;
     const rr = a.risk_reward || {};
     const rows = [];
     // O DETALHE DA MORTE vem PRIMEIRO — antes dos níveis, porque muda o sentido de
@@ -2856,8 +2898,12 @@ function renderSetupCards(a) {
     }
     // A conta do R:R declara a entrada — mas quando ela É o gatilho (o caso comum),
     // repetir o número seria escrever o mesmo preço duas vezes no mesmo card: aqui
-    // ele vira NOME ("entrada no gatilho").
-    rows.push(rrLinha(rr, entradaPropria ? `entrada ${fmtNum(rr.entry)}` : "entrada no gatilho"));
+    // ele vira NOME ("entrada no gatilho"). SETUP MORTO não imprime R:R/risco/retorno
+    // nem "entrada no gatilho" (task 20260904-002): a conta seria de um trade que já
+    // terminou — o desfecho é que fala.
+    if (!encerradoOuMorto) {
+      rows.push(rrLinha(rr, entradaPropria ? `entrada ${fmtNum(rr.entry)}` : "entrada no gatilho"));
+    }
     // O estado NATIVO do padrão fica sempre: "em formação" e "rompeu e retraçou
     // (não confirmado)" são fatos que o veredito não carrega — ele diz o que fazer,
     // não em que pé o padrão está.
@@ -2879,10 +2925,18 @@ function renderSetupCards(a) {
     // escrita do backend — é a regra do detector, não uma frase que a tela inventa.
     const pj0 = a.projecao_p3;
     if (pj0) {
+      // Num setup MORTO, a projeção do ponto 3 é um CANDIDATO NOVO — não a
+      // continuação do que já terminou (task 20260904-002). O rótulo e a classe
+      // separam os dois: "preparação" pro setup vivo se preparando; "candidato novo"
+      // pro ponto 3 que nasce DEPOIS do morto, sem reaproveitar o alvo do morto.
+      const prepK = encerradoOuMorto ? "candidato novo — ponto 3" : "preparação — ponto 3";
+      const prepCls = encerradoOuMorto ? "sc-prep sc-candidato" : "sc-prep";
+      const prepBase = encerradoOuMorto
+        ? `${pj0.condicao ? pj0.condicao + " — " : ""}ponto 3 NOVO; o setup acima já terminou.`
+        : (pj0.condicao || "");
       rows.push(pj0.low != null
-        ? scRow("preparação — ponto 3", `${fmtNum(pj0.low)}–${fmtNum(pj0.high)}`,
-                pj0.condicao || "", "sc-prep")
-        : `<div class="sc-row sc-sem"><span class="sc-k">preparação — ponto 3</span>` +
+        ? scRow(prepK, `${fmtNum(pj0.low)}–${fmtNum(pj0.high)}`, prepBase, prepCls)
+        : `<div class="sc-row sc-sem"><span class="sc-k">${escapeHtml(prepK)}</span>` +
           `<span class="sc-v sc-sem-v">sem faixa a marcar</span>` +
           `<span class="sc-basis">${escapeHtml(pj0.motivo || "")}</span></div>`);
     }
@@ -5025,9 +5079,14 @@ function rrDoGrafico(a) {
   // não existe mais, o mesmo defeito que a DA-091 tirou do gatilho e da pílula. Aqui
   // não basta devolver vazio: se a leitura desenhada morreu, o chip DIZ isso (gráfico
   // sem chip é indistinguível de gráfico sem setup).
-  let morto = false, vetado = false;
+  let morto = false, vetado = false, encerrado = false;
   if (camadaVisivel("plano") && a.risk_reward) {
-    if (ehFantasma(a.pattern)) morto = true;
+    const patP = a.pattern || {};
+    // ENCERRADO também não carimba R:R vivo (task 20260904-002): o trade TERMINOU e o
+    // R:R do chip a preço atual seria a conta de um trade já fechado — o desfecho é
+    // que fala. encerrado ≠ fantasma: a cor guarda a direção esmaecida, não vira cinza.
+    if (ehFantasma(patP)) morto = true;
+    else if (patP.encerrado && patP.desfecho) { morto = true; encerrado = true; }
     else return { rr: a.risk_reward, prefixo: duas ? "Setup123 " : "", morto: false };
   }
   // Storm VETADO desenha o padrão mas não tem R:R operável — e o chip não pode calar,
@@ -5041,8 +5100,12 @@ function rrDoGrafico(a) {
     edenCurtoVeto = edenContraste(edenSt, dirSt, edenCurto(edenSt));
   }
   if (camadaVisivel("storm") && a.storm && a.storm.opera === true) {
-    if (ehFantasma(a.storm.pattern)) {
+    const patSt = a.storm.pattern || {};
+    if (ehFantasma(patSt)) {
       morto = true;
+    } else if (patSt.encerrado && patSt.desfecho) {
+      // ENCERRADO no Storm também: mesma regra do plano (task 20260904-002).
+      morto = true; encerrado = true;
     } else {
       const ls = (a.storm.leituras || []).slice().sort(
         (x, y) => (x.ordem === "confirmada" ? 1 : 0) - (y.ordem === "confirmada" ? 1 : 0));
@@ -5053,7 +5116,7 @@ function rrDoGrafico(a) {
       }
     }
   }
-  return { rr: null, prefixo: "", morto, vetado,
+  return { rr: null, prefixo: "", morto, vetado, encerrado,
            edenNome: edenNomeVeto, edenCurto: edenCurtoVeto };
 }
 
@@ -5883,7 +5946,9 @@ function drawPriceChart(canvas, chart, a) {
           : [`R:R ${_pre}${fmtNum(rrPlan.rr)}:1`])
       : (rrPlan ? [`R:R não calculável — ${motivoCurto(rrPlan.note)}`,
                    "R:R não calculável", "R:R sem base"]
-                : _rrG.morto ? ["R:R não vale — padrão invalidado", "R:R — invalidado"]
+                : _rrG.morto ? (_rrG.encerrado
+                  ? ["R:R não vale — trade encerrado", "R:R — encerrado"]
+                  : ["R:R não vale — padrão invalidado", "R:R — invalidado"])
                 // ESCADA de três degraus, e o NOME sobrevive aos dois primeiros: no
                 // telefone o chip cabe em ~250px, e "Éden de Baixa" × "armadilha" são
                 // vetos diferentes — só o primeiro se resolve esperando. Encolhe a
@@ -6911,17 +6976,32 @@ function registraVigilancia(avisos) {
 }
 
 const _VIG_PT = { stop: "stop perfurado", alvo: "alvo tocado", gatilho: "gatilho tocado" };
+// Nome do nível e o verbo do evento, separados: a badge escreve "gatilho 366,84
+// tocado", com o PREÇO no meio (task 20260904-002). Stop é "perfurado", nível de
+// alvo/gatilho é "tocado".
+const _VIG_NIVEL = { stop: "stop", alvo: "alvo", gatilho: "gatilho" };
+const _VIG_VERBO = { stop: "perfurado", alvo: "tocado", gatilho: "tocado" };
 
 function vigilanciaHtml(ticker) {
   const lista = _vigilancia.get((ticker || "").toUpperCase()) || [];
   if (!lista.length) return "";
   return `<span class="h-vig">` + lista.map((a) => {
     const quando = (a.quando || "").slice(11, 16);
-    const txt = `${_VIG_PT[a.nivel] || a.nivel} ${fmtNum(a.preco_nivel)}`;
-    const tit = `${a.metodo} · ${tfNome(a.frame)} — ${a.texto} às ${quando}. ` +
+    // A badge CARREGA direção + frame + nível (task 20260904-002): "venda 1h ·
+    // gatilho 366,84 tocado". Sem a direção e o frame, um evento de VENDA aparecia
+    // ao lado do veredito COMPRADO dos analistas sem a palavra que os distingue —
+    // e a cor segue a DIREÇÃO (DA-201), não o tipo de nível. Método fica no title.
+    const dir = a.direcao || "";
+    const fr = tfCurto(a.frame) || a.frame || "";
+    const nome = _VIG_NIVEL[a.nivel] || a.nivel || "";
+    const verbo = _VIG_VERBO[a.nivel] || "tocado";
+    const cabeca = [dir, fr].filter(Boolean).join(" ");
+    const txt = `${cabeca ? cabeca + " · " : ""}${nome} ${fmtNum(a.preco_nivel)} ${verbo}`;
+    const tit = `${a.metodo || ""} · ${tfNome(a.frame)} — ${a.texto} às ${quando}. ` +
       `Isto é o PREÇO cruzando um nível já calculado (intrabarra): o veredito do ` +
       `padrão continua saindo do FECHAMENTO do candle.`;
-    return `<span class="vig-i vig-${escapeHtml(a.nivel)}" title="${escapeHtml(tit)}">` +
+    const dirCls = dir ? ` vig-dir-${escapeHtml(dir)}` : "";
+    return `<span class="vig-i vig-${escapeHtml(a.nivel)}${dirCls}" title="${escapeHtml(tit)}">` +
       `${escapeHtml(txt)} <i>${escapeHtml(quando)}</i> ` +
       `<em>preço</em></span>`;
   }).join("") + `</span>`;
@@ -7569,7 +7649,13 @@ function paintHistory() {
         vClass = setupState;
         vTitle = full;   // title ganha a frase legível, não o snake_case
       } else {
-        vHtml = verdictHtml(v);
+        // ROTULA A FONTE do veredito na lateral (task 20260904-002): "AUMENTAR" em
+        // cima dos eventos de vigilância dos setups de VENDA lia-se como sinal do
+        // setup. A micro-linha "analistas" o separa — é rating, não gatilho. Fica em
+        // bloco (não rouba largura do ticker), e o valor curto "AUMENTAR" segue como
+        // está (a coluna é estreita; a direção por extenso mora no cabeçalho).
+        vHtml = `<span class="h-vfonte" title="${escapeHtml(VERDICT_FONTE_AJUDA)}">analistas</span>` +
+          verdictHtml(v);
         vClass = verdictClass(v).replace("verdict", "").trim();
       }
       // Watchlist densa (task 009/015): a coluna estreita só comporta veredito +
