@@ -5541,6 +5541,16 @@ function planZonesStorm(a, out, marcar) {
   // ela pode ter. Os três pontos continuam desenhados em fantasma, e o card do Storm
   // continua com cada número e com a data da invalidação escrita.
   if (ehFantasma(storm.pattern)) return out;
+  // ENCERRADO (TP ou stop já consumidos) TAMBÉM NÃO DESENHA GATILHO (task
+  // 20260903-027). O ciclo_de_vida do padrão (DA-202/214) já sabe que o trade
+  // terminou, mas o gatilho do Storm é uma LINHA DE NÍVEL (abaixo, `stLinha`), não
+  // o `trigger` de `desenha123` — que já se cala sozinho no encerrado do Setup123
+  // (o `!historia` da linha ~5664). Sem este espelho, um Storm que já bateu o alvo
+  // continuava desenhando "Storm p2 · gatilho" como convite a entrar num trade
+  // morto, com preço passando por ali de novo (a MESMA armadilha da DA-091, um
+  // degrau abaixo). Alvo e stop CONTINUAM (fantasma, via `aplicaFantasmaNasZonas`
+  // lá embaixo) — são o desfecho, não o convite.
+  const encerradoSt = !!(storm.pattern.encerrado && storm.pattern.desfecho);
   // O prefixo é o NOME do método quando as duas famílias dividem a tela, e a forma
   // curta de sempre quando o Storm está sozinho — prefixo repetido em cada linha de
   // um gráfico que só tem Storm é ruído, não informação.
@@ -5563,7 +5573,9 @@ function planZonesStorm(a, out, marcar) {
   stLinha((storm.stop || {}).price, `${pre} · stop (SL)`, `${pre} SL`, ZONE_COLORS.stop);
   (storm.leituras || []).forEach((L) => {
     const n = L.entrada === "ponto3" ? "p3" : L.entrada === "ponto2" ? "p2" : "p2/3";
-    stLinha(L.trigger, `${pre} ${n} · gatilho`, `${pre} ${n} gat.`, ZONE_COLORS.storm);
+    if (!encerradoSt) {
+      stLinha(L.trigger, `${pre} ${n} · gatilho`, `${pre} ${n} gat.`, ZONE_COLORS.storm);
+    }
     stLinha((L.target || {}).price, `${pre} ${n} · alvo (TP)`, `${pre} ${n} TP`,
             ZONE_COLORS.target);
   });

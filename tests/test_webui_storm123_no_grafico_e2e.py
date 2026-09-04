@@ -48,6 +48,28 @@ def _storm(*, invalidado=False):
     return {**_STORM, "pattern": pat}
 
 
+# O DESFECHO do Storm que já chegou ao alvo (task 20260903-027) — a mesma forma que
+# o backend grava (ver `_ENCERRADO` em test_ciclo_de_vida_do_padrao.py): o padrão
+# ACIONOU e o TP foi tocado, então a entrada de referência não é mais o preço atual.
+_ENCERRADO_STORM = {"tipo": "alvo", "em": "2026-08-27 15:00", "price": 414.0,
+                    "entrada_em": "2026-08-26 13:00", "entrada": 452.0,
+                    "empate_na_barra": False}
+
+
+def _storm_encerrado():
+    """O Storm do fixture comum, com o TP já consumido — plano MORTO, não vivo.
+
+    A entrada=preço atual (o defeito da task) faria o R:R do gatilho já superado
+    virar "não calculável — o alvo já ficou pra trás da entrada". Aqui o padrão tem
+    ``encerrado``/``desfecho`` como o backend grava depois do ciclo_de_vida
+    (DA-202/214) — é o que ensina o gráfico a mostrar ESTADO, não recalcular um
+    plano que já terminou.
+    """
+    pat = dict(_STORM["pattern"], encerrado=True, desfecho=_ENCERRADO_STORM,
+               acionado_em=_ENCERRADO_STORM["entrada_em"])
+    return {**_STORM, "pattern": pat}
+
+
 # Índice de confiabilidade: os dois extremos do gate de N, como o backend os monta.
 _CONF_SEM_AMOSTRA = {
     "n_minimo": 5, "n_operavel": 20,
@@ -88,8 +110,8 @@ def _card(conf):
             "saida": None, "protecao": {}, "peso": None, "confiabilidade": conf}
 
 
-def _snapshot(*, invalidado=False):
-    st = _storm(invalidado=invalidado)
+def _snapshot(*, invalidado=False, encerrado=False):
+    st = _storm_encerrado() if encerrado else _storm(invalidado=invalidado)
     r = {
         "verdict": None, "final_decision": "", "timeframe": "1d",
         "as_of_price": 465.58, "actionable": {**_PLANO, "storm": st},
@@ -106,8 +128,8 @@ def _snapshot(*, invalidado=False):
             "result": r}
 
 
-def _abre(page, base_url, *, invalidado=False, conf=None):
-    snap = _snapshot(invalidado=invalidado)
+def _abre(page, base_url, *, invalidado=False, encerrado=False, conf=None):
+    snap = _snapshot(invalidado=invalidado, encerrado=encerrado)
     card = _card(conf) if conf is not None else None
 
     def handler(route):
@@ -282,6 +304,65 @@ def test_a_legenda_declara_o_storm_invalidado(base):
         _abre(page, base, invalidado=True)
         legenda = page.evaluate("() => document.getElementById('chartLegend').innerText")
         assert "invalidado" in legenda, legenda
+        browser.close()
+
+
+# ────── (3b) o ENCERRADO do Storm no gráfico (task 20260903-027) ──────────────
+#
+# Print do Samyr (03/09, MSFT 4h): um Storm que já tinha batido o alvo continuava
+# desenhado como plano VIVO, com o chip do R:R lendo "R:R não calculável — o alvo
+# já ficou pra trás da entrada" — a régua reconstruindo o trade a preço ATUAL em
+# vez de ler o desfecho que o backend já tinha calculado (DA-202/214, mesmo ciclo
+# de vida do Setup123). ENCERRADO não é FANTASMA (DA-140): a cor não vira cinza,
+# só esmaece — quem separa os dois é `historia` (aqui) contra `fantasma`
+# (test_storm_invalidado_vira_fantasma_no_grafico, acima).
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_storm_encerrado_nao_carimba_R_R_nao_calculavel_no_grafico(base):
+    """DENTE desta task: o chip do gráfico é o que o Samyr viu primeiro no print.
+    Um TP já consumido não pode ler como se o setup ainda estivesse de pé."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+        chip = "() => document.getElementById('priceChart').dataset.rr || ''"
+
+        _abre(page, base)
+        vivo = page.evaluate(chip)
+        assert "0,83" in vivo, ("o vivo carimba o R:R do gatilho", vivo)
+
+        _abre(page, base, encerrado=True)
+        fechado = page.evaluate(chip)
+        assert "não calculável" not in fechado, (
+            "o banner do plano reconstruído a preço atual voltou", fechado)
+        assert "encerrado" in fechado, (
+            "o chip tem de dizer que o trade TERMINOU, não calar", fechado)
+        browser.close()
+
+
+@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+def test_storm_encerrado_vira_historia_no_grafico_sem_virar_cinza(base):
+    """Os três pontos e o selo ficam — a história explica onde o preço esteve —,
+    mas o gatilho não se desenha mais (é o convite a operar um trade que já
+    terminou), e a cor guarda a DIREÇÃO esmaecida em vez do cinza do invalidado
+    (DA-140: encerrado ≠ fantasma)."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=DESKTOP)
+
+        _abre(page, base)
+        vivo = [d for d in page.evaluate(_PINTADO) if d["familia"] == "storm"]
+        assert vivo and not any(d["historia"] for d in vivo), vivo
+
+        _abre(page, base, encerrado=True)
+        fechado = [d for d in page.evaluate(_PINTADO) if d["familia"] == "storm"]
+        assert fechado, "o encerrado continua desenhado — é história, não apagamento"
+        assert all(d["historia"] for d in fechado), fechado
+        assert all(not d["fantasma"] for d in fechado), (
+            "encerrado não é fantasma — não vira cinza (DA-140)", fechado)
+        assert [d["lab"] for d in fechado] == ["1", "2", "3"], fechado
+
+        rotulos = page.evaluate(_ROTULOS)
+        assert not any("gatilho" in t for t in rotulos), (
+            "gatilho de um trade já encerrado — convite a operar história", rotulos)
         browser.close()
 
 
