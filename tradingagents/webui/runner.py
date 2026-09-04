@@ -1633,6 +1633,13 @@ class AnalysisRunner:
                 "cost": cost,
             }
             self.store.save(record)
+            # Teto de gasto (porta 6, DA-189): só a run na CHAVE DO SERVIDOR
+            # (dono logado, sem BYOK) consome do teto — BYOK gasta a chave do
+            # próprio usuário. Best-effort dentro do try do _persist.
+            if (run.overrides.get("allow_server_key") is True
+                    and not run.overrides.get("api_key")):
+                from tradingagents.webui import spend_guard
+                spend_guard.GUARD.record(cost.get("usd") or 0)
         except Exception:
             pass  # history is best-effort; a failed write must not kill the run
 
@@ -2241,6 +2248,12 @@ class AnalysisRunner:
                 "compare": True,  # marks this record as a comparison
             }
             self.store.save(record)
+            # Teto de gasto (porta 6): compare na chave do servidor (dono, sem
+            # BYOK) também consome do teto. Best-effort dentro do try.
+            if (crun.overrides.get("allow_server_key") is True
+                    and not crun.overrides.get("api_key")):
+                from tradingagents.webui import spend_guard
+                spend_guard.GUARD.record(cost.get("usd") or 0)
         except Exception:
             pass
 

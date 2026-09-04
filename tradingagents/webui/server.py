@@ -57,7 +57,9 @@ from tradingagents.webui import (
     agenda,
     oauth_codex,
     oauth_providers,
+    ratelimit,
     server_login,
+    spend_guard,
     static_publish,
     timeutil,
 )
@@ -137,6 +139,8 @@ class _Handler(BaseHTTPRequestHandler):
     auth: OwnerAuth         # injected on the server instance
     subscription: SubscriptionStore          # injected on the server instance
     oauth_flows: oauth_providers.PendingOAuth  # injected on the server instance
+    login_limiter: ratelimit.RateLimiter       # injected on the server instance
+    expensive_limiter: ratelimit.RateLimiter   # injected on the server instance
 
     # -- helpers --------------------------------------------------------------
     def _send_json(self, obj, status: int = 200, cookies: list[str] | None = None) -> None:
@@ -355,6 +359,48 @@ class _Handler(BaseHTTPRequestHandler):
             if secret:
                 text = text.replace(secret, "***")
         return text
+
+    # -- rate limit / teto de gasto (porta 6, DA-189) -------------------------
+    def _client_ip(self) -> str:
+        """IP do cliente pra chavear o rate limit. ``client_address`` é
+        ``(host, port)`` no stdlib; cai pra 'unknown' se ausente."""
+        try:
+            return self.client_address[0] or "unknown"
+        except Exception:
+            return "unknown"
+
+    def _too_many(self, retry_after: int) -> None:
+        """429 genérico (não vaza se usuário/senha existe — porta 5 não regride)."""
+        body = json.dumps({"error": "muitas tentativas — tente mais tarde",
+                           "error_code": "rate_limited"}).encode("utf-8")
+        self.send_response(429)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        if retry_after > 0:
+            self.send_header("Retry-After", str(int(retry_after)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _throttle_expensive_or_429(self) -> bool:
+        """Teto de RAJADA das rotas caras, por PRINCIPAL (sessão do dono, ou IP
+        anônimo). True se pode seguir; senão já respondeu 429."""
+        principal = self._session_id() if self._is_owner() else self._client_ip()
+        dec = self.expensive_limiter.hit(f"exp:{principal or 'anon'}")
+        if not dec.allowed:
+            self._too_many(dec.retry_after)
+            return False
+        return True
+
+    def _spend_cap_or_402(self) -> bool:
+        """Teto de GASTO diário: barra SÓ a run que rodaria na CHAVE DO SERVIDOR
+        (dono logado, sem BYOK). True se pode seguir; senão respondeu 402 explícito
+        (nunca degrada em silêncio). BYOK/público passam — é a chave deles."""
+        server_key = self._is_owner() and not (self.headers.get("X-LLM-Key") or "").strip()
+        if server_key and spend_guard.GUARD.exceeded():
+            self._send_json({"error": spend_guard.GUARD.refusal_message(),
+                             "error_code": "spend_cap"}, 402)
+            return False
+        return True
 
     # -- OAuth da assinatura (task 019; multi-provedor 020) -------------------
     def _oauth_redirect_uri(self, provider: str = "openai") -> str:
@@ -683,7 +729,10 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "não encontrado"}, 404)
         except Exception as exc:  # never leak a stack to the socket as HTML
-            self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+            # Redige credencial como o do_POST/do_DELETE (consistência do
+            # _redact_key, achado da porta 5): nenhum GET lê header sensível hoje,
+            # mas um GET novo que passe a ler herdaria o buraco se ficasse de fora.
+            self._send_json({"error": self._redact_key(f"{type(exc).__name__}: {exc}")}, 500)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -692,6 +741,16 @@ class _Handler(BaseHTTPRequestHandler):
                 # Login do dono: senha (env TRADINGDEGENS_OWNER_TOKEN) verificada
                 # server-side em tempo-constante; cria sessão e devolve cookie
                 # HttpOnly. Nunca ecoa a senha nem a chave do servidor.
+                #
+                # Rate limit por IP (porta 6): a senha é humana e curta — sem teto,
+                # é força-bruta viável. Lockout PROGRESSIVO. A chave é o IP (não a
+                # senha), então o 429 é idêntico pra senha errada/ausente — porta 5
+                # não regride. Login CORRETO zera o IP (dono legítimo não fica preso).
+                login_key = f"login:{self._client_ip()}"
+                dec = self.login_limiter.hit(login_key)
+                if not dec.allowed:
+                    self._too_many(dec.retry_after)
+                    return
                 body = self._read_json_body()
                 if not self.auth.enabled():
                     self._send_json({"ok": False, "error": "login do dono não configurado"}, 400)
@@ -699,6 +758,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if not self.auth.verify_password(body.get("password")):
                     self._send_json({"ok": False, "error": "senha incorreta"}, 401)
                     return
+                self.login_limiter.reset(login_key)
                 sid = self.auth.create_session()
                 # HttpOnly: JS não lê (anti-XSS). SameSite=Strict: não vaza cross-site.
                 cookie = (f"{self.auth.cookie_name}={sid}; HttpOnly; SameSite=Strict; "
@@ -849,8 +909,17 @@ class _Handler(BaseHTTPRequestHandler):
                 # na chave do servidor: `{"method":"setup123","compare":true}` passava
                 # pela isenção e queimava crédito do dono anonimamente. A regra passa a
                 # ser a rota REAL, não só o rótulo do método.
-                if not self._rota_sem_llm(method, body) and not self._gate_or_403(body):
+                sem_llm = self._rota_sem_llm(method, body)
+                if not sem_llm and not self._gate_or_403(body):
                     return
+                # Rotas que gastam LLM (não o atalho 1-2-3 de $0): teto de gasto do
+                # servidor (402 explícito no estouro) + teto de rajada por princípio
+                # (429). O setup123 estrutural fica de fora — não gasta token nenhum.
+                if not sem_llm:
+                    if not self._spend_cap_or_402():
+                        return
+                    if not self._throttle_expensive_or_429():
+                        return
                 # BYOK: a chave/provider/modelo do usuário viajam por header+corpo e
                 # valem só pra ESTA run (chave do usuário > env do servidor).
                 overrides = self._llm_overrides(body)
@@ -950,6 +1019,10 @@ class _Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 if not self._gate_or_403(body):
                     return
+                if not self._spend_cap_or_402():
+                    return
+                if not self._throttle_expensive_or_429():
+                    return
                 a = (body.get("a") or "").strip()
                 b = (body.get("b") or "").strip()
                 self._send_json(self.runner.confront(a, b, overrides=self._llm_overrides(body)))
@@ -962,6 +1035,10 @@ class _Handler(BaseHTTPRequestHandler):
                 question = (body.get("question") or "").strip()
                 if not run_id:
                     self._send_json({"error": "informe o run_id"}, 400)
+                    return
+                if not self._spend_cap_or_402():
+                    return
+                if not self._throttle_expensive_or_429():
                     return
                 answer = self.runner.ask(run_id, question, overrides=self._llm_overrides(body))
                 if answer is None:
@@ -1026,7 +1103,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
                 auth: OwnerAuth | None = None,
-                subscription: SubscriptionStore | None = None) -> ThreadingHTTPServer:
+                subscription: SubscriptionStore | None = None,
+                login_limiter: ratelimit.RateLimiter | None = None,
+                expensive_limiter: ratelimit.RateLimiter | None = None,
+                ) -> ThreadingHTTPServer:
     runner = runner or AnalysisRunner()
     # OwnerAuth lê a senha do dono da env (TRADINGDEGENS_OWNER_TOKEN) uma vez, na
     # subida; sem senha configurada, o login fica desabilitado e todos são público.
@@ -1041,9 +1121,16 @@ def make_server(host: str, port: int, runner: AnalysisRunner | None = None,
     # TTL. Compartilhado no handler (não por-requisição) pra o /start e o /callback
     # verem o mesmo mapa.
     oauth_flows = oauth_providers.PendingOAuth()
+    # Limiters de rate (porta 6): um por servidor (isolados entre instâncias/testes),
+    # compartilhados por TODAS as threads de requisição deste servidor (são class
+    # attrs do BoundHandler). Env-tunáveis; testes injetam limiters pequenos.
+    login_limiter = login_limiter or ratelimit.login_limiter_from_env()
+    expensive_limiter = expensive_limiter or ratelimit.expensive_limiter_from_env()
     handler = type("BoundHandler", (_Handler,),
                    {"runner": runner, "auth": auth, "subscription": subscription,
-                    "oauth_flows": oauth_flows})
+                    "oauth_flows": oauth_flows,
+                    "login_limiter": login_limiter,
+                    "expensive_limiter": expensive_limiter})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
     return httpd
@@ -1133,6 +1220,16 @@ def main() -> None:
               f"após o fechamento do candle).", flush=True)
     else:
         print("Agenda do scan DESLIGADA (TRADINGDEGENS_SCAN_AGENDA).", flush=True)
+    # TETO DE GASTO (porta 6, item 3): declarado alto no boot — ligado mostra o
+    # valor, DESLIGADO avisa em maiúscula (o "sem teto" nunca é silencioso).
+    if spend_guard.GUARD.enabled():
+        print(f"Teto de gasto do servidor: US$ {spend_guard.GUARD.cap_usd:.2f}/dia "
+              f"(rotas na chave do servidor; estouro = recusa 402 explícita).",
+              flush=True)
+    else:
+        print("AVISO: SEM teto de gasto do servidor — TRADINGDEGENS_SPEND_CAP_USD "
+              "não definido. Rotas na chave do servidor rodam sem teto; defina o "
+              "valor pra ativar a recusa explícita no estouro.", flush=True)
     httpd = make_server(host, port, runner=runner)
     _graceful_shutdown(httpd, runner, agendador)
     shown = host if host != "0.0.0.0" else "0.0.0.0 (todas as interfaces — Tailscale incluído)"
