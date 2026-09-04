@@ -1154,6 +1154,104 @@ def build_erick_method_section(
     return "\n".join(lines) + degraded_note
 
 
+def erick_reading_dict(
+    symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
+) -> dict:
+    """Leitura determinística do Método Erick como DICT — o card da tela (task
+    20260904-003).
+
+    Compõe EXATAMENTE as mesmas funções e a mesma ordem de
+    :func:`build_erick_method_section` (o texto do analista ``erick``): mesmo frame
+    de swing, mesma natureza da queda, mesma porta TIER 2, mesmo ``_decide`` e
+    ``_estado``. O card LÊ deste dict, então "card == decisão do módulo" é garantido
+    por construção (e soldado por teste). Não reimplementa nada — só devolve os
+    valores já computados em vez de renderizar markdown. Fail-open: sem candle →
+    ``{"disponivel": False, ...}``.
+
+    O método decide no swing (4h) com o diário/semanal de fundo; por isso o card
+    aparece nas leituras do 1w/1d (a tendência de fundo) — a DECISÃO é a mesma do
+    veredito ``erick``, não uma releitura por frame.
+    """
+    frame = _SWING_FRAME
+    chart = build_price_chart(symbol, curr_date, timeframe=frame)
+    read = _ema_read(chart)
+    degraded = False
+    if read is None:
+        frame = _FALLBACK_FRAME
+        chart = build_price_chart(symbol, curr_date, timeframe=frame)
+        read = _ema_read(chart)
+        degraded = True
+    if read is None:
+        return {"disponivel": False, "frame": frame,
+                "frame_label": _FRAME_LABEL.get(frame, frame),
+                "motivo": "sem candle suficiente para a leitura de EMA neste frame"}
+
+    if drop is None:
+        drop = _drop_nature(symbol, curr_date, asset_type)
+    drop_cls = (drop or {}).get("classification")
+    fine_plan = _fine_plan(symbol, curr_date)
+    fine_veto = drop_cls == "liquidacao_saudavel" and _fine_sell_triggered(fine_plan)
+    factors = _factors(symbol, curr_date, chart, drop)
+    gate = _gate_abre(read, drop_cls, factors)
+    decision = _decide(read, drop, fine_veto, factors)
+    decision["estado"] = _estado(decision["acao"], read["trend"], drop_cls, gate)
+
+    swing_plan = build_actionable_plan_dict(symbol, curr_date, frame)
+    saida = _saida(swing_plan, read)
+
+    # EMAs do frame (o card mostra o alinhamento): o que a fonte computou, último
+    # valor de cada janela — nunca um número inventado pra uma média ausente.
+    ema_src = (chart or {}).get("ema") or {}
+    emas = {}
+    for w, serie in ema_src.items():
+        v = _last(serie)
+        if v is not None:
+            emas[str(w)] = v
+
+    tese = factors.get("tese") or {}
+    return {
+        "disponivel": True,
+        "frame": frame,
+        "frame_label": _FRAME_LABEL.get(frame, frame),
+        "degraded": degraded,
+        # decisão canônica (== veredito do analista erick, por construção)
+        "estado": decision["estado"],
+        "acao": decision["acao"],
+        "entrada": decision["entrada"],
+        "saida": saida,
+        "peso": decision["peso"],
+        "peso_racional": decision["peso_racional"],
+        # regime das médias
+        "trend": read["trend"],
+        "trend_pt": _TREND_PT.get(read["trend"], read["trend"]),
+        "close": read["close"],
+        "e8": read["e8"], "e21": read["e21"], "e50": read["e50"],
+        "emas": emas,
+        "at_media": read["at_media"], "extended": read["extended"], "below": read["below"],
+        # natureza da queda / gaps (a fonte única; texto igual ao da seção)
+        "drop": {"classification": drop_cls,
+                 "kind": (drop or {}).get("kind"),
+                 "buracos": (drop or {}).get("buracos")},
+        "drop_line": _render_drop_nature(drop, decision["estado"]) or "",
+        # ponderação (TIER 2 semanal / TIER 3 balanço) — os fatos que pesam
+        "gate": gate,
+        "gate_faltam": (_gate_faltam(read, drop_cls, factors) if not gate else []),
+        "tese": {"regime": tese.get("regime"), "frame": tese.get("frame"),
+                 "frame_label": _FRAME_LABEL.get(tese.get("frame"), tese.get("frame"))}
+                if tese else {},
+        "earnings": (factors.get("earnings") or {}).get("leitura", ""),
+        "ausentes": factors.get("ausentes") or [],
+        # RSI (indicador nº2): divergência no frame de swing
+        "rsi_divergence": _rsi_divergence(chart),
+        # gatilho 1-2-3 (Erick) + níveis do swing, e o timing fino do 15m
+        "pattern_line": _pattern_line(swing_plan, _COMPACT_FRAME.get(frame, frame)) or "",
+        "levels_line": _levels_line(swing_plan) or "",
+        "fine_timing": _fine_timing(fine_plan) or "",
+        "estado_note": _estado_note(drop_cls, decision["estado"], fine_veto, gate,
+                                    (factors.get("tese") or {}).get("frame")) or "",
+    }
+
+
 def ensure_erick_method_coverage(
     report: str, symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
 ) -> str:

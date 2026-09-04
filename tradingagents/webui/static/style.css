@@ -1697,6 +1697,24 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .sc-storm.sc-vetado { border-left-color: var(--muted); }
 .sc-storm .sc-dir { color: var(--green); }
 .sc-storm.sc-venda .sc-dir { color: var(--red); }
+/* Card do MÉTODO ERICK (task 20260904-003) — a leitura de FUNDO (1w/1d), primeiro na
+   ordem. A borda é o --accent (azul) pra distinguir do Setup123/Storm (verde/vermelho
+   de direção); o ESTADO carrega a cor por FUNÇÃO (DA-085: verde só pra AGIR; AGUARDAR
+   neutro; CAIXA cinza — a palavra manda, não a cor). */
+.sc-erick { border-left: 3px solid var(--accent); }
+.sc-erick .sc-dir { color: var(--accent); text-transform: none; letter-spacing: 0; }
+.sc-erick-estado.agir .sc-v { color: var(--green); }
+.sc-erick-estado.aguardar .sc-v { color: var(--text); }
+.sc-erick-estado.caixa .sc-v { color: var(--muted); }
+.sc-erick-saida .sc-k { font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); color: var(--text); }
+/* "Método Erick: fora do frame" nos frames menores (4h/1h/15m): o método decide no
+   fundo diário/semanal, então aqui não há card — só o cabeçalho que diz por quê. */
+.sc-erick-fora {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted);
+  padding: 4px 0 6px; border-bottom: 1px dashed var(--border); margin-bottom: 8px;
+}
+.sc-erick-fora-k { font-weight: var(--fw-bold); color: var(--text); }
 /* Cabeçalho de LEITURA dentro do card do Storm: são DUAS entradas do MESMO padrão
    (mesmos pontos, mesmo stop), e sem uma régua entre elas os dois gatilhos e os dois
    R:R viram uma lista de seis números sem dono. A régua é sólida de 1px (DA-070). */

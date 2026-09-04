@@ -2764,6 +2764,82 @@ function stormCardHtml(st, frameDoBloco) {
     `<div class="sc-rows">${rows.join("")}</div></section>`;
 }
 
+// Card do MÉTODO ERICK (task 20260904-003) — a leitura determinística do método
+// (a MESMA decisão do veredito do analista `erick`, soldada por teste em
+// erick_reading_dict), nas leituras de fundo (1w/1d). O ESTADO é a manchete; a
+// entrada/saída/peso vêm do módulo, sem reimplementar. O "1-2-3" do Erick é uma
+// SEQUÊNCIA DE 3 CANDLES (DA-205), separada do pivô do Setup123.
+const _ERICK_ESTADO_CLS = { AGIR: "agir", AGUARDAR: "aguardar", CAIXA: "caixa" };
+function erickCardHtml(er) {
+  if (!er || !er.disponivel) return "";
+  const rows = [];
+  const estCls = _ERICK_ESTADO_CLS[er.estado] || "";
+  rows.push(scRow("estado (Método Erick)", er.estado,
+    er.estado_note || "estado único do método — a leitura abaixo deriva dele.",
+    "sc-erick-estado " + estCls));
+  // Regime + alinhamento das EMAs (o que a fonte computou; preço acima/abaixo de cada)
+  const emas = er.emas || {};
+  const ordem = Object.keys(emas).map(Number).filter((n) => !isNaN(n)).sort((x, y) => x - y);
+  const alinh = ordem.map((w) => {
+    const v = emas[String(w)];
+    const lado = er.close != null ? (er.close >= v ? "↑" : "↓") : "";
+    return `EMA ${w} ${fmtNum(v)} ${lado}`.trim();
+  }).join(" · ");
+  rows.push(scRow("regime (médias)", er.trend_pt || er.trend || "—",
+    `preço ${fmtNum(er.close)}${alinh ? " · " + alinh : ""}`, "sc-erick-regime"));
+  if (er.drop_line) {
+    rows.push(`<div class="sc-row sc-erick-drop"><span class="sc-basis">${escapeHtml(er.drop_line)}</span></div>`);
+  }
+  // Porta TIER 2 (ponderação semanal, DA-067) — o fato que rebaixa o downtrend a timing
+  if (er.gate && er.tese && er.tese.frame_label) {
+    rows.push(scRow("porta TIER 2", "aberta",
+      `tese de alta no ${er.tese.frame_label} sobrepõe o downtrend do swing — rebaixado a TIMING.`,
+      "sc-erick-gate"));
+  } else if (er.gate_faltam && er.gate_faltam.length) {
+    rows.push(scRow("porta TIER 2", "não abriu", er.gate_faltam.join("; ") + ".", "sc-erick-gate"));
+  }
+  // RSI (indicador nº2) — divergência no frame de swing
+  const rsi = er.rsi_divergence || {};
+  if (rsi.measured) {
+    const k = rsi.kind === "bearish" ? "divergência de baixa"
+      : rsi.kind === "bullish" ? "divergência de alta" : "alinhado (sem divergência)";
+    rows.push(scRow("RSI", k, rsi.detail || "", "sc-erick-rsi"));
+  }
+  if (er.earnings) {
+    rows.push(scRow("balanço (TIER 3)", "considerado", er.earnings, "sc-erick-earn"));
+  }
+  // ── DECISÃO (vocabulário do Erick) ──
+  rows.push(scRow("entrada (recuo à média)", er.acao === "AGIR" ? "AGIR" : "AGUARDAR",
+    er.entrada, "sc-erick-decisao"));
+  if (er.saida) {
+    rows.push(`<div class="sc-row sc-erick-saida"><span class="sc-k">saída</span>` +
+      `<span class="sc-basis">${escapeHtml(er.saida)}</span></div>`);
+  }
+  rows.push(scRow("peso relativo", er.peso || "—", er.peso_racional || "", "sc-erick-peso"));
+  // Gatilho: SEQUÊNCIA DE 3 CANDLES do Erick (DA-205), separado do pivô do Setup123
+  if (er.pattern_line) {
+    rows.push(`<div class="sc-row sc-erick-pat"><span class="sc-basis">` +
+      `${escapeHtml("sequência de 3 candles (Erick): " + er.pattern_line)}</span></div>`);
+    if (er.levels_line) {
+      rows.push(`<div class="sc-row"><span class="sc-basis">${escapeHtml(er.levels_line)}</span></div>`);
+    }
+  }
+  if (er.fine_timing) {
+    rows.push(`<div class="sc-row sc-erick-fine"><span class="sc-basis">${escapeHtml(er.fine_timing)}</span></div>`);
+  }
+  if (er.ausentes && er.ausentes.length) {
+    rows.push(scRow("não medido", String(er.ausentes.length),
+      er.ausentes.join(" · "), "sc-erick-ausentes"));
+  }
+  const deg = er.degraded
+    ? `<span class="sc-now">leitura no ${escapeHtml(er.frame_label)} (fonte de swing indisponível)</span>`
+    : "";
+  return `<section class="setup-card sc-erick">` +
+    `<div class="sc-head"><span class="sc-title">Método Erick ` +
+    `<span class="sc-dir">${escapeHtml(er.estado || "")}</span></span>${deg}</div>` +
+    `<div class="sc-rows">${rows.join("")}</div></section>`;
+}
+
 function renderSetupCards(a) {
   const el = $("setupCards");
   if (!el) return;
@@ -3007,6 +3083,20 @@ function renderSetupCards(a) {
   // nulo — é o caso do 1-2-3 já acionado sem média ativa). Enfiá-lo num card seria
   // atribuir a uma leitura um estado que ela não produziu; ele fica no rodapé, que
   // é o lugar do que não pertence a ninguém.
+  // ORDEM (task 20260904-003): Método Erick PRIMEIRO nas leituras de fundo (1w/1d),
+  // depois Setup123, depois Recuo à média. Nos frames menores (4h/1h/15m) não há card
+  // — um cabeçalho diz "fora do frame" (o método decide no fundo diário/semanal).
+  const er = a.erick_reading;
+  let erickForaNota = "";
+  if (er && er.disponivel && !er.fora_do_frame) {
+    cards.unshift(erickCardHtml(er));
+  } else if (er && er.fora_do_frame) {
+    erickForaNota =
+      `<div class="sc-erick-fora"><span class="sc-erick-fora-k">Método Erick</span>` +
+      `<span class="sc-erick-fora-v">fora do frame — decide no diário/semanal (fundo); ` +
+      `este é o ${escapeHtml(tfNome(_tf))}.</span></div>`;
+  }
+
   const semCard = cards.length === 0;
   const donoNaTela = (dono === "123" && !!pat)
     || (dono === "recuo_media" && !!(bz && bz.price != null));
@@ -3056,7 +3146,7 @@ function renderSetupCards(a) {
       `${escapeHtml(tfNome(_verdictTf))}.</span></div>`
     : "";
   el.classList.toggle("is-exploratorio", explor);
-  el.innerHTML = frameTopo + aviso + cards.join("") +
+  el.innerHTML = frameTopo + erickForaNota + aviso + cards.join("") +
     (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
   el.classList.remove("hidden");
 }

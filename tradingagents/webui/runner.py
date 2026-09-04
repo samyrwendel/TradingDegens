@@ -601,6 +601,30 @@ def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIME
         return {}
 
 
+def _erick_reading_for_frame(
+    ticker: str, date: str, asset_type: str, timeframe: str
+) -> dict[str, Any]:
+    """Leitura do Método Erick pro card da tela (task 20260904-003), determinística
+    e SEM LLM. O método decide no swing (4h) usando o diário/semanal de FUNDO — por
+    isso o card só aparece nas leituras de fundo (1w/1d); nos frames menores
+    (4h/1h/15m) ele fica ``fora_do_frame`` (o cabeçalho diz isso, sem card). A
+    DECISÃO é a mesma do veredito do analista ``erick`` (mesma ``erick_reading_dict``
+    que ``build_erick_method_section`` — soldado por teste). Fail-open: qualquer erro
+    devolve indisponível, nunca derruba o /api/chart nem a run."""
+    if timeframe not in ("1w", "1d"):
+        return {"disponivel": False, "fora_do_frame": True, "frame": timeframe}
+    try:
+        from tradingagents.agents.utils.erick_method import erick_reading_dict
+        d = erick_reading_dict(ticker, date, asset_type)
+        d["fora_do_frame"] = False
+        return d
+    except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra a tela
+        logger.warning("erick_reading falhou para %s %s (%s): %s",
+                       ticker, date, timeframe, exc)
+        return {"disponivel": False, "fora_do_frame": False, "frame": timeframe,
+                "motivo": "leitura do Método Erick indisponível nesta run"}
+
+
 # MÉTODOS ESTRUTURAIS ($0 de LLM): leem a série e devolvem níveis, sem agente
 # nenhum. São métodos SEPARADOS, não flags um do outro — o 1-2-3 deste projeto e o
 # 1-2-3 Storm usam a mesma numeração para pontos DIFERENTES (ver DA-081), e a única
@@ -1374,6 +1398,11 @@ class AnalysisRunner:
                 run.ticker, run.date, run.timeframe, method,
                 incluir_storm=self._storm_visivel(),
             )
+            # Card do Método Erick (task 20260904-003) no actionable da run aberta —
+            # frame de fundo (1w/1d) mostra o card; menor fica fora_do_frame.
+            if isinstance(run.result["actionable"], dict):
+                run.result["actionable"]["erick_reading"] = _erick_reading_for_frame(
+                    run.ticker, run.date, run.asset_type, run.timeframe)
             # Calendário de resultados tri-state pra QUALQUER método (task
             # 20260901-044) — mesma leitura que o Erick já consulta como fator
             # TIER 3 (:func:`erick_method._earnings_read`), só que aqui exposta
@@ -3430,6 +3459,12 @@ class AnalysisRunner:
             )
             chart = fetch_price_chart(ticker, date, timeframe, method)
             plan = _plano(timeframe)
+
+        # Card do Método Erick nas leituras de fundo (1w/1d), fora_do_frame nos
+        # menores (task 20260904-003). O `timeframe` aqui já é o EFETIVO (pós-degrade).
+        if isinstance(plan, dict):
+            plan["erick_reading"] = _erick_reading_for_frame(
+                ticker, date, asset_type, timeframe)
 
         return {
             "ticker": ticker,
