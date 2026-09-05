@@ -126,15 +126,17 @@ def test_a_linha_do_123_nao_perdeu_nem_mudou_nenhum_campo(monkeypatch):
     }
     monkeypatch.setattr(sc, "build_actionable_plan_dict", lambda *a, **k: plano)
     monkeypatch.setattr(sc, "build_storm_plan_dict", lambda *a, **k: _plano_storm())
+    monkeypatch.setattr(sc, "build_bollinger_plan_dict", lambda *a, **k: {"pattern": None})
     monkeypatch.setattr(sc, "_live_price", lambda *_a, **_k: None)
     linha = sc._frame_row("X", "2026-08-29", "1d", live_price=100.0)
     for campo in _CAMPOS_DO_123:
         assert campo in linha, f"o campo {campo} do 1-2-3 sumiu da linha"
     assert linha["trigger"] == 110.0 and linha["sl"] == 88.0 and linha["tp"] == 130.0
     assert linha["estado"] == "formando"
-    # e o Storm é uma chave a mais numa caixa só dele; o Éden (DA-184) é OUTRA
-    # chave a mais, rótulo de medição — nenhuma delas MEXE nas do 123 acima.
-    assert set(linha) - set(_CAMPOS_DO_123) == {"storm", "eden"}, set(linha)
+    # cada setup a mais é uma chave a mais numa caixa só dele; o Éden (DA-184) é
+    # rótulo de medição — nenhuma delas MEXE nas do 123 acima. Storm (DA-081), Éden
+    # (DA-184) e agora bollinger (task 20260904-015).
+    assert set(linha) - set(_CAMPOS_DO_123) == {"storm", "eden", "bollinger"}, set(linha)
     # padrão FORMANDO: o percurso não se aplica, e o campo diz isso com None em vez
     # de um zero que pareceria "não andou nada" medido
     assert linha["andado_pct"] is None and linha["rr_gatilho"] is None, linha

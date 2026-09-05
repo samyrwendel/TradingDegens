@@ -127,6 +127,26 @@ def _isola_clone_erick(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isola_bollinger(monkeypatch):
+    """O detector de reversão à média em extremo de Bollinger (task 20260904-015)
+    roda no scan de TODO frame (``_bollinger_row`` → ``build_bollinger_plan_dict``)
+    e, como o Storm e o 1-2-3, lê a série por ``_prep``/``_load_frame``. Testes que
+    trocam a fonte no nível do LOADER já o cobrem offline; os que trocam no nível do
+    PLANO (``build_storm_plan_dict``/``build_actionable_plan_dict``) deixavam só o
+    Bollinger batendo no yfinance com o símbolo sintético. Aqui ele fica INERTE por
+    padrão (sem extremo) — o teste que quer exercitá-lo o repatcha (autouse roda
+    antes, o explícito vence). Mesma disciplina do ``_isola_clone_erick``/
+    ``_isola_carteira_dono``: um detector novo que busca dado vivo nasce inerte na
+    suíte."""
+    from tradingagents.webui import scanner as _sc
+
+    monkeypatch.setattr(_sc, "build_bollinger_plan_dict",
+                        lambda *a, **k: {"pattern": None,
+                                         "motivo": "bollinger inerte no teste"},
+                        raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isola_carteira_dono(monkeypatch, tmp_path_factory):
     """A carteira do dono (``store.carteira_dono_tickers``, task 20260903-021) lê um
     arquivo fora do ``results_dir`` (``~/.tradingagents/carteira-dono.json``). Sem

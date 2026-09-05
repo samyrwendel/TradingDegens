@@ -37,6 +37,7 @@ from tradingagents.agents.utils.erick_method import _EARNINGS_WINDOW_DAYS
 from tradingagents.dataflows.earnings_calendar import earnings_window_status
 from tradingagents.dataflows.price_structure import (
     build_actionable_plan_dict,
+    build_bollinger_plan_dict,
     build_price_chart,
     build_storm_plan_dict,
     eden_classe,
@@ -232,10 +233,11 @@ def _frame_row(ticker: str, date: str, frame: str,
         if setup in ("sem_dado", "intradiario_indisponivel"):
             return {"frame": frame, "estado": "sem_dado", "motivo": f"fonte: {setup}",
                     "price": price}
-        # Sem 1-2-3 não quer dizer sem STORM: são setups diferentes, e o Storm pode
-        # estar formado onde este não está (é metade da razão de ele existir aqui).
+        # Sem 1-2-3 não quer dizer sem STORM nem sem BOLLINGER: são setups diferentes,
+        # e podem estar formados onde este não está (é metade da razão de existirem aqui).
         return {"frame": frame, "estado": "sem_setup", "price": price,
-                "storm": _storm_row(ticker, date, frame, price)}
+                "storm": _storm_row(ticker, date, frame, price),
+                "bollinger": _bollinger_row(ticker, date, frame, price)}
 
     trigger = float(pat["trigger"])
     dist = abs(price / trigger - 1.0) if trigger else None
@@ -345,6 +347,10 @@ def _frame_row(ticker: str, date: str, frame: str,
         # os dois setups no mesmo ativo de relance. Nunca no mesmo campo: misturar os
         # dois numa coluna só faria a taxa de acerto descrever trade nenhum.
         "storm": _storm_row(ticker, date, frame, price),
+        # O BOLLINGER na MESMA linha, célula própria (task 20260904-015): reversão à
+        # média em extremo de 3σ — outro detector, comparável de relance ao lado dos
+        # outros dois. Nunca no mesmo campo, pela mesma razão do Storm.
+        "bollinger": _bollinger_row(ticker, date, frame, price),
         # O ÉDEN no gatilho do 1-2-3 (DA-184) — MEDIÇÃO, não regra: o único
         # ingrediente exclusivo do Storm (MME 8 × MME 80) rotulando um gatilho do
         # 123 que hoje acerta ≤ passeio aleatório, pra medir depois se ele filtra
@@ -446,6 +452,66 @@ def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[
                       "tp": (L.get("target") or {}).get("price"),
                       "rr": (L.get("risk_reward") or {}).get("rr")}
                      for L in leituras],
+    }
+
+
+def _bollinger_row(ticker: str, date: str, frame: str, price: float | None) -> dict[str, Any]:
+    """A leitura da REVERSÃO À MÉDIA EM EXTREMO DE BOLLINGER naquele frame (task
+    20260904-015), compacta pra caber numa linha do scan.
+
+    Setup DIFERENTE do 1-2-3 e do Storm (outro detector, outro gatilho, outro alvo):
+    ocupa a SUA célula, com o seu estado, e nunca se mistura aos outros na mesma
+    coluna — acerto de um setup com R:R de outro não descreve trade nenhum. Sem
+    filtro de veto (o vídeo não tem Éden): ``opera`` é True sempre que há extremo.
+
+    SIZING é do LEDGER, não daqui: esta linha só carrega os NÍVEIS (gatilho/stop/
+    alvo); o tamanho de posição sai da mesma convenção de paper dos outros setups
+    (``_PREMISSA_PAPER``/``_BANCA_PADRAO``), pra a grade método×frame comparar.
+    """
+    try:
+        plano = build_bollinger_plan_dict(ticker, date, timeframe=frame) or {}
+    except Exception as exc:  # noqa: BLE001 — o Bollinger nunca derruba o scan do 1-2-3
+        logger.info("bollinger no scan falhou para %s %s: %s", ticker, frame, exc)
+        return {"estado": "sem_dado"}
+    pat = plano.get("pattern") or {}
+    if not pat:
+        return {"estado": "sem_setup", "opera": False, "motivo": plano.get("motivo")}
+    direction = pat.get("direction")
+    trigger = pat.get("trigger")
+    stop = (plano.get("stop") or {}).get("price")
+    tp = (plano.get("target") or {}).get("price")
+    dist = abs(price / float(trigger) - 1.0) if (price and trigger) else None
+    estado_pat = pat.get("state")
+    # O CICLO vem ANTES DE TUDO (DA-129): um padrão encerrado/invalidado é história,
+    # e o estado da linha sai dele — a MESMA tradução dos outros dois setups.
+    if (_do_ciclo := _estado_do_ciclo(pat)) is not None:
+        linha_estado = _do_ciclo
+    elif dist is not None and dist <= _GATILHO_TOL:
+        linha_estado = "em_gatilho"
+    elif estado_pat == "acionado":
+        linha_estado = "em_movimento"
+    else:
+        linha_estado = "formando"
+    rr = plano.get("risk_reward") or {}
+    return {
+        "estado": linha_estado,
+        "desfecho": pat.get("desfecho"),
+        "ciclo": pat.get("ciclo"),
+        "direction": direction,
+        "pattern_state": estado_pat,
+        "trigger": trigger,
+        "dist_pct": dist,
+        "dist_txt": _fmt_pct(dist),
+        "sl": stop,
+        "tp": tp,
+        "rr": rr.get("rr"),
+        "rr_note": rr.get("note"),
+        # Sem veto neste setup — extremo detectado é operável (o vídeo não filtra).
+        "opera": True,
+        # A PARCIAL declarada viaja na linha (regra 6 do vídeo): não é a saída
+        # principal, mas esconder que ela existe seria decidir pelo leitor.
+        "parcial": (plano.get("parcial") or {}).get("price"),
+        "extremo": pat.get("extremo"),
     }
 
 
@@ -762,9 +828,20 @@ def _chave(e: dict[str, Any]) -> str:
     return "|".join(str(e.get(k)) for k in ("ts", "ticker", "frame", "trigger"))
 
 
-# Setups que o track record sabe separar. ``123`` é o desta lista; ``storm`` é o
-# 1-2-3 do Stormer (DA-081) — outro detector, outro stop, outro alvo.
+# Setups VISÍVEIS na tela de decisão (confiabilidade, por_setup, flags de estratégia):
+# ``123`` é o desta lista; ``storm`` é o 1-2-3 do Stormer (DA-081). Um setup só sobe
+# pra cá quando é candidato a DECIDIR — não quando está só sendo medido.
 SETUPS_DO_LEDGER = ("123", "storm")
+
+# Setups que o LEDGER reconhece e a grade método×frame MEDE (task 20260904-015).
+# É superconjunto de SETUPS_DO_LEDGER: ``bollinger`` (reversão à média em extremo de
+# 3σ, vídeo Value Trade) entra aqui pra ser MEDIDO — grava no ledger, aparece na
+# grade método×frame — mas NÃO no card de confiabilidade dos outros dois, porque não
+# tem amostra pra decidir nada ainda. É a postura da própria task: "o ledger decide
+# com amostra, não a primeira rodada". Sobe pra SETUPS_DO_LEDGER quando (e se) provar.
+# ``_setup_da_entrada`` reconhece ESTA lista — sem ela, um gatilho ``bollinger`` do
+# ledger seria lido como ``123`` (o default) e contaminaria a célula do outro setup.
+SETUPS_MEDIDOS = ("123", "storm", "bollinger")
 
 
 def _estrutura_do_gatilho(e: dict[str, Any]) -> tuple:
@@ -835,7 +912,7 @@ def _setup_da_entrada(e: dict[str, Any]) -> str:
     o campo nasceu (task 023) o ledger só tinha gatilhos dele, e append-only quer
     dizer que a linha velha não é reescrita — o default é que a lê."""
     s = str(e.get("setup") or "123")
-    return s if s in SETUPS_DO_LEDGER else "123"
+    return s if s in SETUPS_MEDIDOS else "123"
 
 
 # Barras por DIA de calendário, por frame — só pra DIMENSIONAR o pedido de série
@@ -1443,8 +1520,10 @@ def _metodo_frame(verdicts: list[dict[str, Any]], banca: float,
     reais = [v for v in verdicts if v.get("veredito") in ("bateu_tp", "bateu_sl")]
 
     def grade(subset: list[dict[str, Any]]) -> dict[str, Any]:
+        # SETUPS_MEDIDOS, não SETUPS_DO_LEDGER: a grade é MEDIÇÃO e inclui o bollinger
+        # (task 20260904-015), que ainda não sobe pro card de decisão.
         out: dict[str, Any] = {}
-        for nome in SETUPS_DO_LEDGER:
+        for nome in SETUPS_MEDIDOS:
             do_setup = [v for v in subset if v.get("setup") == nome]
             frames = {frame: _bloco_metodo_frame(vs, banca)
                       for frame, vs in _agrupa_por_frame(do_setup).items()}
@@ -1454,7 +1533,7 @@ def _metodo_frame(verdicts: list[dict[str, Any]], banca: float,
 
     def grade_por_classe(subset: list[dict[str, Any]]) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        for nome in SETUPS_DO_LEDGER:
+        for nome in SETUPS_MEDIDOS:
             do_setup = [v for v in subset if v.get("setup") == nome]
             classes: dict[str, Any] = {}
             for classe, vs in _agrupa_por_classe(do_setup).items():

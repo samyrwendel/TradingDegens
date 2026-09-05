@@ -3059,6 +3059,21 @@ class AnalysisRunner:
                     known.add(("storm", s["ticker"], f.get("frame"), st.get("trigger")))
                     estruturas.add(_estrutura_do_gatilho(linha_st))
                     novos += 1
+                # O BOLLINGER loga o SEU gatilho com a SUA identidade (task
+                # 20260904-015), mesma mecânica do Storm: a entrada em PREÇO é o
+                # ``trigger`` (o rompimento da estrutura do candle extremo), e o
+                # setup carimba ``bollinger`` pra o ledger separar. Sem veto do Éden
+                # (o vídeo não filtra) — ``opera`` é sempre True quando há extremo.
+                bo = f.get("bollinger") or {}
+                linha_bo = {**bo, "ticker": s["ticker"], "frame": f.get("frame"),
+                            "setup": "bollinger", "entrada": bo.get("trigger")}
+                if (bo.get("estado") == "em_gatilho" and bo.get("opera")
+                        and ("bollinger", s["ticker"], f.get("frame"), bo.get("trigger")) not in known
+                        and _estrutura_do_gatilho(linha_bo) not in estruturas):
+                    self.scan_log.record(linha_bo)
+                    known.add(("bollinger", s["ticker"], f.get("frame"), bo.get("trigger")))
+                    estruturas.add(_estrutura_do_gatilho(linha_bo))
+                    novos += 1
         return {"gatilhos": novos, "sem_dado": sem_dado,
                 "lidos": len(result.get("ativos", []))}
 

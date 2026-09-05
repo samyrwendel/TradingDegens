@@ -2686,3 +2686,207 @@ def eden_classe(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME
     if direcao in ("compra", "venda"):
         return direcao
     return "neutro"
+
+
+# ── Reversão à média em EXTREMO de Bollinger (task 20260904-015) ──────────────
+#
+# ORIGEM: vídeo do canal Value Trade (Samyr mandou analisar 04/09/2026; regra dita
+# em [20:21]-[21:02] da transcrição em
+# ~/brain/trading-ops/video-value-trade-13k-150m-transcricao.md). O que é DO VÍDEO
+# e o que é NOSSO está separado abaixo — nunca se atribui ao vídeo o que ele não deu.
+#
+# DO VÍDEO (as 6 regras, não inventadas):
+#   1. Bollinger de 20 períodos, 3 desvios (não 2 — troca deliberada do default de
+#      fábrica: 3σ é o "caso em mil", sinal raro e de verdade).
+#   2. Só vale se o candle FECHAR fora da banda — fechou abaixo da inferior =
+#      candidato a COMPRA; fechou acima da superior = candidato a VENDA. Pavio que
+#      fura e volta (fechamento DENTRO) NÃO conta ("é ele fechar lá fora, o mercado
+#      inteiro concordando com aquele preço absurdo"). O teste guarda isso.
+#   3. Não entra no fechamento: espera o price action confirmar (o rompimento É a
+#      confirmação — "banda sem price action é aposta").
+#   4. Entrada no ROMPIMENTO da estrutura do candle extremo: COMPRA entra na
+#      SUPERAÇÃO da máxima ([28:29] "Fechou abaixo da banda inferior. Entrada na
+#      superação da máxima"); VENDA entra na PERDA da mínima ([26:06] "Cê vai marcar
+#      a mínima... perde a mínima... ativou o trade").
+#   5. Stop colado logo além da estrutura OPOSTA (mínima do extremo na compra,
+#      máxima na venda).
+#   6. Alvo: a banda CENTRAL (a média do meio). Parcial em 100% do risco é DECLARADA
+#      no plano (``parcial``), não escondida ("existem dois alvos... parcial em cem
+#      por cento e o alvo final passa a ser a média").
+#
+# NOSSO (decisões que o vídeo NÃO dá — nunca atribuídas a ele):
+#   * desvio POPULACIONAL (ddof=0), a convenção das plataformas gráficas (Profit/TV).
+#   * gatilho e stop ANCORADOS no candle extremo (nível estacionário). O vídeo
+#     "desloca o nível pro candle seguinte" enquanto não rompe — refinamento de
+#     execução ao vivo que tornaria o gatilho NÃO-estacionário e furaria a dedup por
+#     estrutura do ledger (o mesmo defeito que fez UM padrão do Storm virar 12 linhas,
+#     task 20260902-040). Ancorar no extremo é fiel à 1ª oração da regra 4 e mensurável.
+#   * alvo = a média NA BARRA DO EXTREMO (nível fixo): o ledger precisa de alvo
+#     estacionário — a SMA20 corrente andaria junto com o preço e nunca seria tocada.
+#   * SIZING: NENHUM próprio. O vídeo não dá tamanho de posição, então este setup NÃO
+#     inventa sizing — grava no ledger e é medido pela MESMA convenção de paper dos
+#     outros setups (posição fixa + risco fixo, ``_PREMISSA_PAPER``/``_BANCA_PADRAO``
+#     em scanner.py). É de propósito: sizing diferente por setup faria a grade
+#     método×frame não comparar nada.
+_BOLL_PERIODO = 20        # períodos da média/banda (regra 1 — DO VÍDEO)
+_BOLL_DESVIOS = 3.0       # desvios-padrão (regra 1 — DO VÍDEO, troca o default de 2)
+
+
+@dataclass
+class BollingerPattern:
+    """O extremo de Bollinger mais recente: o candle que FECHOU fora da banda."""
+
+    direction: str                    # compra | venda
+    extremo: dict[str, Any]           # o candle extremo (data + OHLC)
+    banda: float                      # a banda rompida (inferior na compra, superior na venda)
+    media: float                      # banda central na barra do extremo = ALVO
+    trigger: float                    # rompimento da estrutura (regra 4)
+    stop_price: float                 # estrutura oposta (regra 5)
+    idx: int                          # índice do candle extremo na série
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "direction": self.direction,
+            "extremo": self.extremo,
+            "banda": round(self.banda, 2),
+            "media": round(self.media, 2),
+            "trigger": round(self.trigger, 2),
+        }
+
+
+def _bollinger_bands(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """``(central, superior, inferior)`` de Bollinger 20/3σ — média SIMPLES de 20 (a
+    ``MA20`` que :func:`_prep_calc` já computou) e desvio POPULACIONAL (ddof=0, a
+    convenção das plataformas). Barras sem os 20 períodos saem NaN e nunca viram
+    sinal (o extremo só olha barras com banda definida)."""
+    close = df["Close"].astype(float)
+    central = df["MA20"] if "MA20" in df.columns else close.rolling(_BOLL_PERIODO).mean()
+    desvio = close.rolling(_BOLL_PERIODO).std(ddof=0)
+    return central, central + _BOLL_DESVIOS * desvio, central - _BOLL_DESVIOS * desvio
+
+
+def _bollinger_extremo(df: pd.DataFrame, fmt: str,
+                       ultima_em_formacao: bool = False) -> "BollingerPattern | None":
+    """O EXTREMO de Bollinger mais recente numa barra FECHADA (regra 2).
+
+    Fechamento ABAIXO da banda inferior → candidato a COMPRA; ACIMA da superior →
+    VENDA. Pavio que fura e volta (mínima/máxima fora mas FECHAMENTO dentro) não
+    conta — é o FECHAMENTO que decide. Varre da esquerda pra direita e o extremo
+    MAIS RECENTE vence (mesma regra do triplo mais recente do Storm).
+    """
+    central, superior, inferior = _bollinger_bands(df)
+    c = df["Close"].astype(float).values
+    up, lo_band, mid = superior.values, inferior.values, central.values
+    # A última barra em formação não pode ser o extremo: o fechamento dela muda a
+    # cada tick, e "fechou fora" só é fato numa barra fechada (regra do ponto 3 do
+    # Storm, reusada).
+    ultimo = len(df) - (1 if ultima_em_formacao else 0)
+    achado: int | None = None
+    direction: str | None = None
+    for i in range(_BOLL_PERIODO - 1, ultimo):
+        if pd.isna(up[i]) or pd.isna(lo_band[i]):
+            continue
+        if c[i] < lo_band[i]:
+            achado, direction = i, "compra"
+        elif c[i] > up[i]:
+            achado, direction = i, "venda"
+    if achado is None or direction is None:
+        return None
+    row = df.iloc[achado]
+    compra = direction == "compra"
+    high, low = float(row["High"]), float(row["Low"])
+    return BollingerPattern(
+        direction=direction,
+        extremo={"date": row["Date"].strftime(fmt),
+                 "open": round(float(row["Open"]), 2), "high": round(high, 2),
+                 "low": round(low, 2), "close": round(float(row["Close"]), 2)},
+        banda=float(lo_band[achado] if compra else up[achado]),
+        media=float(mid[achado]),
+        trigger=high if compra else low,      # regra 4: compra rompe a máxima; venda perde a mínima
+        stop_price=low if compra else high,   # regra 5: estrutura oposta
+        idx=achado,
+    )
+
+
+def build_bollinger_plan(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+) -> dict[str, Any]:
+    """Plano da reversão à média em extremo de Bollinger — $0 de LLM, série
+    date-guarded (não enxerga candle futuro). Ver o cabeçalho da seção pro que é DO
+    VÍDEO e o que é NOSSO. Devolve sempre um dict serializável, com o motivo escrito
+    quando não há extremo (a ausência de sinal é informação)."""
+    fmt = _date_fmt(timeframe)
+    df = _prep(symbol, curr_date, timeframe)
+    price = round(float(df["Close"].astype(float).iloc[-1]), 2) if len(df) else None
+    as_of = _as_of_stamp(df["Date"].iloc[-1], timeframe) if len(df) else None
+    pat = (_bollinger_extremo(df, fmt, _ultima_barra_em_formacao(curr_date))
+           if len(df) >= _BOLL_PERIODO else None)
+    out: dict[str, Any] = {
+        "symbol": symbol, "as_of": as_of, "price": price,
+        "timeframe": _plan_timeframe_ref(timeframe),
+        "periodo": _BOLL_PERIODO, "desvios": _BOLL_DESVIOS,
+        "pattern": pat.as_dict() if pat is not None else None,
+        "invalidation": None, "stop": None, "target": None, "risk_reward": None,
+    }
+    if pat is None or price is None:
+        out["motivo"] = "nenhum fechamento fora da banda de 3σ na janela lida"
+        return out
+    compra = pat.direction == "compra"
+    trigger = round(pat.trigger, 2)
+    stop_price = round(pat.stop_price, 2)
+    alvo = round(pat.media, 2)
+    stop = {"label": "stop (SL)", "price": stop_price, "anchor": stop_price, "slack": 0.0,
+            "basis": ("logo além da " + ("mínima" if compra else "máxima") +
+                      " do candle extremo — o vídeo põe o stop colado na estrutura, e o "
+                      "quanto além é decisão de quem opera (não se inventa folga)")}
+    target = {"label": f"banda central (média de {_BOLL_PERIODO}) na barra do extremo",
+              "price": alvo, "low": None, "high": None}
+    entry_basis = ("gatilho — rompimento da máxima do candle extremo" if compra
+                   else "gatilho — perda da mínima do candle extremo")
+    # DESFECHO/CICLO pela RÉGUA COMPARTILHADA (:func:`_morte_e_desfecho`), a MESMA
+    # dos outros detectores: o extremo perde a validade se FECHAR além do stop (o
+    # elástico arrebentou — o vídeo avisa em [31:12] que numa crise ele "cai em linha
+    # reta sem voltar"), e é justamente por isso que a entrada exige o rompimento e o
+    # stop é curto. A invalidação é esse nível de stop.
+    em, desfecho, acionado = _morte_e_desfecho(
+        df, pat.idx, stop_price, compra, fmt, trigger, alvo, stop_price)
+    state = "acionado" if acionado else "formando"
+    entry = price if acionado else trigger
+    entry_basis_efetiva = "preço atual (entrada já acionada)" if acionado else entry_basis
+    rr = _risk_reward(entry, entry_basis_efetiva, stop, target, compra)
+    out.update({
+        "invalidation": {"label": ("perda da mínima do extremo" if compra
+                                   else "retomada da máxima do extremo"),
+                         "price": stop_price},
+        "stop": stop, "target": target,
+        "risk_reward": _com_percurso(rr, trigger, state, price, stop, target, compra,
+                                     entry_basis),
+        "pattern": {**out["pattern"], "state": state,
+                    "invalidado": em is not None and desfecho is None,
+                    "invalidado_em": em, "desfecho": desfecho,
+                    "encerrado": desfecho is not None, "acionado_em": acionado,
+                    "ciclo": ciclo_de_vida(acionado_em=acionado, invalidado_em=em,
+                                           desfecho=desfecho)},
+        # PARCIAL declarada (regra 6, DO VÍDEO): 100% do risco (1R). NÃO é a saída
+        # principal — o alvo é a média —; é opção, EXPOSTA, nunca escondida.
+        "parcial": {"tipo": "1R",
+                    "price": round(trigger + (trigger - stop_price) * (1 if compra else -1), 2),
+                    "nota": "parcial opcional em 100% do risco (1R); alvo principal é a média"},
+    })
+    return out
+
+
+def build_bollinger_plan_dict(
+    symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME,
+) -> dict[str, Any]:
+    """Wrapper de UI: nunca levanta — falha vira plano vazio com o motivo escrito."""
+    try:
+        return build_bollinger_plan(symbol, curr_date, timeframe)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("bollinger-plan build failed for %s: %s", symbol, exc)
+        return {"symbol": symbol, "as_of": None, "price": None,
+                "timeframe": _plan_timeframe_ref(timeframe),
+                "periodo": _BOLL_PERIODO, "desvios": _BOLL_DESVIOS,
+                "pattern": None, "invalidation": None, "stop": None,
+                "target": None, "risk_reward": None,
+                "motivo": "série indisponível para esta data/frame"}
