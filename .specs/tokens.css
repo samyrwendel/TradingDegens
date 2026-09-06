@@ -1,0 +1,33 @@
+/* <PROJETO> — tokens crus (CONSTITUIÇÃO). A verdade física dos valores de design.
+ * Estes valores são COPIADOS pros espelhos (index.css / tailwind / theme.js / etc.) — ver .specs/SKILL.md.
+ * Mudar aqui = propagar em TODOS os espelhos + registrar DA-NNN. Nunca hardcodar hex no JSX. */
+
+:root {
+  /* --- Acentos (ex.: 1 por produto/superfície; mantenha um sistema, não cores soltas) --- */
+  --accent:    /* <ex.: oklch(.72 .13 296)  | #ac93ec> */ ;
+  /* --accent-2: <…> ; */
+  /* --accent-3: <…> ; */
+
+  /* --- Superfícies (fundo em camadas) --- */
+  --bg:        /* <ex.: #0a0b0e> */ ;
+  --surface:   /* <ex.: #101319> */ ;
+  --surface-2: /* <ex.: #14181f> */ ;
+  --border:    /* <ex.: rgba(255 255 255 / .07)> */ ;
+
+  /* --- Texto --- */
+  --text:      /* <ex.: #f3f5f6> */ ;
+  --text-dim:  /* <ex.: #8b939d> */ ;
+
+  /* --- Semânticos (status — não confundir com acentos de produto) --- */
+  --up:        /* <sucesso/lucro> */ ;
+  --down:      /* <erro/perda> */ ;
+  --warn:      /* <atenção> */ ;
+
+  /* --- Tipografia / forma --- */
+  --font-sans: /* <ex.: 'Sora', sans-serif> */ ;
+  --font-mono: /* <ex.: 'JetBrains Mono', monospace — TODO dado numérico/técnico> */ ;
+  --radius-card: /* <ex.: 16px> */ ;
+  --radius-pill: /* <ex.: 100px> */ ;
+}
+
+/* PROIBIDOS (legado morto — nunca usar): <ex.: #00ff73 verde-neon, #00e5ff ciano antigo> */

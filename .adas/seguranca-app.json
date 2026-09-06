@@ -1,0 +1,24 @@
+{
+  "_leia_me": "As seis portas de segurança do app (DA-189). Portas 1-2 são mecânicas (scripts/check-secrets.sh, sem estado aqui). Portas 3-6: primeira evidência veio da auditoria somente-leitura task de 04/09 (o agente de execução) — relatório completo arquivado fora do repo. Reteste ao evoluir a rota/serviço tocado; 'passa'/'na' sem evidência não vale (DA-174).",
+  "validacao_servidor": {
+    "estado": "passa",
+    "evidencia": "curl sem cookie/token em 7 rotas de escrita: POST /api/watchlist->403, POST /api/estrategias->403, POST /api/scan/paper/reset->403, DELETE /api/history/<t>->403, POST /api/subscription/connect->403, POST /api/analyze sem chave->403 need_key, POST /api/login senha errada->401. Owner-gate (_owner_or_403) na primeira linha de todo do_POST de escrita. Ver relatório, seção Porta 3.",
+    "data": "2026-09-03"
+  },
+  "arquivo_publico": {
+    "estado": "passa",
+    "evidencia": "_serve_static (server.py:164-183) só serve Path(name).name dentro de _STATIC_DIR (app.js/index.html/style.css, nenhum diretório de runs/prints/PDF). Testado ao vivo: '..%2f..%2f', '....//....//' , '../../../etc/passwd' -> 404 nos 3 casos. Ver relatório, seção Porta 4.",
+    "data": "2026-09-03"
+  },
+  "erro_fala_demais": {
+    "estado": "passa",
+    "evidencia": "Forçados: JSON invalido -> 400 generico; ticker unicode; run/token inexistente -> 403 'esta execucao nao e sua' (mesma msg p/ ausente e errado); rota inexistente -> 404 'nao encontrado'; login sem campo senha == login com senha errada (401 'senha incorreta' nos dois, nao diferencia). Nenhuma resposta trouxe stack/caminho/tabela. Debito interno anotado (nao bloqueante): do_GET nao passa pelo _redact_key como do_POST/do_DELETE (nenhuma rota GET le header sensivel hoje). Ver relatorio, secao Porta 5.",
+    "data": "2026-09-03"
+  },
+  "rate_limit": {
+    "_o_que_provar": "N requisições seguidas em login e em rota cara (IA paga) recusadas depois de um teto; teto de gasto declarado no provedor.",
+    "estado": "debito",
+    "evidencia": "FALHA confirmada pela auditoria: grep 'rate.limit|throttle|429' em server.py -> zero ocorrencias. POST /api/login com senha errada x30 seguidas -> 30x401 sem bloqueio/atraso/CAPTCHA. POST /api/analyze sem chave x30 -> 30x403 (gate barra antes de custo, mas sem teto de TENTATIVA). Login usa senha curta escolhida por humano (TRADINGDEGENS_OWNER_TOKEN) -> forca-bruta viavel de verdade. Teto de gasto: nao encontrado em litellm-config.yaml nem config do webui. Precisa de task/DA propria (proposta minima: lockout/backoff no POST /api/login). Ver relatorio, secao Porta 6.",
+    "data": "2026-09-03"
+  }
+}

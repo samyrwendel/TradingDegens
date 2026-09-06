@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Hook ADAS: injeta a spec destilada da faixa no INSTANTE da edição (enforcement JIT). FONTE ÚNICA: .claude/hooks/adas-inject.sh (um case por faixa — edite lá, versionado com o código; também é chamado pelo roteador user-level host/adas-route.sh do repo adas quando a sessão nasce fora do repo). Só Claude Code — em outra LLM, cole o ADAS.md. REQUER 'jq' no PATH: sem jq o hook falha aberto (vira no-op SILENCIOSO — a edição passa sem a faixa injetada).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/adas-inject.sh\"",
+            "timeout": 10,
+            "statusMessage": "ADAS"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/da-index-hook.sh\"",
+            "timeout": 10,
+            "statusMessage": "ADAS índice de DAs"
+          }
+        ]
+      }
+    ]
+  }
+}
