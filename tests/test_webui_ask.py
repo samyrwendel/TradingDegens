@@ -25,7 +25,7 @@ def _single_record():
         "result": {
             "verdict": "Underweight",
             "timeframe": "1d",
-            "erick_report": "Aguardar o recuo à média antes de entrar com peso.",
+            "analista_report": "Aguardar o recuo à média antes de entrar com peso.",
             "trader_plan": "Plano: manter, aguardar pullback.",
             "actionable": {
                 "as_of": "2026-08-24",
@@ -63,8 +63,8 @@ def _compare_record():
                                     "ma": {"20": [472.29], "50": [419.09], "200": [429.43]}},
                 },
                 "b": {
-                    "method": "erick", "label": "Método Erick · diário", "verdict": "Buy",
-                    "erick_report": "Erick: recuo à média nas EMAs 8/21.",
+                    "method": "analista", "label": "Método do analista · diário", "verdict": "Buy",
+                    "analista_report": "analista: recuo à média nas EMAs 8/21.",
                     "actionable": {"as_of": "2026-08-24", "price": 488.88},
                     "price_chart": {"ema": {"8": [485.21], "21": [469.7], "50": [441.63]},
                                     "ma": {"20": [477.32], "50": [421.08], "200": [429.33]}},
@@ -152,10 +152,10 @@ def test_build_context_compare_names_both_columns():
     assert ctx["mode"] == "compare"
     assert ctx["has_numbers"] is True
     assert "Padrão · diário" in ctx["facts"]
-    assert "Método Erick · diário" in ctx["facts"]
+    assert "Método do analista · diário" in ctx["facts"]
     # cada coluna traz suas próprias EMAs (não se misturam)
     assert "EMA 8: 484,17" in ctx["facts"]   # Padrão
-    assert "EMA 8: 485,21" in ctx["facts"]   # Erick
+    assert "EMA 8: 485,21" in ctx["facts"]   # analista
 
 
 def test_build_context_single_no_actionable_is_honest():

@@ -9,7 +9,7 @@ series up* to weekly. The product owner, however, decides half the time on the
 **Why 4h is pulled straight from the exchange (not resampled 1h→4h).** Binance
 exposes ``4h`` as a *native* kline interval, so we fetch it directly: the candle
 is then aligned to the exchange's own 4h boundaries (00:00/04:00/08:00… UTC) —
-exactly the bar the product owner (and Erick) reads off Quantfury/TV. Resampling
+exactly the bar the product owner (and analista) reads off referência de design/TV. Resampling
 1h→4h in memory would (a) depend on a deep-enough 1h history and (b) risk a
 boundary/label mismatch against what the trader sees on the chart. A real native
 bar has neither problem and stays honest to "the candle the exchange printed".
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 # Intraday timeframes we support, mapped to Binance's kline interval strings.
 # Kept small on purpose: these are the frames the product owner actually trades —
-# 15m for timing, 1h for the intraday trend, 4h for the swing read Erick decides
+# 15m for timing, 1h for the intraday trend, 4h for the swing read analista decides
 # on. All three are NATIVE Binance intervals, so each is a real exchange bar (no
 # in-memory resampling — see the module docstring).
 INTRADAY_INTERVALS: dict[str, str] = {"15m": "15m", "1h": "1h", "4h": "4h"}

@@ -1,4 +1,4 @@
-"""Resultado reportado do âncora via Finnhub — o catalisador da leitura do Erick.
+"""Resultado reportado do âncora via Finnhub — o catalisador da leitura do analista.
 
 Sem rede: o histórico de surpresas e o calendário são injetados (monkeypatch do
 único seam ``_finnhub_get``). Cobrem: escolher o trimestre reportado mais recente

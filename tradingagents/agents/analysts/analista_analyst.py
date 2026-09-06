@@ -1,16 +1,16 @@
-"""Analista `erick` — decide pelo MÉTODO ERICK, não é um clone do de mercado.
+"""Analista `analista` — decide pelo MÉTODO DO ANALISTA, não é um clone do de mercado.
 
-O de mercado descreve indicadores. Este DECIDE como o Erick Sekiama: entrada no
+O de mercado descreve indicadores. Este DECIDE como o analista: entrada no
 recuo à média (EMA 8/21) no intradiário (15m/4h), saída antes da reversão, caixa
 como posição ativa, tático separado de estrutural, e o PESO RELATIVO do trade
 (posição cheia / meia / inicial) conforme a confirmação — a resposta ao
 "quantos %" sem chutar valor absoluto.
 
-Modelo em `~/brain/trading-ops/modelo-decisorio-erick-sekiama.md` (4 fontes
+Modelo em a nota privada do modelo decisório do analista (4 fontes
 independentes). Reusa a fundação já pronta (EMA, intradiário, região/1-2-3,
 funding/OI, medo & ganância). A moldura o LLM escreve; o núcleo operável
 (timeframe, recuo, saída, peso) é garantido determinístico por
-:func:`ensure_erick_method_coverage`. pt-BR pela regra fixada.
+:func:`ensure_analista_method_coverage`. pt-BR pela regra fixada.
 """
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -41,7 +41,7 @@ from tradingagents.agents.utils.drop_nature import (
     drop_nature_field,
     enforce_drop_nature_coherence,
 )
-from tradingagents.agents.utils.erick_method import ensure_erick_method_coverage
+from tradingagents.agents.utils.analista_method import ensure_analista_method_coverage
 
 
 # Regra 10 CONDICIONADA à classificação JÁ FEITA (fonte única): o LLM recebe a
@@ -79,9 +79,9 @@ def _drop_rule(drop: dict | None) -> str:
     return base
 
 
-def create_erick_analyst(llm):
+def create_analista_analyst(llm):
 
-    def erick_analyst_node(state):
+    def analista_analyst_node(state):
         current_date = state["trade_date"]
         symbol = state["company_of_interest"]
         asset_type = state.get("asset_type", "stock")
@@ -106,7 +106,7 @@ def create_erick_analyst(llm):
         drop_rule = _drop_rule(drop)
 
         system_message = (
-            """Você é o analista que decide pelo MÉTODO ERICK SEKIAMA — modelado de 59 transcrições, dos gráficos dele (EMA 8/21 no 15m/4h, na Quantfury), da carteira real (62% em caixa) e do racional escrito de cada posição. Você NÃO é o analista de mercado: ele descreve indicadores; você DECIDE como o Erick decide. Suas regras (siga-as, não as recite):
+            """Você é o analista que decide pelo MÉTODO ANALISTA — modelado de 59 transcrições, dos gráficos dele (EMA 8/21 no 15m/4h, na referência de design), da carteira real (62% em caixa) e do racional escrito de cada posição. Você NÃO é o analista de mercado: ele descreve indicadores; você DECIDE como o analista decide. Suas regras (siga-as, não as recite):
 
 1. **Regime antes do preço.** Primeiro classifique o mercado (alta / correção / distribuição) pela pilha de médias — EMA 8/21 para o timing, a média maior para a tendência. Só então olhe nível.
 2. **Eixo = média móvel.** O gatilho é o preço RECUANDO até a média e reagindo ali. Não persiga rompimento esticado.
@@ -185,7 +185,7 @@ NÃO emita um veredito próprio de AGIR/AGUARDAR nem um ponto de recuo/nível op
             # classificação (drop) alimenta a seção — não reclassifica. Em cripto,
             # anexa também funding/OI e medo & ganância — os filtros do método —
             # reusando os mesmos guardas do analista de mercado.
-            report = ensure_erick_method_coverage(
+            report = ensure_analista_method_coverage(
                 content, symbol, current_date, asset_type, drop=drop
             )
             if is_crypto:
@@ -196,7 +196,7 @@ NÃO emita um veredito próprio de AGIR/AGUARDAR nem um ponto de recuo/nível op
                     report, symbol, current_date
                 )
             # Correlação com o âncora + FORÇA RELATIVA e o calendário de earnings —
-            # o Erick decide por correlação com a NVDA diante do EVENTO de balanço.
+            # o analista decide por correlação com a NVDA diante do EVENTO de balanço.
             # Determinístico, ancorado nos candles/fonte cacheados e date-guarded.
             report = ensure_correlation_coverage(
                 report, symbol, current_date, asset_type
@@ -207,10 +207,10 @@ NÃO emita um veredito próprio de AGIR/AGUARDAR nem um ponto de recuo/nível op
 
         return {
             "messages": [result],
-            "erick_report": report,
+            "analista_report": report,
             # Campo estruturado da natureza da queda — fonte única que o juiz/UI leem
             # (não a prosa). Mesmo classificação usada na regra 10 e na seção do método.
-            "erick_drop_nature": drop_nature_field(drop, coherence_flags),
+            "analista_drop_nature": drop_nature_field(drop, coherence_flags),
         }
 
-    return erick_analyst_node
+    return analista_analyst_node

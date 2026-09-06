@@ -119,7 +119,7 @@ def _snapshot(*, invalidado=False, encerrado=False):
         "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
         "trader_plan": "", "risk_decision": "", "market_report": "",
         "sentiment_report": "", "news_report": "", "fundamentals_report": "",
-        "erick_report": "", "drop_nature": {}, "derivatives_report": "",
+        "analista_report": "", "drop_nature": {}, "derivatives_report": "",
         "setup123": False, "storm123": True,
     }
     return {"run_id": "R-032", "ticker": "MSFT", "date": "2026-08-29",

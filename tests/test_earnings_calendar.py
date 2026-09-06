@@ -1,6 +1,6 @@
 """Calendário de earnings — próxima data de resultado, cacheada e date-guarded.
 
-Provedor novo (brief 24/08): o eixo da análise do Erick é o EVENTO ("resultado da
+Provedor novo (brief 24/08): o eixo da análise do analista é o EVENTO ("resultado da
 NVDA sai quarta 26/08"). Estes testes injetam um DataFrame de earnings falso (sem
 rede) e checam: escolher a próxima data ESTRITAMENTE depois da base, o "após o
 fechamento", o clamp do date_guard, a fonte caída virando "indisponível" (sem
@@ -303,7 +303,7 @@ def test_window_status_cripto_nao_consulta_nada(monkeypatch):
 @pytest.mark.unit
 def test_window_status_dias_none_fica_none_nao_false(fake_yf, monkeypatch):
     """Data presente sem dias calculáveis (caso raro do ``_days_ahead`` do
-    erick_method): ``in_window`` não pode virar ``False`` por ignorância."""
+    analista_method): ``in_window`` não pode virar ``False`` por ignorância."""
     ev, status = ec.get_next_earnings_status("NVDA", "2026-08-01")
     ev = dict(ev)
     ev.pop("days_ahead", None)

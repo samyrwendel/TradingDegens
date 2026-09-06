@@ -76,8 +76,8 @@ class Propagator:
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
-            # On-demand; stays "" unless the erick analyst is in the selection.
-            "erick_report": "",
+            # On-demand; stays "" unless the analista analyst is in the selection.
+            "analista_report": "",
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

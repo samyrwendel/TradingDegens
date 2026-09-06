@@ -1,4 +1,4 @@
-"""Carteira-espelho que CLONA as PRÓXIMAS entradas/saídas do Erick em paper
+"""Carteira-espelho que CLONA as PRÓXIMAS entradas/saídas do analista em paper
 (tasks 20260902-055/056).
 
 Dois dentes centrais:
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tradingagents.webui import clone_erick as C
+from tradingagents.webui import clone_analista as C
 
 pytestmark = pytest.mark.unit
 
@@ -99,7 +99,7 @@ def test_capital_nao_positivo_e_recusado(tmp_path):
 
 
 def test_capital_do_env_semeia_quando_estado_nao_tem(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLONE_ERICK_CAPITAL", "5000")
+    monkeypatch.setenv("CLONE_ANALISTA_CAPITAL", "5000")
     assert C.estado(dir=tmp_path)["estado"] == "ativo"
     assert C.estado(dir=tmp_path)["capital"] == 5000.0
 
@@ -137,7 +137,7 @@ def test_trocar_moeda_e_um_comando_novo_nao_arqueologia(tmp_path):
 def test_capital_do_env_nao_declara_moeda(tmp_path, monkeypatch):
     """O atalho de semear capital via env (sem configurar_capital()) nunca declara
     moeda — "ativo sem moeda" é honesto (None), não um USD assumido em silêncio."""
-    monkeypatch.setenv("CLONE_ERICK_CAPITAL", "5000")
+    monkeypatch.setenv("CLONE_ANALISTA_CAPITAL", "5000")
     assert C.estado(dir=tmp_path)["estado"] == "ativo"
     assert C.estado(dir=tmp_path)["moeda"] is None
 

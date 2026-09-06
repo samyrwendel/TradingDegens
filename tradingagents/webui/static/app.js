@@ -19,8 +19,8 @@ let _cancelPending = "";
 let _cancelPause = false;             // o pedido foi Pausar (true) ou Parar (false)?
 const _STOP_LABEL = "Parar análise";
 let _openRunId = "";                 // run simples aberto (lado A de um confronto manual)
-let _openMethod = "padrao";          // método da análise aberta (Erick EMA 8/21 / Padrão MMS) — troca de TF mantém a estrutura do método
-let _openView = "padrao";            // o que a barra de reanálise destaca: "padrao" | "erick" | "compare" (compare = view de comparação aberta). Clicar o destaque = "Atualizar" (reanalisa hoje preservando o método).
+let _openMethod = "padrao";          // método da análise aberta (analista EMA 8/21 / Padrão MMS) — troca de TF mantém a estrutura do método
+let _openView = "padrao";            // o que a barra de reanálise destaca: "padrao" | "analista" | "compare" (compare = view de comparação aberta). Clicar o destaque = "Atualizar" (reanalisa hoje preservando o método).
 let _prevRunningIds = new Set();     // ids que apareciam "running" na última lista
 const _finishedFlags = new Map();    // run_id -> "done" | "error" (terminou em 2º plano)
 let _historyTimer = null;            // atualização lenta da lista (marcadores vivos)
@@ -681,7 +681,7 @@ function renderProgress(snap) {
   const steps = $("steps");
   const cmpStepsEl = $("compareSteps");
 
-  // Progresso de CONFRONTO: trilha de 3 etapas (Padrão → Erick → Comparação) com
+  // Progresso de CONFRONTO: trilha de 3 etapas (Padrão → analista → Comparação) com
   // o estado de cada — em vez dos chips de analista da análise única.
   // Raciocínio ao vivo: revela o texto dos agentes conforme terminam (task 008).
   renderThinking(snap.thinking);
@@ -844,7 +844,7 @@ function renderThinking(items) {
       box.insertBefore(card, after || null);
     }
     // Timeframe(s) que a etapa analisou (task 009): selo ao lado do modelo. Só nos
-    // nós que operam num tempo gráfico (Mercado, Erick); vazio → some (CSS :empty).
+    // nós que operam num tempo gráfico (Mercado, analista); vazio → some (CSS :empty).
     const tfSlot = card.querySelector("[data-tk-tf]");
     if (tfSlot) tfSlot.textContent = stepTfLabel(it);
     // Atribuição por etapa: qual LLM rodou este card (aparece assim que o 1º start
@@ -873,7 +873,7 @@ function stepModelLabel(it) {
 }
 
 // Selo de TIMEFRAME(s) da etapa (task 009): "semanal · diário" (Mercado) / "4h · 15m"
-// (Erick). Vazio nos nós que não operam num tempo gráfico (some via CSS :empty). O TF vem
+// (analista). Vazio nos nós que não operam num tempo gráfico (some via CSS :empty). O TF vem
 // do backend (real do motor, não configurado) — nunca inventa aqui.
 function stepTfLabel(it) {
   if (!it || !it.timeframe) return "";
@@ -938,13 +938,13 @@ function contradictionsHtml(findings) {
 // Selo de TIMEFRAME(s) no cabeçalho da seção do analista (task 009) — espelha o
 // node_timeframe do backend (progress.py) pras seções persistentes do resultado.
 // Mercado = semanal · diário (+ frame de referência quando a run é intradiária);
-// Erick = 4h · 15m. HONESTO: o que o motor lê, não o configurado. Vazio → não aparece.
+// analista = 4h · 15m. HONESTO: o que o motor lê, não o configurado. Vazio → não aparece.
 function tfTag(node) {
   let tf = "";
   if (node === "market") {
     tf = "semanal · diário";
     if (_verdictTf && _verdictTf !== "1d" && _verdictTf !== "1w") tf += " · " + _verdictTf;
-  } else if (node === "erick") {
+  } else if (node === "analista") {
     tf = "4h · 15m";
   }
   return tf ? ` <span class="sec-tf">${escapeHtml(tf)}</span>` : "";
@@ -1010,7 +1010,7 @@ function auditFooterHtml(audit, asOfPrice) {
       `<ul class="audit-steps-list">` +
       byStep.map((s) => {
         const lbl = stepModelLabel(s);
-        // TF real da etapa (task 009) ao lado do modelo — só onde se aplica (Mercado/Erick).
+        // TF real da etapa (task 009) ao lado do modelo — só onde se aplica (Mercado/analista).
         const tf = s.timeframe ? `<span class="as-tf">${escapeHtml(s.timeframe)}</span>` : "";
         return `<li><span class="as-step">${escapeHtml(s.label || s.node || "—")}</span>` +
           `<span class="as-meta">${tf}<span class="as-model">${lbl ? escapeHtml(lbl) : "—"}</span></span>` +
@@ -1084,7 +1084,7 @@ function bindErrorCard(container) {
 function _hasAnyReport(r) {
   if (!r) return false;
   return ["market_report", "sentiment_report", "news_report", "fundamentals_report",
-    "erick_report", "bull", "bear", "research_manager", "investment_plan",
+    "analista_report", "bull", "bear", "research_manager", "investment_plan",
     "trader_plan", "risk_decision"].some((k) => (r[k] || "").toString().trim());
 }
 
@@ -1128,9 +1128,9 @@ function partialReportsHtml(snap, r) {
   const axes = r.axes || {};
   let html = partialBannerHtml(snap, r);
   html += fallbackBannerHtml(r.fallbacks);
-  if (r.erick_report && r.erick_report.trim()) {
-    html += `<details class="section erick" open><summary>Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
-      `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
+  if (r.analista_report && r.analista_report.trim()) {
+    html += `<details class="section analista" open><summary>Método do analista — recuo à média · saída · peso do trade${tfTag("analista")}${axisTag(axes.analista)}</summary>` +
+      `<div class="section-body"><div class="md">${renderMarkdown(r.analista_report)}</div></div></details>`;
   }
   html += section("Juiz do Debate (Gestor de Pesquisa) — leitura", r.research_manager || r.investment_plan, axes.juiz);
   html += section("Mercado — preço e múltiplos tempos gráficos", r.market_report, axes.tecnico, "market");
@@ -1201,7 +1201,7 @@ function renderResult(snap) {
   // Terminou (done/error) antes do cancel pegar: solta a trava do 'parando…' (013).
   if (_cancelPending && _cancelPending === (snap.run_id || _watchedRunId)) clearCancelPending();
   $("comparePanel").classList.add("hidden");
-  // Run de comparação (Padrão × Erick): view própria, lado a lado.
+  // Run de comparação (Padrão × Analista): view própria, lado a lado.
   if ((snap.result || {}).compare) { renderCompare(snap); return; }
   const nameEl = document.getElementById("assetName");
   if (nameEl) {
@@ -1308,14 +1308,14 @@ function renderResult(snap) {
   // reexibe as teses (podem ter sido escondidas por um render de erro anterior).
   const railThesesOk = document.querySelector(".rail-theses");
   if (railThesesOk) railThesesOk.classList.remove("hidden");
-  // método da análise aberta: a estrutura (recuo/1-2-3) é EMA 8/21 no Erick, MMS no
+  // método da análise aberta: a estrutura (recuo/1-2-3) é EMA 8/21 no analista, MMS no
   // Padrão. Trocar de TF precisa recalcular na mesma família — daí guardar o método.
   // setup123 (atalho estrutural $0) é método próprio — o ↻ re-roda o atalho, não a
   // análise completa.
   _openMethod = r.storm123 ? "storm123"
     : r.setup123 ? "setup123"
-    : ((r.erick_report && r.erick_report.trim()) ? "erick" : "padrao");
-  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/Erick/1-2-3/Storm)
+    : ((r.analista_report && r.analista_report.trim()) ? "analista" : "padrao");
+  _openView = _openMethod;   // a barra destaca o método aberto (Padrão/analista/1-2-3/Storm)
   const estrutural = _METODOS_ESTRUTURAIS.has(_openMethod);
   $("verdictBadge").className = estrutural ? `verdict ${_openMethod}` : verdictClass(r.verdict);
   $("verdictBadge").innerHTML = estrutural
@@ -1364,7 +1364,7 @@ function renderResult(snap) {
   _revalVoo = null;
   _openLive = r.live_price || null;
   renderHeadPrice(r.actionable, _openLive);
-  renderEarnings(r.earnings, _openMethod, !!(r.erick_report && r.erick_report.trim()));
+  renderEarnings(r.earnings, _openMethod, !!(r.analista_report && r.analista_report.trim()));
   renderSetupCards(r.actionable);
   // A ESCADA vem do RESULTADO da run (foi computada junto da análise, $0 de LLM):
   // uma análise antiga, sem o campo, simplesmente não a mostra — nada de escada
@@ -1385,18 +1385,18 @@ function renderResult(snap) {
 
   const isCrypto = snap.asset_type === "crypto";
   let html = "";
-  // Modo Erick (sob demanda): a leitura do método vem primeiro e ABERTA — é o que
+  // Modo analista (sob demanda): a leitura do método vem primeiro e ABERTA — é o que
   // o Samyr pediu em destaque (recuo à média, saída, peso do trade). Só aparece
-  // quando o método Erick foi acionado; a análise Padrão não a tem.
+  // quando o método do analista foi acionado; a análise Padrão não a tem.
   const axes = r.axes || {};
   // Portão de QA (item 7): a checagem de consistência vai no TOPO das seções.
   html += contradictionsHtml(r.contradictions);
   // Fallback transparente (task 027-fallback): se o motor trocou de provedor sozinho
   // em alguma etapa, o banner de resumo abre logo abaixo do QA — visível de relance.
   html += fallbackBannerHtml(r.fallbacks);
-  if (r.erick_report && r.erick_report.trim()) {
-    html += `<details class="section erick" open><summary>Método Erick — recuo à média · saída · peso do trade${tfTag("erick")}${axisTag(axes.erick)}</summary>` +
-      `<div class="section-body"><div class="md">${renderMarkdown(r.erick_report)}</div></div></details>`;
+  if (r.analista_report && r.analista_report.trim()) {
+    html += `<details class="section analista" open><summary>Método do analista — recuo à média · saída · peso do trade${tfTag("analista")}${axisTag(axes.analista)}</summary>` +
+      `<div class="section-body"><div class="md">${renderMarkdown(r.analista_report)}</div></div></details>`;
   }
   // For crypto, the deterministic derivatives feed goes first and open — it is
   // the data yfinance can't see and the source is always named here.
@@ -1420,7 +1420,7 @@ function renderResult(snap) {
   loadHistory();
 }
 
-// ---- comparação Padrão × Erick (meta-juiz) --------------------------------
+// ---- comparação Padrão × Analista (meta-juiz) --------------------------------
 // Bloco titulado do meta-juiz (concordância / divergência / significado). Renderiza
 // markdown pra manter negrito e listas; nada é cortado — o texto flui inteiro.
 function metaSection(title, md) {
@@ -1434,11 +1434,11 @@ function metaSection(title, md) {
 // "A"/"B" (fixa o id do canvas pra o desenho depois do innerHTML).
 function compareColumn(c, slot) {
   if (!c || !c.method) return "";
-  const isErick = c.method === "erick";
-  const title = "" + (c.label || (isErick ? "Método Erick" : "Padrão"));
+  const isAnalyst = c.method === "analista";
+  const title = "" + (c.label || (isAnalyst ? "Método do analista" : "Padrão"));
   const v = c.verdict || (c.status === "error" ? "error" : "");
-  const plan = isErick
-    ? (c.erick_report || c.trader_plan || c.final_decision || "")
+  const plan = isAnalyst
+    ? (c.analista_report || c.trader_plan || c.final_decision || "")
     : (c.trader_plan || c.final_decision || "");
   const reused = c.reused
     ? `<span class="cmp-reused" title="reaproveitado do cache — não re-rodou">cache</span>`
@@ -1730,7 +1730,7 @@ function renderConfrontControl(snap) {
   ctl.classList.remove("hidden");
 }
 function confrontOptionLabel(r) {
-  const m = r.method === "erick" ? "Erick" : (r.method === "padrao" ? "Padrão" : "");
+  const m = r.method === "analista" ? "Analista" : (r.method === "padrao" ? "Padrão" : "");
   const tf = tfNome(r.verdict_timeframe || "1d");
   const when = r.finished_at ? fmtStamp(r.finished_at) : (r.date || "");
   const v = VERDICT_PT[verdictKey(r.verdict || "")] || (r.verdict ? String(r.verdict).toUpperCase() : "");
@@ -1749,15 +1749,15 @@ async function confront(a, b) {
     const res = await apiPost("/api/compare", { a, b });
     const snap = await res.json();
     if (!res.ok) { $("formError").textContent = snap.error || "falha ao confrontar"; return; }
-    // Par Padrão × Erick já pronto (mesmo frame/data): confronto direto, reusa as
+    // Par Padrão × Analista já pronto (mesmo frame/data): confronto direto, reusa as
     // duas análises. Renderiza na hora.
     if (snap.result && snap.result.compare) { renderCompare(snap); return; }
-    // Não era Padrão × Erick no mesmo frame (ex.: dois Padrão) — o backend refez
+    // Não era Padrão × Analista no mesmo frame (ex.: dois Padrão) — o backend refez
     // pela via correta, rodando só o método que faltava. Acompanha o run.
     if (snap.run_id) {
       renderProgress({
         status: "running", ticker: snap.ticker || "", elapsed: 0, cost: null,
-        progress: { phase: "Inicializando", label: "Refazendo como Padrão × Erick…", percent: 3, plan: [], reached: [] },
+        progress: { phase: "Inicializando", label: "Refazendo como Padrão × Analista…", percent: 3, plan: [], reached: [] },
       });
       watchRun(snap.run_id);
       loadHistory();
@@ -1774,13 +1774,13 @@ async function confront(a, b) {
 // aberto. Os frames operáveis vêm do ativo aberto (o backend é a fonte da verdade);
 // sem ativo aberto, a escada inteira fica ativa (o backend clampa/degrada honesto).
 let _barTf = "1d";        // timeframe escolhido na barra (default diário; reflete o veredito do aberto)
-let _barMethod = "padrao"; // método escolhido na barra: "padrao" | "erick" | "compare"
+let _barMethod = "padrao"; // método escolhido na barra: "padrao" | "analista" | "compare"
 
-// Normaliza um "view" (padrao|erick|compare|"") pro método a rodar. "" (run com erro
+// Normaliza um "view" (padrao|analista|compare|"") pro método a rodar. "" (run com erro
 // sem método) e qualquer desconhecido caem em padrão — nunca inventa método.
 // Métodos que o backend conhece — usado pra preservar o método de um run que
 // falhou sem inventar nada (desconhecido/ausente = "", cai no padrão).
-const _METODOS_CONHECIDOS = new Set(["padrao", "erick", "setup123", "storm123", "compare"]);
+const _METODOS_CONHECIDOS = new Set(["padrao", "analista", "setup123", "storm123", "compare"]);
 
 // Métodos ESTRUTURAIS ($0 de LLM). São SEPARADOS, não flags um do outro: o 1-2-3
 // deste projeto e o 1-2-3 Storm usam a mesma numeração pra pontos DIFERENTES
@@ -1789,7 +1789,7 @@ const _METODOS_ESTRUTURAIS = new Set(["setup123", "storm123"]);
 
 function normMethod(v) {
   if (v === "compare") return "compare";
-  if (v === "erick") return "erick";
+  if (v === "analista") return "analista";
   if (_METODOS_ESTRUTURAIS.has(v)) return v;
   return "padrao";
 }
@@ -1799,7 +1799,7 @@ function normMethod(v) {
 // ele é o que já está gravado no histórico, no reúso e no ledger do track record.
 function methodLabel(v) {
   if (v === "compare") return "Comparar";
-  if (v === "erick") return "Erick";
+  if (v === "analista") return "Analista";
   if (v === "setup123") return "Setup123";
   if (v === "storm123") return "Storm123";
   return "Padrão";
@@ -1846,8 +1846,8 @@ function renderLaunchBar() {
   // fica com QUATRO chips em vez de cinco (o toggle do dono, na config, religa).
   const metodos = [
     ["padrao", "Padrão", "Leitura Padrão (MMS · 1-2-3) no timeframe escolhido"],
-    ["erick", "Erick", "Método Erick — recuo à média, saída antes da reversão, peso do trade"],
-    ["compare", "Comparar", "Roda as DUAS (Padrão e Erick) e confronta com o meta-juiz — a divergência é o sinal"],
+    ["analista", "Analista", "Método do analista — recuo à média, saída antes da reversão, peso do trade"],
+    ["compare", "Comparar", "Roda as DUAS (Padrão e Analista) e confronta com o meta-juiz — a divergência é o sinal"],
     ["setup123", "Setup123", "Só o setup estrutural: gatilho, invalidação, SL, TP e R:R — sem LLM, instantâneo ($0)"],
     ["storm123", "Storm123", "O 1-2-3 do Stormer com filtro Éden (MME 8 × MME 80): ponto 2 é o FUNDO, stop no ponto 2, alvo por projeção da amplitude — sem LLM ($0)"],
   ].filter(([m]) => m !== "storm123" || estrategiaOn("storm"));
@@ -2196,8 +2196,8 @@ function runReanalyze(method, tf) {
   $("comparePanel").classList.add("hidden");
   $("steps").innerHTML = "";
   const boot = compare
-    ? "Comparando Padrão × Erick…"
-    : (m === "erick" ? "Método Erick — subindo o motor…"
+    ? "Comparando Padrão × Analista…"
+    : (m === "analista" ? "Método do analista — subindo o motor…"
       : m === "setup123" ? "Setup123 — leitura estrutural, sem LLM…"
       : m === "storm123" ? "Storm123 + Éden — leitura estrutural, sem LLM…"
       : "Subindo o motor…");
@@ -2781,19 +2781,19 @@ function stormCardHtml(st, frameDoBloco) {
     `<div class="sc-rows">${rows.join("")}</div></section>`;
 }
 
-// Card do MÉTODO ERICK (task 20260904-003) — a leitura determinística do método
-// (a MESMA decisão do veredito do analista `erick`, soldada por teste em
-// erick_reading_dict), nas leituras de fundo (1w/1d). O ESTADO é a manchete; a
-// entrada/saída/peso vêm do módulo, sem reimplementar. O "1-2-3" do Erick é uma
+// Card do MÉTODO DO ANALISTA (task 20260904-003) — a leitura determinística do método
+// (a MESMA decisão do veredito do analista `analista`, soldada por teste em
+// analista_reading_dict), nas leituras de fundo (1w/1d). O ESTADO é a manchete; a
+// entrada/saída/peso vêm do módulo, sem reimplementar. O "1-2-3" do analista é uma
 // SEQUÊNCIA DE 3 CANDLES (DA-191), separada do pivô do Setup123.
-const _ERICK_ESTADO_CLS = { AGIR: "agir", AGUARDAR: "aguardar", CAIXA: "caixa" };
-function erickCardHtml(er) {
+const _ANALISTA_ESTADO_CLS = { AGIR: "agir", AGUARDAR: "aguardar", CAIXA: "caixa" };
+function analystCardHtml(er) {
   if (!er || !er.disponivel) return "";
   const rows = [];
-  const estCls = _ERICK_ESTADO_CLS[er.estado] || "";
-  rows.push(scRow("estado (Método Erick)", er.estado,
+  const estCls = _ANALISTA_ESTADO_CLS[er.estado] || "";
+  rows.push(scRow("estado (Método do analista)", er.estado,
     er.estado_note || "estado único do método — a leitura abaixo deriva dele.",
-    "sc-erick-estado " + estCls));
+    "sc-analista-estado " + estCls));
   // Regime + alinhamento das EMAs (o que a fonte computou; preço acima/abaixo de cada)
   const emas = er.emas || {};
   const ordem = Object.keys(emas).map(Number).filter((n) => !isNaN(n)).sort((x, y) => x - y);
@@ -2803,56 +2803,56 @@ function erickCardHtml(er) {
     return `EMA ${w} ${fmtNum(v)} ${lado}`.trim();
   }).join(" · ");
   rows.push(scRow("regime (médias)", er.trend_pt || er.trend || "—",
-    `preço ${fmtNum(er.close)}${alinh ? " · " + alinh : ""}`, "sc-erick-regime"));
+    `preço ${fmtNum(er.close)}${alinh ? " · " + alinh : ""}`, "sc-analista-regime"));
   if (er.drop_line) {
-    rows.push(`<div class="sc-row sc-erick-drop"><span class="sc-basis">${escapeHtml(er.drop_line)}</span></div>`);
+    rows.push(`<div class="sc-row sc-analista-drop"><span class="sc-basis">${escapeHtml(er.drop_line)}</span></div>`);
   }
   // Porta TIER 2 (ponderação semanal, DA-067) — o fato que rebaixa o downtrend a timing
   if (er.gate && er.tese && er.tese.frame_label) {
     rows.push(scRow("porta TIER 2", "aberta",
       `tese de alta no ${er.tese.frame_label} sobrepõe o downtrend do swing — rebaixado a TIMING.`,
-      "sc-erick-gate"));
+      "sc-analista-gate"));
   } else if (er.gate_faltam && er.gate_faltam.length) {
-    rows.push(scRow("porta TIER 2", "não abriu", er.gate_faltam.join("; ") + ".", "sc-erick-gate"));
+    rows.push(scRow("porta TIER 2", "não abriu", er.gate_faltam.join("; ") + ".", "sc-analista-gate"));
   }
   // RSI (indicador nº2) — divergência no frame de swing
   const rsi = er.rsi_divergence || {};
   if (rsi.measured) {
     const k = rsi.kind === "bearish" ? "divergência de baixa"
       : rsi.kind === "bullish" ? "divergência de alta" : "alinhado (sem divergência)";
-    rows.push(scRow("RSI", k, rsi.detail || "", "sc-erick-rsi"));
+    rows.push(scRow("RSI", k, rsi.detail || "", "sc-analista-rsi"));
   }
   if (er.earnings) {
-    rows.push(scRow("balanço (TIER 3)", "considerado", er.earnings, "sc-erick-earn"));
+    rows.push(scRow("balanço (TIER 3)", "considerado", er.earnings, "sc-analista-earn"));
   }
-  // ── DECISÃO (vocabulário do Erick) ──
+  // ── DECISÃO (vocabulário do analista) ──
   rows.push(scRow("entrada (recuo à média)", er.acao === "AGIR" ? "AGIR" : "AGUARDAR",
-    er.entrada, "sc-erick-decisao"));
+    er.entrada, "sc-analista-decisao"));
   if (er.saida) {
-    rows.push(`<div class="sc-row sc-erick-saida"><span class="sc-k">saída</span>` +
+    rows.push(`<div class="sc-row sc-analista-saida"><span class="sc-k">saída</span>` +
       `<span class="sc-basis">${escapeHtml(er.saida)}</span></div>`);
   }
-  rows.push(scRow("peso relativo", er.peso || "—", er.peso_racional || "", "sc-erick-peso"));
-  // Gatilho: SEQUÊNCIA DE 3 CANDLES do Erick (DA-191), separado do pivô do Setup123
+  rows.push(scRow("peso relativo", er.peso || "—", er.peso_racional || "", "sc-analista-peso"));
+  // Gatilho: SEQUÊNCIA DE 3 CANDLES do analista (DA-191), separado do pivô do Setup123
   if (er.pattern_line) {
-    rows.push(`<div class="sc-row sc-erick-pat"><span class="sc-basis">` +
-      `${escapeHtml("sequência de 3 candles (Erick): " + er.pattern_line)}</span></div>`);
+    rows.push(`<div class="sc-row sc-analista-pat"><span class="sc-basis">` +
+      `${escapeHtml("sequência de 3 candles (analista): " + er.pattern_line)}</span></div>`);
     if (er.levels_line) {
       rows.push(`<div class="sc-row"><span class="sc-basis">${escapeHtml(er.levels_line)}</span></div>`);
     }
   }
   if (er.fine_timing) {
-    rows.push(`<div class="sc-row sc-erick-fine"><span class="sc-basis">${escapeHtml(er.fine_timing)}</span></div>`);
+    rows.push(`<div class="sc-row sc-analista-fine"><span class="sc-basis">${escapeHtml(er.fine_timing)}</span></div>`);
   }
   if (er.ausentes && er.ausentes.length) {
     rows.push(scRow("não medido", String(er.ausentes.length),
-      er.ausentes.join(" · "), "sc-erick-ausentes"));
+      er.ausentes.join(" · "), "sc-analista-ausentes"));
   }
   const deg = er.degraded
     ? `<span class="sc-now">leitura no ${escapeHtml(er.frame_label)} (fonte de swing indisponível)</span>`
     : "";
-  return `<section class="setup-card sc-erick">` +
-    `<div class="sc-head"><span class="sc-title">Método Erick ` +
+  return `<section class="setup-card sc-analista">` +
+    `<div class="sc-head"><span class="sc-title">Método do analista ` +
     `<span class="sc-dir">${escapeHtml(er.estado || "")}</span></span>${deg}</div>` +
     `<div class="sc-rows">${rows.join("")}</div></section>`;
 }
@@ -3100,17 +3100,17 @@ function renderSetupCards(a) {
   // nulo — é o caso do 1-2-3 já acionado sem média ativa). Enfiá-lo num card seria
   // atribuir a uma leitura um estado que ela não produziu; ele fica no rodapé, que
   // é o lugar do que não pertence a ninguém.
-  // ORDEM (task 20260904-003): Método Erick PRIMEIRO nas leituras de fundo (1w/1d),
+  // ORDEM (task 20260904-003): Método do analista PRIMEIRO nas leituras de fundo (1w/1d),
   // depois Setup123, depois Recuo à média. Nos frames menores (4h/1h/15m) não há card
   // — um cabeçalho diz "fora do frame" (o método decide no fundo diário/semanal).
-  const er = a.erick_reading;
-  let erickForaNota = "";
+  const er = a.analista_reading;
+  let analystForaNota = "";
   if (er && er.disponivel && !er.fora_do_frame) {
-    cards.unshift(erickCardHtml(er));
+    cards.unshift(analystCardHtml(er));
   } else if (er && er.fora_do_frame) {
-    erickForaNota =
-      `<div class="sc-erick-fora"><span class="sc-erick-fora-k">Método Erick</span>` +
-      `<span class="sc-erick-fora-v">fora do frame — decide no diário/semanal (fundo); ` +
+    analystForaNota =
+      `<div class="sc-analista-fora"><span class="sc-analista-fora-k">Método do analista</span>` +
+      `<span class="sc-analista-fora-v">fora do frame — decide no diário/semanal (fundo); ` +
       `este é o ${escapeHtml(tfNome(_tf))}.</span></div>`;
   }
 
@@ -3163,7 +3163,7 @@ function renderSetupCards(a) {
       `${escapeHtml(tfNome(_verdictTf))}.</span></div>`
     : "";
   el.classList.toggle("is-exploratorio", explor);
-  el.innerHTML = frameTopo + erickForaNota + aviso + cards.join("") +
+  el.innerHTML = frameTopo + analystForaNota + aviso + cards.join("") +
     (rodape ? `<div class="sc-foot">${rodape}</div>` : "");
   el.classList.remove("hidden");
 }
@@ -3452,7 +3452,7 @@ function renderEscada(mf) {
 // famílias na tela e nenhuma frase dizendo o que FAZER com elas.
 //
 // Toda a POLÍTICA é decidida no backend (webui/execucao.py, modelada da spec do
-// degenbot sobre o corpus do Erick) — aqui é só desenho. Um veredito calculado em
+// degenbot sobre o corpus do analista) — aqui é só desenho. Um veredito calculado em
 // dois lugares vira dois vereditos.
 const VEREDITO_CLS = { entrar: "ok", aguardar: "espera", passar: "nao", sem_setup: "nao" };
 
@@ -4291,7 +4291,7 @@ function degradedName(d) {
 // com borda sólida, a outra com borda tracejada, pra não colidir com o veredito
 // de compra/venda (que já é quem manda no verde/vermelho sólido, DA-140) — e "sem
 // balanço" fica discreto (cinza, sem borda). Sempre por PALAVRA antes de cor.
-function earningsHtml(earnings, method, erickAtivo) {
+function earningsHtml(earnings, method, analystAtivo) {
   if (!earnings || earnings.status == null) return "";   // cripto: sem calendário
   const janela = earnings.window_days;
   let cls = "earn-seguro";
@@ -4311,27 +4311,27 @@ function earningsHtml(earnings, method, erickAtivo) {
     const dias = earnings.days_ahead;
     texto = `Próximo balanço em ${earnings.date}${Number.isInteger(dias) ? ` (${dias} dias)` : ""} — fora da janela de risco (${janela} dias).`;
   }
-  // Item 4 (task 044): onde o Erick usa isto como fator, o traço vira EXPLÍCITO
+  // Item 4 (task 044): onde o analista usa isto como fator, o traço vira EXPLÍCITO
   // aqui — hoje só existia dentro da prosa longa do relatório. Gramática exata do
-  // TIER 3 em erick_method._tier3: só ``na_janela is True`` desce um degrau de
+  // TIER 3 em analista_method._tier3: só ``na_janela is True`` desce um degrau de
   // peso; fora da janela ou não medido não mexe no peso (mas a fonte caída AINDA
   // assim custa o fator inteiro, e isso também se diz).
-  if (erickAtivo && method === "erick") {
+  if (analystAtivo && method === "analista") {
     if (earnings.status === "fonte_indisponivel") {
-      texto += " Método Erick: sem este dado, o fator de balanço (TIER 3) ficou de fora da leitura.";
+      texto += " Método do analista: sem este dado, o fator de balanço (TIER 3) ficou de fora da leitura.";
     } else if (earnings.in_window) {
-      texto += " Método Erick: fator TIER 3 — reduz o peso da posição um degrau (nunca a direção).";
+      texto += " Método do analista: fator TIER 3 — reduz o peso da posição um degrau (nunca a direção).";
     } else {
-      texto += " Método Erick: considerado (TIER 3) — fora da janela, sem efeito no peso.";
+      texto += " Método do analista: considerado (TIER 3) — fora da janela, sem efeito no peso.";
     }
   }
   return `<div class="earn-badge ${cls}"><b>Calendário de resultados</b> — ${escapeHtml(texto)}</div>`;
 }
 
-function renderEarnings(earnings, method, erickAtivo) {
+function renderEarnings(earnings, method, analystAtivo) {
   const el = $("earningsBanner");
   if (!el) return;
-  const html = earningsHtml(earnings, method, erickAtivo);
+  const html = earningsHtml(earnings, method, analystAtivo);
   el.innerHTML = html;
   el.classList.toggle("hidden", !html);
 }
@@ -4439,8 +4439,8 @@ function bindReeval() {
 // só o TF muda. Reusa o método da análise ABERTA (_openMethod).
 function reevaluate(tf) {
   if (!_openTicker) return;
-  // O método da reavaliação é o da análise ABERTA (_openMethod): abrir uma Erick pelo
-  // histórico/confronto tem que continuar Erick ao reavaliar (aqui e no reavaliar-com-
+  // O método da reavaliação é o da análise ABERTA (_openMethod): abrir uma analista pelo
+  // histórico/confronto tem que continuar analista ao reavaliar (aqui e no reavaliar-com-
   // fontes) — mesma verdade que a troca de TF do gráfico (switchTimeframe usa _openMethod).
   // Com uma análise aberta _openMethod sempre existe; cai em 'padrao' só na ausência dela.
   const method = _openMethod || "padrao";
@@ -4534,7 +4534,7 @@ function renderCamadasSelector(a) {
         : "")
     : "";
   const grupoMedias =
-    `<span class="camadas-k" title="${escapeHtml("Famílias de média: MMS é a do Padrão, EMA 8/21/50 é a do Erick. A EMA 80 do Éden acompanha a leitura do Storm.")}">médias</span>` +
+    `<span class="camadas-k" title="${escapeHtml("Famílias de média: MMS é a do Padrão, EMA 8/21/50 é a do analista. A EMA 80 do Éden acompanha a leitura do Storm.")}">médias</span>` +
     CAMADAS_MEDIA.map((f) => {
       const on = ativas.has(f);
       const nome = CAMADA_NOME_TODAS[f];
@@ -5050,10 +5050,10 @@ function revalidaSeOCandleFechouEnquantoEuNaoOlhava() {
 // ────────────────────────── UM GRÁFICO, UM MÉTODO ───────────────────────────
 //
 // "Percebo tbm que mistura tudo em um gráfico só, Storm123, Setup123 e Padrão com
-// Erick." Estava certo, e eram TRÊS misturas empilhadas na mesma tela:
+// analista." Estava certo, e eram TRÊS misturas empilhadas na mesma tela:
 //
 //   1. as MÉDIAS — as duas famílias eram desenhadas sempre, pra todo método: MMS
-//      20/50/200 (Padrão) mais EMA 8/21/50 (Erick), mais a EMA 80 do Éden nas runs
+//      20/50/200 (Padrão) mais EMA 8/21/50 (analista), mais a EMA 80 do Éden nas runs
 //      do Storm. Sete linhas, das quais o método aberto usa três;
 //   2. os NÍVEIS — numa run do Storm o gráfico traçava os do Storm E os do plano
 //      (Setup123 + recuo à média), porque a única condição era o Storm ter opinião.
@@ -5069,13 +5069,13 @@ function revalidaSeOCandleFechouEnquantoEuNaoOlhava() {
 // TODO rótulo carrega a sua — "stop (SL)" vira "Setup123 · stop (SL)" ao lado de
 // "Storm123 · stop (SL)", porque dois níveis do mesmo papel sem dono é o defeito.
 const CAMADA_DO_METODO = {
-  padrao: "plano", erick: "plano", setup123: "plano", storm123: "storm",
+  padrao: "plano", analista: "plano", setup123: "plano", storm123: "storm",
 };
 const CAMADA_NOME = { plano: "Setup123", storm: "Storm123" };
 // A média é parte da leitura, não enfeite: o Éden É a MME 8 × MME 80, e o recuo do
 // Padrão é a MMS. Ligar uma camada traz as médias que a justificam.
 const MEDIAS_DA_CAMADA = {
-  plano: { padrao: ["20", "50", "200"], erick: [], setup123: ["20", "50", "200"] },
+  plano: { padrao: ["20", "50", "200"], analista: [], setup123: ["20", "50", "200"] },
   storm: { ema: ["8", "80"] },
 };
 // AS CAMADAS SÃO DO USUÁRIO. "Eu deveria poder selecionar a camada do que eu quero
@@ -5085,7 +5085,7 @@ const MEDIAS_DA_CAMADA = {
 //
 // Duas famílias de camada, porque são duas perguntas diferentes:
 //   • LEITURAS — quais níveis/pontos estão traçados (plano × Storm);
-//   • MÉDIAS   — quais famílias de média (MMS do Padrão × EMA do Erick). Elas vêm
+//   • MÉDIAS   — quais famílias de média (MMS do Padrão × EMA do analista). Elas vêm
 //     no payload sempre, então ligar/desligar é decisão de tela, não de backend.
 // A EMA 80 acompanha a leitura do Storm: ela é METADE do filtro Éden, e um Éden sem
 // a lenta na tela é um veto que não se confere.
@@ -5098,7 +5098,7 @@ const MEDIAS_DA_CAMADA = {
 const CAMADAS_LEITURA = ["plano", "storm"];
 const CAMADAS_MEDIA = ["mms", "emas"];
 const CAMADA_NOME_TODAS = {
-  plano: "Setup123", storm: "Storm123", mms: "MMS (Padrão)", emas: "EMA (Erick)",
+  plano: "Setup123", storm: "Storm123", mms: "MMS (Padrão)", emas: "EMA (analista)",
 };
 // Médias que cada família de média traça, e a do Éden que anda com o Storm.
 const JANELAS_DA_MEDIA = { mms: { ma: ["20", "50", "200"] }, emas: { ema: ["8", "21", "50"] } };
@@ -5114,7 +5114,7 @@ let _camadasTocado = false;
 // O padrão de ABERTURA de um método: a leitura dele e a família de média dele.
 function camadasPadrao(metodo) {
   const leitura = CAMADA_DO_METODO[metodo] || "plano";
-  const medias = metodo === "erick" ? ["emas"] : metodo === "storm123" ? [] : ["mms"];
+  const medias = metodo === "analista" ? ["emas"] : metodo === "storm123" ? [] : ["mms"];
   return new Set([leitura, ...medias]);
 }
 
@@ -5294,7 +5294,7 @@ function nomeiaTag(tag, familia, precisa) {
 // confere). Ligar e desligar é decisão de tela: as duas famílias vêm no payload.
 function mediasVisiveis(a) {
   const ma = new Set(), ema = new Set();
-  // No CONFRONTO as duas famílias aparecem sempre: comparar Padrão × Erick é o
+  // No CONFRONTO as duas famílias aparecem sempre: comparar Padrão × Analista é o
   // objetivo declarado daquela tela, e esconder a média de uma das colunas seria
   // tirar do confronto justamente o que ele confronta.
   if (_openView === "compare") {
@@ -5620,7 +5620,7 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 // Empilha as pílulas do eixo pra que não se sobreponham quando os níveis ficam
-// perto (a Quantfury faz igual): ordena por y, garante um vão mínimo empurrando pra
+// perto (a referência de design faz igual): ordena por y, garante um vão mínimo empurrando pra
 // baixo e, se estourar a base, comprime de volta pra cima. ``ry`` é o y DESENHADO
 // da pílula (pode diferir do nível real ``y``, e aí um leader curto religa os dois).
 function layoutAxisPills(pills, top, bottom, gap) {
@@ -5868,7 +5868,7 @@ function drawPriceChart(canvas, chart, a) {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
-  // fundo do gráfico PRETO PURO (Quantfury, task 029) — nada de navy; velas, médias
+  // fundo do gráfico PRETO PURO (referência de design, task 029) — nada de navy; velas, médias
   // e as pílulas do eixo contrastam sobre ele.
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, cssW, cssH);
@@ -5932,7 +5932,7 @@ function drawPriceChart(canvas, chart, a) {
   const x = (i) => padL + (i - v0 + 0.5) * (plotWx / vis);
   const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * plotH;
 
-  // Etiquetas de nível na RÉGUA DA DIREITA (estilo Quantfury): o preço atual e as
+  // Etiquetas de nível na RÉGUA DA DIREITA (estilo da referência de design): o preço atual e as
   // zonas viram pílulas coloridas no eixo Y, na altura exata do nível — a linha
   // horizontal (desenhada adiante) cruza o gráfico até elas. Nada de caixa tampando
   // vela. Montadas aqui pra que os números de grade que caírem sob uma pílula sejam
@@ -6158,7 +6158,7 @@ function drawPriceChart(canvas, chart, a) {
   });
 
   // MÉDIAS DO MÉTODO ABERTO, e só. As duas famílias eram desenhadas sempre — MMS
-  // 20/50/200 do Padrão MAIS EMA 8/21/50 do Erick, mais a EMA 80 do Éden nas runs
+  // 20/50/200 do Padrão MAIS EMA 8/21/50 do analista, mais a EMA 80 do Éden nas runs
   // do Storm: sete linhas numa tela onde o método usa três. A média é parte da
   // LEITURA (o Éden É a MME 8 × MME 80), então ela acompanha a camada, e ligar uma
   // camada extra traz as médias que a justificam.
@@ -6963,10 +6963,10 @@ async function startAnalysis(ev) {
   const date = $("date").value;
   if (!ticker) { $("formError").textContent = "Informe um ticker."; return; }
   // Barra ÚNICA (task 029): Analisar roda com o método + timeframe escolhidos na barra.
-  // Comparar dispara as DUAS (Padrão × Erick, compare=true); 1-2-3 é o atalho estrutural
-  // ($0 de LLM); Erick/Padrão vão no method.
+  // Comparar dispara as DUAS (Padrão × Analista, compare=true); 1-2-3 é o atalho estrutural
+  // ($0 de LLM); analista/Padrão vão no method.
   const compare = _barMethod === "compare";
-  const method = (_barMethod === "erick" || _METODOS_ESTRUTURAIS.has(_barMethod))
+  const method = (_barMethod === "analista" || _METODOS_ESTRUTURAIS.has(_barMethod))
     ? _barMethod : "padrao";
   const timeframe = _barTf || "1d";
   $("runBtn").disabled = true;
@@ -7943,10 +7943,10 @@ async function applyConfig() {
     if (dateGlabel) dateGlabel.title = "Horários em " + TZ_LABEL + ".";
     $("tzNote").textContent = "Horários em " + TZ_LABEL + ".";
     _isOwner = !!cfg.owner;
-    // O BOTÃO DA CARTEIRA DO ERICK depende de DUAS coisas, e as duas só se sabem
+    // O BOTÃO DA CARTEIRA DO ANALISTA depende de DUAS coisas, e as duas só se sabem
     // aqui: ser dono E esta instância ter a credencial (a rota devolve 404 sem
-    // ela). Ver `preparaCarteiraErick` — DA-148.
-    preparaCarteiraErick();
+    // ela). Ver `preparaCarteiraAnalista` — DA-148.
+    preparaCarteiraAnalista();
     _ownerLoginEnabled = !!cfg.owner_login_enabled;
     if (cfg.llm) { _llmMeta = cfg.llm; renderConfigPanel(); }
     // Flag de estratégia por setup (DA-184): se mudou desde o último /api/config
@@ -9177,7 +9177,7 @@ function renderModelTest(data) {
   }).join("");
 }
 
-// ══════════ A CARTEIRA DO ERICK, DENTRO DO PRODUTO (DA-148) ═════════════════
+// ══════════ A CARTEIRA DO ANALISTA, DENTRO DO PRODUTO (DA-148) ═════════════════
 //
 // "QUERO DEIXAR ISSO NO TRADINGDEGENS" (Samyr). É a carteira REAL do autor do
 // método — posição, movimentações datadas e o racional escrito por ele — ao lado do
@@ -9194,32 +9194,32 @@ function renderModelTest(data) {
 // vez por dia. Se a leitura de agora falhou, a tela mostra o ÚLTIMO lido com a data
 // e diz que está degradado — painel vazio se leria como "ele zerou a carteira", que
 // é uma afirmação, não uma ausência.
-let _erickDados = null;
+let _analystDados = null;
 
-async function abreCarteiraErick() {
-  const painel = $("erickPanel");
+async function abreCarteiraAnalista() {
+  const painel = $("analystPanel");
   if (!painel) return;
   painel.classList.remove("hidden");
-  $("erickCorpo").innerHTML = '<span class="hint">lendo a carteira…</span>';
+  $("analystCorpo").innerHTML = '<span class="hint">lendo a carteira…</span>';
   try {
-    const res = await fetch("/api/erick/carteira");
+    const res = await fetch("/api/analista/carteira");
     if (!res.ok) {
       // 403 (não é dono) e 404 (instância sem credencial) não são erro de tela: a
       // feature simplesmente não existe pra quem pediu. Fecha e some o botão.
       painel.classList.add("hidden");
-      $("erickOpenBtn")?.classList.add("hidden");
+      $("analystOpenBtn")?.classList.add("hidden");
       return;
     }
-    _erickDados = await res.json();
-    pintaCarteiraErick();
+    _analystDados = await res.json();
+    pintaCarteiraAnalista();
   } catch (e) {
-    $("erickCorpo").innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
+    $("analystCorpo").innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
   }
 }
 
 // A IDADE DO DADO EM PALAVRAS. "há 3h" responde a pergunta que "27/08" não responde
 // sozinha — e o degradado diz por que está velho, em vez de deixar o leitor supor.
-function erickCarimboHtml(d) {
+function analystCarimboHtml(d) {
   const q = d.lido_em ? fmtStamp(new Date(d.lido_em * 1000).toISOString()) : null;
   const h = d.idade_horas;
   const idade = h == null ? "" : h < 1 ? "agora há pouco"
@@ -9233,14 +9233,14 @@ function erickCarimboHtml(d) {
   ].filter(Boolean).join(" · ");
 }
 
-function erickPct(v) {
+function analystPct(v) {
   return v == null ? "—" : `${(v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 }
 
-function pintaCarteiraErick() {
-  const d = _erickDados;
+function pintaCarteiraAnalista() {
+  const d = _analystDados;
   if (!d) return;
-  $("erickCarimbo").innerHTML = erickCarimboHtml(d);
+  $("analystCarimbo").innerHTML = analystCarimboHtml(d);
   const linhas = d.composicao || [];
   const caixa = linhas.find((L) => (L.classe || "").toLowerCase() === "caixa");
   const ativos = linhas.filter((L) => L !== caixa);
@@ -9251,7 +9251,7 @@ function pintaCarteiraErick() {
   const caixaHtml = caixa ? `
     <div class="ek-caixa">
       <span class="ek-caixa-k">caixa</span>
-      <b class="ek-caixa-v">${erickPct(caixa.participacao)}</b>
+      <b class="ek-caixa-v">${analystPct(caixa.participacao)}</b>
       <span class="ek-caixa-nota">${escapeHtml((caixa.tese || "").split(".")[0] || "")}</span>
     </div>` : "";
 
@@ -9264,7 +9264,7 @@ function pintaCarteiraErick() {
     const v = L.variacao_pm;
     const dir = v == null ? "" : v >= 0 ? "compra" : "venda";
     const abre = sym
-      ? `<button type="button" class="ek-abre" data-erick-go="${escapeHtml(sym)}" ` +
+      ? `<button type="button" class="ek-abre" data-analyst-go="${escapeHtml(sym)}" ` +
         `title="${escapeHtml(`Analisar ${sym} pelo Setup123 — a posição real dele e o veredito do sistema, lado a lado`)}">analisar</button>`
       : "";
     // O RÓTULO VIAJA COM O NÚMERO (`data-k`). No desktop quem nomeia é o cabeçalho
@@ -9277,8 +9277,8 @@ function pintaCarteiraErick() {
       <span class="ek-num" data-k="qtd">${fmtNum(L.qtd)}</span>
       <span class="ek-num" data-k="preço médio">${fmtNum(L.precoMedio)}</span>
       <span class="ek-num" data-k="agora">${L.preco_agora == null ? "—" : fmtNum(L.preco_agora)}</span>
-      <span class="ek-num ek-var ${dir}" data-k="desde o PM">${erickPct(v)}</span>
-      <span class="ek-num" data-k="peso">${erickPct(L.participacao)}</span>
+      <span class="ek-num ek-var ${dir}" data-k="desde o PM">${analystPct(v)}</span>
+      <span class="ek-num" data-k="peso">${analystPct(L.participacao)}</span>
       <span class="ek-entrada" data-k="entrada">${escapeHtml(L.entrada || "")}</span>
       ${abre}
     </div>`;
@@ -9310,27 +9310,27 @@ function pintaCarteiraErick() {
       <div class="ek-rel-txt">${escapeHtml(txt).replace(/\n{2,}/g, "<br><br>")}</div></details>`;
   }).join("");
 
-  const hist = erickCurvaHtml((d.historico || {}));
+  const hist = analystCurvaHtml((d.historico || {}));
 
-  $("erickCorpo").innerHTML =
+  $("analystCorpo").innerHTML =
     caixaHtml +
     `<div class="ek-grade">${cab}${ativos.map(linhaHtml).join("")}</div>` +
     hist +
     (feed ? `<h3 class="ek-sec">movimentações</h3><ul class="ek-movs">${feed}</ul>` : "") +
     (rels ? `<h3 class="ek-sec">relatórios — o racional dele</h3>${rels}` : "");
 
-  $("erickCorpo").querySelectorAll("[data-erick-go]").forEach((b) =>
+  $("analystCorpo").querySelectorAll("[data-analyst-go]").forEach((b) =>
     b.addEventListener("click", () => {
       // Mesma rota de abertura da faixa (DA-143): preenche o lançador e submete.
-      $("erickPanel").classList.add("hidden");
-      abreDaFaixa(`${b.dataset.erickGo}|1d|setup123`);
+      $("analystPanel").classList.add("hidden");
+      abreDaFaixa(`${b.dataset.analystGo}|1d|setup123`);
     }));
 }
 
 // A CURVA DE PATRIMÔNIO em SVG inline — sem biblioteca e sem canvas: são poucos
 // pontos e o desenho é uma linha. Sem série, a seção não aparece (em vez de um eixo
 // vazio que se leria como "patrimônio zero").
-function erickCurvaHtml(h) {
+function analystCurvaHtml(h) {
   const pts = Array.isArray(h) ? h : (h && Array.isArray(h.serie) ? h.serie : []);
   const vals = pts.map((p) => Number(
     typeof p === "number" ? p : (p.valor ?? p.patrimonio ?? p.total ?? p.v))).filter(
@@ -9392,34 +9392,34 @@ async function toggleEstrategiaStorm(classe, ativo) {
 // segunda importa: `owner` sozinho não garante que ESTA instância tem a credencial
 // configurada — sem ela a rota devolve 404 e o botão não deve aparecer prometendo
 // uma tela que não abre.
-async function preparaCarteiraErick() {
-  const btn = $("erickOpenBtn");
+async function preparaCarteiraAnalista() {
+  const btn = $("analystOpenBtn");
   if (!btn) return;
   if (!_isOwner) { btn.classList.add("hidden"); return; }
   try {
-    const res = await fetch("/api/erick/carteira");
+    const res = await fetch("/api/analista/carteira");
     if (!res.ok) { btn.classList.add("hidden"); return; }
-    _erickDados = await res.json();
+    _analystDados = await res.json();
     btn.classList.remove("hidden");
   } catch (e) { btn.classList.add("hidden"); }
 }
 
-function bindCarteiraErick() {
-  const open = $("erickOpenBtn");
+function bindCarteiraAnalista() {
+  const open = $("analystOpenBtn");
   if (open && !open._bound) {
     open._bound = true;
-    open.addEventListener("click", abreCarteiraErick);
+    open.addEventListener("click", abreCarteiraAnalista);
   }
-  const close = $("erickCloseBtn");
+  const close = $("analystCloseBtn");
   if (close && !close._bound) {
     close._bound = true;
-    close.addEventListener("click", () => $("erickPanel").classList.add("hidden"));
+    close.addEventListener("click", () => $("analystPanel").classList.add("hidden"));
   }
 }
 
 // ---- SCAN DE PORTFÓLIO (28/08): gatilhos 1-2-3 a $0 de LLM ---------------------
 // O olho barato: varre a watchlist em 1d+4h+1h, classifica pela distância do preço ao
-// gatilho e oferece a análise completa (Padrão/Erick) a um clique no que estiver
+// gatilho e oferece a análise completa (Padrão/analista) a um clique no que estiver
 // EM GATILHO. Estados (vocabulário único do backend scanner.py):
 let _scanData = null;        // último scan completo (pra re-pintar ao trocar filtro)
 let _scanEstadoFilter = null; // estado selecionado no filtro de chips (null = todos)
@@ -10095,7 +10095,7 @@ function scanActionsHtml(ticker, f) {
   if (f.estado !== "em_gatilho") return "";
   return `<div class="scan-actions-row">` +
     `<button type="button" class="scan-go" data-go="${escapeHtml(ticker)}|${escapeHtml(f.frame)}|padrao">Analisar Padrão</button>` +
-    `<button type="button" class="scan-go erick" data-go="${escapeHtml(ticker)}|${escapeHtml(f.frame)}|erick">Analisar Erick</button>` +
+    `<button type="button" class="scan-go analista" data-go="${escapeHtml(ticker)}|${escapeHtml(f.frame)}|analista">Analisar analista</button>` +
     `</div>`;
 }
 
@@ -10281,7 +10281,7 @@ function sinalAcoesHtml(o) {
   const f = o.frame_lider || "";
   return `<div class="scan-actions-row">` +
     `<button type="button" class="scan-go" data-go="${escapeHtml(o.ticker)}|${escapeHtml(f)}|padrao">Analisar Padrão</button>` +
-    `<button type="button" class="scan-go erick" data-go="${escapeHtml(o.ticker)}|${escapeHtml(f)}|erick">Analisar Erick</button>` +
+    `<button type="button" class="scan-go analista" data-go="${escapeHtml(o.ticker)}|${escapeHtml(f)}|analista">Analisar analista</button>` +
     `</div>`;
 }
 
@@ -10505,8 +10505,8 @@ let _trackBanca = null;   // null = usa o padrão do servidor (100)
 // "123" e o card dizendo "Setup123" sobre o mesmo dado.
 const _SETUP_NOME = { "123": "Setup123", storm: "Storm123" };
 
-// A CURVA DE EQUITY em SVG inline — mesma técnica da carteira do Erick
-// (erickCurvaHtml): poucos pontos, sem biblioteca. A amplitude inclui SEMPRE o
+// A CURVA DE EQUITY em SVG inline — mesma técnica da carteira do analista
+// (analystCurvaHtml): poucos pontos, sem biblioteca. A amplitude inclui SEMPRE o
 // zero (mesmo que todo trade fechado dê lucro, ou todos dêem prejuízo): é a
 // linha de partida de toda banca, e escondê-la deixaria "só lucro" e "lucro
 // pequeno" com o mesmo desenho.
@@ -10562,7 +10562,7 @@ const SETUPS_DO_LEDGER_FRONT = ["123", "storm"];
 // a mercado com o preço de agora — reusa andamento_lucro/andamento_prejuizo,
 // que o motor de vereditos já produzia) ao lado das fechadas.
 //
-// NUNCA CONFUNDIR com a carteira do Erick (`erickPanel`, tasks 026/027): aquela
+// NUNCA CONFUNDIR com a carteira do analista (`analystPanel`, tasks 026/027): aquela
 // é REAL, de OUTRA pessoa, lida de fonte externa. Esta é a SIMULAÇÃO dos sinais
 // do próprio produto — painel diferente, sem soma nenhuma entre as duas.
 function fmtMarco(marco) {
@@ -10602,7 +10602,7 @@ function carteiraPaperHtml(paper) {
     : "";
   return `<h3 class="ek-sec">Paper trading — carteira virtual</h3>` +
     `<p class="hint">Simulação — NENHUMA ordem real é enviada a lugar nenhum. ` +
-    `Não é a carteira do Erick (essa é real, de outra fonte, e fica noutro painel — as duas nunca somam).</p>` +
+    `Não é a carteira do analista (essa é real, de outra fonte, e fica noutro painel — as duas nunca somam).</p>` +
     `<div class="scan-summary">saldo simulado: <b class="${saldoCls}">${saldoSinal}$${scanFmt(c.saldo_usd)}</b>` +
     `<span class="hint"> — realizado ${realizado} + não realizado ${naoRealizado} · ${fmtMarco(c.marco)}</span>${resetBtn}</div>` +
     pnlCurvaHtml(c.curva_equity) +
@@ -10836,7 +10836,7 @@ function init() {
   bindConfront();
   bindLaunchBar();
   bindScan();
-  bindCarteiraErick();   // carteira do Erick: só-dono, botão escondido por default (DA-148)
+  bindCarteiraAnalista();   // carteira do analista: só-dono, botão escondido por default (DA-148)
   renderLaunchBar();   // barra ÚNICA de pé no boot (TFs + métodos) mesmo sem ativo aberto
   bindExportPdf();
   bindDicaDosGestos();   // a ajuda dos gestos recolhe, e lembra (DA-128)

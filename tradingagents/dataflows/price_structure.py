@@ -158,19 +158,19 @@ _STOP_BASIS_NO_ATR = "invalidação exata (sem base de ATR para folga)"
 
 # Estrutura CIENTE DO MÉTODO (fork brief 24/08). O "recuo à média" que cada método
 # opera é numa família de médias DIFERENTE, então a detecção passa a keyar na média
-# do método — o confronto Padrão × Erick deixa de ser o mesmo overlay 2x:
+# do método — o confronto Padrão × Analista deixa de ser o mesmo overlay 2x:
 #   • Padrão  → MÉDIAS SIMPLES (MMS 20/50/200), como sempre;
-#   • Erick   → EMAs de timing (8/21), a média que o método realmente lê na tela.
+#   • analista   → EMAs de timing (8/21), a média que o método realmente lê na tela.
 # Muda a MÉDIA de referência do recuo (regiões de compra/ativa) e o horizonte de
-# swing (Erick = timing mais curto → k menor → 1-2-3 e topo anterior mais recentes).
+# swing (analista = timing mais curto → k menor → 1-2-3 e topo anterior mais recentes).
 # O que continua lido do PREÇO (velas, swings) é o mesmo — não se fabrica diferença.
 _METHOD_MAS: dict[str, tuple[tuple[str, str], ...]] = {
     "padrao": tuple((f"MMS{w}", f"MA{w}") for w in _MA_WINDOWS),
-    "erick": tuple((f"EMA{w}", f"EMA{w}") for w in (8, 21)),
+    "analista": tuple((f"EMA{w}", f"EMA{w}") for w in (8, 21)),
 }
-# Sensibilidade de swing por método: Erick opera timing mais curto (EMA 8/21), então
+# Sensibilidade de swing por método: analista opera timing mais curto (EMA 8/21), então
 # enxerga reversões mais recentes/apertadas; Padrão usa a janela larga de sempre.
-_METHOD_SWING_K = {"padrao": _SWING_K, "erick": 3}
+_METHOD_SWING_K = {"padrao": _SWING_K, "analista": 3}
 _DEFAULT_METHOD = "padrao"
 
 
@@ -431,7 +431,7 @@ def _prep_calc(symbol: str, curr_date: str, timeframe: str = _DEFAULT_TIMEFRAME)
     # coluna a mais na série já carregada (custo ~zero) e não muda o que o gráfico
     # desenha por padrão — quem decide desenhá-la é ``_chart_emas(method)``.
     for w in sorted({*_EMA_WINDOWS, _STORM_EMA_LENTA}):
-        # adjust=False = the recursive EMA a charting platform draws (Quantfury/TV).
+        # adjust=False = the recursive EMA a charting platform draws (referência de design/TV).
         df[f"EMA{w}"] = close.ewm(span=w, adjust=False).mean()
     return df
 
@@ -1052,7 +1052,7 @@ def detect_price_structure(
     ``timeframe`` selects the frame: ``"1d"`` (default) from the cached daily
     series, or ``"15m"``/``"1h"`` intraday from the keyless exchange (crypto only).
     ``method`` selects the average family the "recuo à média" keys on (Padrão →
-    MMS; Erick → EMA 8/21) and the swing horizon — so the Padrão and Erick columns
+    MMS; analista → EMA 8/21) and the swing horizon — so the Padrão and analista columns
     of a confront draw genuinely different structures (fork brief 24/08).
     Propagates :class:`NoMarketDataError` (incl. :class:`IntradayUnavailableError`
     for a non-crypto intraday request) so the caller degrades to an explicit note.
@@ -1071,7 +1071,7 @@ def detect_price_structure(
     # Detect the pattern on the CANONICAL swing horizon (the default method's k)
     # regardless of `method`, so the report text (always canonical), the chart
     # annotation and the actionable plan can never disagree on the trigger. Before
-    # this, an Erick run (k=3) drew the tighter-swing 1-2-3 on the chart (e.g. AAOI
+    # this, an analista run (k=3) drew the tighter-swing 1-2-3 on the chart (e.g. AAOI
     # gatilho 91,50) while the report text — built canonical (k=5) — read 160,87; the
     # reader saw two triggers for "the" pattern and a stale "acionado".
     canonical_k = _method_k(_DEFAULT_METHOD)
@@ -1155,7 +1155,7 @@ def build_price_structure_section(
     an explicit note on a hard data failure. Never silence, never a fake number.
     On an intraday request for an asset with no keyless intraday candle (e.g. an
     equity) it declares "intradiário indisponível para ação" rather than invent.
-    ``method`` picks the average family the structure keys on (Padrão MMS / Erick EMA).
+    ``method`` picks the average family the structure keys on (Padrão MMS / analista EMA).
     """
     tf = _tf_label(timeframe)
     heading = f"## Estrutura de preço / setups — {tf}"
@@ -1284,7 +1284,7 @@ def build_price_chart(
     window has no value yet), and the detected setup markers that fall inside the
     window. The candles and BOTH average families are always drawn; ``method`` only
     picks which family the setup MARKERS (buy regions, active region, 1-2-3) key on
-    — so Padrão and Erick columns of a confront differ (fork brief 24/08). Fail-open:
+    — so Padrão and analista columns of a confront differ (fork brief 24/08). Fail-open:
     returns an empty payload on any error (including intraday unavailable) so a chart
     hiccup never blocks the analysis result.
     """
@@ -1789,7 +1789,7 @@ def build_actionable_plan(
 
     ``timeframe`` selects the frame (daily default, or ``"15m"``/``"1h"`` intraday
     for crypto). ``method`` picks the average family the recuo/regiões key on (Padrão
-    MMS / Erick EMA 8/21) and the swing horizon — so a confront's two columns operate
+    MMS / analista EMA 8/21) and the swing horizon — so a confront's two columns operate
     each method's own zones. Reuses :func:`detect_price_structure` (buy regions, live
     region, 1-2-3) and the same swings — nothing is recomputed from scratch and no
     number is fabricated. Propagates nothing: a data failure yields a ``sem_dado``

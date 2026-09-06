@@ -16,12 +16,12 @@ from tradingagents.webui.store import HistoryStore
 
 
 def _dual_factory():
-    """Padrão → Buy; Erick (analyst present) → Hold WITH an erick_report, so the
-    two sides are a real Padrão × Erick pair the manual confront can meta-judge
-    directly (detect_method needs the erick_report to tell them apart)."""
+    """Padrão → Buy; analista (analyst present) → Hold WITH an analista_report, so the
+    two sides are a real Padrão × Analista pair the manual confront can meta-judge
+    directly (detect_method needs the analista_report to tell them apart)."""
     def make(config, selected, callbacks):
-        if "erick" in selected:
-            fs = {**FINAL_STATE, "erick_report": "Erick: aguardar o recuo à média."}
+        if "analista" in selected:
+            fs = {**FINAL_STATE, "analista_report": "analista: aguardar o recuo à média."}
             return _FakeGraph(callbacks, fs, "Hold")
         return _FakeGraph(callbacks, FINAL_STATE, "Buy")
     return make
@@ -56,8 +56,8 @@ def server(tmp_path):
 
 @pytest.fixture()
 def dual_server(tmp_path):
-    """A server whose fake engine writes a real Erick report — lets the compare
-    endpoint exercise the DIRECT Padrão × Erick confront path over HTTP."""
+    """A server whose fake engine writes a real analista report — lets the compare
+    endpoint exercise the DIRECT Padrão × Analista confront path over HTTP."""
     httpd, base = _make_server(tmp_path, _dual_factory())
     yield base
     httpd.shutdown()
@@ -459,7 +459,7 @@ def test_analyze_rejects_unknown_timeframe_for_stock(server):
     raise AssertionError("expected HTTP 400")
 
 
-# --------------------------------------------- Padrão × Erick compare (task 017) ---
+# --------------------------------------------- Padrão × Analista compare (task 017) ---
 def test_analyze_compare_flow(server, monkeypatch):
     """POST /api/analyze with compare:true runs both readings and returns a
     compare block (two columns + meta-judge)."""
@@ -494,23 +494,23 @@ def _run_on(base, payload):
 
 
 def test_compare_endpoint_confronts_two_runs(dual_server, monkeypatch):
-    """POST /api/compare directly meta-judges a valid Padrão × Erick pair (same
+    """POST /api/compare directly meta-judges a valid Padrão × Analista pair (same
     frame/date) — no re-run, ``manual`` flagged."""
     _stub_enrich(monkeypatch)
     a = _run_on(dual_server, {"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
-    b = _run_on(dual_server, {"ticker": "AAPL", "date": "2026-08-22", "method": "erick"})
+    b = _run_on(dual_server, {"ticker": "AAPL", "date": "2026-08-22", "method": "analista"})
     status, snap = _post(dual_server, "/api/compare", {"a": a, "b": b})
     assert status == 200
     cmp = snap["result"]["compare"]
     assert cmp["manual"] is True
     assert set(("a", "b", "meta")).issubset(cmp)
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "analista"
 
 
 def test_compare_endpoint_reroutes_same_method(server, monkeypatch):
     """POST /api/compare with two SAME-method runs never yields método×ele-mesmo:
-    it reroutes to a real Padrão × Erick run (task 024). The default fake engine
-    writes no erick_report, so both runs read as Padrão → reroute."""
+    it reroutes to a real Padrão × Analista run (task 024). The default fake engine
+    writes no analista_report, so both runs read as Padrão → reroute."""
     _stub_enrich(monkeypatch)
     a = _run_on(server, {"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
     b = _run_on(server, {"ticker": "AAPL", "date": "2026-08-22", "method": "padrao"})
@@ -524,7 +524,7 @@ def test_compare_endpoint_reroutes_same_method(server, monkeypatch):
             break
         time.sleep(0.02)
     cmp = done["result"]["compare"]
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "analista"
     assert cmp["meta"]["agreement"] != "invalido"
 
 
@@ -701,7 +701,7 @@ def test_paper_reset_publico_e_403_dono_reseta_o_marco(tmp_path):
 
 @pytest.mark.parametrize("payload,porque", [
     ({"method": "setup123", "compare": True},
-     "setup123+compare caía em start_compare (Padrão × Erick × meta-juiz) na chave do servidor"),
+     "setup123+compare caía em start_compare (Padrão × Analista × meta-juiz) na chave do servidor"),
     ({"method": "SETUP123", "compare": True},
      "o método é normalizado pra minúsculo — o bypass não pode voltar pelo caixa alta"),
     ({"method": "setup123", "compare": 1},

@@ -5,7 +5,7 @@ estrutura já vem computada do :func:`build_actionable_plan_dict`
 (determinístico, cacheado DA-058, zero LLM). Este módulo só ENUMERA: varre a
 watchlist em 1d+4h+1h (em paralelo) e classifica cada ativo pela distância do
 preço ao GATILHO,
-pra o Samyr decidir com um clique se vale a análise completa (Padrão/Erick).
+pra o Samyr decidir com um clique se vale a análise completa (Padrão/analista).
 
 Estados (vocabulário único, reutilizado no painel):
 * ``em_gatilho``   — preço a ≤ _GATILHO_TOL do gatilho (ponto de entrada AGORA).
@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tradingagents.agents.utils.erick_method import _EARNINGS_WINDOW_DAYS
+from tradingagents.agents.utils.analista_method import _EARNINGS_WINDOW_DAYS
 from tradingagents.dataflows.earnings_calendar import earnings_window_status
 from tradingagents.dataflows.price_structure import (
     build_actionable_plan_dict,
@@ -70,7 +70,7 @@ SCAN_FRAMES = ("1w", "1d", "4h", "1h")
 # Distância do preço ao gatilho que caracteriza "em gatilho" (ponto de entrada).
 # PROVISÓRIO e declarado: 0,5% absorve o ruído intradiário de um toque iminente.
 # A calibrar com o track record do scans.jsonl (mesma disciplina do
-# _EARNINGS_WINDOW_NOTE do erick_method).
+# _EARNINGS_WINDOW_NOTE do analista_method).
 _GATILHO_TOL = 0.005
 
 # Abaixo deste R:R, num setup JÁ ACIONADO, o que sobra do movimento não paga o
@@ -1618,7 +1618,7 @@ def _carteira_paper(verdicts: list[dict[str, Any]], banca: float,
     POSIÇÕES ABERTAS ao lado — os mesmos ``andamento_lucro``/``andamento_prejuizo``
     que o track record já calculava, só que agora com apresentação.
 
-    Nunca soma com a carteira do Erick (tasks 026/027) — aquela é REAL, de
+    Nunca soma com a carteira do analista (tasks 026/027) — aquela é REAL, de
     OUTRA pessoa, lida de fonte externa; esta é a SIMULAÇÃO dos sinais do
     próprio produto. Somar as duas faria o saldo mentir sobre de onde vem cada
     dólar."""

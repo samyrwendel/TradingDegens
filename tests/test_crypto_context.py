@@ -1,6 +1,6 @@
 """Crypto network-context vendors — on-chain, spot-ETF flow, Fear & Greed.
 
-Fork brief part 3 (@ericksekiama corpus, confirmed by a second independent
+Fork brief part 3 (corpus do analista, confirmed by a second independent
 modeling): three feeds an equity-shaped pipeline is blind to but the modeled
 decision process treats as first-class for a crypto call. These tests mock the
 HTTP layer so they never touch the network, and assert the acceptance the brief

@@ -1,7 +1,7 @@
 """Garante a seção de calendário de earnings no relatório do analista.
 
 Espelha os outros guardas de cobertura: anexa uma seção com a próxima data de
-resultado do ativo (e do âncora NVDA — o eixo do evento na leitura do Erick),
+resultado do ativo (e do âncora NVDA — o eixo do evento na leitura do analista),
 vinda da fonte pública cacheada e date-guarded. Fonte caída → "indisponível",
 nunca uma data inventada. Cripto não tem earnings: a seção vem vazia e não é
 anexada. Fail-open.

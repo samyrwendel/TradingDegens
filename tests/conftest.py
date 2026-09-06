@@ -107,8 +107,8 @@ def _limpa_cache_de_serie_preparada():
 
 
 @pytest.fixture(autouse=True)
-def _isola_clone_erick(monkeypatch, tmp_path_factory):
-    """A carteira-espelho do Erick (``clone_erick``, task 20260902-055) grava um
+def _isola_clone_analista(monkeypatch, tmp_path_factory):
+    """A carteira-espelho do analista (``clone_analista``, task 20260902-055) grava um
     ledger append-only e busca COTAÇÃO VIVA na detecção. Como ela é acionada de
     dentro do alerta horário (``scripts/tg_alertas.py``), qualquer teste que exercite
     esse caminho gravaria no ledger REAL de produção (que alimenta o resumo do
@@ -117,12 +117,12 @@ def _isola_clone_erick(monkeypatch, tmp_path_factory):
     testes do próprio clone passam ``path``/``preco_fn`` explícitos e ignoram este
     default (o argumento vence o env/monkeypatch).
     """
-    from tradingagents.webui import clone_erick as _ce
+    from tradingagents.webui import clone_analista as _ce
 
-    monkeypatch.setenv("CLONE_ERICK_DIR", str(tmp_path_factory.mktemp("clone-erick")))
+    monkeypatch.setenv("CLONE_ANALISTA_DIR", str(tmp_path_factory.mktemp("clone-analista")))
     # capital NÃO semeado por default: o clone fica ARMADO nos testes que não o
     # configuram de propósito (task 056) — nenhum começa com um número chutado.
-    monkeypatch.delenv("CLONE_ERICK_CAPITAL", raising=False)
+    monkeypatch.delenv("CLONE_ANALISTA_CAPITAL", raising=False)
     monkeypatch.setattr(_ce, "_preco_real", lambda ticker, classe: None)
 
 
@@ -135,7 +135,7 @@ def _isola_bollinger(monkeypatch):
     PLANO (``build_storm_plan_dict``/``build_actionable_plan_dict``) deixavam só o
     Bollinger batendo no yfinance com o símbolo sintético. Aqui ele fica INERTE por
     padrão (sem extremo) — o teste que quer exercitá-lo o repatcha (autouse roda
-    antes, o explícito vence). Mesma disciplina do ``_isola_clone_erick``/
+    antes, o explícito vence). Mesma disciplina do ``_isola_clone_analista``/
     ``_isola_carteira_dono``: um detector novo que busca dado vivo nasce inerte na
     suíte."""
     from tradingagents.webui import scanner as _sc
@@ -152,7 +152,7 @@ def _isola_carteira_dono(monkeypatch, tmp_path_factory):
     arquivo fora do ``results_dir`` (``~/.tradingagents/carteira-dono.json``). Sem
     isolar, a suíte leria o arquivo REAL desta máquina e a watchlist efetiva da
     agenda passaria a depender de estado de produção — mesma armadilha que a
-    ``_isola_clone_erick`` acima já fecha pro clone. O caminho isolado não existe
+    ``_isola_clone_analista`` acima já fecha pro clone. O caminho isolado não existe
     por padrão: fail-open devolve lista vazia, e os testes que querem tickers
     extras escrevem o arquivo explicitamente.
     """

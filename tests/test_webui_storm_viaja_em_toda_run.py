@@ -3,7 +3,7 @@
 *"eu não vi nenhum desenho do storm123 nos gráficos que analisei."*
 
 A leitura do Storm viajava só quando o MÉTODO era ``storm123``. Numa análise Padrão
-ou Erick ela não estava desligada — estava **ausente**, e por isso nem o botão da
+ou analista ela não estava desligada — estava **ausente**, e por isso nem o botão da
 camada aparecia. A tela não tinha como anunciar o que não recebeu.
 
 Aqui se trava o contrário: **todo caminho que monta o plano da tela traz o Storm ao
@@ -39,21 +39,21 @@ def sem_rede(monkeypatch):
     return chamadas
 
 
-@pytest.mark.parametrize("metodo", ["padrao", "erick", "setup123", "storm123"])
+@pytest.mark.parametrize("metodo", ["padrao", "analista", "setup123", "storm123"])
 def test_o_plano_da_tela_traz_o_storm_em_QUALQUER_metodo(sem_rede, metodo):
     """DENTE: com ``method="padrao"`` o plano voltava sem ``storm``, e a camada do
     Storm nem existia pra ser ligada."""
     p = R.plano_com_storm(TICKER, DATE, "1d", metodo)
     assert p.get("storm"), (metodo, p)
     assert p["storm"]["pattern"], (metodo, p)
-    # ao LADO, nunca no lugar: o que a família Padrão/Erick produziu continua inteiro
+    # ao LADO, nunca no lugar: o que a família Padrão/analista produziu continua inteiro
     assert p["method"] == metodo and p["price"] == 465.58, p
 
 
 def test_o_storm_le_o_MESMO_frame_do_plano(sem_rede):
     """Um Storm lido no diário sob um plano de 4h seria a tela comparando dois
     candles diferentes com o mesmo nome."""
-    R.plano_com_storm(TICKER, DATE, "4h", "erick")
+    R.plano_com_storm(TICKER, DATE, "4h", "analista")
     assert sem_rede["plano"][-1][2] == "4h", sem_rede["plano"]
     assert sem_rede["storm"][-1][2] == "4h", sem_rede["storm"]
 

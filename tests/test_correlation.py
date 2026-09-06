@@ -1,9 +1,9 @@
 """Correlação entre ativos + FORÇA RELATIVA, dos candles cacheados (sem rede).
 
-Provedor novo (brief 24/08): o método do Erick mapeia ativos por correlação com um
+Provedor novo (brief 24/08): o método do analista mapeia ativos por correlação com um
 ÂNCORA (NVDA) diante de um evento, e extrai FORÇA RELATIVA — quem não cai quando o
 líder cai. Estes testes alimentam séries sintéticas via monkeypatch de
-``load_ohlcv`` (nada de rede) e checam: banda do Erick, correlação alta/baixa dos
+``load_ohlcv`` (nada de rede) e checam: banda do analista, correlação alta/baixa dos
 log-retornos, o caso do próprio âncora, a força relativa num recorte de queda, a
 seção pt-BR, e o degradê quando falta candle (nada inventado).
 """

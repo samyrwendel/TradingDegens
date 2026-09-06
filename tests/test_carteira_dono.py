@@ -39,7 +39,7 @@ def test_arquivo_sem_a_chave_tickers_e_fail_open(tmp_path):
 
 
 def test_env_var_isola_o_caminho_default(tmp_path, monkeypatch):
-    """Mesmo molde de override do ``clone_erick._base_dir`` (``CLONE_ERICK_DIR``):
+    """Mesmo molde de override do ``clone_analista._base_dir`` (``CLONE_ANALISTA_DIR``):
     a suíte usa ``CARTEIRA_DONO_PATH`` pra nunca tocar o arquivo real desta
     máquina (ver a fixture autouse ``_isola_carteira_dono`` em conftest.py)."""
     p = tmp_path / "via-env.json"

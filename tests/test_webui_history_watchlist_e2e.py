@@ -144,7 +144,7 @@ def test_watchlist_layout_and_uniform_radius(live):
 
         # (1) BORDAS: raio único em botões sempre presentes + a linha do histórico
         # não é cartão arredondado (raio 0). A régua de 1px entre itens saiu na 018
-        # (watchlist contínua estilo Quantfury) — a densidade vem do espaçamento.
+        # (watchlist contínua estilo da referência de design) — a densidade vem do espaçamento.
         run_r = page.eval_on_selector("#runBtn", "el=>getComputedStyle(el).borderRadius")
         cfg_r = page.eval_on_selector("#configBtn", "el=>getComputedStyle(el).borderRadius")
         # DA-078 regra 1: raio máximo 2px, e o token único do projeto passou a ser

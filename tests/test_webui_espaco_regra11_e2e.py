@@ -115,7 +115,7 @@ _SNAP = {
         "bull": "Tese de alta.", "bear": "Tese de baixa.",
         "research_manager": "", "investment_plan": "", "trader_plan": "",
         "risk_decision": "", "market_report": "", "sentiment_report": "",
-        "news_report": "", "fundamentals_report": "", "erick_report": "",
+        "news_report": "", "fundamentals_report": "", "analista_report": "",
         "drop_nature": {}, "derivatives_report": "",
     },
 }

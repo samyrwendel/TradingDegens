@@ -160,7 +160,7 @@ def test_rewind_is_noop_for_a_stage_that_never_ran():
     ran: list[str] = []
     tmpdir, _cfg, _first = _fresh(ran)
     step_before = checkpoint_step(tmpdir, TICKER, DATE)
-    assert rewind_before_node(tmpdir, TICKER, DATE, node="Erick Analyst") is None
+    assert rewind_before_node(tmpdir, TICKER, DATE, node="Analista Analyst") is None
     assert checkpoint_step(tmpdir, TICKER, DATE) == step_before
     assert len(completed_nodes(tmpdir, TICKER, DATE)) == 3
 

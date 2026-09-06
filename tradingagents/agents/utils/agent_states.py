@@ -64,15 +64,15 @@ class AgentState(MessagesState):
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
-    # On-demand "Modo Erick": present only when the erick analyst was selected;
+    # On-demand "Modo analista": present only when the analista analyst was selected;
     # empty string otherwise. The intraday-EMA method read (recuo à média, saída,
-    # peso relativo). See agents/analysts/erick_analyst.py.
-    erick_report: Annotated[str, "Report from the Erick-method Analyst (optional)"]
+    # peso relativo). See agents/analysts/analista_analyst.py.
+    analista_report: Annotated[str, "Report from the analista-method Analyst (optional)"]
     # Natureza da queda (liquidação × fraqueza) classificada UMA vez pelo analista
-    # erick: classification/reasons/anchor/coherence_flags. Fonte única — o juiz lê
+    # analista: classification/reasons/anchor/coherence_flags. Fonte única — o juiz lê
     # este campo, não a prosa. Precisa estar no schema senão o LangGraph descarta a
     # chave (só propaga o que o estado declara).
-    erick_drop_nature: Annotated[dict, "Classified drop nature for Modo Erick (single source; the judge reads this field, not the prose)"]
+    analista_drop_nature: Annotated[dict, "Classified drop nature for Modo analista (single source; the judge reads this field, not the prose)"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

@@ -1,6 +1,6 @@
 """Calendário de earnings — próxima data de resultado (fonte pública, keyless).
 
-O eixo da análise do Erick é o EVENTO: "o resultado da NVDA sai quarta 26/08".
+O eixo da análise do analista é o EVENTO: "o resultado da NVDA sai quarta 26/08".
 Sem saber quando é o evento, não dá pra posicionar antes ("evita aumentar antes
 do balanço" — regra dele).
 
@@ -111,7 +111,7 @@ def get_next_earnings_status(symbol: str, curr_date: str) -> tuple[dict | None, 
     caiu" na mesma frase. Cacheado (DA-058) e date-guarded.
     """
     # Import tardio do guard: date_guard vive na camada de agents e importá-lo no
-    # topo criaria um ciclo (agents.__init__ -> erick_analyst -> earnings_coverage
+    # topo criaria um ciclo (agents.__init__ -> analista_analyst -> earnings_coverage
     # -> este módulo). No momento da CHAMADA a camada de agents já está carregada.
     from tradingagents.agents.utils.date_guard import clamp
 
@@ -194,7 +194,7 @@ def earnings_window_status(
         return out
     dias = ev.get("days_ahead")
     out["days_ahead"] = dias
-    # ``dias`` ausente é o mesmo caso raro do ``_days_ahead`` do erick_method (data
+    # ``dias`` ausente é o mesmo caso raro do ``_days_ahead`` do analista_method (data
     # presente sem dias calculáveis): fica ``None`` — não vira "fora da janela".
     out["in_window"] = (dias <= window_days) if isinstance(dias, int) else None
     return out
@@ -260,7 +260,7 @@ def build_earnings_section(
     ev, status = get_next_earnings_status(symbol, curr_date)
     lines.append(_event_line(symbol.upper(), "", ev, status))
 
-    # O âncora (NVDA) é o eixo do evento na leitura do Erick — mostra sempre, a não
+    # O âncora (NVDA) é o eixo do evento na leitura do analista — mostra sempre, a não
     # ser que o próprio ativo já seja o âncora.
     from .correlation import default_anchor
 
@@ -269,7 +269,7 @@ def build_earnings_section(
         ev_a, status_a = get_next_earnings_status(anchor_name, curr_date)
         lines.append(_event_line(anchor_name, " (âncora)", ev_a, status_a))
 
-    # RESULTADO já reportado do âncora (o CATALISADOR da leitura do Erick) — reportado
+    # RESULTADO já reportado do âncora (o CATALISADOR da leitura do analista) — reportado
     # × estimado + surpresa, via Finnhub. É o dado que define "bateu → liquidação de
     # longs" vs "decepcionou → fraqueza". Ausente (sem chave/fonte) = honesto, sem
     # inventar. Mostra o do próprio ativo quando ele é o âncora.

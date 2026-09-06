@@ -97,7 +97,7 @@ def test_o_resultado_do_storm_se_identifica_pelo_SEU_marcador():
     assert detect_method({"result": {"storm123": True, "setup123": False}}) == "storm123"
     assert detect_method({"result": {"setup123": True, "storm123": False}}) == "setup123"
     # e uma leitura estrutural nunca vira a coluna de um confronto
-    assert detect_method({"result": {"erick_report": "x"}}) == "erick"
+    assert detect_method({"result": {"analista_report": "x"}}) == "analista"
 
 
 # ------------------------------------------------------------------- a tela ---
@@ -189,7 +189,7 @@ def _snap(storm):
             "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
             "trader_plan": "", "risk_decision": "", "market_report": "",
             "sentiment_report": "", "news_report": "", "fundamentals_report": "",
-            "erick_report": "", "drop_nature": {}, "derivatives_report": "",
+            "analista_report": "", "drop_nature": {}, "derivatives_report": "",
         },
     }
 
@@ -230,7 +230,7 @@ def test_o_storm_tem_chip_proprio_na_barra(base, tmp_path):
         # único recorte não negativo medido). A barra fica de pé ANTES de
         # qualquer ticker aberto (task 034: sem empilhar em duas fileiras), e
         # sem classe conhecida ainda ela cai no chão "stock" — CINCO chips.
-        assert m["metodos"] == ["padrao", "erick", "compare", "setup123", "storm123"], m
+        assert m["metodos"] == ["padrao", "analista", "compare", "setup123", "storm123"], m
         assert "Storm123" in m["rotulos"], m
 
         # O dono desliga a célula EM AÇÕES (POST /api/estrategias — aqui direto
@@ -243,7 +243,7 @@ def test_o_storm_tem_chip_proprio_na_barra(base, tmp_path):
         page.reload(wait_until="networkidle")
         page.wait_for_selector("#launchMethods .lb-method")
         m2 = page.evaluate(_JS_CHIPS_BARRA)
-        assert m2["metodos"] == ["padrao", "erick", "compare", "setup123"], m2
+        assert m2["metodos"] == ["padrao", "analista", "compare", "setup123"], m2
         assert "Storm123" not in m2["rotulos"], m2
         assert m2["metodos"].count("setup123") == 1
         browser.close()

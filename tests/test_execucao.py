@@ -7,13 +7,13 @@ anteriores que bateram os TPs, SL e se devemos proteger com BE e um trailing sto
 pode ser habilitado"*.
 
 Os casos abaixo são os **casos de aceitação da spec** do degenbot
-(``~/brain/trading-ops/erick-camada-de-execucao-e-saida-spec.md`` §11), traduzidos em
+(a nota privada da camada de execução e saída do analista §11), traduzidos em
 teste. Dois invariantes atravessam tudo:
 
   * **nada de nível inventado** — todo preço do card sai do plano que o painel já
     desenha; o card acrescenta a POLÍTICA, não números;
   * **o que é `sem evidência` continua declarado** — a fração exata de cada alvo, o
-    break-even como regra do Erick e o ATR como régua de trailing NÃO estão no corpus,
+    break-even como regra do analista e o ATR como régua de trailing NÃO estão no corpus,
     e o card diz isso em vez de fabricar autoridade.
 """
 
@@ -205,7 +205,7 @@ def test_be_e_trailing_nascem_DESLIGADOS_com_o_porque_escrito():
     assert p["be"]["ligado"] is False and p["trailing"]["ligado"] is False, p
     assert "recuo à média é ENTRADA" in p["be"]["nota"], p["be"]
     assert "sem evidência" in p["be"]["evidencia"], ("o BE não é regra observada do "
-                                                     "Erick, e o card diz isso", p["be"])
+                                                     "analista, e o card diz isso", p["be"])
     assert "+1R" in " ".join(g["texto"] for g in p["be"]["gatilhos"]), p["be"]
     assert "fundo ascendente" in " ".join(g["texto"] for g in p["be"]["gatilhos"]), p["be"]
 
@@ -214,7 +214,7 @@ def test_be_e_trailing_nascem_DESLIGADOS_com_o_porque_escrito():
 def test_o_trailing_segue_media_e_fundo_e_NAO_ATR():
     """O Samyr perguntou "média? fundo? ATR?". O corpus responde: média ascendente e
     fundo ascendente. O ATR é utilitário do motor (folga do stop) — chamá-lo de régua
-    de trailing do Erick seria inventar."""
+    de trailing do analista seria inventar."""
     t = ex.protecao()["trailing"]
     assert "EMA 21" in t["referencia"] and "FUNDO ascendente" in t["referencia"], t
     assert "ATR" in t["evidencia"] and "sem evidência" in t["evidencia"], t
@@ -301,7 +301,7 @@ def test_wilson_aperta_conforme_a_amostra_cresce():
 # ───────────────────────── §2 — peso SEMPRE relativo ───────────────────────────
 @pytest.mark.unit
 def test_o_peso_e_relativo_e_nunca_cita_valor_nem_percentual():
-    """Regra 8 do método: o Erick fala em proporção à confirmação, nunca em cifra."""
+    """Regra 8 do método: o analista fala em proporção à confirmação, nunca em cifra."""
     for estado, degrau in (("ativo", "meia posição"),
                            ("aguardar_rompimento", "inicial"),
                            ("aguardar_pullback", "inicial"),

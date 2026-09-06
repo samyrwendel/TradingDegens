@@ -1,6 +1,6 @@
 """Correlação entre ativos + FORÇA RELATIVA, dos candles diários já cacheados.
 
-Método do Erick (análise 4, 24/08): ele mapeia 30+ ativos por correlação com um
+Método do analista (análise 4, 24/08): ele mapeia 30+ ativos por correlação com um
 ÂNCORA (a NVDA, pro setor de IA) pra saber quem sofre junto num evento (o
 resultado da NVDA) e quem vira refúgio. O conceito que ele extrai daí é a FORÇA
 RELATIVA — "o que não cai quando o líder cai é o que eu acumulo".
@@ -25,7 +25,7 @@ from .stockstats_utils import load_ohlcv
 logger = logging.getLogger(__name__)
 
 # Âncora padrão por tipo de ativo. Ação: NVDA (líder do ciclo de IA, referência do
-# Erick). Cripto: BTC-USD (líder do setor) — NVDA não faz sentido pra cripto.
+# analista). Cripto: BTC-USD (líder do setor) — NVDA não faz sentido pra cripto.
 DEFAULT_STOCK_ANCHOR = "NVDA"
 DEFAULT_CRYPTO_ANCHOR = "BTC-USD"
 
@@ -45,11 +45,11 @@ def default_anchor(asset_type: str) -> str:
     return DEFAULT_CRYPTO_ANCHOR if asset_type == "crypto" else DEFAULT_STOCK_ANCHOR
 
 
-# ---------------------------------------------------------------- bandas Erick --
-# Bandas do próprio Erick (nota 04). Correlação ALTA = anda junto = sofre junto
+# ---------------------------------------------------------------- bandas analista --
+# Bandas do próprio analista (nota 04). Correlação ALTA = anda junto = sofre junto
 # num evento (risco de contágio 🔴); BAIXA = protegido do evento (refúgio 🟢).
 def classify_correlation(r: float) -> tuple[str, str]:
-    """(rótulo, emoji-de-estado) pela banda do Erick. r em [-1, 1]."""
+    """(rótulo, emoji-de-estado) pela banda do analista. r em [-1, 1]."""
     if r >= 0.70:
         return "alta", "🔴"
     if r >= 0.50:
@@ -268,7 +268,7 @@ def build_correlation_section(
                 f"(correlação {v['label']}, n={v['n']})"
             )
 
-    # Força relativa — o insumo do "refúgio" do Erick.
+    # Força relativa — o insumo do "refúgio" do analista.
     try:
         rs = compute_relative_strength(symbol, curr_date, anchor_name, asset_type)
     except Exception as exc:  # noqa: BLE001

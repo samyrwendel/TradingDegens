@@ -23,7 +23,7 @@ def _dirty() -> dict:
             "- **Ponto 2** (repique / mínima): 2026-06-09 — 160.87\n"
             "- **Gatilho**: perda de 160.87 — **acionado** (perdeu a mínima do ponto 2)."
         ),
-        "erick_report": "Leitura do método.\n\nPROPOSTA FINAL DE TRANSAÇÃO: MANTER (caixa / aguardar gatilho)",
+        "analista_report": "Leitura do método.\n\nPROPOSTA FINAL DE TRANSAÇÃO: MANTER (caixa / aguardar gatilho)",
         "trader_plan": "**Ação**: VENDER — Sell\n\nPROPOSTA FINAL DE TRANSAÇÃO: **VENDER**",
         "fundamentals_report": (
             "- **Capitalização de mercado:** US$ 9,56 bilhões\n"
@@ -47,7 +47,7 @@ def _clean() -> dict:
             "### Padrão 1-2-3 de venda\n"
             "- **Gatilho**: perda de 160.87 — **acionado** (perdeu a mínima do ponto 2)."
         ),
-        "erick_report": "Leitura do método: caixa, aguardar gatilho. (sem proposta final)",
+        "analista_report": "Leitura do método: caixa, aguardar gatilho. (sem proposta final)",
         "trader_plan": "**Ação**: VENDER — Sell\n\nLEITURA DO TRADER (insumo, não é o veredito): **VENDER**",
         "fundamentals_report": (
             "## Âncoras determinísticas\n"
@@ -66,7 +66,7 @@ def _clean() -> dict:
 @pytest.mark.unit
 def test_dirty_report_lists_real_inconsistencies():
     codes = {f["code"] for f in check_contradictions(_dirty())}
-    assert "decisao_dupla" in codes            # erick=MANTER vs trader=VENDER
+    assert "decisao_dupla" in codes            # analista=MANTER vs trader=VENDER
     assert "gatilho_123_divergente" in codes   # chart 91,50 vs texto 160,87
     assert "acionado_incoerente" in codes      # venda 'acionado' com 113,15 ≥ 91,50
     assert "preco_market_cap_divergente" in codes  # 9,56bi/80,2mi ≈ 119 vs 113,15
@@ -113,24 +113,24 @@ def test_render_section_clean_and_dirty():
 
 
 @pytest.mark.unit
-def test_erick_state_vs_veredito_divergence_is_flagged():
+def test_analista_state_vs_veredito_divergence_is_flagged():
     """Item 6b: 'Estado: AGIR' with a prose 'Veredito: AGUARDAR' is a self-contradiction."""
-    r = {"erick_report": (
-        "**Estado (Método Erick):** AGIR — estado único.\n"
+    r = {"analista_report": (
+        "**Estado (Método do analista):** AGIR — estado único.\n"
         "Veredito do método: AGUARDAR / caixa até o gatilho."
     )}
     codes = {f["code"] for f in check_contradictions(r)}
-    assert "erick_estado_veredito_divergente" in codes
+    assert "analista_estado_veredito_divergente" in codes
 
 
 @pytest.mark.unit
-def test_erick_state_consistent_not_flagged():
-    r = {"erick_report": (
-        "**Estado (Método Erick):** CAIXA — estado único.\n"
+def test_analista_state_consistent_not_flagged():
+    r = {"analista_report": (
+        "**Estado (Método do analista):** CAIXA — estado único.\n"
         "A leitura deriva do estado: caixa é posição."
     )}
     codes = {f["code"] for f in check_contradictions(r)}
-    assert "erick_estado_veredito_divergente" not in codes
+    assert "analista_estado_veredito_divergente" not in codes
 
 
 @pytest.mark.unit

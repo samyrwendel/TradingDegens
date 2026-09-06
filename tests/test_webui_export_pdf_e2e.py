@@ -101,11 +101,11 @@ _SEED_COMPARE = r"""
 () => {
 """ + _CANDLES_JS + r"""
   const col = (method, verdict) => ({
-    method, label: method === 'erick' ? 'Metodo Erick' : 'Padrao',
+    method, label: method === 'analista' ? 'Metodo do analista' : 'Padrao',
     verdict, status: 'done', date: '2026-08-25', run_id: 'run-' + method,
     timeframe: '4h', verdict_timeframe: '4h',
     trader_plan: '### Plano ' + method + '\nEntrada no recuo, saida antes da reversao.',
-    erick_report: method === 'erick' ? '### Erick\nRecuo a media EMA 8/21.' : '',
+    analista_report: method === 'analista' ? '### analista\nRecuo a media EMA 8/21.' : '',
     price_chart: { candles, ma: {}, ema: {}, markers: {} },
     cost: 0.05, elapsed: 20, degraded: []
   });
@@ -116,13 +116,13 @@ _SEED_COMPARE = r"""
     result: { compare: {
       meta: {
         agreement: "divergem",
-        headline: "Padrao compra, Erick espera recuo.",
+        headline: "Padrao compra, analista espera recuo.",
         concordancia: "Ambos veem tendencia de alta.",
         divergencia: "O timing diverge: entrar agora x esperar.",
         significado: "A divergencia e o sinal — reduzir tamanho."
       },
       a: col('padrao', 'BUY'),
-      b: col('erick', 'HOLD')
+      b: col('analista', 'HOLD')
     } }
   };
   renderCompare(snap);

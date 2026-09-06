@@ -1,4 +1,4 @@
-"""Keyless intraday (15m/1h/4h) OHLCV loader — the data foundation for the Erick
+"""Keyless intraday (15m/1h/4h) OHLCV loader — the data foundation for the analista
 model (fork brief 24/08, extended 25/08 for equities).
 
 Network-free: the two source seams (:func:`_binance_klines` for crypto,

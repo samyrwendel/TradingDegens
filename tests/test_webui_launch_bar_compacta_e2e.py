@@ -240,7 +240,7 @@ def test_em_1280_a_barra_cabe_numa_linha_sem_rolar_a_pagina(base):
 # As tasks 017/022 tinham empilhado TEMPO e MÉTODO em DUAS fileiras cada (a
 # mesma gramática do bloco MODELOS) pra caber em 1500px sem estourar. A 034
 # reverte isso DE PROPÓSITO: o pedido, a partir de 5 apps de referência
-# (Quantfury/Krystal/CoinMarketCap), foi UMA linha só pra cada grupo — nenhum
+# (referência de design/Krystal/CoinMarketCap), foi UMA linha só pra cada grupo — nenhum
 # desses apps empilha frame/método em duas fileiras. O espaço que isso custa
 # saiu de outro lugar: ATIVO deixou de crescer (fixo ~160px, antes esticava até
 # ~345px), MODELOS colapsou de um par de chips sempre visível pra um chevron de

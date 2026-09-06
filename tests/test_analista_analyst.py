@@ -1,4 +1,4 @@
-"""The on-demand Erick-method analyst: wiring + the deterministic method read.
+"""The on-demand analista-method analyst: wiring + the deterministic method read.
 
 No LLM and no network here — the graph wiring is asserted structurally and the
 method read is driven with a synthetic (monkeypatched) chart/plan so the verdict
@@ -7,8 +7,8 @@ mapping is pinned deterministically.
 
 import pytest
 
-import tradingagents.agents.utils.erick_method as em
-from tradingagents.agents.utils.erick_method import (
+import tradingagents.agents.utils.analista_method as em
+from tradingagents.agents.utils.analista_method import (
     _days_ahead,
     _decide,
     _drop_decelerating,
@@ -21,8 +21,8 @@ from tradingagents.agents.utils.erick_method import (
     _rsi_series,
     _swing_points,
     _tese_read,
-    build_erick_method_section,
-    ensure_erick_method_coverage,
+    build_analista_method_section,
+    ensure_analista_method_coverage,
 )
 from tradingagents.graph.analyst_execution import build_analyst_execution_plan
 from tradingagents.graph.conditional_logic import ConditionalLogic
@@ -44,27 +44,27 @@ def _no_earnings_network(monkeypatch):
 
 
 # --------------------------------------------------------------- wiring --------
-def test_select_analysts_appends_erick_on_demand():
+def test_select_analysts_appends_analista_on_demand():
     # Padrão is untouched…
     assert select_analysts_for_asset("stock") == ["market", "social", "news", "fundamentals"]
     assert select_analysts_for_asset("crypto") == ["market", "social", "news"]
-    # …and the method only adds the erick analyst when asked, at the end.
-    assert select_analysts_for_asset("stock", include_erick=True)[-1] == "erick"
-    assert "erick" in select_analysts_for_asset("crypto", include_erick=True)
+    # …and the method only adds the analista analyst when asked, at the end.
+    assert select_analysts_for_asset("stock", include_analista=True)[-1] == "analista"
+    assert "analista" in select_analysts_for_asset("crypto", include_analista=True)
     # Padrão default really is off.
-    assert "erick" not in select_analysts_for_asset("crypto")
+    assert "analista" not in select_analysts_for_asset("crypto")
 
 
-def test_execution_plan_has_erick_spec():
-    plan = build_analyst_execution_plan(["market", "erick"])
+def test_execution_plan_has_analista_spec():
+    plan = build_analyst_execution_plan(["market", "analista"])
     spec = plan.specs[-1]
-    assert spec.key == "erick"
-    assert spec.agent_node == "Erick Analyst"
-    assert spec.tool_node == "tools_erick"
-    assert spec.report_key == "erick_report"
+    assert spec.key == "analista"
+    assert spec.agent_node == "Analista Analyst"
+    assert spec.tool_node == "tools_analista"
+    assert spec.report_key == "analista_report"
 
 
-def test_conditional_routes_erick():
+def test_conditional_routes_analista():
     logic = ConditionalLogic()
 
     class _Msg:
@@ -73,25 +73,25 @@ def test_conditional_routes_erick():
     class _MsgWithCalls:
         tool_calls = [{"name": "get_indicators"}]
 
-    assert logic.should_continue_erick({"messages": [_Msg()]}) == "Msg Clear Erick"
-    assert logic.should_continue_erick({"messages": [_MsgWithCalls()]}) == "tools_erick"
+    assert logic.should_continue_analista({"messages": [_Msg()]}) == "Msg Clear Analista"
+    assert logic.should_continue_analista({"messages": [_MsgWithCalls()]}) == "tools_analista"
 
 
-def test_progress_plan_includes_erick_stage():
-    nodes = [p["node"] for p in build_plan(["market", "erick"])]
-    assert "Erick Analyst" in nodes
-    # Erick belongs to the "Analistas" phase, before the debate.
-    erick = next(p for p in build_plan(["market", "erick"]) if p["node"] == "Erick Analyst")
-    assert erick["phase"] == "Analistas"
-    assert erick["order"] < 50  # ahead of Bull Researcher
+def test_progress_plan_includes_analista_stage():
+    nodes = [p["node"] for p in build_plan(["market", "analista"])]
+    assert "Analista Analyst" in nodes
+    # analista belongs to the "Analistas" phase, before the debate.
+    analista = next(p for p in build_plan(["market", "analista"]) if p["node"] == "Analista Analyst")
+    assert analista["phase"] == "Analistas"
+    assert analista["order"] < 50  # ahead of Bull Researcher
 
 
-def test_extract_result_carries_erick_report():
-    state = {"erick_report": "## 🧭 Método Erick — leitura", "investment_debate_state": {}}
+def test_extract_result_carries_analista_report():
+    state = {"analista_report": "## 🧭 Método do analista — leitura", "investment_debate_state": {}}
     out = extract_result(state, "Hold")
-    assert out["erick_report"].startswith("## 🧭 Método Erick")
+    assert out["analista_report"].startswith("## 🧭 Método do analista")
     # Absent (Padrão run) → empty string, never missing.
-    assert extract_result({"investment_debate_state": {}}, "Hold")["erick_report"] == ""
+    assert extract_result({"investment_debate_state": {}}, "Hold")["analista_report"] == ""
 
 
 # ------------------------------------------------- verdict/peso mapping ---------
@@ -235,7 +235,7 @@ def test_section_crypto_cites_intraday_entry_exit_and_weight(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)  # concern testado à parte
-    section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
+    section = build_analista_method_section("BTC-USD", "2026-08-24", "crypto")
     # The four things the acceptance requires, all present:
     assert "intradiário" in section  # timeframe declared
     assert "4 horas" in section
@@ -252,21 +252,21 @@ def test_section_emits_single_state_enum(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
-    section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
-    assert "**Estado (Método Erick):** AGIR" in section
+    section = build_analista_method_section("BTC-USD", "2026-08-24", "crypto")
+    assert "**Estado (Método do analista):** AGIR" in section
     # exactly one state label, no competing 'Veredito' line in the deterministic part
-    assert section.count("Estado (Método Erick):") == 1
+    assert section.count("Estado (Método do analista):") == 1
     assert "Veredito" not in section
 
 
 def test_section_stock_reads_intraday_like_crypto(monkeypatch):
-    """An equity now has keyless intraday (yfinance), so the Erick section reads the
+    """An equity now has keyless intraday (yfinance), so the analista section reads the
     4h swing frame for a stock too — no longer a daily-only 'no intraday for stocks'
     fallback (fork brief 25/08 item 6)."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
-    section = build_erick_method_section("BE", "2026-08-24", "stock")
+    section = build_analista_method_section("BE", "2026-08-24", "stock")
     assert "4 horas" in section          # swing frame, same as crypto
     assert "não existe para ação" not in section  # the stale claim is gone
     assert "**Peso relativo do trade:**" in section
@@ -284,7 +284,7 @@ def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", chart)
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
-    section = build_erick_method_section("BE", "2019-01-15", "stock")
+    section = build_analista_method_section("BE", "2019-01-15", "stock")
     assert "diário" in section
     assert "indisponível" in section.lower()
     assert "**Peso relativo do trade:**" in section
@@ -293,7 +293,7 @@ def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
 def test_section_no_candle_is_honest_not_fabricated(monkeypatch):
     # crypto feed down for BOTH intraday and the daily fallback -> no read
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": {"candles": [], "ema": {}})
-    section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
+    section = build_analista_method_section("BTC-USD", "2026-08-24", "crypto")
     assert "nada inventado" in section.lower()
     assert "**Peso relativo" not in section  # no fake verdict when there is no data
 
@@ -317,7 +317,7 @@ def test_section_surfaces_123_trigger_in_method_read(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_pattern())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
-    section = build_erick_method_section("BTC-USD", "2026-08-24", "crypto")
+    section = build_analista_method_section("BTC-USD", "2026-08-24", "crypto")
     assert "Gatilho 1-2-3 de compra (4h)" in section
     assert "rompimento de 98.00" in section
     assert "em formação" in section
@@ -339,7 +339,7 @@ def test_coverage_is_fail_open(monkeypatch):
 
     monkeypatch.setattr(em, "build_price_chart", _boom)
     # enrichment must never break the report
-    assert ensure_erick_method_coverage("PROSE", "BTC-USD", "2026-08-24", "crypto") == "PROSE"
+    assert ensure_analista_method_coverage("PROSE", "BTC-USD", "2026-08-24", "crypto") == "PROSE"
 
 
 # ---------------------------- coerência: drop_nature manda no Estado da seção ----
@@ -359,10 +359,10 @@ def test_section_drop_nature_before_estado_and_derives_it(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP)
-    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
-    assert "**Estado (Método Erick):** AGIR" in section
+    section = build_analista_method_section("AVGO", "2026-08-26", "stock")
+    assert "**Estado (Método do analista):** AGIR" in section
     # a natureza da queda aparece ACIMA do Estado (ordem = coerência de leitura)
-    assert section.index("🩸 Natureza da queda") < section.index("Estado (Método Erick)")
+    assert section.index("🩸 Natureza da queda") < section.index("Estado (Método do analista)")
     assert "Deriva da natureza da queda" in section
     assert "posição inicial" in section
     # a string de re-leitura contraditória não existe mais
@@ -378,8 +378,8 @@ def test_section_liquidacao_entry_cites_daily_average(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP_EVID)
-    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
-    assert "**Estado (Método Erick):** AGIR" in section
+    section = build_analista_method_section("AVGO", "2026-08-26", "stock")
+    assert "**Estado (Método do analista):** AGIR" in section
     assert "MMS200 diária" in section
     assert "sintoma da liquidação" in section
     # a formulação v1 (entrada ancorada na EMA 8·EMA 21) não existe mais
@@ -397,9 +397,9 @@ def test_section_mitigation1_15m_sell_caps_liquidacao_at_aguardar(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_sell_triggered())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP)
-    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
-    assert "**Estado (Método Erick):** AGUARDAR" in section
-    assert "**Estado (Método Erick):** AGIR" not in section
+    section = build_analista_method_section("AVGO", "2026-08-26", "stock")
+    assert "**Estado (Método do analista):** AGUARDAR" in section
+    assert "**Estado (Método do analista):** AGIR" not in section
 
 
 def test_section_fail_open_drop_none_matches_mechanical(monkeypatch):
@@ -408,9 +408,9 @@ def test_section_fail_open_drop_none_matches_mechanical(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
-    section = build_erick_method_section("AVGO", "2026-08-26", "stock")
+    section = build_analista_method_section("AVGO", "2026-08-26", "stock")
     # baixa sem natureza da queda → CAIXA (mecânica de hoje), sem bloco de queda.
-    assert "**Estado (Método Erick):** CAIXA" in section
+    assert "**Estado (Método do analista):** CAIXA" in section
     assert "🩸 Natureza da queda" not in section
     assert "Deriva da natureza da queda" not in section
 
@@ -598,7 +598,7 @@ def test_gate_intc_opens_and_decides_initial():
 
 def test_gate_opens_with_bearish_weekly_divergence_present():
     """Regressão do confronto em dado REAL: o INTC de 27/08 tem divergência bearish
-    no semanal (topo 124,92→133,99 · RSI 91→73) e o Erick mandou montar [09:51].
+    no semanal (topo 124,92→133,99 · RSI 91→73) e o analista mandou montar [09:51].
 
     A porta são as CINCO condições citadas — a divergência da tese não é um 6º
     bloqueio (isso reprovava a aceitação §5.1 com o dado da live). Ela pesa no
@@ -747,10 +747,10 @@ def test_section_intc_gate_full_acceptance(monkeypatch):
         "status": "ok", "ev": {"date": "2026-10-22", "days_ahead": 56}, "dias": 56,
         "na_janela": False, "ausente": None,
         "leitura": "sem balanço até 2026-10-22 (56 dias)"})
-    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    section = build_analista_method_section("INTC", "2026-08-27", "stock")
     # O fix: Estado NÃO é mais CAIXA pelo motivo errado
-    assert "**Estado (Método Erick):** AGUARDAR" in section
-    assert "**Estado (Método Erick):** CAIXA" not in section
+    assert "**Estado (Método do analista):** AGUARDAR" in section
+    assert "**Estado (Método do analista):** CAIXA" not in section
     # peso inicial (não caixa) e a porta nomeada
     assert "**Peso relativo do trade:** posição inicial" in section
     assert "Porta TIER 2 aberta" in section
@@ -779,10 +779,10 @@ def test_section_names_why_gate_did_not_open(monkeypatch):
               "na_janela": True, "ausente": None, "leitura": "balanço em 8 dia(s)"}
     monkeypatch.setattr(em, "_earnings_read", lambda s, d: dentro)
     monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full(earnings=dentro))
-    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    section = build_analista_method_section("INTC", "2026-08-27", "stock")
     assert "Porta TIER 2 não abriu" in section
     assert "balanço dentro da janela" in section
-    assert "**Estado (Método Erick):** CAIXA" in section
+    assert "**Estado (Método do analista):** CAIXA" in section
 
 
 def test_section_swing_divergence_is_named_in_the_trace(monkeypatch):
@@ -800,11 +800,11 @@ def test_section_swing_divergence_is_named_in_the_trace(monkeypatch):
         "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
     monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full(
         divergencia={"measured": True, "kind": "bearish", "detail": "d"}))
-    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    section = build_analista_method_section("INTC", "2026-08-27", "stock")
     assert "divergência bearish no 4h (timing — consultada, não inverte)" in section
     # segue sendo TIMING: não vira veto de direção nem fecha a porta
     assert "Porta TIER 2 aberta" in section
-    assert "**Estado (Método Erick):** CAIXA" not in section
+    assert "**Estado (Método do analista):** CAIXA" not in section
 
 
 def test_swing_divergence_absent_stays_out_of_the_trace(monkeypatch):
@@ -820,7 +820,7 @@ def test_swing_divergence_absent_stays_out_of_the_trace(monkeypatch):
         "classification": "indefinido", "reasons": [],
         "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
     monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full())
-    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    section = build_analista_method_section("INTC", "2026-08-27", "stock")
     assert "timing — consultada, não inverte" not in section
 
 
@@ -838,8 +838,8 @@ def test_section_thesis_divergence_does_not_close_the_gate(monkeypatch):
         "classification": "indefinido", "reasons": [],
         "evidence": {"anchor": {"name": "NVDA", "trend": "alta", "beat_recent": True}}})
     monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_div_tese("bearish"))
-    section = build_erick_method_section("INTC", "2026-08-27", "stock")
+    section = build_analista_method_section("INTC", "2026-08-27", "stock")
     assert "Porta TIER 2 aberta" in section
-    assert "**Estado (Método Erick):** CAIXA" not in section
+    assert "**Estado (Método do analista):** CAIXA" not in section
     assert "posição inicial" in section
     assert "teto de tamanho, não veto" in section

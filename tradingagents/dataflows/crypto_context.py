@@ -1,7 +1,7 @@
 """Crypto network-context data — on-chain, spot-ETF flows, Fear & Greed (fork addition).
 
 Three signals the equity-shaped pipeline is blind to but that the modeled
-decision process (the ``@ericksekiama`` corpus, cross-checked by a second
+decision process (the analyst's corpus, cross-checked by a second
 independent modeling of the same channel: on-chain appears in 20 of 59 videos,
 spot-ETF flow in 17, Fear & Greed in 5) treats as first-class for a crypto call:
 

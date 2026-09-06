@@ -238,7 +238,7 @@ def _trade_levels_md(action: str, entry: float | None, stop: float | None) -> li
 def render_trader_proposal(proposal: TraderProposal) -> str:
     """Render a TraderProposal to markdown (pt-BR).
 
-    The trader is ONE reading among several (técnico, Erick, juiz do debate); its
+    The trader is ONE reading among several (técnico, analista, juiz do debate); its
     action feeds the risk debate and the portfolio manager, who owns THE final
     decision. So the trailing line is labelled ``LEITURA DO TRADER`` — a module
     input, explicitly NOT a competing "proposta final" — because four modules each

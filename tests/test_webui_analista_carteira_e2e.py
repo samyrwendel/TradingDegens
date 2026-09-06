@@ -1,6 +1,6 @@
-"""O PAINEL da carteira do Erick na tela — e a invisibilidade dele (DA-148).
+"""O PAINEL da carteira do analista na tela — e a invisibilidade dele (DA-148).
 
-O teste do servidor (`test_webui_erick_carteira`) prova que a ROTA recusa. Este
+O teste do servidor (`test_webui_analista_carteira`) prova que a ROTA recusa. Este
 prova a outra metade, que é a que o visitante vê: **ele não descobre que a feature
 existe**. Botão escondido, painel escondido, nada na tela para clicar.
 
@@ -61,7 +61,7 @@ _CARTEIRA = {
 def _abre(page, base_url, *, dono: bool, viewport=None):
     def handler(route):
         u = route.request.url
-        if "/api/erick/carteira" in u:
+        if "/api/analista/carteira" in u:
             if not dono:
                 route.fulfill(status=403, content_type="application/json",
                               body=json.dumps({"error": "acesso restrito ao dono",
@@ -84,17 +84,18 @@ def _abre(page, base_url, *, dono: bool, viewport=None):
 
 
 _ESTADO = """() => ({
-  botao: !!document.getElementById('erickOpenBtn')
-         && !document.getElementById('erickOpenBtn').classList.contains('hidden'),
-  painel: !!document.getElementById('erickPanel')
-          && !document.getElementById('erickPanel').classList.contains('hidden'),
-  texto: (document.getElementById('erickCorpo') || {}).innerText || '',
+  botao: !!document.getElementById('analystOpenBtn')
+         && !document.getElementById('analystOpenBtn').classList.contains('hidden'),
+  painel: !!document.getElementById('analystPanel')
+          && !document.getElementById('analystPanel').classList.contains('hidden'),
+  texto: (document.getElementById('analystCorpo') || {}).innerText || '',
 })"""
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
 @pytest.mark.parametrize("viewport", [DESKTOP, TELEFONE], ids=["desktop", "telefone"])
-def test_DENTE_o_visitante_nao_descobre_que_a_feature_existe(base, viewport):
+def test_DENTE_o_visitante_nao_descobre_que_a_feature_existe(base, viewport, monkeypatch):
+    monkeypatch.setenv("ANALISTA_CARTEIRA_URL", "https://fonte-do-analista.exemplo/carteira")
     """Recusar no clique não basta: o botão não pode estar lá. Uma feature que se
     anuncia e depois nega é um convite a insistir — e o conteúdo é de assinatura
     paga de outra pessoa."""
@@ -105,9 +106,9 @@ def test_DENTE_o_visitante_nao_descobre_que_a_feature_existe(base, viewport):
         m = page.evaluate(_ESTADO)
         assert m["botao"] is False, m
         assert m["painel"] is False, m
-        # e nem o nome do autor aparece em lugar nenhum da tela do visitante
+        # e nem a fonte (site do autor) aparece em lugar nenhum da tela do visitante
         corpo = page.inner_text("body").lower()
-        assert "erick sekiama" not in corpo, corpo[:300]
+        assert "fonte-do-analista.exemplo" not in corpo, corpo[:300]
         browser.close()
 
 
@@ -119,10 +120,10 @@ def test_o_DONO_ve_o_botao_e_o_painel_abre_com_o_carimbo_do_dado(base):
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, dono=True)
         assert page.evaluate(_ESTADO)["botao"] is True
-        page.click("#erickOpenBtn")
-        page.wait_for_selector("#erickPanel:not(.hidden)", timeout=10000)
+        page.click("#analystOpenBtn")
+        page.wait_for_selector("#analystPanel:not(.hidden)", timeout=10000)
         page.wait_for_timeout(400)
-        carimbo = page.inner_text("#erickCarimbo")
+        carimbo = page.inner_text("#analystCarimbo")
         assert "27/08/2026" in carimbo, carimbo
         assert "há 3h" in carimbo or "agora há pouco" in carimbo, carimbo
         browser.close()
@@ -138,8 +139,8 @@ def test_o_CAIXA_e_manchete_e_a_variacao_usa_a_paleta_de_direcao(base, viewport)
         browser = p.chromium.launch()
         page = browser.new_page(viewport=viewport)
         _abre(page, base, dono=True, viewport=viewport)
-        page.click("#erickOpenBtn")
-        page.wait_for_selector("#erickPanel:not(.hidden)", timeout=10000)
+        page.click("#analystOpenBtn")
+        page.wait_for_selector("#analystPanel:not(.hidden)", timeout=10000)
         page.wait_for_timeout(400)
         m = page.evaluate("""() => {
           const c = document.querySelector('.ek-caixa');
@@ -165,8 +166,8 @@ def test_O_GANCHO_analisar_abre_o_ativo_dele_pelo_NOSSO_sistema(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, dono=True)
-        page.click("#erickOpenBtn")
-        page.wait_for_selector("#erickPanel:not(.hidden)", timeout=10000)
+        page.click("#analystOpenBtn")
+        page.wait_for_selector("#analystPanel:not(.hidden)", timeout=10000)
         page.wait_for_timeout(400)
         page.evaluate("""() => {
           window.__pedido = null;
@@ -179,10 +180,10 @@ def test_O_GANCHO_analisar_abre_o_ativo_dele_pelo_NOSSO_sistema(base):
             return o(u, x);
           };
         }""")
-        alvos = page.evaluate("""() => [...document.querySelectorAll('[data-erick-go]')]
-                                     .map((b) => b.dataset.erickGo)""")
+        alvos = page.evaluate("""() => [...document.querySelectorAll('[data-analyst-go]')]
+                                     .map((b) => b.dataset.analystGo)""")
         assert alvos == ["MSFT", "BTC-USD"], ("o caixa não pode ser clicável", alvos)
-        page.click('[data-erick-go="BTC-USD"]')
+        page.click('[data-analyst-go="BTC-USD"]')
         page.wait_for_function("() => window.__pedido !== null", timeout=10000)
         pedido = page.evaluate("() => window.__pedido")
         assert pedido["ticker"] == "BTC-USD" and pedido["method"] == "setup123", pedido
@@ -199,8 +200,8 @@ def test_o_racional_dele_esta_la_e_RECOLHIDO(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, dono=True)
-        page.click("#erickOpenBtn")
-        page.wait_for_selector("#erickPanel:not(.hidden)", timeout=10000)
+        page.click("#analystOpenBtn")
+        page.wait_for_selector("#analystPanel:not(.hidden)", timeout=10000)
         page.wait_for_timeout(400)
         m = page.evaluate("""() => {
           const d = document.querySelector('.ek-rel');

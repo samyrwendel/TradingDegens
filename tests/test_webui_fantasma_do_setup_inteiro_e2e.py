@@ -70,7 +70,7 @@ def _snap(ciclo_123, ciclo_storm):
          "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
          "trader_plan": "", "risk_decision": "", "market_report": "",
          "sentiment_report": "", "news_report": "", "fundamentals_report": "",
-         "erick_report": "", "drop_nature": {}, "derivatives_report": "",
+         "analista_report": "", "drop_nature": {}, "derivatives_report": "",
          "setup123": True, "storm123": True}
     return {"run_id": "R-150", "ticker": "AAPL", "date": "2026-08-29",
             "asset_type": "stock", "status": "done", "elapsed": 2,

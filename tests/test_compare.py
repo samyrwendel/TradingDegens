@@ -1,4 +1,4 @@
-"""Padrão × Erick comparison + meta-judge (Fase 3, task 017).
+"""Padrão × Analista comparison + meta-judge (Fase 3, task 017).
 
 The meta-judge is deterministic and anchored in the two real verdicts/timeframes;
 the orchestrator runs both readings, reuses a cached side, and reports a combined
@@ -25,11 +25,11 @@ def _stub_fetches(monkeypatch):
 
 
 def _dual_factory():
-    """Padrão → Buy; Erick (analyst present) → Hold with an erick_report, so the
-    two sides genuinely diverge and the Erick side is cache-reusable."""
+    """Padrão → Buy; analista (analyst present) → Hold with an analista_report, so the
+    two sides genuinely diverge and the analista side is cache-reusable."""
     def make(config, selected, callbacks):
-        if "erick" in selected:
-            fs = {**FINAL_STATE, "erick_report": "Erick: aguardar o recuo à média (EMA 8/21)."}
+        if "analista" in selected:
+            fs = {**FINAL_STATE, "analista_report": "analista: aguardar o recuo à média (EMA 8/21)."}
             return _FakeGraph(callbacks, fs, "Hold")
         return _FakeGraph(callbacks, FINAL_STATE, "Buy")
     return make
@@ -49,7 +49,7 @@ def _wait(runner, run_id, timeout=20.0):
 def test_meta_agree():
     m = deterministic_meta(
         {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
-        {"verdict": "Buy", "timeframe": "4h", "method": "erick", "date": "2026-08-22", "actionable": {}},
+        {"verdict": "Buy", "timeframe": "4h", "method": "analista", "date": "2026-08-22", "actionable": {}},
     )
     assert m["agreement"] == "concordam"
     assert m["verdict"] == "Buy"
@@ -59,7 +59,7 @@ def test_meta_agree():
 def test_meta_diverge_picks_conservative_and_explains():
     m = deterministic_meta(
         {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
-        {"verdict": "Hold", "timeframe": "4h", "method": "erick", "date": "2026-08-22",
+        {"verdict": "Hold", "timeframe": "4h", "method": "analista", "date": "2026-08-22",
          "actionable": {"setup_state": "aguardar_pullback"}},
     )
     assert m["agreement"] == "divergem"
@@ -67,8 +67,8 @@ def test_meta_diverge_picks_conservative_and_explains():
     assert "Divergem" in m["headline"]
     assert "timing" in m["significado"].lower()   # anchored decision meaning, not vague
     # names WHICH two are being compared (criterion 4)
-    assert "Padrão" in m["divergencia"] and "Erick" in m["divergencia"]
-    assert "Padrão" in m["label_a"] and "Erick" in m["label_b"]
+    assert "Padrão" in m["divergencia"] and "analista" in m["divergencia"]
+    assert "Padrão" in m["label_a"] and "analista" in m["label_b"]
 
 
 def test_meta_same_method_is_error_never_concordam():
@@ -80,7 +80,7 @@ def test_meta_same_method_is_error_never_concordam():
     )
     assert m["agreement"] == "invalido"
     assert "Concordam" not in m["headline"]
-    assert "Padrão × Erick" in m["headline"]
+    assert "Padrão × Analista" in m["headline"]
     # two timeframes of the same method is equally invalid (no trend/timing story)
     m2 = deterministic_meta(
         {"verdict": "Buy", "timeframe": "1d", "method": "padrao", "date": "2026-08-22"},
@@ -91,7 +91,7 @@ def test_meta_same_method_is_error_never_concordam():
 
 def test_meta_partial_when_one_side_missing():
     m = deterministic_meta({"verdict": "Buy", "timeframe": "1d", "method": "padrao"},
-                           {"verdict": None, "timeframe": "1d", "method": "erick"})
+                           {"verdict": None, "timeframe": "1d", "method": "analista"})
     assert m["agreement"] == "parcial"
 
 
@@ -101,7 +101,7 @@ def test_build_column_reads_record():
         "verdict": "Buy", "verdict_timeframe": "4h",
         "cost": {"usd": 0.02}, "elapsed": 10, "status": "done",
         "result": {"verdict": "Buy", "verdict_timeframe": "4h",
-                   "trader_plan": "entrar metade", "erick_report": "",
+                   "trader_plan": "entrar metade", "analista_report": "",
                    "actionable": {}, "degraded": []},
     }
     c = build_column(rec, "padrao")
@@ -114,7 +114,7 @@ def test_build_column_carries_drop_nature():
     rec = {"run_id": "x", "date": "2026-08-26", "status": "done",
            "result": {"verdict": "Hold", "verdict_timeframe": "4h",
                       "drop_nature": {"classification": "liquidacao_saudavel"}}}
-    c = build_column(rec, "erick")
+    c = build_column(rec, "analista")
     assert c["drop_nature"] == {"classification": "liquidacao_saudavel"}
     # ausência → {} (nunca KeyError pro meta-juiz)
     assert build_column({"result": {}}, "padrao")["drop_nature"] == {}
@@ -123,19 +123,19 @@ def test_build_column_carries_drop_nature():
 def test_meta_injects_drop_nature_as_closed_data():
     """O juiz recebe a classificação da queda como DADO FECHADO (fonte única): trata
     como entrada, não reclassifica; e sinaliza quando a prosa foi corrigida."""
-    erick = {"verdict": "Buy", "timeframe": "4h", "method": "erick", "date": "2026-08-26",
+    analista = {"verdict": "Buy", "timeframe": "4h", "method": "analista", "date": "2026-08-26",
              "actionable": {}, "drop_nature": {"classification": "liquidacao_saudavel",
                                                "coherence_flags": {"removed": 2}}}
     padrao = {"verdict": "Hold", "timeframe": "1d", "method": "padrao", "date": "2026-08-26"}
-    m = deterministic_meta(padrao, erick)
+    m = deterministic_meta(padrao, analista)
     assert m["drop_nature"]["classification"] == "liquidacao_saudavel"
     sig = m["significado"].lower()
     assert "já está classificada" in sig and "não reclassifique" in sig
     assert "liquidação de longs" in sig
     assert "baixa confiança na prosa" in sig          # coherence_flags sinalizado
     # indefinido/indisponível não injeta nota (nada decisivo a fechar)
-    erick2 = {**erick, "drop_nature": {"classification": "indefinido"}}
-    m2 = deterministic_meta(padrao, erick2)
+    analista2 = {**analista, "drop_nature": {"classification": "indefinido"}}
+    m2 = deterministic_meta(padrao, analista2)
     assert "reclassifique" not in m2["significado"].lower()
 
 
@@ -147,8 +147,8 @@ def test_start_compare_two_columns_and_meta(tmp_path):
     assert snap["status"] == "done"
     cmp = snap["result"]["compare"]
     assert cmp["a"]["method"] == "padrao" and cmp["a"]["verdict"] == "Buy"
-    assert cmp["b"]["method"] == "erick" and cmp["b"]["verdict"] == "Hold"
-    assert cmp["b"]["erick_report"]
+    assert cmp["b"]["method"] == "analista" and cmp["b"]["verdict"] == "Hold"
+    assert cmp["b"]["analista_report"]
     assert cmp["meta"]["agreement"] == "divergem"
     assert snap["cost"]["usd"] > 0                 # two pipelines summed
     assert r.store.get(snap["run_id"])["compare"] is True   # persisted + marked
@@ -174,16 +174,16 @@ def test_simple_progress_three_step_model():
     done() converte a que ficou 'running' em 'done' (a 'reused' permanece)."""
     tr = rm._SimpleProgress()
     steps = tr.snapshot()["compare_steps"]
-    assert [s["key"] for s in steps] == ["padrao", "erick", "meta"]
+    assert [s["key"] for s in steps] == ["padrao", "analista", "meta"]
     assert [s["label"] for s in steps] == [
-        "Análise Padrão", "Análise método Erick", "Comparação (meta-juiz)"]
+        "Análise Padrão", "Análise método do analista", "Comparação (meta-juiz)"]
     assert all(s["state"] == "pending" for s in steps)
     tr.step("padrao", "reused")
-    tr.step("erick", "done")
+    tr.step("analista", "done")
     tr.step("meta", "running")
     tr.done()  # 'running' -> 'done'; 'reused'/'done' intactos
     final = {s["key"]: s["state"] for s in tr.snapshot()["compare_steps"]}
-    assert final == {"padrao": "reused", "erick": "done", "meta": "done"}
+    assert final == {"padrao": "reused", "analista": "done", "meta": "done"}
     assert tr.snapshot()["percent"] == 100
 
 
@@ -193,7 +193,7 @@ def test_compare_progress_steps_done_when_fresh(tmp_path):
     snap = _wait(r, r.start_compare("BTC-USD", "2026-08-22"))
     states = _steps_by_key(snap)
     # nada em cache → os dois lados rodaram fresco; meta sempre roda
-    assert states == {"padrao": "done", "erick": "done", "meta": "done"}
+    assert states == {"padrao": "done", "analista": "done", "meta": "done"}
 
 
 def test_compare_progress_marks_reused_sides(tmp_path):
@@ -204,7 +204,7 @@ def test_compare_progress_marks_reused_sides(tmp_path):
     states = _steps_by_key(snap2)
     # DA-058: lado cacheado NÃO re-roda → etapa 'reused'; meta confronta e conclui
     assert states["padrao"] == "reused"
-    assert states["erick"] == "reused"
+    assert states["analista"] == "reused"
     assert states["meta"] == "done"
 
 
@@ -213,36 +213,36 @@ def test_confront_two_existing_runs(tmp_path):
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                        store=HistoryStore(tmp_path), graph_factory=_dual_factory())
     rid_p = r.start("BTC-USD", "2026-08-22", method="padrao"); _wait(r, rid_p)
-    rid_e = r.start("BTC-USD", "2026-08-22", method="erick"); _wait(r, rid_e)
+    rid_e = r.start("BTC-USD", "2026-08-22", method="analista"); _wait(r, rid_e)
     snap = r.confront(rid_p, rid_e)
     assert snap["status"] == "done"
     cmp = snap["result"]["compare"]
     assert cmp["manual"] is True
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "analista"
     assert cmp["meta"]["agreement"] == "divergem"
     # names exactly which two readings (criterion 4)
-    assert "Padrão" in cmp["meta"]["label_a"] and "Erick" in cmp["meta"]["label_b"]
+    assert "Padrão" in cmp["meta"]["label_a"] and "analista" in cmp["meta"]["label_b"]
     # persisted as a compare record, openable
     assert r.store.get(snap["run_id"])["compare"] is True
 
 
 def test_confront_valid_pair_orders_padrao_first(tmp_path):
-    """A valid Padrão × Erick pair is confronted directly (free, no re-run); the
-    header always reads Padrão first even if Erick was picked as side A."""
+    """A valid Padrão × Analista pair is confronted directly (free, no re-run); the
+    header always reads Padrão first even if analista was picked as side A."""
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                        store=HistoryStore(tmp_path), graph_factory=_dual_factory())
-    rid_e = r.start("BTC-USD", "2026-08-22", method="erick"); _wait(r, rid_e)
+    rid_e = r.start("BTC-USD", "2026-08-22", method="analista"); _wait(r, rid_e)
     rid_p = r.start("BTC-USD", "2026-08-22", method="padrao"); _wait(r, rid_p)
-    out = r.confront(rid_e, rid_p)              # Erick picked first
+    out = r.confront(rid_e, rid_p)              # analista picked first
     assert "rerouted" not in out               # direct: it was already a valid pair
     cmp = out["result"]["compare"]
     assert cmp["manual"] is True
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "analista"
 
 
-def test_confront_same_method_reroutes_to_padrao_erick(tmp_path):
+def test_confront_same_method_reroutes_to_padrao_analista(tmp_path):
     """SPCX bug (task 024): confronting two runs of the SAME method can no longer
-    produce 'Padrão × Padrão'. It reroutes to a real Padrão × Erick compare that
+    produce 'Padrão × Padrão'. It reroutes to a real Padrão × Analista compare that
     reuses the cached side and runs only the missing method."""
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                        store=HistoryStore(tmp_path), graph_factory=_dual_factory())
@@ -250,31 +250,31 @@ def test_confront_same_method_reroutes_to_padrao_erick(tmp_path):
     rid_a = r.start("SPCX", "2026-08-22", method="padrao"); _wait(r, rid_a)
     rid_b = r.start("SPCX", "2026-08-22", method="padrao"); _wait(r, rid_b)
     out = r.confront(rid_a, rid_b)
-    # not a direct confront: rerouted to an async Padrão × Erick run
+    # not a direct confront: rerouted to an async Padrão × Analista run
     assert out.get("rerouted") is True and "run_id" in out
     assert "compare" not in (out.get("result") or {})
     snap = _wait(r, out["run_id"])
     cmp = snap["result"]["compare"]
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
-    assert cmp["b"]["erick_report"]                 # the missing method actually ran
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "analista"
+    assert cmp["b"]["analista_report"]                 # the missing method actually ran
     assert cmp["a"]["reused"] is True               # the existing Padrão was reused
     assert cmp["meta"]["agreement"] != "invalido"   # a real confront, not método×ele-mesmo
 
 
 def test_confront_mismatched_timeframe_reroutes(tmp_path):
-    """Padrão × Erick but on DIFFERENT frames is not 'same timeframe' → reroute to a
-    fresh same-frame Padrão × Erick anchored on the open run A."""
+    """Padrão × Analista but on DIFFERENT frames is not 'same timeframe' → reroute to a
+    fresh same-frame Padrão × Analista anchored on the open run A."""
     r = AnalysisRunner(base_config={"results_dir": str(tmp_path)},
                        store=HistoryStore(tmp_path), graph_factory=_dual_factory())
     rid_p1d = r.start("BTC-USD", "2026-08-22", method="padrao", timeframe="1d"); _wait(r, rid_p1d)
-    rid_e4h = r.start("BTC-USD", "2026-08-22", method="erick", timeframe="4h"); _wait(r, rid_e4h)
+    rid_e4h = r.start("BTC-USD", "2026-08-22", method="analista", timeframe="4h"); _wait(r, rid_e4h)
     out = r.confront(rid_p1d, rid_e4h)
     assert out.get("rerouted") is True
     snap = _wait(r, out["run_id"])
     cmp = snap["result"]["compare"]
     # anchored on A (1d): both sides on the same frame now
     assert cmp["a"]["timeframe"] == "1d" and cmp["b"]["timeframe"] == "1d"
-    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "erick"
+    assert cmp["a"]["method"] == "padrao" and cmp["b"]["method"] == "analista"
 
 
 def test_confront_rejects_different_tickers(tmp_path):

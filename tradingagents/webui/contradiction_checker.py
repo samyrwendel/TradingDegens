@@ -26,7 +26,7 @@ from typing import Any
 _ACTIONS = ("COMPRAR", "AUMENTAR", "MANTER", "REDUZIR", "VENDER", "AGUARDAR")
 
 _MODULE_TEXT_KEYS = (
-    "market_report", "erick_report", "trader_plan", "investment_plan",
+    "market_report", "analista_report", "trader_plan", "investment_plan",
     "research_manager", "risk_decision", "fundamentals_report", "bull", "bear",
     "news_report", "sentiment_report",
 )
@@ -306,13 +306,13 @@ def _check_aggregates(result: dict[str, Any]) -> list[dict[str, str]]:
     return findings
 
 
-_ERICK_STATES = ("AGIR", "AGUARDAR", "CAIXA")
+_ANALISTA_STATES = ("AGIR", "AGUARDAR", "CAIXA")
 
 
-def _check_erick_state(result: dict[str, Any]) -> list[dict[str, str]]:
-    """The Erick module must speak ONE state (item 6b): the deterministic 'Estado' and
+def _check_analista_state(result: dict[str, Any]) -> list[dict[str, str]]:
+    """The analista module must speak ONE state (item 6b): the deterministic 'Estado' and
     any prose 'Veredito' must agree, never 'Veredito AGUARDAR' vs 'Estado AGIR'."""
-    text = result.get("erick_report") or ""
+    text = result.get("analista_report") or ""
     if not isinstance(text, str) or not text:
         return []
     est = re.search(r"Estado[^\n:]*:\**\s*(AGIR|AGUARDAR|CAIXA)", text, re.IGNORECASE)
@@ -322,8 +322,8 @@ def _check_erick_state(result: dict[str, Any]) -> list[dict[str, str]]:
     a, b = est.group(1).upper(), ver.group(1).upper()
     if a != b:
         return [_finding(
-            "erick_estado_veredito_divergente", "alta",
-            f"Método Erick contradiz a si mesmo: Estado={a} vs Veredito={b}. O módulo "
+            "analista_estado_veredito_divergente", "alta",
+            f"Método do analista contradiz a si mesmo: Estado={a} vs Veredito={b}. O módulo "
             "deve emitir UM estado único (AGIR/AGUARDAR/CAIXA).",
         )]
     return []
@@ -377,7 +377,7 @@ def check_contradictions(result: dict[str, Any] | None) -> list[dict[str, str]]:
         _check_price_drift,
         _check_market_cap_price,
         _check_aggregates,
-        _check_erick_state,
+        _check_analista_state,
         _check_oi_divergence,
     ):
         try:

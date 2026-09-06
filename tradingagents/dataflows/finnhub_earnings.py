@@ -1,7 +1,7 @@
-"""Resultado REPORTADO de earnings do âncora — o CATALISADOR que o Erick lê.
+"""Resultado REPORTADO de earnings do âncora — o CATALISADOR que o analista lê.
 
 O `earnings_calendar` (yfinance) responde "quando é o próximo balanço". Mas a
-leitura do Erick gira em torno do RESULTADO que já saiu: "a NVDA reportou e
+leitura do analista gira em torno do RESULTADO que já saiu: "a NVDA reportou e
 **bateu** → a queda pós-balanço é liquidação de longs, não fraqueza". Esse dado —
 reportado × estimado + surpresa — o calendário não dá, e o yfinance
 `get_earnings_dates` anda STALE para o âncora (só devolve trimestres antigos). O

@@ -1,5 +1,5 @@
 """E2E da barra de controle numa linha só (task de UI 010, pedido do Samyr;
-redistribuída na task 034 a partir de 5 apps de referência — Quantfury/Krystal/
+redistribuída na task 034 a partir de 5 apps de referência — referência de design/Krystal/
 CoinMarketCap).
 
 O pedido original: Ativo · Data · Tempo · Método · Analisar · ↻ na MESMA linha —

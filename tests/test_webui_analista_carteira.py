@@ -1,4 +1,4 @@
-"""A CARTEIRA DO ERICK dentro do produto — e o portão que a protege (DA-148).
+"""A CARTEIRA DO ANALISTA dentro do produto — e o portão que a protege (DA-148).
 
 Duas travas, e nenhuma é negociável:
 
@@ -8,7 +8,7 @@ Duas travas, e nenhuma é negociável:
    O Samyr é aluno e pode consumir o que comprou; o visitante do produto dele, não.
    Trazer chave própria de LLM não compra assinatura de terceiro, então o portão de
    CUSTO (`_gate_or_403`) não serve aqui — só o de AUTORIZAÇÃO.
-2. **A credencial não mora no código.** Sem `ERICK_CARTEIRA_EMAIL` no ambiente, a
+2. **A credencial não mora no código.** Sem `ANALISTA_CARTEIRA_EMAIL` no ambiente, a
    feature não existe: a rota devolve 404 e o front esconde o botão. E o e-mail
    NUNCA aparece em resposta, em log ou em mensagem de erro.
 """
@@ -20,7 +20,7 @@ import urllib.request
 
 import pytest
 
-from tradingagents.dataflows import erick_carteira as ec
+from tradingagents.dataflows import analista_carteira as ec
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
@@ -74,23 +74,25 @@ def test_DENTE_visitante_anonimo_leva_403_e_a_rota_nao_executa_nada(servidor, mo
     base, _ = servidor
     monkeypatch.setattr(ec, "carteira",
                         lambda **kw: pytest.fail("a rota LEU a carteira antes do portão"))
-    status, corpo = _get(f"{base}/api/erick/carteira")
+    status, corpo = _get(f"{base}/api/analista/carteira")
     assert status == 403, (status, corpo)
     assert corpo.get("error_code") == "owner_only", corpo
 
 
-def test_o_403_nao_vaza_nem_o_endereco_nem_quem_assina(servidor):
+def test_o_403_nao_vaza_nem_o_endereco_nem_quem_assina(servidor, monkeypatch):
+    monkeypatch.setenv("ANALISTA_CARTEIRA_URL", "https://fonte-do-analista.exemplo/carteira")
     base, _ = servidor
-    _, corpo = _get(f"{base}/api/erick/carteira")
+    _, corpo = _get(f"{base}/api/analista/carteira")
     texto = json.dumps(corpo, ensure_ascii=False)
-    assert "ericksekiama" not in texto, texto
+    assert "fonte-do-analista.exemplo" not in texto, texto
     assert "@" not in texto, texto
 
 
 def test_sem_credencial_a_feature_NAO_EXISTE_nesta_instancia(monkeypatch):
     """Falha silenciosa e limpa: `None`, não exceção. Um stack trace aqui exporia o
     endereço de alguém, e um 500 anunciaria que a feature existe."""
-    monkeypatch.delenv("ERICK_CARTEIRA_EMAIL", raising=False)
+    monkeypatch.delenv("ANALISTA_CARTEIRA_EMAIL", raising=False)
+    monkeypatch.delenv("ANALISTA_CARTEIRA_URL", raising=False)
     assert ec.configurado() is False
     assert ec.carteira() is None
 
@@ -98,7 +100,8 @@ def test_sem_credencial_a_feature_NAO_EXISTE_nesta_instancia(monkeypatch):
 def test_o_cache_responde_dentro_da_janela_e_NAO_bate_no_servidor_alheio(monkeypatch, tmp_path):
     """Cadência civilizada: é servidor de outra pessoa e o dado é atualizado à mão.
     DENTE: qualquer regressão que volte a buscar a cada pedido bate aqui."""
-    monkeypatch.setenv("ERICK_CARTEIRA_EMAIL", "alguem@exemplo.com")
+    monkeypatch.setenv("ANALISTA_CARTEIRA_EMAIL", "alguem@exemplo.com")
+    monkeypatch.setenv("ANALISTA_CARTEIRA_URL", "https://fonte-do-analista.exemplo/carteira")
     monkeypatch.setattr(ec, "_CACHE", tmp_path / "c.json")
     n = {"i": 0}
 
@@ -117,7 +120,8 @@ def test_o_cache_responde_dentro_da_janela_e_NAO_bate_no_servidor_alheio(monkeyp
 def test_falha_de_acesso_DEGRADA_pro_ultimo_lido_em_vez_de_esvaziar_a_tela(monkeypatch, tmp_path):
     """Painel vazio se leria como "ele zerou a carteira" — que é uma AFIRMAÇÃO, não
     uma ausência de dado. Degrada mostrando o último lido, marcado."""
-    monkeypatch.setenv("ERICK_CARTEIRA_EMAIL", "alguem@exemplo.com")
+    monkeypatch.setenv("ANALISTA_CARTEIRA_EMAIL", "alguem@exemplo.com")
+    monkeypatch.setenv("ANALISTA_CARTEIRA_URL", "https://fonte-do-analista.exemplo/carteira")
     monkeypatch.setattr(ec, "_CACHE", tmp_path / "c.json")
     monkeypatch.setattr(ec, "_busca", lambda: {
         "carteira": _AMOSTRA, "historico": None, "lido_em": 1_000.0})
@@ -133,7 +137,8 @@ def test_falha_de_acesso_DEGRADA_pro_ultimo_lido_em_vez_de_esvaziar_a_tela(monke
 
 
 def test_sem_cache_e_com_a_fonte_fora_do_ar_devolve_None_em_vez_de_inventar(monkeypatch, tmp_path):
-    monkeypatch.setenv("ERICK_CARTEIRA_EMAIL", "alguem@exemplo.com")
+    monkeypatch.setenv("ANALISTA_CARTEIRA_EMAIL", "alguem@exemplo.com")
+    monkeypatch.setenv("ANALISTA_CARTEIRA_URL", "https://fonte-do-analista.exemplo/carteira")
     monkeypatch.setattr(ec, "_CACHE", tmp_path / "vazio.json")
 
     def explode():
@@ -163,4 +168,4 @@ def test_a_participacao_sai_do_preco_MEDIO_e_o_caixa_entra_na_conta(monkeypatch)
 def test_o_simbolo_traduz_pro_vocabulario_do_PRODUTO_e_caixa_nao_vira_ticker(linha, esperado):
     """A cripto vem no formato da exchange no payload dele; o produto fala BTC-USD.
     E CAIXA não é ativo negociável — pedir cotação de "CASH" seria inventar símbolo."""
-    assert AnalysisRunner._erick_simbolo(linha) == esperado
+    assert AnalysisRunner._analista_simbolo(linha) == esperado

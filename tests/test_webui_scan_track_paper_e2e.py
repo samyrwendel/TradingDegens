@@ -12,7 +12,7 @@ DA-155 nomeou o que estava sendo construído — PAPER TRADING, não "estatísti
 do scan" — e cresceu o escopo: a CARTEIRA VIRTUAL acompanha a simulação
 enquanto ela VIVE (posições abertas com PnL não realizado, saldo evoluindo),
 com o vocabulário e o aviso ("nenhuma ordem real") que o nome exige, e sem
-NUNCA se confundir com a carteira REAL do Erick (outro painel, `#erickPanel`).
+NUNCA se confundir com a carteira REAL do analista (outro painel, `#analystPanel`).
 """
 
 import json
@@ -217,23 +217,23 @@ def test_nomenclatura_de_paper_trading_e_o_aviso_de_ordem_simulada(base):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_nunca_confunde_com_a_carteira_do_erick(base):
+def test_nunca_confunde_com_a_carteira_do_analista(base):
     """As duas convivem na TELA (painéis diferentes), mas NUNCA no mesmo
-    painel nem somando saldo — a carteira virtual não pode citar "Erick" como
+    painel nem somando saldo — a carteira virtual não pode citar "analista" como
     se fosse a fonte do saldo, só como esclarecimento de que são coisas
-    diferentes, e o texto do Erick tem de morar no painel DELE."""
+    diferentes, e o texto do analista tem de morar no painel DELE."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base)
-        assert page.query_selector("#erickPanel") is not None, "painel do Erick some do DOM"
+        assert page.query_selector("#analystPanel") is not None, "painel do analista some do DOM"
         # os dois painéis são elementos DIFERENTES — nunca o mesmo container
         same = page.evaluate(
-            "() => document.getElementById('erickPanel') === document.getElementById('scanTrack')")
+            "() => document.getElementById('analystPanel') === document.getElementById('scanTrack')")
         assert same is False
-        # #erickPanel não tem NADA da carteira virtual dentro dele
-        erick_txt = page.inner_text("#erickPanel")
-        assert "saldo simulado" not in erick_txt.lower()
+        # #analystPanel não tem NADA da carteira virtual dentro dele
+        analista_txt = page.inner_text("#analystPanel")
+        assert "saldo simulado" not in analista_txt.lower()
         browser.close()
 
 

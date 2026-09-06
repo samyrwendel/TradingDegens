@@ -50,15 +50,15 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         tool_node="tools_fundamentals",
         report_key="fundamentals_report",
     ),
-    # On-demand "Modo Erick": só entra na seleção quando o usuário pede o método.
+    # On-demand "Modo analista": só entra na seleção quando o usuário pede o método.
     # Reusa o conjunto de ferramentas do de mercado (mesmo tool_node key), mas com
     # prompt/veredito próprios do método (recuo à média, saída, peso relativo).
-    "erick": AnalystNodeSpec(
-        key="erick",
-        agent_node="Erick Analyst",
-        clear_node="Msg Clear Erick",
-        tool_node="tools_erick",
-        report_key="erick_report",
+    "analista": AnalystNodeSpec(
+        key="analista",
+        agent_node="Analista Analyst",
+        clear_node="Msg Clear Analista",
+        tool_node="tools_analista",
+        report_key="analista_report",
     ),
 }
 

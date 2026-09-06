@@ -1,4 +1,4 @@
-"""Carteira-ESPELHO em PAPER que CLONA as PRÓXIMAS entradas e saídas do Erick
+"""Carteira-ESPELHO em PAPER que CLONA as PRÓXIMAS entradas e saídas do analista
 (tasks 20260902-055/056) — replica MECANICAMENTE o que ele faz, não modela o
 raciocínio dele.
 
@@ -21,14 +21,14 @@ passou a ser o preço de verdade).
 **O CAPITAL é PARÂMETRO, sem default inventado (task 056).** Enquanto o Samyr não
 disser o valor, o clone fica ARMADO e PARADO — e diz isso, em vez de estrear com um
 número chutado (não é o aporte de 70k dele). Configurado via
-:func:`configurar_capital` (ou o env ``CLONE_ERICK_CAPITAL``), configurar (re)arma a
+:func:`configurar_capital` (ou o env ``CLONE_ANALISTA_CAPITAL``), configurar (re)arma a
 baseline: a ativação recomeça a história ali.
 
 **A REGRA INEGOCIÁVEL do preço.** O preço de entrada do clone é o preço REAL do
 instante em que NÓS detectamos a mudança — via :func:`live_price.fetch_live_price`
 —, NUNCA o ``precoMedio`` dele, NUNCA o preço do dia em que ele entrou. O
 ``precoMedio`` dele é gravado no ledger SÓ como auditoria — a prova de que NÃO é ele
-que entra na conta. Teste-dente em ``test_webui_clone_erick``.
+que entra na conta. Teste-dente em ``test_webui_clone_analista``.
 
 **Replica o PESO, não a quantidade.** Capital diferente: a quantidade dele não
 transporta. O clone mira o ``peso_agora`` (pct do capital DEPOIS da mudança)
@@ -71,15 +71,15 @@ from tradingagents.webui import alertas_tg as A
 
 # Env pelo qual o serviço pode injetar o capital (o Samyr define o valor). NÃO há
 # default: capital ausente = clone armado e parado.
-_CAPITAL_ENV = "CLONE_ERICK_CAPITAL"
+_CAPITAL_ENV = "CLONE_ANALISTA_CAPITAL"
 
 _MESES = {"jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
           "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12}
 
 
 def _base_dir(dir: str | os.PathLike | None = None) -> Path:
-    return Path(dir) if dir else Path(os.environ.get("CLONE_ERICK_DIR")
-                or (Path.home() / ".tradingagents" / "clone-erick"))
+    return Path(dir) if dir else Path(os.environ.get("CLONE_ANALISTA_DIR")
+                or (Path.home() / ".tradingagents" / "clone-analista"))
 
 
 def ledger_path(dir: str | os.PathLike | None = None) -> Path:

@@ -1,11 +1,11 @@
-"""O card MÉTODO ERICK nas leituras de fundo (task 20260904-003).
+"""O card MÉTODO DO ANALISTA nas leituras de fundo (task 20260904-003).
 
 Samyr (03/09 19:55): *"no diário só aparecem Setup123 e Recuo à média; não deveria
-ter um card priorizando a análise do Erick?"*. O card aparece PRIMEIRO nas leituras
+ter um card priorizando a análise do analista?"*. O card aparece PRIMEIRO nas leituras
 do 1w/1d, com o estado/decisão/EMAs do método; nos frames menores (4h/1h) ele fica
 FORA DO FRAME (só o cabeçalho, sem card), porque o método decide no fundo diário/
-semanal. O dado do card vem de ``erick_reading`` no ``actionable`` — o front só
-renderiza; a decisão é a de ``erick_reading_dict`` (soldada em test_erick_reading_dict).
+semanal. O dado do card vem de ``analista_reading`` no ``actionable`` — o front só
+renderiza; a decisão é a de ``analista_reading_dict`` (soldada em test_analista_reading_dict).
 """
 
 import json
@@ -29,7 +29,7 @@ def base(tmp_path):
     yield from sobe_servidor(tmp_path)
 
 
-_ERICK = {
+_ANALISTA = {
     "disponivel": True, "fora_do_frame": False, "frame": "4h", "frame_label": "4 horas (intradiário)",
     "degraded": False, "estado": "AGIR", "acao": "AGIR",
     "entrada": "preço recuou até a média agora (EMA 8 99,00 · EMA 21 98,00) — é o ponto de entrada no recuo",
@@ -45,26 +45,26 @@ _ERICK = {
 }
 
 
-def _snap(erick):
+def _snap(analista):
     plano = {
         "symbol": "AVGO", "price": 99.2, "timeframe": "diário (referência)", "horizon": "dias",
         "setup_state": "aguardar_rompimento", "setup_source": "123",
         "pattern": None, "buy_zone": None, "realize_zone": None, "pullback_zone": None,
         "invalidation": None, "stop": None, "target": None, "risk_reward": None,
-        "erick_reading": erick,
+        "analista_reading": analista,
     }
     r = {"verdict": "Hold", "final_decision": "", "timeframe": "1d", "as_of_price": 99.2,
          "actionable": plano, "live_price": None, "price_chart": None, "degraded": [],
          "bull": "", "bear": "", "research_manager": "", "investment_plan": "", "trader_plan": "",
          "risk_decision": "", "market_report": "", "sentiment_report": "", "news_report": "",
-         "fundamentals_report": "", "erick_report": "", "drop_nature": {}, "derivatives_report": ""}
+         "fundamentals_report": "", "analista_report": "", "drop_nature": {}, "derivatives_report": ""}
     return {"run_id": "R-ERK", "ticker": "AVGO", "date": "2026-09-03", "asset_type": "stock",
             "status": "done", "elapsed": 1, "cost": {"usd": 0.0}, "verdict": "Hold",
             "verdict_timeframe": "1d", "result": r}
 
 
-def _abre(page, base_url, erick):
-    snap = _snap(erick)
+def _abre(page, base_url, analista):
+    snap = _snap(analista)
 
     def handler(route):
         u = route.request.url
@@ -83,21 +83,21 @@ def _abre(page, base_url, erick):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
-def test_o_card_do_Metodo_Erick_aparece_PRIMEIRO_no_diario(base):
+def test_o_card_do_Metodo_analista_aparece_PRIMEIRO_no_diario(base):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
-        _abre(page, base, _ERICK)
+        _abre(page, base, _ANALISTA)
         # existe e é o PRIMEIRO card
         ordem = page.evaluate(
             "() => [...document.querySelectorAll('#setupCards .setup-card')].map(c => c.className)")
-        assert ordem and "sc-erick" in ordem[0], ("Erick não é o primeiro card", ordem)
+        assert ordem and "sc-analista" in ordem[0], ("analista não é o primeiro card", ordem)
         txt = page.evaluate(
-            "() => document.querySelector('.setup-card.sc-erick').innerText.replace(/\\s+/g,' ')")
-        assert "Método Erick" in txt, txt
+            "() => document.querySelector('.setup-card.sc-analista').innerText.replace(/\\s+/g,' ')")
+        assert "Método do analista" in txt, txt
         assert "AGIR" in txt and "meia posição" in txt, txt
         assert "EMA 8" in txt and "99,00" in txt, ("alinhamento das EMAs", txt)
-        assert "sequência de 3 candles (Erick)" in txt, ("1-2-3 do Erick separado do pivô", txt)
+        assert "sequência de 3 candles (analista)" in txt, ("1-2-3 do analista separado do pivô", txt)
         browser.close()
 
 
@@ -108,9 +108,9 @@ def test_fora_do_frame_nao_desenha_card_mas_avisa(base):
         browser = p.chromium.launch()
         page = browser.new_page(viewport=DESKTOP)
         _abre(page, base, fora)
-        assert page.query_selector(".setup-card.sc-erick") is None, "não devia haver card no 4h"
-        nota = page.query_selector(".sc-erick-fora")
+        assert page.query_selector(".setup-card.sc-analista") is None, "não devia haver card no 4h"
+        nota = page.query_selector(".sc-analista-fora")
         assert nota is not None, "faltou o cabeçalho 'fora do frame'"
         t = nota.inner_text()
-        assert "Método Erick" in t and "fora do frame" in t, t
+        assert "Método do analista" in t and "fora do frame" in t, t
         browser.close()

@@ -13,11 +13,11 @@ Este módulo NÃO inventa nível nenhum. Os níveis saem de
 :func:`price_structure._pattern_levels` (invalidação, stop, alvo, R:R) e o percurso
 sai da task 008 (:func:`price_structure._com_percurso`). O que ele acrescenta é a
 POLÍTICA — a ordem em que se digita, a fração a realizar, a proteção e o veredito de
-oportunidade — modelada em ``~/brain/trading-ops/erick-camada-de-execucao-e-saida-spec.md``
-pelo degenbot a partir do corpus do Erick.
+oportunidade — modelada em a nota privada da camada de execução e saída do analista
+pelo degenbot a partir do corpus do analista.
 
 **O que é `sem evidência` continua declarado como tal**, e é a maior parte do valor
-aqui: a fração exata de cada alvo, o break-even como regra do Erick e o ATR como
+aqui: a fração exata de cada alvo, o break-even como regra do analista e o ATR como
 referência de trailing NÃO estão no corpus, e o card diz isso em vez de fabricar um
 número que parece autoridade.
 """
@@ -251,12 +251,12 @@ def saida(plan: dict[str, Any] | None) -> dict[str, Any]:
 def protecao() -> dict[str, Any]:
     """BE e trailing: existem, e nascem DESLIGADOS — com o porquê escrito.
 
-    Não é omissão nem preguiça de default. O método do Erick **compra o recuo à
+    Não é omissão nem preguiça de default. O método do analista **compra o recuo à
     média**: um BE ou um trailing colado na média ejetaria o trade exatamente no
     pullback em que ele estaria ADICIONANDO. Ligado por default, o comprador-de-recuo
     vira vendedor-de-recuo — inverte o método.
 
-    E há uma honestidade a declarar: **`sem evidência` de que o Erick verbalize o
+    E há uma honestidade a declarar: **`sem evidência` de que o analista verbalize o
     break-even.** A proteção que ele descreve é REDUZIR (tirar ficha da mesa), não
     mover stop. O BE é pergunta do Samyr, entregue como ferramenta ancorada em duas
     âncoras medíveis — nunca em palpite.
@@ -273,7 +273,7 @@ def protecao() -> dict[str, Any]:
             ],
             "nota": ("desligado por default: o recuo à média é ENTRADA no método, e um BE "
                      "cedo estopa no pullback em que se adiciona."),
-            "evidencia": ("`sem evidência` de BE no corpus do Erick — ele protege REDUZINDO. "
+            "evidencia": ("`sem evidência` de BE no corpus do analista — ele protege REDUZINDO. "
                           "O gatilho de +1R é convenção declarada, `a calibrar`."),
         },
         "trailing": {
@@ -284,7 +284,7 @@ def protecao() -> dict[str, Any]:
             "disparo": "só no FECHAMENTO do frame que perde a referência; pavio não dispara.",
             "nota": ("ligar tipicamente só no RESÍDUO, depois de realizado o grosso — "
                      "nunca na posição inteira."),
-            "evidencia": ("`sem evidência` de ATR como régua de trailing do Erick: o ATR é "
+            "evidencia": ("`sem evidência` de ATR como régua de trailing do analista: o ATR é "
                           "utilitário do motor (folga do stop), não a referência dele."),
         },
     }
@@ -394,7 +394,7 @@ def card(plan: dict[str, Any] | None, por_setup: dict[str, Any] | None = None,
 def peso_relativo(plan: dict[str, Any] | None) -> dict[str, Any]:
     """Quanto do capital — **sempre em RELATIVO, nunca em valor ou percentual**.
 
-    Regra 8 do método: o Erick fala em proporção à confirmação (caixa · inicial ·
+    Regra 8 do método: o analista fala em proporção à confirmação (caixa · inicial ·
     meia · cheia), nunca em cifra. O degrau sai do ESTADO do setup, que é o que o
     plano já publica — quanto mais confirmado, maior o degrau —, e o card diz o
     degrau, não um número que ninguém disse.

@@ -1,5 +1,5 @@
 :root {
-  /* Fundo QUASE PRETO estilo Quantfury (task 029): neutro-escuro, sem tom azulado.
+  /* Fundo QUASE PRETO estilo da referência de design (task 029): neutro-escuro, sem tom azulado.
      O gráfico é o mais profundo (#000), painéis #111, superfícies elevadas #1a1a1a.
      As cores de FUNÇÃO (verde/amarelo/vermelho) e o azul de DADO (MMS50/1-2-3,
      hardcoded em app.js) ficam intactos — só o chrome navy saiu. */
@@ -26,7 +26,7 @@
             --yellow-border #6b5514 · --orange #ff8a3d */
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
-  /* ESCALA TIPOGRÁFICA — densidade Quantfury (task 036). Fonte proprietária
+  /* ESCALA TIPOGRÁFICA — densidade referência de design (task 036). Fonte proprietária
      (UniNeue) NÃO usada; sans neutro casando ESCALA + PESOS + line-heights, que é
      o que dá a densidade. Só 4 tamanhos e 2 pesos — nada fora disso.
        10/500 → rodapé/disclaimer legal
@@ -128,13 +128,13 @@ img, canvas, svg, video { max-width: 100%; }
 
 body {
   margin: 0;
-  /* Edge-to-edge (padrão Quantfury): sem moldura escura em volta. O corpo é uma
+  /* Edge-to-edge (padrão da referência de design): sem moldura escura em volta. O corpo é uma
      coluna que preenche a tela; o palco (main) ocupa toda a altura restante e é a
      superfície contínua — o fundo escuro só aparece atrás do topo/rodapé. */
   display: flex; flex-direction: column; min-height: 100vh;
   background: var(--bg);
   color: var(--text);
-  /* base = texto de interface 12/500 (o mais usado na Quantfury) */
+  /* base = texto de interface 12/500 (o mais usado na referência de design) */
   font: var(--fw-med) var(--fs-12)/1.4 var(--font);
 }
 
@@ -220,7 +220,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    página na horizontal (pego por test_vertical_resizer_drags_and_persists). Base
    `wrap`: sem espaço, quebra — melhor duas linhas legíveis que scroll horizontal.
 
-   Task 034 — redistribuição a partir de 5 apps de referência (Quantfury/Krystal/
+   Task 034 — redistribuição a partir de 5 apps de referência (referência de design/Krystal/
    CoinMarketCap): o gap GRANDE (24px — o piso da faixa 24-32px) separa PERGUNTAS
    (ativo+data · tempo · método · ações); o PEQUENO (6px, em `.lb-asset`) só existe
    DENTRO da mesma pergunta (ativo+data — "o quê" e "quando" são a mesma coisa). */
@@ -303,7 +303,7 @@ button.lb-method {
 }
 /* Todos os métodos compartilham o mesmo estilo (padrão visual único); a cor de
    destaque só entra no SELECIONADO, nunca por tipo. Antes cada método tinha cor
-   própria (padrao azul, erick azul-claro, compare roxo) — inconsistente. */
+   própria (padrao azul, analista azul-claro, compare roxo) — inconsistente. */
 button.lb-method:hover:not(.is-active) { color: var(--text); }
 /* método SELECIONADO (o que Analisar/↻ vão rodar): anel de destaque */
 button.lb-method.is-active { color: var(--green); font-weight: var(--fw-bold); }
@@ -388,9 +388,9 @@ button.lb-method.is-active { color: var(--green); font-weight: var(--fw-bold); }
 }
 .lbp-foot button:hover { color: var(--text); border-color: var(--accent); }
 
-/* seção do método Erick no resultado: destaque sutil sem gritar */
-details.section.erick { border-color: #2e5c7d; }
-details.section.erick > summary { color: #9cc7f5; }
+/* seção do método do analista no resultado: destaque sutil sem gritar */
+details.section.analista { border-color: #2e5c7d; }
+details.section.analista > summary { color: #9cc7f5; }
 
 .hint { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12); min-height: 16px; }
 .error { margin: 7px 0 0; color: var(--red); font-size: var(--fs-12); }
@@ -572,7 +572,7 @@ details.section.erick > summary { color: #9cc7f5; }
 .fallback-banner .fb-list li { font-size: var(--fs-10); line-height: var(--lh-10); color: var(--text); }
 .fallback-banner .fb-step { color: var(--muted); font-family: var(--mono); }
 
-/* Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação, cada
+/* Trilha do CONFRONTO (task 030): as 3 etapas Padrão → analista → Comparação, cada
    uma com número, ícone de estado e rótulo. Estados: aguardando (apagada) ·
    rodando (accent, pulsa) · concluída (verde) · reusada do cache (âmbar). */
 .cmp-steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -777,12 +777,12 @@ details.section[open] > summary::before { content: "▾"; }
 
 /* candlestick chart */
 .chart-card {
-  /* o gráfico é a superfície mais profunda: preto puro (Quantfury), velas e
+  /* o gráfico é a superfície mais profunda: preto puro (referência de design), velas e
      etiquetas do eixo destacam sobre ele. */
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
   padding: 14px 16px; margin: 8px 0 6px;
 }
-/* setup ativo NÃO pinta o gráfico de verde (task 018): a Quantfury não tem moldura
+/* setup ativo NÃO pinta o gráfico de verde (task 018): a referência de design não tem moldura
    colorida no gráfico. O destaque do setup vive nas faixas dentro do próprio gráfico
    (compra/realização/1-2-3), não numa borda em volta do card. */
 
@@ -932,7 +932,7 @@ details.section[open] > summary::before { content: "▾"; }
   background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 11px;
 }
 
-/* ---- comparação Padrão × Erick (Fase 3, meta-juiz) ---- */
+/* ---- comparação Padrão × analista (Fase 3, meta-juiz) ---- */
 .compare-panel .cmp-head { display: flex; align-items: baseline; gap: 10px 20px; flex-wrap: wrap; margin-bottom: 12px; }
 .cmp-2p { color: var(--muted); font-weight: var(--fw-med); font-size: var(--fs-10); }
 
@@ -1152,7 +1152,7 @@ details.section[open] > summary::before { content: "▾"; }
    ÚNICA do launcher na task 029; os estilos vivem agora em .launch-bar / .lb-*.) */
 
 /* history — WATCHLIST densa (task 009/018): nada de cartão nem RÉGUA entre itens.
-   Como a Quantfury, é contínua e densa — só espaçamento separa as linhas (sem
+   Como a referência de design, é contínua e densa — só espaçamento separa as linhas (sem
    divisória de 1px). Cada linha é ticker (negrito) + nome (cinza) à esquerda,
    veredito + data à direita e um × discreto. Legibilidade vem do respiro + hover. */
 .history { list-style: none; margin: 0; padding: 0; display: block; }
@@ -1697,24 +1697,24 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 .sc-storm.sc-vetado { border-left-color: var(--muted); }
 .sc-storm .sc-dir { color: var(--green); }
 .sc-storm.sc-venda .sc-dir { color: var(--red); }
-/* Card do MÉTODO ERICK (task 20260904-003) — a leitura de FUNDO (1w/1d), primeiro na
+/* Card do MÉTODO DO ANALISTA (task 20260904-003) — a leitura de FUNDO (1w/1d), primeiro na
    ordem. A borda é o --accent (azul) pra distinguir do Setup123/Storm (verde/vermelho
    de direção); o ESTADO carrega a cor por FUNÇÃO (DA-085: verde só pra AGIR; AGUARDAR
    neutro; CAIXA cinza — a palavra manda, não a cor). */
-.sc-erick { border-left: 3px solid var(--accent); }
-.sc-erick .sc-dir { color: var(--accent); text-transform: none; letter-spacing: 0; }
-.sc-erick-estado.agir .sc-v { color: var(--green); }
-.sc-erick-estado.aguardar .sc-v { color: var(--text); }
-.sc-erick-estado.caixa .sc-v { color: var(--muted); }
-.sc-erick-saida .sc-k { font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); color: var(--text); }
-/* "Método Erick: fora do frame" nos frames menores (4h/1h/15m): o método decide no
+.sc-analista { border-left: 3px solid var(--accent); }
+.sc-analista .sc-dir { color: var(--accent); text-transform: none; letter-spacing: 0; }
+.sc-analista-estado.agir .sc-v { color: var(--green); }
+.sc-analista-estado.aguardar .sc-v { color: var(--text); }
+.sc-analista-estado.caixa .sc-v { color: var(--muted); }
+.sc-analista-saida .sc-k { font-size: var(--fs-12); line-height: var(--lh-12); font-weight: var(--fw-bold); color: var(--text); }
+/* "Método do analista: fora do frame" nos frames menores (4h/1h/15m): o método decide no
    fundo diário/semanal, então aqui não há card — só o cabeçalho que diz por quê. */
-.sc-erick-fora {
+.sc-analista-fora {
   display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted);
   padding: 4px 0 6px; border-bottom: 1px dashed var(--border); margin-bottom: 8px;
 }
-.sc-erick-fora-k { font-weight: var(--fw-bold); color: var(--text); }
+.sc-analista-fora-k { font-weight: var(--fw-bold); color: var(--text); }
 /* Cabeçalho de LEITURA dentro do card do Storm: são DUAS entradas do MESMO padrão
    (mesmos pontos, mesmo stop), e sem uma régua entre elas os dois gatilhos e os dois
    R:R viram uma lista de seis números sem dono. A régua é sólida de 1px (DA-070). */
@@ -2063,7 +2063,7 @@ footer { text-align: center; color: var(--dim); font-size: var(--fs-10); line-he
 /* Ticker-título do cabeçalho: título maior da escala (16/700), não fonte gigante —
    a escala só tem 4 tamanhos e 2 pesos (task 036), e o ticker já usa o teto dos
    dois. Pedido do Samyr foi "destaca mais", e nos métodos ESTRUTURAIS (Setup123 /
-   Storm123 / Padrão / Erick, a maioria das runs — sem LLM) o veredito ao lado
+   Storm123 / Padrão / analista, a maioria das runs — sem LLM) o veredito ao lado
    também sai no branco padrão: mesmo tamanho, mesmo peso, mesma cor, empatados.
    Verde/vermelho são DIREÇÃO DE PREÇO (DA-078) — pintar o ticker deles faria
    'ZEC-USD' parecer alta ou baixa. O accent azul já é o vocabulário de
@@ -2193,7 +2193,7 @@ stroke='%238b97ad' stroke-width='1.2' stroke-linecap='round'>\
 #priceChart { touch-action: none; cursor: default; }
 
 /* ============================================================================
-   PALCO (padrão Quantfury): gráfico protagonista + coluna de contexto
+   PALCO (padrão da referência de design): gráfico protagonista + coluna de contexto
    ----------------------------------------------------------------------------
    Aproveitamento de tela: em vez de tudo empilhado numa coluna central com
    margem morta, telas largas ganham DUAS colunas — o gráfico grande à esquerda
@@ -3416,12 +3416,12 @@ body.chart-max-aberto { overflow: hidden; }
 .vig-dir-compra { border-left-color: var(--green); }
 .vig-dir-compra, .vig-dir-compra > i { color: var(--green); }
 
-/* ══════════ CARTEIRA DO ERICK (DA-148) — painel só-dono ═══════════════════════
+/* ══════════ CARTEIRA DO ANALISTA (DA-148) — painel só-dono ═══════════════════════
    Mesma linguagem do resto: canto reto (DA-070), sem degradê, sem pictograma
    (DA-076), número tabular à direita (DA-078 regra 6), e a cor só onde ela
    significa — a variação desde o preço médio usa a paleta de DIREÇÃO da DA-140,
    porque é exatamente isso que ela diz (subiu = verde, caiu = vermelho). */
-.erick-panel { padding: 12px 14px; }
+.analista-panel { padding: 12px 14px; }
 .ek-carimbo { color: var(--muted); font-size: var(--fs-12); line-height: var(--lh-12); margin: 0 0 10px; }
 .ek-degradado { color: var(--text); }
 /* O CAIXA É MANCHETE, não linha de tabela. 71% em caixa é POSTURA declarada por

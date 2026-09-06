@@ -83,7 +83,7 @@ from tradingagents.webui.subscription import SubscriptionStore
 #   - parâmetros da própria rota estrutural ($0 de LLM);
 #   - configuração BYOK, que o front manda em TODA requisição (inclusive de quem
 #     não tem chave, ex.: Ollama self-host) e que o 1-2-3 sequer consome.
-# `compare` está FORA de propósito: é ele que troca a rota por Padrão x Erick x
+# `compare` está FORA de propósito: é ele que troca a rota por Padrão x analista x
 # meta-juiz na chave do servidor.
 # Métodos ESTRUTURAIS: leem a série e devolvem níveis, $0 de LLM — o portão de custo
 # protegeria um custo que não existe. Lista, nunca um ``if`` por método: cada novo
@@ -619,7 +619,7 @@ class _Handler(BaseHTTPRequestHandler):
                     (qs.get("tf", ["1d"])[0] or "1d"),
                     (qs.get("ticker", [""])[0] or ""),
                     (qs.get("asset_type", [""])[0] or "")))
-            elif path == "/api/erick/carteira":
+            elif path == "/api/analista/carteira":
                 # SÓ-DONO, SEM ALTERNATIVA DE BYOK (DA-148). Todo o resto do produto
                 # lê fonte pública; isto é conteúdo de assinatura paga de terceiro —
                 # a tela de login do site diz "acesso exclusivo para alunos". Trazer
@@ -628,7 +628,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # AUTORIZAÇÃO, e o único que serve é o de dono.
                 if not self._owner_or_403():
                     return
-                dados = self.runner.erick_carteira()
+                dados = self.runner.analista_carteira()
                 if dados is None:
                     # Instância sem a credencial: a feature não existe aqui. 404 e
                     # não 500 — não é erro, é ausência; e a mensagem não diz nada
@@ -717,7 +717,7 @@ class _Handler(BaseHTTPRequestHandler):
                 date = (qs.get("date", [""])[0] or "").strip()
                 tf = (qs.get("tf", ["1d"])[0] or "1d").strip()
                 # método da análise aberta (task 031): mantém a estrutura por método
-                # (Erick EMA 8/21 / Padrão MMS) ao trocar de timeframe.
+                # (analista EMA 8/21 / Padrão MMS) ao trocar de timeframe.
                 method = (qs.get("method", ["padrao"])[0] or "padrao").strip().lower()
                 if not ticker:
                     self._send_json({"error": "informe um ticker"}, 400)
@@ -887,11 +887,11 @@ class _Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 ticker = (body.get("ticker") or "").strip()
                 date = (body.get("date") or "").strip()
-                # "método Erick" sob demanda: default Padrão. Aceita method=="erick"
-                # ou o atalho legível erick==true.
+                # "método do analista" sob demanda: default Padrão. Aceita method=="analista"
+                # ou o atalho legível analista==true.
                 method = (body.get("method") or "").strip().lower()
-                if not method and body.get("erick"):
-                    method = "erick"
+                if not method and body.get("analista"):
+                    method = "analista"
                 # Reference timeframe for the verdict (task 012); default daily. An
                 # invalid frame for the asset is a ValueError -> 400 below.
                 timeframe = (body.get("timeframe") or "1d").strip() or "1d"
@@ -905,7 +905,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # estrutura do mesmo jeito que pode ver o /api/chart.
                 #
                 # A isenção vale SÓ quando o atalho é mesmo a rota que vai subir. O
-                # `compare` é decidido DEPOIS daqui e roda Padrão + Erick + meta-juiz
+                # `compare` é decidido DEPOIS daqui e roda Padrão + analista + meta-juiz
                 # na chave do servidor: `{"method":"setup123","compare":true}` passava
                 # pela isenção e queimava crédito do dono anonimamente. A regra passa a
                 # ser a rota REAL, não só o rótulo do método.
@@ -923,7 +923,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # BYOK: a chave/provider/modelo do usuário viajam por header+corpo e
                 # valem só pra ESTA run (chave do usuário > env do servidor).
                 overrides = self._llm_overrides(body)
-                # "comparar Padrão × Erick" (Fase 3): roda as duas leituras + meta-juiz.
+                # "comparar Padrão × Analista" (Fase 3): roda as duas leituras + meta-juiz.
                 if body.get("compare"):
                     run_id = self.runner.start_compare(
                         ticker, date, timeframe=timeframe, overrides=overrides

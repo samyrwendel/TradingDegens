@@ -192,7 +192,7 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                 report, symbol, current_date, timeframe
             )
             # Correlação com o âncora (NVDA/BTC) + força relativa, e o calendário
-            # de earnings (risco de evento) — dois insumos do método do Erick que a
+            # de earnings (risco de evento) — dois insumos do método do analista que a
             # prosa não computa. Determinísticos, dos mesmos candles/fonte pública
             # cacheados e date-guarded; earnings é vazio (não anexa) em cripto.
             report = ensure_correlation_coverage(

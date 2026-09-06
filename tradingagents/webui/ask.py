@@ -43,10 +43,10 @@ SYSTEM_PROMPT = (
     "vier marcado \"sem dado\" em DADOS, diga que esta análise não tem esse valor — não "
     "pegue o número de outra média no lugar.\n"
     "- Pergunta de \"onde / qual nível / quanto / a que preço\" DEVE devolver o preço ou "
-    "a FAIXA real dos DADOS. Ex.: \"recuo à média\" no método Erick = a faixa das EMAs "
+    "a FAIXA real dos DADOS. Ex.: \"recuo à média\" no método do analista = a faixa das EMAs "
     "8 e 21 (com os números exatos). Nunca responda de forma vaga quando o número existe "
     "nos DADOS.\n"
-    "- Se DADOS tiver mais de uma leitura (ex.: Padrão e Método Erick), e a pergunta for "
+    "- Se DADOS tiver mais de uma leitura (ex.: Padrão e Método do analista), e a pergunta for "
     "de uma delas, use os números DAQUELA coluna e diga de qual leitura são. Não misture "
     "nem faça média das duas.\n"
     "- Se a pergunta não tiver base nos DADOS nem nos RELATÓRIOS desta run, diga "
@@ -60,7 +60,7 @@ SYSTEM_PROMPT = (
 _REPORT_CAP = 1400
 # Quantos relatórios (e em que ordem) entram no contexto de uma análise simples.
 _SINGLE_REPORTS = (
-    ("erick_report", "Método Erick (recuo à média · saída · peso)"),
+    ("analista_report", "Método do analista (recuo à média · saída · peso)"),
     ("trader_plan", "Plano do Trader"),
     ("final_trade_decision", "Decisão final"),
     ("market_report", "Mercado"),
@@ -69,7 +69,7 @@ _SINGLE_REPORTS = (
 )
 # No confronto cada coluna carrega só estes (é o que build_column preserva).
 _COLUMN_REPORTS = (
-    ("erick_report", "Método Erick"),
+    ("analista_report", "Método do analista"),
     ("trader_plan", "Plano do Trader"),
     ("final_decision", "Decisão final"),
 )
@@ -136,7 +136,7 @@ def _pullback_dist_line(actionable: dict, price_chart: dict) -> tuple[str, bool]
             bits.append(f"EMA {w} ({val}): {dist}")
     if not bits:
         return "Recuo/gatilho a aguardar: sem nível definido.", False
-    # Toque em curso: dentro de 0,4% da EMA 21 (tolerância do método Erick)
+    # Toque em curso: dentro de 0,4% da EMA 21 (tolerância do método do analista)
     e21_raw = _last_valid(ema.get("21"))
     tocando = (e21_raw is not None
                and abs(float(raw_price) / float(e21_raw) - 1) <= 0.004)
@@ -173,7 +173,7 @@ def price_facts(actionable: dict | None, price_chart: dict | None) -> list[str]:
         has_number = has_number or val is not None
     lines.append(
         "Médias exponenciais (EMA) — referência do \"recuo à média\" do método "
-        "Erick: " + " · ".join(ema_bits) + "."
+        "analista: " + " · ".join(ema_bits) + "."
     )
 
     ma = price_chart.get("ma") or {}
@@ -296,7 +296,7 @@ def build_context(record: dict) -> dict[str, Any]:
             col = compare.get(slot) or {}
             if not col:
                 continue
-            label = col.get("label") or ("Padrão" if slot == "a" else "Método Erick")
+            label = col.get("label") or ("Padrão" if slot == "a" else "Método do analista")
             verdict = col.get("verdict") or "—"
             actionable = col.get("actionable") or {}
             as_of = as_of or str(actionable.get("as_of") or "")

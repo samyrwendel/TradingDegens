@@ -237,7 +237,7 @@ def test_flag_nova_no_corpo_tira_a_isencao_do_setup123(free_server, monkeypatch)
 
 @pytest.mark.parametrize("extra", [
     {"compare": True},
-    {"confront_with": "erick"},
+    {"confront_with": "analista"},
     {"deep_dive": True},
     {"meta": True},
 ])

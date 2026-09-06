@@ -5,7 +5,7 @@ e a barra de reanálise separada DEIXOU DE EXISTIR. Esta suíte prova a matriz i
 NOVO layout (o DOM mudou — os seletores .re-* saíram, entraram .lb-*):
 
   * método volta a viver no launcher (reverte a 021 de propósito): a barra tem
-    ‹Padrão · 🧭 Erick · ⚖️ Comparar› como SELETOR (clicar seleciona; Analisar roda);
+    ‹Padrão · 🧭 analista · ⚖️ Comparar› como SELETOR (clicar seleciona; Analisar roda);
   * Analisar roda o ticker do input com o método + timeframe escolhidos na barra;
   * ↻ (#rerunBtn) reanalisa o ativo ABERTO hoje preservando o método aberto — absorve
     o antigo "Atualizar"; fica desabilitado enquanto nenhum ativo está aberto;
@@ -13,8 +13,8 @@ NOVO layout (o DOM mudou — os seletores .re-* saíram, entraram .lb-*):
 
 Sem rodar LLM: intercepta o POST /api/analyze (Playwright route) e LÊ o corpo, provando
 que cada combinação manda método + timeframe + data corretos. Cobre AÇÃO e CRIPTO, as
-duas rotas (launcher e ↻), os casos críticos (Erick preserva Erick por TF; Comparar
-sempre Padrão × Erick; default Padrão · Diário) e a matriz inteira 3×5.
+duas rotas (launcher e ↻), os casos críticos (analista preserva analista por TF; Comparar
+sempre Padrão × Analista; default Padrão · Diário) e a matriz inteira 3×5.
 
 Pulado com skip se Playwright/Chromium não estiver disponível.
 """
@@ -41,7 +41,7 @@ except Exception:  # noqa: BLE001
 
 TODAY = "2026-08-25"          # data de "hoje" forçada no cliente (semântica do ↻)
 OPEN_DATE = "2026-08-20"      # data da análise ABERTA (≠ hoje) — prova que o ↻ usa hoje
-METHODS = ["padrao", "erick", "compare"]
+METHODS = ["padrao", "analista", "compare"]
 TFS = ["1w", "1d", "4h", "1h", "15m"]
 TF_PT = {"1w": "semanal", "1d": "diário", "4h": "4h", "1h": "1h", "15m": "15m"}
 ASSETS = [("AAPL", "ação"), ("BTC-USD", "cripto")]
@@ -85,7 +85,7 @@ def live_server(tmp_path):
 
 
 # Semeia o estado "ativo ABERTO" e aponta a barra única pra ele (sem rodar nada).
-# openView = método aberto ("padrao"|"erick"|"compare"); syncLaunchBarToOpen espelha
+# openView = método aberto ("padrao"|"analista"|"compare"); syncLaunchBarToOpen espelha
 # isso em _barMethod/_barTf e preenche o ticker do input — igual ao render de resultado.
 _SEED_OPEN_JS = r"""
 (args) => {
@@ -100,7 +100,7 @@ _SEED_OPEN_JS = r"""
   _timeframes = ['1w','1d','4h','1h','15m'];
   _verdictTf = verdictTf;
   _openView = openView;
-  _openMethod = (openView === 'erick') ? 'erick' : 'padrao';
+  _openMethod = (openView === 'analista') ? 'analista' : 'padrao';
   syncLaunchBarToOpen();
   return true;
 }
@@ -155,7 +155,7 @@ def _expect_body(body, method, tf):
     assert body.get("timeframe") == tf, ("timeframe", body)
     assert body.get("date") == TODAY, ("data != hoje", body)
     if method == "compare":
-        # Comparar SEMPRE dispara Padrão × Erick no backend (compare=true) — nunca
+        # Comparar SEMPRE dispara Padrão × Analista no backend (compare=true) — nunca
         # método × ele-mesmo. O method do corpo é irrelevante (o backend roda os dois).
         assert body.get("compare") is True, ("compare", body)
     else:
@@ -165,7 +165,7 @@ def _expect_body(body, method, tf):
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
 def test_full_method_timeframe_matrix(live_server):
-    """A matriz inteira: método{padrao,erick,compare} × TF{5} × ativo{ação,cripto} pela
+    """A matriz inteira: método{padrao,analista,compare} × TF{5} × ativo{ação,cripto} pela
     barra única (Analisar), mais o default (Padrão · Diário sem tocar nos seletores).
     Imprime a tabela de resultados."""
     rows = []
@@ -217,9 +217,9 @@ def test_full_method_timeframe_matrix(live_server):
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
 def test_reanalyze_preserves_method_across_tf(live_server):
-    """Preservação de método por TF (031/037/039) no novo layout: com um ERICK aberto,
-    a barra DESTACA Erick (is-active); trocar de TF NÃO reseta o método; e o ↻ reanalisa
-    Erick em TODOS os TFs, sempre na data de HOJE — a classe de bug do 037/039 não volta."""
+    """Preservação de método por TF (031/037/039) no novo layout: com um ANALISTA aberto,
+    a barra DESTACA analista (is-active); trocar de TF NÃO reseta o método; e o ↻ reanalisa
+    analista em TODOS os TFs, sempre na data de HOJE — a classe de bug do 037/039 não volta."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
@@ -228,20 +228,20 @@ def test_reanalyze_preserves_method_across_tf(live_server):
             page.goto(live_server)
             page.wait_for_selector("#launchMethods button.lb-method", state="visible")
             for tf in TFS:
-                _seed_open(page, "AAPL", "erick", verdict_tf="1d")
-                # abrir um Erick já deixa o método Erick selecionado e o ↻ habilitado
-                cls0 = page.get_attribute('#launchMethods button.lb-method[data-method="erick"]', "class")
-                assert "is-active" in (cls0 or ""), ("Erick sem destaque ao abrir", tf, cls0)
+                _seed_open(page, "AAPL", "analista", verdict_tf="1d")
+                # abrir um analista já deixa o método do analista selecionado e o ↻ habilitado
+                cls0 = page.get_attribute('#launchMethods button.lb-method[data-method="analista"]', "class")
+                assert "is-active" in (cls0 or ""), ("analista sem destaque ao abrir", tf, cls0)
                 assert page.is_disabled("#rerunBtn") is False, "↻ deveria estar habilitado com ativo aberto"
 
-                # troca de TF: só muda o timeframe — o método Erick PERMANECE selecionado
+                # troca de TF: só muda o timeframe — o método do analista PERMANECE selecionado
                 page.click(f'#launchTfs button.lb-tf[data-tf="{tf}"]')
-                cls = page.get_attribute('#launchMethods button.lb-method[data-method="erick"]', "class")
+                cls = page.get_attribute('#launchMethods button.lb-method[data-method="analista"]', "class")
                 assert "is-active" in (cls or ""), ("trocar de TF resetou o método", tf, cls)
 
-                # ↻ reanalisa o ABERTO preservando Erick, no TF escolhido, na data de hoje
+                # ↻ reanalisa o ABERTO preservando analista, no TF escolhido, na data de hoje
                 body = _rerun_click(page)
-                assert body.get("method") == "erick", ("↻ caiu pra padrao", tf, body)
+                assert body.get("method") == "analista", ("↻ caiu pra padrao", tf, body)
                 assert body.get("compare") in (False, None), ("↻ não é compare", tf, body)
                 assert body.get("timeframe") == tf, ("↻ timeframe", tf, body)
                 assert body.get("date") == TODAY, ("↻ deveria usar hoje", tf, body)
@@ -250,9 +250,9 @@ def test_reanalyze_preserves_method_across_tf(live_server):
 
 
 @pytest.mark.skipif(sync_playwright is None, reason="playwright/chromium indisponível")
-def test_compare_always_padrao_x_erick(live_server):
-    """Comparar SEMPRE sai como Padrão × Erick (compare=true), nunca método × ele-mesmo:
-    tanto do zero (launcher) quanto selecionando Comparar sobre um Erick aberto, em todos
+def test_compare_always_padrao_x_analista(live_server):
+    """Comparar SEMPRE sai como Padrão × Analista (compare=true), nunca método × ele-mesmo:
+    tanto do zero (launcher) quanto selecionando Comparar sobre um analista aberto, em todos
     os TFs, ação e cripto."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
@@ -268,15 +268,15 @@ def test_compare_always_padrao_x_erick(live_server):
                     assert body.get("compare") is True, ("compare do zero", body)
                     assert body.get("timeframe") == tf, ("compare timeframe", body)
 
-                    # com um Erick ABERTO: selecionar Comparar sobrepõe o método aberto
-                    _seed_open(page, ticker, "erick", verdict_tf="1d")
+                    # com um analista ABERTO: selecionar Comparar sobrepõe o método aberto
+                    _seed_open(page, ticker, "analista", verdict_tf="1d")
                     page.click(f'#launchTfs button.lb-tf[data-tf="{tf}"]')
                     page.click('#launchMethods button.lb-method[data-method="compare"]')
                     with page.expect_response("**/api/analyze") as ri:
                         page.click("#runBtn")
                     body2 = json.loads(ri.value.request.post_data)
-                    assert body2.get("compare") is True, ("compare sobre erick", body2)
-                    assert body2.get("timeframe") == tf, ("compare/erick timeframe", body2)
+                    assert body2.get("compare") is True, ("compare sobre analista", body2)
+                    assert body2.get("timeframe") == tf, ("compare/analista timeframe", body2)
         finally:
             browser.close()
 
@@ -295,7 +295,7 @@ def test_single_bar_layout_no_separate_reanalyze_bar(live_server):
             # a barra de reanálise separada e os controles antigos sumiram
             assert page.locator("#reanalyzeBar").count() == 0
             assert page.locator(".reanalyze-bar").count() == 0
-            assert page.locator("#erickToggle").count() == 0
+            assert page.locator("#analystToggle").count() == 0
             assert page.locator("#compareToggle").count() == 0
             assert page.locator(".method-toggle").count() == 0
             assert page.locator("#refreshBtn").count() == 0
@@ -348,14 +348,14 @@ def test_bar_renders_and_clicks_on_mobile_390(live_server):
             )
             assert no_overflow, "barra estourou a largura no mobile 390"
 
-            body = _launch_run(page, "BTC-USD", "erick", "15m")
-            assert body.get("method") == "erick" and body.get("timeframe") == "15m"
+            body = _launch_run(page, "BTC-USD", "analista", "15m")
+            assert body.get("method") == "analista" and body.get("timeframe") == "15m"
         finally:
             browser.close()
 
 
 # --- o atalho 1-2-3 no ↻: $0 não pode virar análise completa ------------------
-# Seed próprio (o _SEED_OPEN_JS achata _openMethod em padrao|erick de propósito,
+# Seed próprio (o _SEED_OPEN_JS achata _openMethod em padrao|analista de propósito,
 # porque nasceu antes do setup123 existir).
 _SEED_OPEN_SETUP123_JS = r"""
 (args) => {
@@ -382,8 +382,8 @@ def test_rerun_do_setup123_nao_cai_em_padrao(live_server):
     """↻ com o 1-2-3 ABERTO re-roda o ATALHO ($0), nunca uma Padrão completa.
 
     Regressão medida: ``runReanalyze()`` achatava o método com
-    ``method === "erick" ? "erick" : "padrao"``. O setup123 — atalho estrutural
-    sem LLM — não é "erick", então caía em "padrao" e subia o pipeline
+    ``method === "analista" ? "analista" : "padrao"``. O setup123 — atalho estrutural
+    sem LLM — não é "analista", então caía em "padrao" e subia o pipeline
     multi-agente inteiro: o botão prometia $0 e cobrava uma análise completa.
     Este teste falha com o ternário de volta.
     """

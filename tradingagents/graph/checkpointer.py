@@ -113,7 +113,7 @@ _NODE_OUTPUT: dict[str, tuple[str, ...]] = {
     "Sentiment Analyst":    ("sentiment_report",),
     "News Analyst":         ("news_report",),
     "Fundamentals Analyst": ("fundamentals_report",),
-    "Erick Analyst":        ("erick_report",),
+    "Analista Analyst":        ("analista_report",),
     "Bull Researcher":      ("investment_debate_state.bull_history",),
     "Bear Researcher":      ("investment_debate_state.bear_history",),
     "Research Manager":     ("investment_plan",),

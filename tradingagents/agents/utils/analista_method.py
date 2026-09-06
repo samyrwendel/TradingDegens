@@ -1,6 +1,6 @@
-"""Leitura determinística do MÉTODO ERICK — o núcleo do analista `erick`.
+"""Leitura determinística do MÉTODO DO ANALISTA — o núcleo do analista `analista`.
 
-O analista `erick` (LLM) escreve a moldura (regime, macro, filtros de sentimento
+O analista `analista` (LLM) escreve a moldura (regime, macro, filtros de sentimento
 e derivativo). Este módulo garante — determinístico, ancorado em dado de
 ferramenta, jamais inventado — a parte que o método EXIGE e que a prosa costuma
 deixar solta: **timeframe intradiário, entrada no recuo à média (EMA 8/21),
@@ -9,7 +9,7 @@ inicial / caixa) — a resposta ao "quantos %" do Samyr sem chutar valor absolut
 
 Modelado de 4 fontes independentes (59 transcrições, 18 frames de gráfico,
 carteira real 62% em caixa, racional escrito por posição). Ver
-`~/brain/trading-ops/modelo-decisorio-erick-sekiama.md`. O eixo é a média móvel
+a nota privada do modelo decisório do analista. O eixo é a média móvel
 (EMA 8/21 pro timing, 50 pra tendência), no 15m/4h; entrada FRACIONADA no recuo
 à média; saída em exaustão ("pega a maior parte e sai antes de reverter"); caixa
 é posição ativa; separa tático de estrutural.
@@ -154,7 +154,7 @@ def _estado(
 
 
 # ------------------------------------------------ camada de ponderação ---------
-# A hierarquia do método (spec ~/brain/trading-ops/erick-camada-de-ponderacao-spec.md).
+# A hierarquia do método (spec a nota privada da camada de ponderação do analista).
 # Antes, a decisão era GATILHO ÚNICO: a pilha de EMAs do 4h mandava sozinha, nada
 # competia, nada sobrepunha e não havia lista de "não ignore isto" — foi assim que o
 # INTC virou CAIXA com o calendário de balanço correto na tela, mas fora do _decide.
@@ -170,7 +170,7 @@ def _estado(
 # decisão declara AUSENTE e nunca decide como se o fator fosse neutro.
 _TESE_FRAMES = ("1w", "1d")   # o mensal (1mo) não existe no price_structure — D4
 
-# Janela de "balanço na janela". PROVISÓRIA e declarada: o corpus do Erick é
+# Janela de "balanço na janela". PROVISÓRIA e declarada: o corpus do analista é
 # qualitativo ("vai divulgar só em 22 de outubro" × "reduziria agora") e não dá
 # número, então a spec marca este limiar como `a calibrar por backtest` (§8). Fica
 # explícito aqui E escrito no traço — auditável, não embutido.
@@ -354,7 +354,7 @@ def _factors(
     fonte única), nunca re-buscada. Faltando dado, o fator declara AUSENTE na lista
     consolidada — a decisão nunca o trata como neutro.
 
-    ``chart`` é o chart do frame de swing JÁ buscado por ``build_erick_method_section``
+    ``chart`` é o chart do frame de swing JÁ buscado por ``build_analista_method_section``
     — divergência e desaceleração saem dele, sem fetch novo.
     """
     tese = _tese_read(symbol, curr_date)
@@ -450,7 +450,7 @@ def _rsi_divergence(chart: dict) -> dict:
     # já faz. Antes o None era validado só nos últimos 40 closes, mas ``_rsi_series``
     # percorre a série inteira (até 260 barras) subtraindo: um único buraco no meio
     # (NaN de gap em semanal reamostrado, candle parcial) virava TypeError que
-    # escapava até o ``build_erick_method_section`` e derrubava a seção toda.
+    # escapava até o ``build_analista_method_section`` e derrubava a seção toda.
     brutos = [c.get("c") for c in candles]
     closes = [c for c in brutos if c is not None]
     buracos = len(brutos) - len(closes)
@@ -518,7 +518,7 @@ def _gate_abre(r: dict, drop_cls: str | None, factors: dict | None) -> bool:
 
     A porta são estas CINCO citadas e mais nada. Em especial, a divergência bearish
     do frame da TESE **não veta aqui** — medido na live: o INTC de 27/08 tem
-    divergência bearish no semanal (topo 124,92→133,99 com RSI 91→73) e o Erick
+    divergência bearish no semanal (topo 124,92→133,99 com RSI 91→73) e o analista
     mandou "começar a montar agora" [09:51]. Um 6º bloqueio não citado reprovava a
     aceitação §5.1 em dado real. Essa divergência entra no TIER 3 como TETO DE
     TAMANHO: modula o peso, nunca a direção (spec §8 deixa a precedência
@@ -570,7 +570,7 @@ def _tier3(d: dict, factors: dict | None) -> dict:
       soma tamanho em cima dela).
     * divergência bearish no frame da TESE (semanal/diário) → mesmo teto. É aqui
       que ela pesa, e NÃO como veto de direção na porta TIER 2: no INTC de 27/08 ela
-      existe no semanal e o Erick comprou mesmo assim ([09:51]) — logo ela limita o
+      existe no semanal e o analista comprou mesmo assim ([09:51]) — logo ela limita o
       tamanho, não cancela a tese (spec §8, `a validar` por backtest).
 
     ``caixa`` é piso e teto de si mesmo — o TIER 3 não mexe. ``factors=None``
@@ -989,10 +989,10 @@ def _traco_line(
             f" — **comandou:** {comandou}; **sobrepôs:** {sobrepos}.")
 
 
-def build_erick_method_section(
+def build_analista_method_section(
     symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
 ) -> str:
-    """Seção markdown pt-BR do método Erick — determinística e ancorada em dado.
+    """Seção markdown pt-BR do método do analista — determinística e ancorada em dado.
 
     O método lê no 4h (frame de swing) + timing fino no 15m para QUALQUER ativo —
     cripto no candle da exchange, ação no intradiário keyless do yfinance. Se a
@@ -1017,7 +1017,7 @@ def build_erick_method_section(
                          "diário. Nenhuma barra inventada; o método pede o 4h/15m.")
 
     frame_label = _FRAME_LABEL.get(frame, frame)
-    head = "## 🧭 Método Erick — leitura do setup"
+    head = "## 🧭 Método do analista — leitura do setup"
 
     if read is None:
         return (
@@ -1053,12 +1053,12 @@ def build_erick_method_section(
     mech_estado = _estado(mech["acao"], read["trend"], None)
     if drop_cls == "liquidacao_saudavel" and mech_estado == "CAIXA" and decision["estado"] != "CAIXA":
         logger.info(
-            "erick-drop-flip %s %s: estado %s->%s por liquidacao_saudavel (veto15m=%s)",
+            "analista-drop-flip %s %s: estado %s->%s por liquidacao_saudavel (veto15m=%s)",
             symbol, curr_date, mech_estado, decision["estado"], fine_veto,
         )
     if gate and mech_estado == "CAIXA":
         logger.info(
-            "erick-gate-flip %s %s: estado CAIXA->%s por porta TIER 2 (tese %s/%s)",
+            "analista-gate-flip %s %s: estado CAIXA->%s por porta TIER 2 (tese %s/%s)",
             symbol, curr_date, decision["estado"],
             factors["tese"]["regime"], factors["tese"]["frame"],
         )
@@ -1072,7 +1072,7 @@ def build_erick_method_section(
     drop_line = _render_drop_nature(drop, decision["estado"])
     estado_note = _estado_note(drop_cls, decision["estado"], fine_veto, gate,
                                (factors.get("tese") or {}).get("frame"))
-    estado_txt = ("**Estado (Método Erick):** "
+    estado_txt = ("**Estado (Método do analista):** "
                   f"{decision['estado']} — estado único do método neste run; a "
                   "leitura abaixo deriva dele (sem veredito paralelo).")
     if estado_note:
@@ -1154,14 +1154,14 @@ def build_erick_method_section(
     return "\n".join(lines) + degraded_note
 
 
-def erick_reading_dict(
+def analista_reading_dict(
     symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
 ) -> dict:
-    """Leitura determinística do Método Erick como DICT — o card da tela (task
+    """Leitura determinística do Método do analista como DICT — o card da tela (task
     20260904-003).
 
     Compõe EXATAMENTE as mesmas funções e a mesma ordem de
-    :func:`build_erick_method_section` (o texto do analista ``erick``): mesmo frame
+    :func:`build_analista_method_section` (o texto do analista ``analista``): mesmo frame
     de swing, mesma natureza da queda, mesma porta TIER 2, mesmo ``_decide`` e
     ``_estado``. O card LÊ deste dict, então "card == decisão do módulo" é garantido
     por construção (e soldado por teste). Não reimplementa nada — só devolve os
@@ -1170,7 +1170,7 @@ def erick_reading_dict(
 
     O método decide no swing (4h) com o diário/semanal de fundo; por isso o card
     aparece nas leituras do 1w/1d (a tendência de fundo) — a DECISÃO é a mesma do
-    veredito ``erick``, não uma releitura por frame.
+    veredito ``analista``, não uma releitura por frame.
     """
     frame = _SWING_FRAME
     chart = build_price_chart(symbol, curr_date, timeframe=frame)
@@ -1214,7 +1214,7 @@ def erick_reading_dict(
         "frame": frame,
         "frame_label": _FRAME_LABEL.get(frame, frame),
         "degraded": degraded,
-        # decisão canônica (== veredito do analista erick, por construção)
+        # decisão canônica (== veredito do analista analista, por construção)
         "estado": decision["estado"],
         "acao": decision["acao"],
         "entrada": decision["entrada"],
@@ -1243,7 +1243,7 @@ def erick_reading_dict(
         "ausentes": factors.get("ausentes") or [],
         # RSI (indicador nº2): divergência no frame de swing
         "rsi_divergence": _rsi_divergence(chart),
-        # gatilho 1-2-3 (Erick) + níveis do swing, e o timing fino do 15m
+        # gatilho 1-2-3 (analista) + níveis do swing, e o timing fino do 15m
         "pattern_line": _pattern_line(swing_plan, _COMPACT_FRAME.get(frame, frame)) or "",
         "levels_line": _levels_line(swing_plan) or "",
         "fine_timing": _fine_timing(fine_plan) or "",
@@ -1252,10 +1252,10 @@ def erick_reading_dict(
     }
 
 
-def ensure_erick_method_coverage(
+def ensure_analista_method_coverage(
     report: str, symbol: str, curr_date: str, asset_type: str, drop: dict | None = None
 ) -> str:
-    """Anexa a seção determinística do método ao relatório do analista `erick`.
+    """Anexa a seção determinística do método ao relatório do analista `analista`.
 
     Espelha os outros guardas de cobertura (multi-timeframe, derivativos,
     price-structure): a prosa do LLM molda; esta seção garante o núcleo
@@ -1264,9 +1264,9 @@ def ensure_erick_method_coverage(
     relatório intacto.
     """
     try:
-        section = build_erick_method_section(symbol, curr_date, asset_type, drop=drop)
+        section = build_analista_method_section(symbol, curr_date, asset_type, drop=drop)
     except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra o relatório
-        logger.warning("erick-method coverage failed for %s: %s", symbol, exc)
+        logger.warning("analista-method coverage failed for %s: %s", symbol, exc)
         return report
     base = (report or "").rstrip()
     return f"{base}\n\n{section}\n" if base else section + "\n"

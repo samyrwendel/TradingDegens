@@ -85,13 +85,13 @@ def test_force_fresh_bypasses_reuse(tmp_path):
 
 
 def test_different_method_does_not_reuse(tmp_path):
-    """Padrão and Erick are different reads of the same ticker/date — one must not
+    """Padrão and analista are different reads of the same ticker/date — one must not
     be served as the other."""
     calls: list = []
     runner = _runner(tmp_path, calls)
     r1 = runner.start("AAPL", "2020-01-02", method="padrao")
     _wait(runner, r1)
-    r2 = runner.start("AAPL", "2020-01-02", method="erick")
+    r2 = runner.start("AAPL", "2020-01-02", method="analista")
     s2 = _wait(runner, r2)
     assert s2["reused"] is False
     assert len(calls) == 2
@@ -142,36 +142,36 @@ def test_historical_always_reuses_regardless_of_ttl(tmp_path):
     assert len(calls) == 1
 
 
-# ----------------------- invalidação de 1º deploy: erick pré-coerência (task 005) ---
-def _save_erick_record(store, run_id, with_drop):
-    """Grava um registro erick DONE — com ou sem o campo ``drop_nature`` (pré-fix)."""
-    result = {"verdict": "Hold", "verdict_timeframe": "1d", "erick_report": "## método"}
+# ----------------------- invalidação de 1º deploy: analista pré-coerência (task 005) ---
+def _save_analista_record(store, run_id, with_drop):
+    """Grava um registro analista DONE — com ou sem o campo ``drop_nature`` (pré-fix)."""
+    result = {"verdict": "Hold", "verdict_timeframe": "1d", "analista_report": "## método"}
     if with_drop:
         result["drop_nature"] = {"classification": "liquidacao_saudavel"}
     store.save({
         "run_id": run_id, "ticker": "AAPL", "date": "2020-01-02", "asset_type": "stock",
-        "status": "done", "verdict": "Hold", "verdict_timeframe": "1d", "method": "erick",
+        "status": "done", "verdict": "Hold", "verdict_timeframe": "1d", "method": "analista",
         "cost_usd": 0.0, "elapsed": 1, "finished_at": "2020-01-02T00:00:00",
         "result": result,
     })
 
 
-def test_prefix_erick_record_without_drop_nature_is_invalidated(tmp_path):
-    """Um registro erick gravado ANTES da coerência (sem ``drop_nature``) NÃO é
+def test_prefix_analista_record_without_drop_nature_is_invalidated(tmp_path):
+    """Um registro analista gravado ANTES da coerência (sem ``drop_nature``) NÃO é
     reusado — reapareceria com o Estado antigo, contraditório. O novo (com o campo)
     volta a reusar normalmente. Padrão nunca é afetado."""
     store = HistoryStore(tmp_path)
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)}, store=store,
                             graph_factory=lambda *a, **k: None)
-    _save_erick_record(store, "old", with_drop=False)
+    _save_analista_record(store, "old", with_drop=False)
     # nenhum dos dois caminhos de reúso (single-run e confronto) devolve o pré-fix
-    assert runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "erick") is None
-    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=True) is None
+    assert runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "analista") is None
+    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_analista=True) is None
     # já um registro pós-fix (com o campo) reusa
-    _save_erick_record(store, "new", with_drop=True)
-    rec = runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "erick")
+    _save_analista_record(store, "new", with_drop=True)
+    rec = runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "analista")
     assert rec and rec["run_id"] == "new"
-    rec2 = runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=True)
+    rec2 = runner._find_reusable("AAPL", "2020-01-02", "1d", want_analista=True)
     assert rec2 and rec2["run_id"] == "new"
 
 
@@ -183,35 +183,35 @@ def _save_setup123_record(store, run_id="s123"):
         "status": "done", "verdict": None, "verdict_timeframe": "1d",
         "method": "setup123", "cost_usd": 0.0, "elapsed": 1,
         "finished_at": "2020-01-02T00:00:00",
-        "result": {"verdict": None, "erick_report": "", "market_report": "",
+        "result": {"verdict": None, "analista_report": "", "market_report": "",
                    "setup123": True, "actionable": {"setup_state": "ativo"}},
     })
 
 
 def test_registro_setup123_nao_vira_o_lado_padrao_do_confronto(tmp_path):
-    """O 1-2-3 grava ``erick_report`` VAZIO — e a detecção por ausência o dava como
+    """O 1-2-3 grava ``analista_report`` VAZIO — e a detecção por ausência o dava como
     "padrao". O confronto reusava esse registro EM BRANCO como a coluna Padrão e o
-    meta-juiz julgava nada contra um Erick de verdade. Agora ele é recusado."""
+    meta-juiz julgava nada contra um analista de verdade. Agora ele é recusado."""
     store = HistoryStore(tmp_path)
     runner = AnalysisRunner(base_config={"results_dir": str(tmp_path)}, store=store,
                             graph_factory=lambda *a, **k: None)
     _save_setup123_record(store)
-    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=False) is None
-    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=True) is None
+    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_analista=False) is None
+    assert runner._find_reusable("AAPL", "2020-01-02", "1d", want_analista=True) is None
     # e o reúso single-run também não o entrega como padrão
     assert runner._find_reusable_completed("AAPL", "2020-01-02", "1d", "padrao") is None
 
 
 def test_detect_method_identifica_o_atalho_em_vez_de_chutar_padrao(tmp_path):
-    """``detect_method`` inferia por AUSÊNCIA de erick_report; o atalho caía em
+    """``detect_method`` inferia por AUSÊNCIA de analista_report; o atalho caía em
     "padrao" e entrava num par de confronto que ele não é."""
     from tradingagents.webui.compare import confront_pair_valid, detect_method
 
-    rec = {"result": {"setup123": True, "erick_report": ""}}
+    rec = {"result": {"setup123": True, "analista_report": ""}}
     assert detect_method(rec) == "setup123"
-    # e um par com ele deixa de ser um confronto válido (Padrão × Erick, só)
+    # e um par com ele deixa de ser um confronto válido (Padrão × Analista, só)
     assert confront_pair_valid({"method": "setup123", "timeframe": "1d", "date": "d"},
-                               {"method": "erick", "timeframe": "1d", "date": "d"}) is False
+                               {"method": "analista", "timeframe": "1d", "date": "d"}) is False
 
 
 def test_padrao_de_verdade_continua_reusavel(tmp_path):
@@ -224,9 +224,9 @@ def test_padrao_de_verdade_continua_reusavel(tmp_path):
         "status": "done", "verdict": "Hold", "verdict_timeframe": "1d",
         "method": "padrao", "cost_usd": 0.1, "elapsed": 9,
         "finished_at": "2020-01-02T00:00:00",
-        "result": {"verdict": "Hold", "erick_report": "", "market_report": "## técnico"},
+        "result": {"verdict": "Hold", "analista_report": "", "market_report": "## técnico"},
     })
-    rec = runner._find_reusable("AAPL", "2020-01-02", "1d", want_erick=False)
+    rec = runner._find_reusable("AAPL", "2020-01-02", "1d", want_analista=False)
     assert rec and rec["run_id"] == "p1"
 
 

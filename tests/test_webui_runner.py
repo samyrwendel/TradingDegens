@@ -180,10 +180,10 @@ def test_module_axes_every_module_declares_eixo_and_horizonte():
     """Item 8: each module carries an axis + horizon so a weekly-up/daily-down/reduce/
     wait spread reads as LAYERS, not a contradiction. The verdict is the position axis."""
     axes = module_axes()
-    for key in ("veredito", "juiz", "tecnico", "erick", "trader"):
+    for key in ("veredito", "juiz", "tecnico", "analista", "trader"):
         assert axes[key]["eixo"] and axes[key]["horizonte"]
     assert axes["veredito"]["eixo"] == "posição"
-    assert axes["erick"]["eixo"] == "tático"
+    assert axes["analista"]["eixo"] == "tático"
     assert axes["tecnico"]["eixo"] == "estrutural"
 
 
@@ -258,8 +258,8 @@ def test_extract_result_earnings_defaults_empty():
 
 
 def test_full_run_attaches_earnings_field(tmp_path, monkeypatch):
-    """O método completo (padrão/erick) preenche ``result["earnings"]`` — mesma
-    leitura tri-state que o Erick já usa internamente como fator, exposta como
+    """O método completo (padrão/analista) preenche ``result["earnings"]`` — mesma
+    leitura tri-state que o analista já usa internamente como fator, exposta como
     campo estruturado pra tela (reusa o cache DA-058, sem fetch novo)."""
     fake = {"status": "ok", "date": "2026-09-10", "days_ahead": 5,
             "in_window": True, "window_days": 21}

@@ -5,7 +5,7 @@ Anotado a pedido dele: **entra depois** das prioridades de correção (seguranç
 
 ## Regra que vale pra todos os itens (DA-070)
 
-- **Card quadrado** — sem cantos arredondados de cartão, referência Quantfury.
+- **Card quadrado** — sem cantos arredondados de cartão, referência de design.
 - **Zero degradê** — nenhum `linear-gradient`/`radial-gradient` como cor de fundo em
   NENHUMA superfície: card, linha, chip, botão, barra. (Redação corrigida em 29/08 — a
   anterior dizia só "card, linha ou chip" e era mais estreita que a instrução do Samyr.)
@@ -535,9 +535,9 @@ um teste de CSS validaria a versão anterior e passaria por acidente. A suíte g
 fixture autouse que aponta o `_STATIC_DIR` pro repo. É o inverso do que produção quer,
 e é o certo aqui.
 
-## 10. Linguagem visual da Quantfury (DA-078) aplicada (30/08) — ✅ FEITO (task 20260830-003)
+## 10. Linguagem visual da referência de design (DA-078) aplicada (30/08) — ✅ FEITO (task 20260830-003)
 
-"Modela bem a Quantfury, pq nosso design não está seguindo as regras que mandei." A
+"Modela bem a referência de design, pq nosso design não está seguindo as regras que mandei." A
 DA-070 e a DA-076 tinham sido cumpridas ao pé da letra e o resultado ainda não parecia
 com a referência — regra vaga não segura implementação. A DA-078 destilou a referência
 em regras verificáveis; aqui elas viraram código e portão de teste.
@@ -736,7 +736,7 @@ Vale igual pro Storm (mesmo decaimento). Provado em `tests/test_rr_percurso.py` 
 ## 16. Um gráfico, um método (task 20260830-009)
 
 "Percebo tbm que mistura tudo em um gráfico só, Storm123, Setup123 e Padrão com
-Erick." Eram três misturas empilhadas:
+analista." Eram três misturas empilhadas:
 
 1. **médias** — as duas famílias sempre desenhadas: MMS 20/50/200 + EMA 8/21/50, mais
    a EMA 80 do Éden. Sete linhas onde o método usa três;
@@ -751,7 +751,7 @@ seletor de CAMADAS que só aparece quando há o que oferecer. Com duas famílias
 todo rótulo se identifica (`Setup123 · stop (SL)` × `Storm123 · stop (SL)`); com uma
 só, o rótulo fica limpo.
 
-Por método: padrão e Setup123 → MMS 20/50/200 · Erick → EMA 8/21/50 · Storm123 →
+Por método: padrão e Setup123 → MMS 20/50/200 · analista → EMA 8/21/50 · Storm123 →
 EMA 8/80 (o par do Éden). A camada extra não vaza pra outra análise.
 
 Provado em `tests/test_webui_um_grafico_um_metodo_e2e.py` (13). Governança: **DA-088**.
@@ -768,7 +768,7 @@ ela **persiste na sessão**.
 - **Depois do primeiro toque** a escolha é dele e vale nas análises seguintes, em
   qualquer timeframe (`sessionStorage`, morre ao fechar a aba).
 - **Dois grupos:** LEITURAS (Setup123 × Storm123, só as que existem no plano) e
-  MÉDIAS (MMS do Padrão × EMA do Erick). A EMA 80 acompanha o Storm — é metade do
+  MÉDIAS (MMS do Padrão × EMA do analista). A EMA 80 acompanha o Storm — é metade do
   filtro Éden.
 - **As duas leituras juntas** é o valor (comparação), e nada fica anônimo: faixa,
   ponto numerado, legenda, chip de R:R e a etiqueta CURTA (a que o telefone desenha).
@@ -794,7 +794,7 @@ base do seu preço · **invalidação** · **realizar** (grosso em T1, resíduo 
 - PASSAR **não imprime onde comprar** — o número é o que fica na cabeça de quem lê.
 - A fração de cada alvo sai `a calibrar`: o corpus tem um único caso com número.
 - BE e trailing desligados não é omissão — o método compra o recuo à média, e ligá-los
-  ejetaria no pullback em que se adiciona. `sem evidência` de BE no corpus do Erick.
+  ejetaria no pullback em que se adiciona. `sem evidência` de BE no corpus do analista.
 - **Gate de N:** com n<5 a tela DIZ "amostra insuficiente" em vez de exibir taxa; de 5
   a 19 a taxa sai sempre com o intervalo de Wilson; a expectativa (E[R]) vem antes.
 

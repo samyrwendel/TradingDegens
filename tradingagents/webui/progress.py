@@ -28,7 +28,7 @@ _STAGE_MAP: dict[str, tuple[int, str, str]] = {
     "Sentiment Analyst":    (20, "Analista de Sentimento", "Analistas"),
     "News Analyst":         (30, "Analista de Notícias — macro e mercados de previsão", "Analistas"),
     "Fundamentals Analyst": (40, "Analista Fundamentalista", "Analistas"),
-    "Erick Analyst":        (45, "Método Erick — recuo à média, saída, peso do trade", "Analistas"),
+    "Analista Analyst":        (45, "Método do analista — recuo à média, saída, peso do trade", "Analistas"),
     "Bull Researcher":      (50, "Pesquisador do bull case", "Debate"),
     "Bear Researcher":      (60, "Pesquisador do bear case", "Debate"),
     "Research Manager":     (70, "Gestor de Pesquisa — juiz do debate", "Debate"),
@@ -46,7 +46,7 @@ _ANALYST_NODE = {
     "social": "Sentiment Analyst",
     "news": "News Analyst",
     "fundamentals": "Fundamentals Analyst",
-    "erick": "Erick Analyst",
+    "analista": "Analista Analyst",
 }
 
 # Fixed downstream nodes that always run after the analysts, in order.
@@ -254,7 +254,7 @@ _THINKING_NODES: list[tuple[str, str, str, bool]] = [
     ("Sentiment Analyst",    "Sentimento",                              "Analistas", False),
     ("News Analyst",         "Notícias — macro e mercados de previsão", "Analistas", False),
     ("Fundamentals Analyst", "Fundamentos",                             "Analistas", False),
-    ("Erick Analyst",        "Método Erick",                            "Analistas", False),
+    ("Analista Analyst",        "Método do analista",                            "Analistas", False),
     ("Bull Researcher",      "Tese de Alta (bull)",                     "Debate",    True),
     ("Bear Researcher",      "Tese de Baixa (bear)",                    "Debate",    True),
     ("Research Manager",     "Juiz do Debate",                          "Debate",    False),
@@ -276,8 +276,8 @@ _THINKING_INDEX = {
 #     não-opcional em market_analyst; ensure_multi_timeframe_coverage garante o frame
 #     semanal no relatório). Quando a run tem um frame de REFERÊNCIA intradiário
 #     (4h/1h/15m), o mercado ancora a metade de timing nele — some ao selo.
-#   • Método Erick: opera no intradiário 4h (swing) + 15m (timing) — _SWING_FRAME/
-#     _FINE_FRAME em erick_method; semanal/diário só de fundo. (Se a fonte intradiária
+#   • Método do analista: opera no intradiário 4h (swing) + 15m (timing) — _SWING_FRAME/
+#     _FINE_FRAME em analista_method; semanal/diário só de fundo. (Se a fonte intradiária
 #     cai, o método degrada pro diário e DECLARA no corpo do relatório; o selo mostra
 #     os frames de operação do método.)
 #   • Demais nós (sentimento, notícias, fundamentos, debate, juiz, trader, risco): não
@@ -294,7 +294,7 @@ def node_timeframe(node: str, run_tf: str | None = None) -> str | None:
         if run_tf and run_tf not in ("1d", "1w"):
             base = f"{base} · {_TF_PT.get(run_tf, run_tf)}"
         return base
-    if node == "Erick Analyst":
+    if node == "Analista Analyst":
         return "4h · 15m"
     return None
 

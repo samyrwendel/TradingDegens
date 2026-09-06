@@ -1,6 +1,6 @@
-"""DA-078 — a linguagem visual da Quantfury, verificada regra a regra.
+"""DA-078 — a linguagem visual da referência de design, verificada regra a regra.
 
-"Modela bem a Quantfury, pq nosso design não está seguindo as regras que mandei."
+"Modela bem a referência de design, pq nosso design não está seguindo as regras que mandei."
 
 A DA-070 (card quadrado, zero degradê) e a DA-076 (sem emoji) foram cumpridas ao pé
 da letra e o resultado ainda não parecia com a referência — porque regra vaga não

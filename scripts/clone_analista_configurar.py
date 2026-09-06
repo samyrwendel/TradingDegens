@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Configura capital + moeda do clone da carteira do Erick, e ATIVA na hora.
+"""Configura capital + moeda do clone da carteira do analista, e ATIVA na hora.
 
 O COMANDO que a task 20260902-064 pediu — trocar capital/moeda depois é rodar
 isto de novo, nunca editar o estado na mão nem inferir do histórico (DA-173).
 
 Uso:
-    python3 scripts/clone_erick_configurar.py <capital> <moeda>
+    python3 scripts/clone_analista_configurar.py <capital> <moeda>
 
 O que faz, em ordem:
   1. configurar_capital(capital, moeda) — grava e (RE)ARMA a baseline (a
-     história recomeça do zero a partir daqui; nenhuma posição atual do Erick
+     história recomeça do zero a partir daqui; nenhuma posição atual do analista
      é herdada — DA-173, dente test_dente_ativacao_nao_semeia_a_carteira_atual).
-  2. Busca a leitura REAL da carteira dele (erick_carteira.carteira() — o
+  2. Busca a leitura REAL da carteira dele (analista_carteira.carteira() — o
      MESMO caminho que o timer horário usa, cache de até 1h ou fetch ao vivo;
      NUNCA um snapshot fabricado).
-  3. clone_erick.observar(atual) com essa leitura real — na primeira chamada
+  3. clone_analista.observar(atual) com essa leitura real — na primeira chamada
      pós-ativação isto GRAVA A BASELINE e não opera nada (mesmo efeito que o
      próximo disparo do timer teria; só não espera a hora virar).
   4. Imprime o estado final como prova.
@@ -26,8 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tradingagents.dataflows import erick_carteira as ec  # noqa: E402
-from tradingagents.webui import clone_erick as C  # noqa: E402
+from tradingagents.dataflows import analista_carteira as ec  # noqa: E402
+from tradingagents.webui import clone_analista as C  # noqa: E402
 
 
 def main() -> int:
@@ -48,7 +48,7 @@ def main() -> int:
 
     atual = ec.carteira()
     if not atual:
-        print("ERRO: erick_carteira.carteira() não devolveu leitura — "
+        print("ERRO: analista_carteira.carteira() não devolveu leitura — "
               "capital/moeda ficaram configurados, mas a baseline NÃO foi "
               "gravada (fica pro próximo disparo do timer horário).",
               file=sys.stderr)

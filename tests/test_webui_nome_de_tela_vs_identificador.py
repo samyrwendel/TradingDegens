@@ -37,19 +37,19 @@ def test_o_valor_interno_continua_setup123_e_storm123():
     """O que viaja na API, no store e no ledger. Renomear isto seria desfazer o
     Setup123 — exatamente o que foi proibido."""
     js = (_STATIC / "app.js").read_text()
-    assert 'new Set(["padrao", "erick", "setup123", "storm123", "compare"])' in js
+    assert 'new Set(["padrao", "analista", "setup123", "storm123", "compare"])' in js
     assert 'new Set(["setup123", "storm123"])' in js
 
 
 def test_uma_run_gravada_ANTES_continua_sendo_lida_e_classificada(tmp_path):
     """Registro no formato antigo (só o marcador `setup123: true`, sem nada do que
     veio depois): continua sendo reconhecido como leitura estrutural do Setup123."""
-    antiga = {"result": {"setup123": True, "erick_report": "", "verdict": None}}
+    antiga = {"result": {"setup123": True, "analista_report": "", "verdict": None}}
     assert detect_method(antiga) == "setup123"
     nova_storm = {"result": {"storm123": True, "setup123": False}}
     assert detect_method(nova_storm) == "storm123"
     # e uma run de MÉTODO continua sendo método (o rótulo não contaminou a detecção)
-    assert detect_method({"result": {"erick_report": "x"}}) == "erick"
+    assert detect_method({"result": {"analista_report": "x"}}) == "analista"
     assert detect_method({"result": {}}) == "padrao"
 
 
@@ -84,7 +84,7 @@ def test_ninguem_compara_metodo_por_TEXTO_DE_TELA():
     """Se algum lugar comparasse `=== "1-2-3"` ou `=== "Storm"`, esta renomeação teria
     mudado comportamento em silêncio. A varredura procura exatamente esse padrão."""
     js = (_STATIC / "app.js").read_text()
-    suspeitos = re.findall(r'===\s*"(1-2-3|Storm|Setup123|Storm123|Padrão|Erick)"', js)
+    suspeitos = re.findall(r'===\s*"(1-2-3|Storm|Setup123|Storm123|Padrão|Analista)"', js)
     assert suspeitos == [], ("método comparado por rótulo de tela", suspeitos)
 
 
@@ -133,7 +133,7 @@ def test_os_chips_da_barra_dizem_Setup123_e_Storm123(base, tmp_path):
         # o VALOR (o que vai pra API) intacto; o RÓTULO (o que ele lê) novo
         assert por_valor["setup123"] == "Setup123", m
         assert por_valor["storm123"] == "Storm123", m
-        assert set(por_valor) == {"padrao", "erick", "setup123", "storm123", "compare"}, m
+        assert set(por_valor) == {"padrao", "analista", "setup123", "storm123", "compare"}, m
         browser.close()
 
 
@@ -148,10 +148,10 @@ def test_o_rotulo_sai_do_VALOR_e_nao_de_texto_solto(base):
         page.goto(base, wait_until="networkidle")
         m = page.evaluate("""() => ({
           setup: methodLabel('setup123'), storm: methodLabel('storm123'),
-          padrao: methodLabel('padrao'), erick: methodLabel('erick'),
+          padrao: methodLabel('padrao'), analista: methodLabel('analista'),
           desconhecido: methodLabel('inventado'),
         })""")
         assert m["setup"] == "Setup123" and m["storm"] == "Storm123", m
-        assert m["padrao"] == "Padrão" and m["erick"] == "Erick", m
+        assert m["padrao"] == "Padrão" and m["analista"] == "Analista", m
         assert m["desconhecido"] == "Padrão", ("método desconhecido não inventa nome", m)
         browser.close()

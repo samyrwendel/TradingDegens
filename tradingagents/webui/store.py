@@ -493,7 +493,7 @@ def carteira_dono_tickers(path: str | os.PathLike | None = None) -> list[dict[st
     Fail-open: arquivo ausente ou ilegível devolve lista vazia — quem consome isto
     (:func:`agenda.watchlist_efetiva`) cai de volta na watchlist manual sozinha,
     nunca quebra por causa deste arquivo. Mesmo molde de override do
-    ``clone_erick._base_dir`` (env var ``CLONE_ERICK_DIR``): env pra isolar teste,
+    ``clone_analista._base_dir`` (env var ``CLONE_ANALISTA_DIR``): env pra isolar teste,
     argumento explícito vence tudo.
     """
     p = _carteira_dono_path(path)

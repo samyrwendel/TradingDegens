@@ -18,7 +18,7 @@ from typing import Any
 # Module report texts that reach the published PDF.
 _TEXT_KEYS = (
     "market_report", "news_report", "sentiment_report", "fundamentals_report",
-    "erick_report", "derivatives_report", "research_manager", "investment_plan",
+    "analista_report", "derivatives_report", "research_manager", "investment_plan",
     "trader_plan", "risk_decision", "bull", "bear",
 )
 

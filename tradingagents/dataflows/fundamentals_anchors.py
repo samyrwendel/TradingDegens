@@ -6,7 +6,7 @@ yfinance's real-time ``info`` instead of the date-guarded series the rest of the
 engine uses):
 
 * **Reference price wandered between modules** — the cover read 113,15, the
-  technical read 112,68, Erick 113,24 and the fundamentals block implied ~119 from a
+  technical read 112,68, analista 113,24 and the fundamentals block implied ~119 from a
   LIVE ``marketCap``. Here the price is the SAME date-guarded daily close the chart
   and the verdict use, so every consumer that anchors to this snapshot shares ONE
   price (and market cap = price × shares, 52-week low/high off the same series, not

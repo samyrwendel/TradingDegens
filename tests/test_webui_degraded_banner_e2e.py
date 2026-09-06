@@ -40,7 +40,7 @@ LEGACY_NOTE = (
 
 _EMPTY_REPORTS = {
     "market_report": "", "sentiment_report": "", "news_report": "",
-    "fundamentals_report": "", "erick_report": "", "bull": "", "bear": "",
+    "fundamentals_report": "", "analista_report": "", "bull": "", "bear": "",
     "research_manager": "", "investment_plan": "", "trader_plan": "",
     "risk_decision": "", "axes": {}, "audit": {}, "fallbacks": [],
 }
@@ -93,7 +93,7 @@ def legacy_server(tmp_path):
 
 _RESULT_FIELDS = """
       market_report: '', sentiment_report: '', news_report: '',
-      fundamentals_report: '', erick_report: '', bull: '', bear: '',
+      fundamentals_report: '', analista_report: '', bull: '', bear: '',
       research_manager: '', investment_plan: '', trader_plan: '',
       risk_decision: '', axes: {}, audit: {}, fallbacks: []
 """

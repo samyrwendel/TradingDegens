@@ -32,8 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tradingagents.webui import alertas_tg as A  # noqa: E402
 
 _ESTADO = Path.home() / ".tradingagents" / "cache"
-_ULTIMA_CARTEIRA = _ESTADO / "erick-carteira-alertada.json"
-_FALHA_ALERTADA = _ESTADO / "erick-carteira-falha-alertada.json"
+_ULTIMA_CARTEIRA = _ESTADO / "analista-carteira-alertada.json"
+_FALHA_ALERTADA = _ESTADO / "analista-carteira-falha-alertada.json"
 _FALHA_LIMITE_H = 24.0
 _SINAIS_ENVIADOS = _ESTADO / "sinais-enviados.jsonl"
 _SCAN_SALVO = Path.home() / ".tradingagents" / "logs" / "webui" / "last_scan.json"
@@ -81,7 +81,7 @@ def carteira() -> int:
         # "não chegou alerta hoje".
         print(f"[tg-alertas] {motivo}", file=sys.stderr)
         return 2
-    from tradingagents.dataflows import erick_carteira as ec
+    from tradingagents.dataflows import analista_carteira as ec
 
     atual = ec.carteira()
     if atual is None:
@@ -99,7 +99,7 @@ def carteira() -> int:
             lido_em = atual.get("lido_em")
             ja_alertado = (_carrega(_FALHA_ALERTADA) or {}).get("lido_em") == lido_em
             if not ja_alertado:
-                aviso = (f"⚠️ CARTEIRA DO ERICK sem leitura nova há {idade:.0f}h — "
+                aviso = (f"⚠️ CARTEIRA DO ANALISTA sem leitura nova há {idade:.0f}h — "
                          f"a fonte pode estar fora do ar ou a credencial venceu.")
                 if _envia(chat, aviso):
                     _grava(_FALHA_ALERTADA, {"lido_em": lido_em})
@@ -117,7 +117,7 @@ def carteira() -> int:
     # o futuro) e fica ARMADA até o Samyr definir o capital — por isso recebe `atual`
     # e decide sozinha, não o `mudou` daqui. Defensivo: o alerta é o produto; o clone
     # é registrador passivo e uma falha dele jamais pode derrubar o alerta.
-    from tradingagents.webui import clone_erick as _clone
+    from tradingagents.webui import clone_analista as _clone
 
     with contextlib.suppress(Exception):
         _clone.observar(atual)

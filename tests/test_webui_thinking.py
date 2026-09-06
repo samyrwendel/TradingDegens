@@ -147,20 +147,20 @@ def test_no_attribution_until_a_start_reports_a_model():
 
 
 def test_step_timeframe_only_where_it_applies():
-    """Task 009 — selo de timeframe por etapa: Mercado = semanal · diário, Erick =
+    """Task 009 — selo de timeframe por etapa: Mercado = semanal · diário, analista =
     4h · 15m; os demais nós não operam num tempo gráfico → None (sem selo). O TF sai
     tanto no snapshot ao vivo quanto no models_snapshot de auditoria."""
     t = ThinkingTracker()
-    for node in ("Market Analyst", "Erick Analyst", "News Analyst", "Portfolio Manager"):
+    for node in ("Market Analyst", "Analista Analyst", "News Analyst", "Portfolio Manager"):
         t.set_by_node(node, f"leitura detalhada do no {node} para o teste")
         t.set_model(node, "openai", "gpt-5.4")
     tf = {it["id"]: it["timeframe"] for it in t.snapshot()}
     assert tf["Market Analyst"] == "semanal · diário"
-    assert tf["Erick Analyst"] == "4h · 15m"
+    assert tf["Analista Analyst"] == "4h · 15m"
     assert tf["News Analyst"] is None and tf["Portfolio Manager"] is None
     # o rodapé de auditoria carrega o mesmo TF
     mtf = {r["node"]: r["timeframe"] for r in t.models_snapshot()}
-    assert mtf["Market Analyst"] == "semanal · diário" and mtf["Erick Analyst"] == "4h · 15m"
+    assert mtf["Market Analyst"] == "semanal · diário" and mtf["Analista Analyst"] == "4h · 15m"
 
 
 def test_market_timeframe_stamps_intraday_reference_frame():

@@ -253,7 +253,7 @@ def test_json_serializavel(longf):
         assert key in d
 
 
-# --------------------------------------------- método Erick + grounding do chat --
+# --------------------------------------------- método do analista + grounding do chat --
 _PLAN_FOR_SURFACES = {
     "setup_state": "ativo",
     "price": 140.0,
@@ -276,10 +276,10 @@ _PLAN_FOR_SURFACES = {
 
 
 @pytest.mark.unit
-def test_metodo_erick_publica_stop_alvo_e_rr():
-    """O método é "perda de estrutura", não stop percentual — a leitura do Erick tem
+def test_metodo_analista_publica_stop_alvo_e_rr():
+    """O método é "perda de estrutura", não stop percentual — a leitura do analista tem
     que carregar a invalidação, o stop com a folga declarada e o R:R."""
-    from tradingagents.agents.utils import erick_method as em
+    from tradingagents.agents.utils import analista_method as em
     line = em._levels_line(_PLAN_FOR_SURFACES)
     assert line is not None
     assert "invalida em 131.00" in line
@@ -289,8 +289,8 @@ def test_metodo_erick_publica_stop_alvo_e_rr():
 
 
 @pytest.mark.unit
-def test_metodo_erick_sem_padrao_nao_emite_linha():
-    from tradingagents.agents.utils import erick_method as em
+def test_metodo_analista_sem_padrao_nao_emite_linha():
+    from tradingagents.agents.utils import analista_method as em
     assert em._levels_line({"setup_state": "ativo"}) is None
     assert em._levels_line(None) is None
 

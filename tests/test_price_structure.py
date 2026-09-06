@@ -195,11 +195,11 @@ def test_detects_buy_region_at_average(synth):
 # ------------------------------------ estrutura CIENTE DO MÉTODO (task 031) ---
 @pytest.mark.unit
 def test_method_config_maps():
-    """Padrão lê MMS (janela larga), Erick lê EMA 8/21 (timing curto)."""
+    """Padrão lê MMS (janela larga), analista lê EMA 8/21 (timing curto)."""
     assert ps._method_mas("padrao") == (("MMS20", "MA20"), ("MMS50", "MA50"), ("MMS200", "MA200"))
-    assert ps._method_mas("erick") == (("EMA8", "EMA8"), ("EMA21", "EMA21"))
+    assert ps._method_mas("analista") == (("EMA8", "EMA8"), ("EMA21", "EMA21"))
     assert ps._method_k("padrao") == ps._SWING_K
-    assert ps._method_k("erick") == 3
+    assert ps._method_k("analista") == 3
     # método desconhecido/ausente cai no Padrão (default seguro)
     assert ps._method_mas("qualquer") == ps._method_mas("padrao")
     assert ps._method_k(None) == ps._SWING_K
@@ -220,26 +220,26 @@ def test_padrao_default_is_unchanged(synth):
 
 
 @pytest.mark.unit
-def test_erick_keys_on_ema(synth):
-    """No método Erick a região/recuo sai da EMA 8/21 — rótulos EMA, nunca MMS."""
-    s = ps.detect_price_structure("SYN", CURR, method="erick")
+def test_analista_keys_on_ema(synth):
+    """No método do analista a região/recuo sai da EMA 8/21 — rótulos EMA, nunca MMS."""
+    s = ps.detect_price_structure("SYN", CURR, method="analista")
     for r in s.buy_regions:
         assert r.ma_label.startswith("EMA")
     if s.active_region:
         assert s.active_region.ma_label.startswith("EMA")
     # a família de médias do recuo mudou de verdade
     labels_padrao = {r.ma_label for r in ps.detect_price_structure("SYN", CURR, "1d", "padrao").buy_regions}
-    labels_erick = {r.ma_label for r in s.buy_regions}
-    assert not (labels_padrao & labels_erick) or not labels_padrao or not labels_erick
+    labels_analista = {r.ma_label for r in s.buy_regions}
+    assert not (labels_padrao & labels_analista) or not labels_padrao or not labels_analista
 
 
 @pytest.mark.unit
 def test_actionable_plan_method_aware(synth):
-    """O plano operável do Erick ancora o buy_zone numa EMA; o do Padrão numa MMS."""
+    """O plano operável do analista ancora o buy_zone numa EMA; o do Padrão numa MMS."""
     padrao = ps.build_actionable_plan_dict("SYN", CURR, method="padrao")
-    erick = ps.build_actionable_plan_dict("SYN", CURR, method="erick")
+    analista = ps.build_actionable_plan_dict("SYN", CURR, method="analista")
     bz_p = (padrao.get("buy_zone") or {}).get("label", "")
-    bz_e = (erick.get("buy_zone") or {}).get("label", "")
+    bz_e = (analista.get("buy_zone") or {}).get("label", "")
     if bz_p:
         assert "MMS" in bz_p
     if bz_e:
@@ -249,10 +249,10 @@ def test_actionable_plan_method_aware(synth):
 @pytest.mark.unit
 def test_chart_markers_method_aware(synth):
     """As velas e AS DUAS famílias de média sempre são desenhadas; só os marcadores
-    de REGIÃO de compra seguem o método (Erick marca EMA). O 1-2-3 é canônico e
+    de REGIÃO de compra seguem o método (analista marca EMA). O 1-2-3 é canônico e
     igual pros dois — ver test_123_pattern_is_method_independent."""
     ch_p = ps.build_price_chart("SYN", CURR, method="padrao")
-    ch_e = ps.build_price_chart("SYN", CURR, method="erick")
+    ch_e = ps.build_price_chart("SYN", CURR, method="analista")
     # o payload de candles/médias é o mesmo (só marcadores mudam)
     assert ch_p["candles"] == ch_e["candles"]
     assert set(ch_p["ma"]) == {"20", "50", "200"} and set(ch_p["ema"]) == {"8", "21", "50"}
@@ -263,9 +263,9 @@ def test_chart_markers_method_aware(synth):
 
 def _jiggle_frame() -> pd.DataFrame:
     """A series whose MAJOR swings sit ~8 bars apart but with small +/- jiggles every
-    ~3 bars, so the tight (Erick, k=3) swing horizon registers many extra pivots the
+    ~3 bars, so the tight (analista, k=3) swing horizon registers many extra pivots the
     canonical (Padrão, k=5) horizon smooths away. That divergence is exactly what let
-    an Erick run draw a different 1-2-3 than the canonical report text (AAOI: chart
+    an analista run draw a different 1-2-3 than the canonical report text (AAOI: chart
     gatilho 91,50 vs texto 160,87)."""
     import math
     closes: list[float] = []
@@ -290,16 +290,16 @@ def test_123_pattern_is_method_independent(synth):
     """The 1-2-3 is a pure price-SWING structure, not "on the EMA" or "on the MMS";
     it must be IDENTICAL across methods so the report text (always canonical), the
     chart annotation and the actionable plan can never disagree on the trigger. Bug:
-    an Erick run drew the tighter-swing 1-2-3 on the chart while the report text read
+    an analista run drew the tighter-swing 1-2-3 on the chart while the report text read
     the canonical one — two triggers for "the" pattern."""
     p = ps.detect_price_structure("SYN", CURR, method="padrao").pattern
-    e = ps.detect_price_structure("SYN", CURR, method="erick").pattern
+    e = ps.detect_price_structure("SYN", CURR, method="analista").pattern
     assert p is not None and e is not None
     assert p.as_dict() == e.as_dict()
     # chart + actionable key on the SAME canonical trigger whatever the method
-    ch_e = ps.build_price_chart("SYN", CURR, method="erick")
+    ch_e = ps.build_price_chart("SYN", CURR, method="analista")
     assert ch_e["markers"]["pattern_123"]["trigger"] == p.trigger
-    plan_e = ps.build_actionable_plan_dict("SYN", CURR, method="erick")
+    plan_e = ps.build_actionable_plan_dict("SYN", CURR, method="analista")
     assert (plan_e.get("pattern") or {}).get("trigger") == p.trigger
     # task 031 preserved: buy-region markers still key on the method's MA family
     labels_e = {r["ma_label"] for r in ch_e["markers"]["buy_regions"]}
@@ -307,9 +307,9 @@ def test_123_pattern_is_method_independent(synth):
 
 
 @pytest.mark.unit
-def test_123_uses_canonical_swings_even_when_method_is_erick(monkeypatch):
+def test_123_uses_canonical_swings_even_when_method_is_analista(monkeypatch):
     """Even on a series where the tight (k=3) and canonical (k=5) swing horizons
-    genuinely diverge, an Erick detection must feed the 1-2-3 the CANONICAL swings —
+    genuinely diverge, an analista detection must feed the 1-2-3 the CANONICAL swings —
     otherwise the chart's trigger drifts from the canonical report text (the AAOI
     91,50 vs 160,87 bug)."""
     df = _jiggle_frame()
@@ -322,14 +322,14 @@ def test_123_uses_canonical_swings_even_when_method_is_erick(monkeypatch):
         return real(frame, lows, highs, fmt)
 
     monkeypatch.setattr(ps, "_pattern_123", spy)
-    ps.detect_price_structure("SYN", CURR, method="erick")
+    ps.detect_price_structure("SYN", CURR, method="analista")
 
     prep = ps._prep("SYN", CURR)
     canon_lows, canon_highs = ps._swings(prep, ps._method_k(ps._DEFAULT_METHOD))
     tight_lows, tight_highs = ps._swings(prep, 3)
     # the guard is real only if the two horizons actually differ on this frame
     assert (list(canon_lows), list(canon_highs)) != (list(tight_lows), list(tight_highs))
-    # ...and the pattern was fed the CANONICAL swings, not Erick's tight ones
+    # ...and the pattern was fed the CANONICAL swings, not analista's tight ones
     assert seen["lows"] == list(canon_lows)
     assert seen["highs"] == list(canon_highs)
 
@@ -480,7 +480,7 @@ def test_intraday_crypto_structure_runs(monkeypatch):
 @pytest.mark.unit
 def test_4h_timeframe_runs_and_is_labelled(monkeypatch):
     """The 4h frame (native exchange candle, task 005) runs the detector and stamps
-    '4 horas' on the section/chart/plan — Erick decides the 1-2-3 on 15m/4h."""
+    '4 horas' on the section/chart/plan — analista decides the 1-2-3 on 15m/4h."""
     base = _frame()
     ts = pd.date_range("2026-08-01 00:00", periods=len(base), freq="4h")
     df = base.copy()
@@ -649,7 +649,7 @@ def test_overlapping_buy_and_realize_declares_degeneracy(monkeypatch):
         "Volume": [1000] * len(closes),
     })
     monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
-    plan = ps.build_actionable_plan_dict("SYN", CURR, method="erick")
+    plan = ps.build_actionable_plan_dict("SYN", CURR, method="analista")
     bz, rz = plan.get("buy_zone") or {}, plan.get("realize_zone") or {}
     # a curva FOI construída para sobrepor — se deixar de sobrepor, o teste avisa
     assert bz.get("high") is not None and rz.get("low") is not None

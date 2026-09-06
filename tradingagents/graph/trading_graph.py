@@ -451,11 +451,11 @@ class TradingAgentsGraph:
                     get_verified_market_snapshot,
                 ]
             ),
-            # On-demand "Modo Erick": same data surface as the market analyst
+            # On-demand "Modo analista": same data surface as the market analyst
             # (EMA/intraday come through the deterministic method coverage, not a
             # new tool), but its own node so it can run beside market without
             # sharing the tool-routing edge.
-            "erick": _tn(
+            "analista": _tn(
                 [
                     get_stock_data,
                     get_indicators,
@@ -832,8 +832,8 @@ class TradingAgentsGraph:
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],
-            # On-demand; "" unless the Erick method was requested for this run.
-            "erick_report": final_state.get("erick_report", ""),
+            # On-demand; "" unless the analista method was requested for this run.
+            "analista_report": final_state.get("analista_report", ""),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],

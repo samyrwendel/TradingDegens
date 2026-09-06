@@ -51,7 +51,7 @@ _PARTIAL_SNAP = """() => renderResult({
     bull: 'Tese de alta: momentum forte e volume crescente.',
     bear: 'Tese de baixa: valuation esticado após a corrida.',
     research_manager: '', investment_plan: '', trader_plan: '', sentiment_report: '',
-    news_report: '', fundamentals_report: '', erick_report: '', risk_decision: '',
+    news_report: '', fundamentals_report: '', analista_report: '', risk_decision: '',
     axes: {}, audit: {}, fallbacks: [], degraded: []
   }
 })"""

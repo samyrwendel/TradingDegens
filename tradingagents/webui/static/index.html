@@ -189,8 +189,8 @@
         <div class="wl-search-wrap">
           <input type="search" class="wl-search" id="watchlistSearch" placeholder="Buscar ativo ou nome…"
                  autocomplete="off" spellcheck="false" aria-label="Buscar na lista de observação">
-          <button type="button" class="wl-scan-icon hidden" id="erickOpenBtn"
-                  title="Carteira real do Erick Sekiama — composição, movimentações e relatórios (só o dono vê)">erick</button>
+          <button type="button" class="wl-scan-icon hidden" id="analystOpenBtn"
+                  title="Carteira real do analista — composição, movimentações e relatórios (só o dono vê)">analista</button>
           <button type="button" class="wl-scan-icon" id="scanOpenBtn"
                   title="Varrer a watchlist: quem está em gatilho de compra/venda do Setup123 e do Storm123 (1d + 4h + 1h, sem LLM)">scan</button>
         </div>
@@ -214,7 +214,7 @@
 
     <div class="content">
       <!-- Barra ÚNICA (task 029, redistribuída na 034 a partir de 5 apps de
-           referência — Quantfury/Krystal/CoinMarketCap): ativo+data (mesmo grupo,
+           referência — referência de design/Krystal/CoinMarketCap): ativo+data (mesmo grupo,
            é a mesma pergunta "o quê e quando") · tempo · método · Analisar · ↻ ·
            modelos. Analisar roda com o método + TF escolhidos; ↻ reanalisa o ativo
            ABERTO hoje preservando o método aberto. Preserva método por TF: trocar
@@ -261,7 +261,7 @@
             <div class="lb-tfs" id="launchTfs" role="group" aria-label="Timeframe da análise"></div>
           </div>
           <!-- Idem "método": a posição (entre tempo e Analisar) e os próprios
-               rótulos das pills (Padrão/Erick/Comparar/...) já dizem o que é.
+               rótulos das pills (Padrão/analista/Comparar/...) já dizem o que é.
                Os cinco numa linha só (nenhum dos 5 apps de referência empilha). -->
           <div class="lb-group lb-method">
             <div class="lb-methods" id="launchMethods" role="group" aria-label="Método da análise"></div>
@@ -318,7 +318,7 @@
         </div>
         <div class="bar"><div class="bar-fill" id="barFill"></div></div>
         <ol class="steps" id="steps"></ol>
-        <!-- Trilha do CONFRONTO (task 030): as 3 etapas Padrão → Erick → Comparação
+        <!-- Trilha do CONFRONTO (task 030): as 3 etapas Padrão → analista → Comparação
              com estado de cada (rodando/concluída/reusada do cache). Só aparece
              quando o progresso é de uma comparação (compare_steps no snapshot). -->
         <ol class="cmp-steps hidden" id="compareSteps"></ol>
@@ -347,7 +347,7 @@
           <div class="head-nav">
             <div class="asset-timeline hidden" id="assetTimeline"></div>
             <!-- Confrontar (Fase 3 manual): meta-juiz sobre esta análise × outra
-                 análise já existente do mesmo ativo (Padrão×Erick ou dois TFs). -->
+                 análise já existente do mesmo ativo (Padrão×analista ou dois TFs). -->
             <div class="confront-ctl hidden" id="confrontCtl">
               <select id="confrontSelect" class="confront-select" aria-label="Confrontar com outra análise deste ativo"></select>
               <button type="button" class="confront-btn" id="confrontBtn" title="Meta-juiz sobre as duas análises">Confrontar</button>
@@ -399,7 +399,7 @@
              diz que a análise seguiu sem ela e oferece reavaliar com ela. -->
         <div class="degraded-banner hidden" id="degradedBanner"></div>
 
-        <!-- Palco no padrão Quantfury: o gráfico é o protagonista (coluna
+        <!-- Palco no padrão da referência de design: o gráfico é o protagonista (coluna
              principal, grande) e a coluna de contexto (plano do setup + teses em
              confronto) fica À DIREITA em telas largas em vez de empilhada abaixo.
              No mobile o palco vira uma coluna só (gráfico, depois contexto). -->
@@ -544,7 +544,7 @@
         <div class="ask-box" id="askSingle"></div>
       </section>
 
-      <!-- Comparação Padrão × Erick (Fase 3): meta-juiz no topo, duas colunas
+      <!-- Comparação Padrão × analista (Fase 3): meta-juiz no topo, duas colunas
            lado a lado (empilha no mobile). -->
       <section class="panel compare-panel hidden" id="comparePanel">
         <div class="cmp-head">
@@ -557,31 +557,31 @@
         <div class="cmp-cols" id="cmpCols"></div>
 
         <!-- Q&A ancorado sobre a comparação (task 027): a resposta pode
-             referenciar as duas leituras (Padrão × Erick) com os níveis reais. -->
+             referenciar as duas leituras (Padrão × analista) com os níveis reais. -->
         <div class="ask-box" id="askCompare"></div>
       </section>
 
-      <!-- CARTEIRA DO ERICK (DA-148) — SÓ-DONO. Nasce escondida e só é montada
+      <!-- CARTEIRA DO ANALISTA (DA-148) — SÓ-DONO. Nasce escondida e só é montada
            quando o /api/config diz owner:true E a rota responde: um visitante nem
            vê o botão. É conteúdo de assinatura paga de terceiro, e o portão aqui é
            de AUTORIZAÇÃO, não de custo — BYOK não compra assinatura de outra
-           pessoa. Ver tradingagents/dataflows/erick_carteira.py. -->
-      <section class="panel erick-panel hidden" id="erickPanel">
+           pessoa. Ver tradingagents/dataflows/analista_carteira.py. -->
+      <section class="panel analista-panel hidden" id="analystPanel">
         <div class="scan-head">
-          <h2>Carteira do Erick <span class="orig">(fonte do autor · leitura diária)</span></h2>
+          <h2>Carteira do analista <span class="orig">(fonte do autor · leitura diária)</span></h2>
           <div class="scan-actions">
-            <button type="button" class="scan-close" id="erickCloseBtn" title="Fechar">✕</button>
+            <button type="button" class="scan-close" id="analystCloseBtn" title="Fechar">✕</button>
           </div>
         </div>
         <!-- DE QUANDO É O DADO, sempre (DA-114): fonte de terceiro atualizada à mão,
              e dado velho não pode se disfarçar de novo. -->
-        <p class="ek-carimbo" id="erickCarimbo"></p>
-        <div id="erickCorpo"></div>
+        <p class="ek-carimbo" id="analystCarimbo"></p>
+        <div id="analystCorpo"></div>
       </section>
 
       <!-- SCAN DE PORTFÓLIO (28/08): o olho barato ($0 de LLM) — varre a watchlist
            em 1d+4h e classifica pela distância do preço ao gatilho do Setup123. O que
-           estiver EM GATILHO abre a análise completa (Padrão/Erick) a um clique. -->
+           estiver EM GATILHO abre a análise completa (Padrão/analista) a um clique. -->
       <section class="panel scan-panel hidden" id="scanPanel">
         <div class="scan-head">
           <h2>Scan do portfólio — gatilhos Setup123 e Storm123 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>

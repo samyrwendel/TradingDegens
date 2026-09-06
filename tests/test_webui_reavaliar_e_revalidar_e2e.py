@@ -91,7 +91,7 @@ def _snap(date=None, degraded=None):
             "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
             "trader_plan": "", "risk_decision": "", "market_report": "",
             "sentiment_report": "", "news_report": "", "fundamentals_report": "",
-            "erick_report": "", "drop_nature": {}, "derivatives_report": "",
+            "analista_report": "", "drop_nature": {}, "derivatives_report": "",
             "timeframes": ["1w", "1d", "4h", "1h", "15m"],
         },
     }

@@ -400,7 +400,7 @@ def test_a_MME_80_so_e_DESENHADA_no_metodo_storm():
     """Acrescentá-la a todos os métodos poria uma linha a mais em telas que não a
     usam pra nada."""
     assert 80 not in ps._chart_emas("padrao")
-    assert 80 not in ps._chart_emas("erick")
+    assert 80 not in ps._chart_emas("analista")
     assert 80 in ps._chart_emas("storm")
 
 

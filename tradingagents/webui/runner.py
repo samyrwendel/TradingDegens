@@ -24,7 +24,7 @@ from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-from tradingagents.agents.utils.erick_method import _EARNINGS_WINDOW_DAYS
+from tradingagents.agents.utils.analista_method import _EARNINGS_WINDOW_DAYS
 from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
 from tradingagents.dataflows.earnings_calendar import earnings_window_status
@@ -413,18 +413,18 @@ def apply_llm_overrides(base_config: dict[str, Any],
     return config
 
 
-def select_analysts_for_asset(asset_type: str, include_erick: bool = False) -> list[str]:
+def select_analysts_for_asset(asset_type: str, include_analista: bool = False) -> list[str]:
     """Analyst wire-keys to run for an asset type (crypto has no fundamentals).
 
-    ``include_erick`` appends the on-demand Erick-method analyst at the end of the
-    analyst chain (Modo Erick). Default off — the Padrão analysis is untouched.
+    ``include_analista`` appends the on-demand analista-method analyst at the end of the
+    analyst chain (Modo analista). Default off — the Padrão analysis is untouched.
     """
     if asset_type == "crypto":
         base = [a for a in _ANALYST_ORDER if a != "fundamentals"]
     else:
         base = list(_ANALYST_ORDER)
-    if include_erick:
-        base.append("erick")
+    if include_analista:
+        base.append("analista")
     return base
 
 
@@ -465,7 +465,7 @@ _MODULE_AXES: dict[str, tuple[str, str]] = {
     "veredito": ("posição", "3-6 meses"),
     "juiz": ("posição", "3-6 meses"),
     "tecnico": ("estrutural", "swing (semanas)"),
-    "erick": ("tático", "intradia–swing"),
+    "analista": ("tático", "intradia–swing"),
     "trader": ("tático", "swing"),
 }
 
@@ -489,7 +489,7 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
     return {
         "verdict": signal,
         # THE single canonical decision of the run (bug: four modules — técnico,
-        # Erick, juiz, trader — each stated a "final" action, so an automated
+        # analista, juiz, trader — each stated a "final" action, so an automated
         # consumer could not tell which one is binding). It is the risk/portfolio
         # decision that already becomes ``signal``, exposed here as the pt-BR enum
         # (COMPRAR/AUMENTAR/MANTER/REDUZIR/VENDER). The module texts are READINGS
@@ -510,11 +510,11 @@ def extract_result(final_state: dict[str, Any], signal: str) -> dict[str, Any]:
         "sentiment_report": final_state.get("sentiment_report", "") or "",
         "news_report": final_state.get("news_report", "") or "",
         "fundamentals_report": final_state.get("fundamentals_report", "") or "",
-        # On-demand "Modo Erick": empty string unless the erick analyst ran.
-        "erick_report": final_state.get("erick_report", "") or "",
+        # On-demand "Modo analista": empty string unless the analista analyst ran.
+        "analista_report": final_state.get("analista_report", "") or "",
         # Natureza da queda classificada (fonte única — o meta-juiz/UI leem o CAMPO,
         # não a prosa). {} num run Padrão ou quando a classificação ficou indisponível.
-        "drop_nature": final_state.get("erick_drop_nature") or {},
+        "drop_nature": final_state.get("analista_drop_nature") or {},
         # Filled by the runner for crypto from the engine's deterministic
         # derivatives data path (named source, "unavailable" not fabricated).
         "derivatives_report": "",
@@ -571,7 +571,7 @@ def fetch_price_chart(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAM
 
     ``timeframe`` selects the frame (daily default, or ``"4h"``/``"1h"``/``"15m"``
     intraday for crypto — real keyless exchange candles). ``method`` picks the
-    average family the setup MARKERS key on (Padrão MMS / Erick EMA 8/21) so the two
+    average family the setup MARKERS key on (Padrão MMS / analista EMA 8/21) so the two
     confront columns draw different structures. Reuses the same cached, date-guarded
     series the detector runs on, so it is free and cannot see a future candle.
     Fail-open: returns an empty payload on any error so a chart hiccup never blocks
@@ -591,7 +591,7 @@ def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIME
 
     ``timeframe`` selects the frame (daily default, or an intraday frame for
     crypto). ``method`` picks the average family the recuo/zones key on (Padrão MMS
-    / Erick EMA 8/21). Reuses the same cached, date-guarded series and the detector's
+    / analista EMA 8/21). Reuses the same cached, date-guarded series and the detector's
     own structure, so it is free and cannot see a future candle. Fail-open: returns
     ``{}`` on any error so this enrichment never blocks the analysis result.
     """
@@ -602,28 +602,28 @@ def fetch_actionable_plan(ticker: str, date: str, timeframe: str = _DEFAULT_TIME
         return {}
 
 
-def _erick_reading_for_frame(
+def _analista_reading_for_frame(
     ticker: str, date: str, asset_type: str, timeframe: str
 ) -> dict[str, Any]:
-    """Leitura do Método Erick pro card da tela (task 20260904-003), determinística
+    """Leitura do Método do analista pro card da tela (task 20260904-003), determinística
     e SEM LLM. O método decide no swing (4h) usando o diário/semanal de FUNDO — por
     isso o card só aparece nas leituras de fundo (1w/1d); nos frames menores
     (4h/1h/15m) ele fica ``fora_do_frame`` (o cabeçalho diz isso, sem card). A
-    DECISÃO é a mesma do veredito do analista ``erick`` (mesma ``erick_reading_dict``
-    que ``build_erick_method_section`` — soldado por teste). Fail-open: qualquer erro
+    DECISÃO é a mesma do veredito do analista ``analista`` (mesma ``analista_reading_dict``
+    que ``build_analista_method_section`` — soldado por teste). Fail-open: qualquer erro
     devolve indisponível, nunca derruba o /api/chart nem a run."""
     if timeframe not in ("1w", "1d"):
         return {"disponivel": False, "fora_do_frame": True, "frame": timeframe}
     try:
-        from tradingagents.agents.utils.erick_method import erick_reading_dict
-        d = erick_reading_dict(ticker, date, asset_type)
+        from tradingagents.agents.utils.analista_method import analista_reading_dict
+        d = analista_reading_dict(ticker, date, asset_type)
         d["fora_do_frame"] = False
         return d
     except Exception as exc:  # noqa: BLE001 — enriquecimento nunca quebra a tela
-        logger.warning("erick_reading falhou para %s %s (%s): %s",
+        logger.warning("analista_reading falhou para %s %s (%s): %s",
                        ticker, date, timeframe, exc)
         return {"disponivel": False, "fora_do_frame": False, "frame": timeframe,
-                "motivo": "leitura do Método Erick indisponível nesta run"}
+                "motivo": "leitura do Método do analista indisponível nesta run"}
 
 
 # MÉTODOS ESTRUTURAIS ($0 de LLM): leem a série e devolvem níveis, sem agente
@@ -704,10 +704,10 @@ def leitura_multiframe(ticker: str, date: str, asset_type: str, method: str,
 
 def plano_com_storm(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
                     method: str = "padrao", *, incluir_storm: bool = True) -> dict[str, Any]:
-    """O plano da tela: família Padrão/Erick + a leitura do Storm SEMPRE ao lado.
+    """O plano da tela: família Padrão/analista + a leitura do Storm SEMPRE ao lado.
 
     O Storm viajava só na run do método dele. O efeito na tela era o oposto do que
-    a DA-088 quis: numa análise Padrão ou Erick o Storm não estava desligado — ele
+    a DA-088 quis: numa análise Padrão ou analista o Storm não estava desligado — ele
     **não existia**, e por isso nem a camada aparecia pra ligar. *"eu não vi nenhum
     desenho do storm123 nos gráficos que analisei"* é exatamente isso: trocamos
     "mistura tudo" por "sumiu e não avisou".
@@ -784,9 +784,9 @@ class _Run:
         # Reference frame the market analyst reads for THIS run (task 012). Stamped
         # on the verdict and used as the chart's opening frame.
         self.timeframe = timeframe or _DEFAULT_TIMEFRAME
-        # Method label (padrao/erick), reliable from the analyst selection — feeds
+        # Method label (padrao/analista), reliable from the analyst selection — feeds
         # the resume descriptor and the cross-run reuse key.
-        self.method = "erick" if "erick" in (selected_analysts or []) else "padrao"
+        self.method = "analista" if "analista" in (selected_analysts or []) else "padrao"
         self.status = "running"           # running | done | error | cancelled
         # PARAR/PAUSAR (task 026): o cancelamento é cooperativo — o CancelCallbackHandler
         # levanta RunCancelled quando este Event é setado, abortando o grafo no próximo
@@ -831,7 +831,7 @@ class _Run:
             "ticker": self.ticker,
             "date": self.date,
             "asset_type": self.asset_type,
-            # Método da run (padrao/erick/setup123/compare) — o MESMO campo que o
+            # Método da run (padrao/analista/setup123/compare) — o MESMO campo que o
             # histórico persiste; o front lê de um lugar só.
             "method": self.method,
             "status": self.status,
@@ -862,7 +862,7 @@ class _Run:
 
 class _SimpleProgress:
     """Progresso do confronto como TRILHA de 3 etapas: Análise Padrão → Análise
-    método Erick → Comparação (meta-juiz). Cada etapa tem estado próprio
+    método do analista → Comparação (meta-juiz). Cada etapa tem estado próprio
     (``pending``/``running``/``done``/``reused``) para o front desenhar o stepper —
     o motor já roda as 3 em série, isto só EXPÕE o que rodou e o que veio do cache
     (um lado reaproveitado aparece ``reused``, sem fingir que rodou; DA-058).
@@ -873,7 +873,7 @@ class _SimpleProgress:
     # (key, rótulo) na ordem em que o worker as executa.
     STEPS = (
         ("padrao", "Análise Padrão"),
-        ("erick", "Análise método Erick"),
+        ("analista", "Análise método do analista"),
         ("meta", "Comparação (meta-juiz)"),
     )
 
@@ -914,7 +914,7 @@ class _SimpleProgress:
 
 
 class _CompareRun:
-    """In-memory state for a Padrão × Erick comparison run.
+    """In-memory state for a Padrão × Analista comparison run.
 
     Duck-types the pieces of :class:`_Run` that ``status``/``active_runs``/
     ``_running_summary`` read, so it lives in the same ``_runs`` table and reuses
@@ -1005,7 +1005,7 @@ class AnalysisRunner:
         # graph_factory(config, selected_analysts, callbacks) -> engine graph.
         # Injectable so tests can drive a fake engine.
         self._graph_factory = graph_factory or self._default_graph_factory
-        # meta_judge(padrao_col, erick_col, asset_type) -> comparison dict.
+        # meta_judge(padrao_col, analista_col, asset_type) -> comparison dict.
         # Deterministic by default (anchored, free, keeps the run at 2 pipelines);
         # injectable so tests drive it and a future LLM narrative can slot in.
         self._meta_judge = meta_judge or (lambda p, e, at: deterministic_meta(p, e))
@@ -1057,8 +1057,8 @@ class AnalysisRunner:
               reuse: bool = True) -> str:
         """Kick off an analysis; returns a run_id to poll immediately.
 
-        ``method="erick"`` adds the on-demand Erick-method analyst to the run
-        (Modo Erick); any other value runs the Padrão selection unchanged.
+        ``method="analista"`` adds the on-demand analista-method analyst to the run
+        (Modo analista); any other value runs the Padrão selection unchanged.
 
         ``reuse`` (default on) reaproveita, HONESTAMENTE, uma análise idêntica já
         concluída — mesmo (ticker, data, timeframe, método) — devolvendo o
@@ -1102,9 +1102,9 @@ class AnalysisRunner:
             return self._start_estrutural(method, ticker, date, asset_type, timeframe,
                                           overrides, reuse)
         selected = select_analysts_for_asset(
-            asset_type, include_erick=(method == "erick")
+            asset_type, include_analista=(method == "analista")
         )
-        method_norm = "erick" if "erick" in selected else "padrao"
+        method_norm = "analista" if "analista" in selected else "padrao"
         # Reúso entre runs (DA-058): uma análise idêntica já concluída E com o dado
         # ainda íntegro volta inteira, sem re-rodar. Só o caminho concluído; um run
         # interrompido é retomado pelo checkpoint no worker abaixo (não aqui).
@@ -1132,7 +1132,7 @@ class AnalysisRunner:
 
         Reusa uma run idêntica DO MESMO MÉTODO (DA-058) como qualquer outro; a chave
         de reúso é o próprio método, então uma run Storm nunca volta no lugar de uma
-        1-2-3 (nem de uma Padrão/Erick) do mesmo dia.
+        1-2-3 (nem de uma Padrão/analista) do mesmo dia.
         """
         if reuse:
             prior = self._find_reusable_completed(ticker, date, timeframe, method)
@@ -1211,7 +1211,7 @@ class AnalysisRunner:
                 "bull": "", "bear": "", "research_manager": "",
                 "investment_plan": "", "trader_plan": "", "risk_decision": "",
                 "market_report": "", "sentiment_report": "", "news_report": "",
-                "fundamentals_report": "", "erick_report": "", "drop_nature": {},
+                "fundamentals_report": "", "analista_report": "", "drop_nature": {},
                 "derivatives_report": "",
                 "price_chart": chart or {},
                 "actionable": plan or {},
@@ -1382,10 +1382,10 @@ class AnalysisRunner:
                 run.result["derivatives_report"] = fetch_derivatives_report(
                     run.ticker, run.date
                 )
-            # A estrutura desenhada é CIENTE DO MÉTODO (task 031): a coluna Erick lê o
+            # A estrutura desenhada é CIENTE DO MÉTODO (task 031): a coluna analista lê o
             # recuo/1-2-3 na EMA 8/21 (a média do método), o Padrão nas MMS — assim o
             # confronto mostra estruturas de verdade diferentes, não o mesmo overlay 2x.
-            method = "erick" if "erick" in run.selected_analysts else "padrao"
+            method = "analista" if "analista" in run.selected_analysts else "padrao"
             # The chart opens on the SAME frame the verdict was computed on, so the
             # picture matches the stamp; the UI can still recalc other frames via
             # /api/chart. Persist the ladder + the shown frame + the verdict frame.
@@ -1393,21 +1393,21 @@ class AnalysisRunner:
                 run.ticker, run.date, run.timeframe, method
             )
             # O Storm entra AQUI também: sem ele no payload, uma análise Padrão ou
-            # Erick não tinha nem o botão da camada — a leitura não estava desligada,
+            # analista não tinha nem o botão da camada — a leitura não estava desligada,
             # estava ausente (ver :func:`plano_com_storm`). Com a flag da tela
             # desligada (DA-184) ele volta a ficar ausente de propósito.
             run.result["actionable"] = plano_com_storm(
                 run.ticker, run.date, run.timeframe, method,
                 incluir_storm=self._storm_visivel(_classe_ativo(run.ticker)),
             )
-            # Card do Método Erick (task 20260904-003) no actionable da run aberta —
+            # Card do Método do analista (task 20260904-003) no actionable da run aberta —
             # frame de fundo (1w/1d) mostra o card; menor fica fora_do_frame.
             if isinstance(run.result["actionable"], dict):
-                run.result["actionable"]["erick_reading"] = _erick_reading_for_frame(
+                run.result["actionable"]["analista_reading"] = _analista_reading_for_frame(
                     run.ticker, run.date, run.asset_type, run.timeframe)
             # Calendário de resultados tri-state pra QUALQUER método (task
-            # 20260901-044) — mesma leitura que o Erick já consulta como fator
-            # TIER 3 (:func:`erick_method._earnings_read`), só que aqui exposta
+            # 20260901-044) — mesma leitura que o analista já consulta como fator
+            # TIER 3 (:func:`analista_method._earnings_read`), só que aqui exposta
             # como campo estruturado pra tela em vez de presa na prosa do relatório.
             run.result["earnings"] = earnings_window_status(
                 run.ticker, run.date, _EARNINGS_WINDOW_DAYS, run.asset_type
@@ -1508,7 +1508,7 @@ class AnalysisRunner:
         "Sentiment Analyst": "sentiment_report",
         "News Analyst": "news_report",
         "Fundamentals Analyst": "fundamentals_report",
-        "Erick Analyst": "erick_report",
+        "Analista Analyst": "analista_report",
         "Bull Researcher": "bull",
         "Bear Researcher": "bear",
         "Research Manager": "research_manager",
@@ -1616,9 +1616,9 @@ class AnalysisRunner:
                 "verdict_timeframe": run.timeframe,
                 # Method for the manual-confront picker (task 018): reliable from the
                 # analyst selection, done or errored. setup123 (run instantânea do
-                # 1-2-3) vem como método próprio — nunca colide com padrao/erick.
+                # 1-2-3) vem como método próprio — nunca colide com padrao/analista.
                 "method": getattr(run, "method", None)
-                or ("erick" if "erick" in run.selected_analysts else "padrao"),
+                or ("analista" if "analista" in run.selected_analysts else "padrao"),
                 # Veredito de uma run 1-2-3 (setup_state) — a watchlist mostra isto
                 # no lugar de "CONCLUÍDO": setup123 não tem verdict Buy/Hold, o seu
                 # resultado é o estado do setup (ativo/aguardar_*/sem_*). Vem do
@@ -1650,7 +1650,7 @@ class AnalysisRunner:
         """Registro DONE mais recente idêntico em (ticker, data, timeframe, método)
         cujo dado ainda é íntegro (:meth:`_is_reuse_fresh`), ou ``None``.
 
-        A chave inclui o método (padrao/erick); registros de comparação (method=
+        A chave inclui o método (padrao/analista); registros de comparação (method=
         ``compare``) e errados/interrompidos ficam de fora — não são uma leitura
         simples reaproveitável. É o análogo single-run do ``_find_reusable`` do
         confronto, com a guarda de frescor de dia-corrente por cima (correção de
@@ -1674,10 +1674,10 @@ class AnalysisRunner:
             if not res or res.get("compare"):
                 continue  # nada a reusar / não é leitura simples
             # Invalidação de 1º deploy (task 005 — coerência do drop_nature): um
-            # registro erick gravado ANTES do fix não tem o campo ``drop_nature`` e
+            # registro analista gravado ANTES do fix não tem o campo ``drop_nature`` e
             # reapareceria com o Estado antigo (contraditório). Não reusa — força
             # recomputar; o novo registro já traz o campo e volta a reusar normalmente.
-            if want == "erick" and "drop_nature" not in res:
+            if want == "analista" and "drop_nature" not in res:
                 continue
             if not self._is_reuse_fresh(rec, date):
                 continue
@@ -1726,7 +1726,7 @@ class AnalysisRunner:
         run_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         run = _Run(run_id, ticker, date, asset_type, selected, timeframe=timeframe,
                    overrides=overrides)
-        # O método do ORIGINAL prevalece (setup123 reusa setup123; erick, erick) —
+        # O método do ORIGINAL prevalece (setup123 reusa setup123; analista, analista) —
         # o reuso nunca muda o rótulo do que está devolvendo.
         if prior.get("method"):
             run.method = prior["method"]
@@ -1814,7 +1814,7 @@ class AnalysisRunner:
         forma-do-grafo (não do run_id), o grafo retoma do último nó concluído."""
         asset_type = desc.get("asset_type") or self.detect_asset_type(desc["ticker"])
         selected = desc.get("selected_analysts") or select_analysts_for_asset(
-            asset_type, include_erick=(desc.get("method") == "erick")
+            asset_type, include_analista=(desc.get("method") == "analista")
         )
         run = _Run(
             desc["run_id"], desc["ticker"], desc["date"], asset_type, list(selected),
@@ -2040,7 +2040,7 @@ class AnalysisRunner:
                 return
             selected = desc.get("selected_analysts") or select_analysts_for_asset(
                 desc.get("asset_type") or "stock",
-                include_erick=(desc.get("method") == "erick"),
+                include_analista=(desc.get("method") == "analista"),
             )
             addr = self._checkpoint_addr(
                 selected, desc.get("asset_type") or "stock",
@@ -2082,7 +2082,7 @@ class AnalysisRunner:
     def start_compare(self, ticker: str, date: str,
                       timeframe: str = _DEFAULT_TIMEFRAME,
                       overrides: dict[str, Any] | None = None) -> str:
-        """Kick off a Padrão × Erick comparison; returns a run_id to poll.
+        """Kick off a Padrão × Analista comparison; returns a run_id to poll.
 
         Runs both readings (reusing a cached prior run for either side when one
         exists for the same ticker/date/timeframe) and confronts them with the
@@ -2120,18 +2120,18 @@ class AnalysisRunner:
             # (DA-058: lado já existente NÃO re-roda), a etapa vira 'reused'.
             tr.step("padrao", "running")
             tr.set("Padrão", "Resolvendo a leitura Padrão…", 8)
-            padrao_rec = self._resolve_side(crun, want_erick=False)
+            padrao_rec = self._resolve_side(crun, want_analista=False)
             tr.step("padrao", "reused" if padrao_rec.get("_reused") else "done")
-            # Etapa 2 — método Erick (mesma regra de cache).
-            tr.step("erick", "running")
-            tr.set("Erick", "Resolvendo a leitura pelo método Erick…", 55)
-            erick_rec = self._resolve_side(crun, want_erick=True)
-            tr.step("erick", "reused" if erick_rec.get("_reused") else "done")
+            # Etapa 2 — método do analista (mesma regra de cache).
+            tr.step("analista", "running")
+            tr.set("Analista", "Resolvendo a leitura pelo método do analista…", 55)
+            analista_rec = self._resolve_side(crun, want_analista=True)
+            tr.step("analista", "reused" if analista_rec.get("_reused") else "done")
             # Etapa 3 — meta-juiz (sempre roda: é o confronto das duas leituras).
             tr.step("meta", "running")
             tr.set("Meta-juiz", "Confrontando as duas leituras…", 92)
             col_a = build_column(padrao_rec, "padrao")
-            col_b = build_column(erick_rec, "erick")
+            col_b = build_column(analista_rec, "analista")
             meta = self._meta_judge(col_a, col_b, crun.asset_type)
             tr.step("meta", "done")
             crun.result = {
@@ -2161,18 +2161,18 @@ class AnalysisRunner:
         self._persist_compare(crun, final_status)
         crun.status = final_status
 
-    def _resolve_side(self, crun: _CompareRun, want_erick: bool) -> dict[str, Any]:
+    def _resolve_side(self, crun: _CompareRun, want_analista: bool) -> dict[str, Any]:
         """Return the full record for one side of the comparison — reusing a
         cached prior run for (ticker, date, timeframe, method) when present, else
         running that pipeline fresh (inline, in this worker thread)."""
         existing = self._find_reusable(
-            crun.ticker, crun.date, crun.timeframe, want_erick
+            crun.ticker, crun.date, crun.timeframe, want_analista
         )
         if existing is not None:
             existing = dict(existing)
             existing["_reused"] = True
             return existing
-        selected = select_analysts_for_asset(crun.asset_type, include_erick=want_erick)
+        selected = select_analysts_for_asset(crun.asset_type, include_analista=want_analista)
         sub_id = timeutil.run_id_stamp() + "-" + uuid.uuid4().hex[:6]
         sub = _Run(sub_id, crun.ticker, crun.date, crun.asset_type, selected,
                    timeframe=crun.timeframe, overrides=crun.overrides)
@@ -2190,10 +2190,10 @@ class AnalysisRunner:
         }
 
     def _find_reusable(self, ticker: str, date: str, timeframe: str,
-                       want_erick: bool) -> dict[str, Any] | None:
+                       want_analista: bool) -> dict[str, Any] | None:
         """Most-recent DONE plain run matching (ticker, date, timeframe) whose
-        Erick-presence matches ``want_erick`` — or ``None``. Compare runs are
-        skipped (they are not a plain padrão/erick reading)."""
+        analista-presence matches ``want_analista`` — or ``None``. Compare runs are
+        skipped (they are not a plain padrão/analista reading)."""
         for summ in self.store.recent(30):
             if summ.get("status") != "done":
                 continue
@@ -2210,18 +2210,18 @@ class AnalysisRunner:
             if res.get("compare"):
                 continue  # a comparison record is not a single-method reading
             # Nem o ATALHO 1-2-3: ele grava relatório vazio e veredito None, então a
-            # detecção por ausência de ``erick_report`` o dava como "padrao" — e o
+            # detecção por ausência de ``analista_report`` o dava como "padrao" — e o
             # confronto reusava um registro EM BRANCO como o lado Padrão, mandando o
-            # meta-juiz comparar nada com um Erick real. Uma leitura estrutural não é
+            # meta-juiz comparar nada com um analista real. Uma leitura estrutural não é
             # uma leitura de método — vale para o 1-2-3 e para o Storm.
             if res.get("setup123") or res.get("storm123"):
                 continue
-            has_erick = bool((res.get("erick_report") or "").strip())
-            # Invalidação de 1º deploy (task 005): registro erick pré-coerência (sem
+            has_analista = bool((res.get("analista_report") or "").strip())
+            # Invalidação de 1º deploy (task 005): registro analista pré-coerência (sem
             # ``drop_nature``) não é reusável — reapareceria com o Estado antigo.
-            if has_erick and "drop_nature" not in res:
+            if has_analista and "drop_nature" not in res:
                 continue
-            if has_erick == want_erick:
+            if has_analista == want_analista:
                 return rec
         return None
 
@@ -2291,15 +2291,15 @@ class AnalysisRunner:
 
     def confront(self, id_a: str, id_b: str,
                  overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Confront two analyses of the same ticker — ALWAYS Padrão × Erick on the
+        """Confront two analyses of the same ticker — ALWAYS Padrão × Analista on the
         same timeframe/date (Samyr's rule, task 024). Never 'método contra ele mesmo'.
 
-        If the two picked runs already are a valid Padrão × Erick pair on the same
+        If the two picked runs already are a valid Padrão × Analista pair on the same
         frame and date, meta-judge them directly (free, no re-run, the exact runs
         chosen). Anything else — two of the same method, or mismatched frames/dates —
         is NOT a confront: it reroutes through :meth:`start_compare`, anchored on the
         open run A, which reuses the cached side and runs ONLY the missing method so
-        the outcome is a true Padrão × Erick.
+        the outcome is a true Padrão × Analista.
 
         Returns a done snapshot (``result.compare`` populated) for the direct case,
         or ``{"run_id": ..., "rerouted": True}`` for the rerouted (async) case — the
@@ -2323,7 +2323,7 @@ class AnalysisRunner:
         col_b = build_column(rec_b, detect_method(rec_b))
 
         # Not a real confront (same method, or different frame/date) → reroute to a
-        # true Padrão × Erick compare, anchored on run A (ticker/date/frame the user
+        # true Padrão × Analista compare, anchored on run A (ticker/date/frame the user
         # is looking at). start_compare reuses the cached side and runs only the
         # missing method — impossible to produce método×ele-mesmo by this door.
         if not confront_pair_valid(col_a, col_b):
@@ -2335,8 +2335,8 @@ class AnalysisRunner:
             return {"run_id": run_id, "rerouted": True, "ticker": ta,
                     "status": "running"}
 
-        # Valid pair: keep Padrão first / Erick second so the header always reads
-        # "Padrão · X × Método Erick · X" regardless of which side was picked first.
+        # Valid pair: keep Padrão first / analista second so the header always reads
+        # "Padrão · X × Método do analista · X" regardless of which side was picked first.
         if col_a.get("method") != "padrao":
             col_a, col_b = col_b, col_a
         asset_type = rec_a.get("asset_type") or rec_b.get("asset_type") or "stock"
@@ -2665,7 +2665,7 @@ class AnalysisRunner:
             # method + setup_state no resumo ao vivo igual ao index persistido
             # (task 010): a watchlist usa o mesmo código pra done e running.
             "method": getattr(run, "method", None)
-            or ("erick" if "erick" in run.selected_analysts else "padrao"),
+            or ("analista" if "analista" in run.selected_analysts else "padrao"),
             "setup_state": ((run.result or {}).get("actionable") or {}).get("setup_state"),
             "cost_usd": cost.get("usd", 0),
             "elapsed": round(time.time() - run.started_at, 1),
@@ -3139,7 +3139,7 @@ class AnalysisRunner:
 
         Junta três coisas que já existem e nunca tinham se encontrado: o plano
         (níveis do :mod:`price_structure`), a política de execução (:mod:`execucao`,
-        modelada da spec do degenbot sobre o corpus do Erick) e o track record do
+        modelada da spec do degenbot sobre o corpus do analista) e o track record do
         ledger (:func:`scanner.scan_verdicts`), este último passado pelo GATE DE N —
         taxa de acerto com 3 casos é ruído que engana mais do que ajuda.
 
@@ -3244,8 +3244,8 @@ class AnalysisRunner:
             "ler_em_segundos": em_s + agenda.MARGEM_LEITURA_S,
         }
 
-    def erick_carteira(self, *, force: bool = False) -> dict[str, Any] | None:
-        """A carteira REAL do Erick pra tela — SÓ-DONO (DA-148), ``None`` se a
+    def analista_carteira(self, *, force: bool = False) -> dict[str, Any] | None:
+        """A carteira REAL do analista pra tela — SÓ-DONO (DA-148), ``None`` se a
         instância não tem a credencial configurada.
 
         Passa direto pro módulo, que já decide cache × leitura e degrada pro último
@@ -3254,7 +3254,7 @@ class AnalysisRunner:
         dele, reusando o cache de preço do runner (:data:`_PRICE_TTL`) — a mesma
         fonte que a lista de observação já usa, não uma segunda.
         """
-        from tradingagents.dataflows import erick_carteira as ec
+        from tradingagents.dataflows import analista_carteira as ec
 
         payload = ec.carteira(force=force)
         if payload is None:
@@ -3263,10 +3263,10 @@ class AnalysisRunner:
         # CAIXA não tem cotação, e pedir uma seria inventar símbolo. Cripto do
         # payload vem no formato da exchange ("BINANCE:BTCUSDT"); o produto fala
         # "BTC-USD" — a tradução é da TELA (o payload dele não muda por nossa causa).
-        simbolos = [s for s in (self._erick_simbolo(L) for L in linhas) if s]
+        simbolos = [s for s in (self._analista_simbolo(L) for L in linhas) if s]
         precos = self.live_prices(simbolos) if simbolos else {}
         for L in linhas:
-            sym = self._erick_simbolo(L)
+            sym = self._analista_simbolo(L)
             L["simbolo_produto"] = sym
             cot = (precos or {}).get(sym) if sym else None
             preco = (cot or {}).get("price") if isinstance(cot, dict) else None
@@ -3280,7 +3280,7 @@ class AnalysisRunner:
         return payload
 
     @staticmethod
-    def _erick_simbolo(linha: dict[str, Any]) -> str | None:
+    def _analista_simbolo(linha: dict[str, Any]) -> str | None:
         """O ticker do ativo dele no vocabulário DO PRODUTO.
 
         Caixa não é ativo negociável — devolve None em vez de um símbolo falso que
@@ -3449,7 +3449,7 @@ class AnalysisRunner:
         1-2-3 and bands are re-detected on the chosen frame's own series (daily from
         the cached yfinance series; 4h/1h/15m from the keyless intraday source —
         the exchange for crypto, yfinance for an equity). ``method`` keeps the
-        structure family consistent with the open analysis (Erick EMA 8/21 / Padrão
+        structure family consistent with the open analysis (analista EMA 8/21 / Padrão
         MMS) when the user flips timeframe. Everything reuses the DA-058 caches, so
         flipping back to a frame already fetched costs zero network.
 
@@ -3515,10 +3515,10 @@ class AnalysisRunner:
             chart = fetch_price_chart(ticker, date, timeframe, method)
             plan = _plano(timeframe)
 
-        # Card do Método Erick nas leituras de fundo (1w/1d), fora_do_frame nos
+        # Card do Método do analista nas leituras de fundo (1w/1d), fora_do_frame nos
         # menores (task 20260904-003). O `timeframe` aqui já é o EFETIVO (pós-degrade).
         if isinstance(plan, dict):
-            plan["erick_reading"] = _erick_reading_for_frame(
+            plan["analista_reading"] = _analista_reading_for_frame(
                 ticker, date, asset_type, timeframe)
 
         return {

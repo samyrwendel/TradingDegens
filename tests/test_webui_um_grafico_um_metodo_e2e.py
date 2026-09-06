@@ -1,10 +1,10 @@
 """Um gráfico, um método — a tela para de misturar as leituras (task 20260830-009).
 
 "Percebo tbm que mistura tudo em um gráfico só, Storm123, Setup123 e Padrão com
-Erick." Eram TRÊS misturas empilhadas:
+analista." Eram TRÊS misturas empilhadas:
 
   1. **as médias** — as duas famílias sempre desenhadas, pra todo método: MMS
-     20/50/200 (Padrão) + EMA 8/21/50 (Erick), mais a EMA 80 do Éden nas runs do
+     20/50/200 (Padrão) + EMA 8/21/50 (analista), mais a EMA 80 do Éden nas runs do
      Storm. Sete linhas numa tela onde o método aberto usa três;
   2. **os níveis** — numa run do Storm o gráfico traçava os do Storm E os do plano,
      porque a única condição era o Storm ter opinião. Daí "Storm · stop (SL) 497,98"
@@ -116,7 +116,7 @@ def _snap(metodo):
         "bull": "", "bear": "", "research_manager": "", "investment_plan": "",
         "trader_plan": "", "risk_decision": "", "market_report": "",
         "sentiment_report": "", "news_report": "", "fundamentals_report": "",
-        "erick_report": "Leitura do Erick." if metodo == "erick" else "",
+        "analista_report": "Leitura do analista." if metodo == "analista" else "",
         "drop_nature": {}, "derivatives_report": "",
         "setup123": metodo == "setup123", "storm123": metodo == "storm123",
     }
@@ -164,12 +164,12 @@ _LE = """() => ({
 @pytest.mark.parametrize("metodo,ma,ema", [
     ("padrao", ["20", "200", "50"], []),
     ("setup123", ["20", "200", "50"], []),
-    ("erick", [], ["21", "50", "8"]),
+    ("analista", [], ["21", "50", "8"]),
     ("storm123", [], ["8", "80"]),
 ])
 def test_as_medias_seguem_o_metodo_aberto(base, metodo, ma, ema):
     """DENTE: sete médias na tela pra todo método — MMS 20/50/200 (Padrão) + EMA
-    8/21/50 (Erick) + EMA 80 (Éden). A média é parte da LEITURA: o Éden É a MME 8 ×
+    8/21/50 (analista) + EMA 80 (Éden). A média é parte da LEITURA: o Éden É a MME 8 ×
     MME 80, e o recuo do Padrão é a MMS."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -256,7 +256,7 @@ def test_ligar_a_outra_camada_nomeia_TODOS_os_rotulos(base, viewport):
         # "as duas" entra no grupo de leituras desde a DA-143: sobrepor deixou de ser
         # efeito de "mostrar X" e virou opção com nome próprio.
         assert antes["camadasBtn"] == ["Setup123", "Storm123", "as duas",
-                                       "MMS (Padrão)", "EMA (Erick)"], antes
+                                       "MMS (Padrão)", "EMA (analista)"], antes
 
         page.click('.camada-btn[data-camada="ambas"]')
         page.wait_for_timeout(250)
