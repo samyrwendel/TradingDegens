@@ -1,7 +1,10 @@
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -10,7 +13,7 @@ from yfinance.exceptions import YFRateLimitError
 
 from . import data_notices
 from .config import get_config
-from .symbol_utils import NoMarketDataError, normalize_symbol
+from .symbol_utils import NoMarketDataError, crypto_base, normalize_symbol
 from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
@@ -197,27 +200,6 @@ def _assert_ohlcv_not_stale(
         )
 
 
-def _cache_covers(cached: pd.DataFrame, curr_date_dt) -> bool:
-    """Whether the cached frame already reaches the requested day.
-
-    "Historical rows are immutable" only justifies reusing a cache that actually
-    CONTAINS the requested day. A file whose last row is 24/08 says nothing about
-    25, 26 and 27/08 — those rows are missing, not immutable.
-
-    Covered when the last row is on/after ``curr_date``, or when no business day
-    sits between them (weekend/holiday gap: the market produced no bar, so there
-    is nothing to fetch).
-    """
-    dates = _coerce_ohlcv_dates(cached)
-    if dates.empty:
-        return False
-    latest = dates.max().normalize()
-    requested = pd.to_datetime(curr_date_dt).normalize()
-    if latest >= requested:
-        return True
-    return len(pd.bdate_range(latest + pd.Timedelta(days=1), requested)) == 0
-
-
 # ============================ BUSCA INCREMENTAL DO DIÁRIO (DA-119) ============
 #
 # Pedido do Samyr: *"sempre com dados incrementais, nada revalidar 123 pedindo
@@ -321,28 +303,46 @@ def busca_ohlcv(canonical: str, start_str: str, end_str: str,
     return emenda_ohlcv(cached, trecho), "incremental", ""
 
 
-def _needs_refresh(data_file, cached, curr_date_dt, today_date) -> bool:
-    """Whether a cached frame must be refetched before being served.
+# ======================= REGRA ÚNICA DO CACHE DIÁRIO: O FECHAMENTO ============
+#
+# A série diária/semanal fica CONGELADA dentro do pregão e é renovada — INTEIRA,
+# sem emenda — na primeira leitura depois do fechamento. Nunca fresca a cada
+# chamada (estabilidade do veredito e o throttle do Yahoo, no único IP de
+# produção), nunca eterna.
+#
+# Por que inteira: a emenda incremental (DA-119) confiava no trecho novo. Em
+# 22/09/2026 o Yahoo devolveu um trecho SEM aquele pregão, a sobreposição provou
+# "continuidade" e o buraco ficou no cache pra sempre — AAPL EMA21 327,78 no TD ×
+# 328,81 fresco em 24/09, AGUARDAR × AGIR. E o Yahoo reescala o histórico todo a
+# cada dividendo/split (``auto_adjust``): só o download inteiro traz a escala nova.
+# Uma vez por fechamento, então, a série é a da fonte — buraco transitório ou
+# ajuste de ação corporativa duram no máximo até o próximo fechamento.
+#
+# O fechamento é 16:00 de Nova York + folga pro leilão de fechamento publicar,
+# em dia útil. Sem calendário de feriado de propósito: num feriado a regra só
+# custa UM download a mais (a fonte devolve a mesma série), e um calendário
+# nosso envelheceria. ponytail: meio-pregão (13:00) renova só às 16:10 — série
+# do pregão anterior por 3h nesse dia; ligar exchange_calendars se importar.
+# Cripto fecha a vela D às 00:00 UTC, todo dia.
+_NY = ZoneInfo("America/New_York")
+FECHAMENTO_NY = dt_time(16, 10)
 
-    Two distinct staleness cases exist:
 
-    * **dia corrente** — the bar may be missing or still in progress (Yahoo
-      publishes a partial daily candle during market hours, whose ``Close`` is
-      not the closing price). Row inspection cannot tell a partial bar from a
-      final one, so the TTL governs every current-day cache (#1150).
-    * **cache que não alcança o dia pedido** (bug L2, 28/08) — a file frozen with
-      its last row on 24/08 kept being served for a 27/08 analysis because the
-      request was "historical" and historical rows are immutable. They are; the
-      MISSING ones are not. MCD e BE ficaram exatamente assim: o 4h do mesmo
-      símbolo já estava em 27/08 e o diário parado em 24/08, e o ``drop_nature``
-      — que lê só o diário — mediu queda de -1,3% onde a real era -4,6%. Agora um
-      cache que não cobre ``curr_date`` é refetchado, com a mesma TTL segurando a
-      frequência para o caso do pregão que de fato não existiu (feriado).
-    """
-    historical = pd.to_datetime(curr_date_dt).date() < today_date.date()
-    if historical and _cache_covers(cached, curr_date_dt):
-        return False
-    return time.time() - os.path.getmtime(data_file) > OHLCV_CACHE_TTL_SECONDS
+def ultimo_fechamento(agora: datetime | None = None, cripto: bool = False) -> datetime:
+    """O fechamento de vela diária mais recente em ``agora`` (aware; default = já)."""
+    agora = agora or datetime.now(timezone.utc)
+    if cripto:
+        return agora.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    ny = agora.astimezone(_NY)
+    f = datetime.combine(ny.date(), FECHAMENTO_NY, tzinfo=_NY)
+    while f > ny or f.weekday() >= 5:
+        f = datetime.combine(f.date() - timedelta(days=1), FECHAMENTO_NY, tzinfo=_NY)
+    return f
+
+
+def _needs_refresh(data_file, *, cripto: bool = False, agora: datetime | None = None) -> bool:
+    """O arquivo foi gravado antes do último fechamento? Então a série é renovada."""
+    return os.path.getmtime(data_file) < ultimo_fechamento(agora, cripto).timestamp()
 
 
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
@@ -383,22 +383,18 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     usable_cache = None
     if os.path.exists(data_file):
         cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-        # Serve the cache only when it is usable, reaches the requested day and is
-        # not a stale snapshot of it (#1150 + bug L2); otherwise refetch.
+        # Serve the cache only when it is usable and was written after the last
+        # close (regra do fechamento, acima); otherwise refetch.
         if not cached.empty and "Close" in cached.columns:
             usable_cache = cached
-            if not _needs_refresh(data_file, cached, curr_date_dt, today_date):
+            if not _needs_refresh(data_file, cripto=crypto_base(canonical) is not None):
                 data = cached
 
     if data is None:
         try:
-            # INCREMENTAL (DA-119): com série em cache pede-se só do último dia
-            # conhecido em diante, e emenda-se por data. Cai no completo sozinho
-            # quando não dá pra provar continuidade — e diz por quê.
-            downloaded, modo, motivo = busca_ohlcv(
-                canonical, start_str, end_str, cached=usable_cache)
-            if modo == "completo" and usable_cache is not None:
-                logger.info("OHLCV %s: download completo — %s", canonical, motivo)
+            # INTEIRO, sem emenda no cache (regra do fechamento): a emenda da
+            # DA-119 eternizou um pregão que o Yahoo omitiu num trecho.
+            downloaded, _modo, _motivo = busca_ohlcv(canonical, start_str, end_str)
         except Exception:
             # A revalidação virou obrigatória para o cache que não cobre o dia; se
             # a fonte estiver fora do ar não se pode perder um cache que antes era
@@ -425,9 +421,6 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
                 raise NoMarketDataError(
                     symbol, canonical, "Yahoo Finance returned no rows"
                 )
-            # A regravação acontece MESMO em `sem_novidade`: o `_needs_refresh` é
-            # por mtime, e sem tocar o arquivo toda chamada fora do pregão voltaria
-            # a bater na fonte pra receber o mesmo "não há barra nova".
             downloaded.to_csv(data_file, index=False, encoding="utf-8")
             data = downloaded
 

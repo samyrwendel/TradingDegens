@@ -261,21 +261,17 @@ def _make_stable_load_ohlcv(mod):
                     # `_needs_refresh` (não mais só "mesmo dia"): um arquivo cujo
                     # último pregão é anterior ao dia pedido NÃO cobre o pedido, e
                     # ser "histórico" não o torna válido — foi o bug L2 do MCD/BE.
-                    if not mod._needs_refresh(data_file, cached, curr_date_dt, today_date):
+                    if not mod._needs_refresh(
+                            data_file, cripto=mod.crypto_base(canonical) is not None):
                         data = cached
 
             if data is None:
                 try:
-                    # INCREMENTAL (DA-119) pela MESMA função do módulo original:
-                    # este wrapper existe pra estabilizar o NOME do arquivo, não
-                    # pra ter uma política de download própria. Uma segunda cópia
-                    # da emenda divergiria da primeira, e o remendo que diverge é
-                    # exatamente o que produz série errada sem dar erro.
-                    downloaded, modo, motivo = mod.busca_ohlcv(
-                        canonical, start_str, end_str, cached=usable_cache)
-                    if modo == "completo" and usable_cache is not None:
-                        logger.info("ta_datacache: OHLCV %s baixado completo — %s",
-                                    canonical, motivo)
+                    # MESMA função e MESMA regra do módulo original (download
+                    # inteiro a cada fechamento): este wrapper existe pra
+                    # estabilizar o NOME do arquivo, não pra ter política própria.
+                    downloaded, _modo, _motivo = mod.busca_ohlcv(
+                        canonical, start_str, end_str)
                 except Exception:
                     # Fonte fora do ar: servir o cache degradado é melhor que ficar
                     # sem série. O guard de série vencida (#1021) segue matando o

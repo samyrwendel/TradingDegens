@@ -27,7 +27,6 @@ pytestmark = pytest.mark.unit
 HOJE = pd.Timestamp("2026-08-28")
 PEDIDO = "2026-08-27"          # análise histórica (ontem)
 ULTIMA_BARRA = "2026-08-24"    # a série para 3 dias úteis antes: o buraco do L2
-_TTL_VENCIDO = su.OHLCV_CACHE_TTL_SECONDS + 60
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +70,7 @@ def _semeia_cache(tmp_path, symbol, vencido=True):
                           "Open": [1.0, 1.0, 1.0], "High": [1.0, 1.0, 1.0],
                           "Low": [1.0, 1.0, 1.0], "Close": [269.2, 269.2, 272.6],
                           "Volume": [1, 1, 1]})
-    antigo = time.time() - _TTL_VENCIDO
+    antigo = su.ultimo_fechamento().timestamp() - 60   # gravado antes do último fechamento
     for name in (f"{symbol}-YFin-data-{start}-{end}.csv", f"{symbol}-YFin-5y.csv"):
         f = tmp_path / name
         frame.to_csv(f, index=False)

@@ -1,217 +1,158 @@
-"""OHLCV cache: nem snapshot velho do dia (#1150), nem arquivo que não alcança o
-dia pedido (bug L2, task 20260828-008).
+"""OHLCV cache: a regra do FECHAMENTO (task 20260925-038).
 
-Dois modos de servir preço errado a partir do cache:
+A série diária/semanal fica congelada dentro do pregão e é renovada — inteira,
+sem emenda — na primeira leitura depois do fechamento (16:10 NY em dia útil;
+00:00 UTC pra cripto). Substitui o TTL de 15 min (#1150) e a cobertura do dia
+pedido (bug L2): um arquivo gravado antes do último fechamento não vale, seja o
+pedido de hoje ou histórico.
 
-* **dia corrente** — um run começado antes de a barra do dia fechar era reusado
-  por todos os runs seguintes, alimentando a análise com um close parcial. Duas
-  variantes: a barra pode faltar, ou estar presente mas ainda em formação (a
-  Yahoo publica candle diário parcial durante o pregão). O TTL governa as duas.
-* **cache que não cobre o dia pedido** — "linhas históricas são imutáveis" só
-  justifica reusar um arquivo que CONTÉM o dia pedido. MCD e BE tinham a série
-  diária parada em 24/08 enquanto o 4h dos mesmos símbolos já estava em 27/08:
-  como o pedido era "histórico" (27/08 com hoje = 28/08), o cache era servido
-  para sempre e o ``drop_nature`` mediu -1,3% onde a queda real era -4,6%.
-
-O refetch é limitado por TTL nos dois casos, então nem feriado nem repetição
-martelam a fonte.
+O defeito que motivou: a emenda incremental (DA-119) colou um trecho em que o
+Yahoo omitiu o pregão de 22/09/2026, e o buraco ficou no cache pra sempre —
+AAPL EMA21 327,78 no TD × 328,81 fresco em 24/09.
 """
 from __future__ import annotations
 
 import os
-import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
 
 import tradingagents.dataflows.stockstats_utils as su
 
-TODAY = pd.Timestamp("2026-07-18")
-STALE = su.OHLCV_CACHE_TTL_SECONDS + 60
+NY = ZoneInfo("America/New_York")
 
 
-def _write(tmp_path, name="cache.csv", age_seconds=0.0, last_date="2026-07-17"):
+def _ny(y, mo, d, h, mi=0):
+    return datetime(y, mo, d, h, mi, tzinfo=NY)
+
+
+def _grava(tmp_path, quando: datetime, name="c.csv"):
     f = tmp_path / name
-    pd.DataFrame({"Date": [last_date], "Close": [1.0]}).to_csv(f, index=False)
-    if age_seconds:
-        old = time.time() - age_seconds
-        os.utime(f, (old, old))
+    pd.DataFrame({"Date": ["2026-09-24"], "Close": [1.0]}).to_csv(f, index=False)
+    os.utime(f, (quando.timestamp(), quando.timestamp()))
     return str(f)
 
 
-def _frame(last_date):
-    return pd.DataFrame({"Date": [last_date], "Close": [1.0]})
+# ------------------------------------------------------------ a regra pura ----
+@pytest.mark.unit
+@pytest.mark.parametrize("agora,esperado", [
+    (_ny(2026, 9, 24, 11, 0), _ny(2026, 9, 23, 16, 10)),   # qui no pregão -> qua
+    (_ny(2026, 9, 24, 16, 9), _ny(2026, 9, 23, 16, 10)),   # antes da folga
+    (_ny(2026, 9, 24, 16, 10), _ny(2026, 9, 24, 16, 10)),  # fechou
+    (_ny(2026, 9, 27, 12, 0), _ny(2026, 9, 25, 16, 10)),   # domingo -> sexta
+    (_ny(2026, 9, 28, 9, 0), _ny(2026, 9, 25, 16, 10)),    # seg pré-abertura -> sexta
+    (_ny(2026, 11, 2, 12, 0), _ny(2026, 10, 30, 16, 10)),  # atravessa o fim do DST
+])
+def test_ultimo_fechamento_acao(agora, esperado):
+    assert su.ultimo_fechamento(agora) == esperado
 
 
 @pytest.mark.unit
-def test_current_day_cache_past_ttl_is_refreshed(tmp_path):
-    # Bar missing (rows stop at yesterday) and file older than the TTL -> refetch.
-    f = _write(tmp_path, age_seconds=STALE)
-    assert su._needs_refresh(f, _frame("2026-07-17"), TODAY, TODAY) is True
+def test_ultimo_fechamento_cripto_e_meia_noite_utc_todo_dia():
+    agora = datetime(2026, 9, 27, 3, 0, tzinfo=timezone.utc)   # domingo
+    assert su.ultimo_fechamento(agora, cripto=True) == datetime(2026, 9, 27, tzinfo=timezone.utc)
 
 
 @pytest.mark.unit
-def test_partial_current_day_bar_is_still_refreshed(tmp_path):
-    # Today's row is present but may be an in-progress candle whose Close is not
-    # the closing price. Row inspection can't distinguish it, so the TTL governs.
-    f = _write(tmp_path, age_seconds=STALE, last_date="2026-07-18")
-    assert su._needs_refresh(f, _frame("2026-07-18"), TODAY, TODAY) is True
+def test_dentro_do_pregao_NAO_renova(tmp_path):
+    # gravado depois do fechamento de ontem; hoje o pregão está aberto
+    f = _grava(tmp_path, _ny(2026, 9, 23, 17, 0))
+    assert su._needs_refresh(f, agora=_ny(2026, 9, 24, 11, 0)) is False
+    assert su._needs_refresh(f, agora=_ny(2026, 9, 24, 15, 59)) is False
 
 
 @pytest.mark.unit
-def test_recent_cache_is_not_refetched(tmp_path):
-    # Written moments ago: don't hammer the vendor (weekend/holiday guard).
-    f = _write(tmp_path)
-    assert su._needs_refresh(f, _frame("2026-07-17"), TODAY, TODAY) is False
+def test_depois_do_fechamento_RENOVA_uma_vez(tmp_path):
+    f = _grava(tmp_path, _ny(2026, 9, 24, 11, 0))            # gravado no pregão
+    assert su._needs_refresh(f, agora=_ny(2026, 9, 24, 16, 30)) is True
+    f = _grava(tmp_path, _ny(2026, 9, 24, 16, 31))           # a renovação
+    assert su._needs_refresh(f, agora=_ny(2026, 9, 24, 20, 0)) is False
 
 
 @pytest.mark.unit
-def test_historical_request_that_the_cache_covers_uses_cache(tmp_path):
-    # Past dates are immutable AND the file reaches the requested day: never refetch.
-    past = pd.Timestamp("2026-05-01")
-    f = _write(tmp_path, age_seconds=STALE, last_date="2026-05-01")
-    assert su._needs_refresh(f, _frame("2026-05-01"), past, TODAY) is False
-
-
-# ------------------------------------------------- bug L2: cache que não cobre --
-@pytest.mark.unit
-def test_cache_que_nao_alcanca_o_dia_pedido_e_refetchado(tmp_path):
-    """MCD/BE: diário parado em 24/08 e análise pedida em 27/08. Pedido histórico,
-    mas faltam 3 pregões — o arquivo NÃO cobre o dia e tem de ser revalidado."""
-    hoje = pd.Timestamp("2026-08-28")
-    pedido = pd.Timestamp("2026-08-27")
-    f = _write(tmp_path, age_seconds=STALE, last_date="2026-08-24")
-    assert su._cache_covers(_frame("2026-08-24"), pedido) is False
-    assert su._needs_refresh(f, _frame("2026-08-24"), pedido, hoje) is True
+def test_arquivo_de_dias_atras_renova_mesmo_pra_pedido_historico(tmp_path):
+    """O bug L2 e o histórico eterno: nenhum pedido serve arquivo de antes do fechamento."""
+    f = _grava(tmp_path, _ny(2026, 8, 24, 17, 0))
+    assert su._needs_refresh(f, agora=_ny(2026, 8, 28, 10, 0)) is True
 
 
 @pytest.mark.unit
-def test_fim_de_semana_nao_dispara_refetch(tmp_path):
-    """Sexta 2026-08-21 é a última barra e o pedido é sábado 22: não há pregão
-    no meio, então o cache COBRE o dia — nada a buscar (nem martelar a fonte)."""
-    hoje = pd.Timestamp("2026-08-28")
-    sabado = pd.Timestamp("2026-08-22")
-    f = _write(tmp_path, age_seconds=STALE, last_date="2026-08-21")
-    assert su._cache_covers(_frame("2026-08-21"), sabado) is True
-    assert su._needs_refresh(f, _frame("2026-08-21"), sabado, hoje) is False
+def test_fim_de_semana_nao_renova_arquivo_de_sexta_a_noite(tmp_path):
+    f = _grava(tmp_path, _ny(2026, 9, 25, 18, 0))
+    assert su._needs_refresh(f, agora=_ny(2026, 9, 27, 12, 0)) is False
 
 
 @pytest.mark.unit
-def test_refetch_de_cache_descoberto_respeita_o_ttl(tmp_path):
-    """Feriado real (a fonte não tem a barra mesmo): o arquivo recém-escrito não é
-    rebuscado de novo antes do TTL — a correção não vira martelo na fonte."""
-    hoje = pd.Timestamp("2026-08-28")
-    pedido = pd.Timestamp("2026-08-27")
-    f = _write(tmp_path, last_date="2026-08-24")   # escrito agora
-    assert su._needs_refresh(f, _frame("2026-08-24"), pedido, hoje) is False
+def test_cripto_renova_no_fim_de_semana(tmp_path):
+    f = _grava(tmp_path, datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc))
+    agora = datetime(2026, 9, 27, 1, 0, tzinfo=timezone.utc)
+    assert su._needs_refresh(f, agora=agora) is False
+    assert su._needs_refresh(f, cripto=True, agora=agora) is True
 
 
-@pytest.mark.unit
-def test_cache_vazio_nunca_cobre():
-    assert su._cache_covers(pd.DataFrame({"Date": [], "Close": []}), TODAY) is False
+# ------------------------------------------------------ no caminho REAL ----
+def _semeia(tmp_path, symbol, frame, mtime):
+    today = pd.Timestamp.today()
+    start = (today - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
+    end = (today + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    # os DOIS nomes: o datado (loader original) e o estável (wrapper do datacache,
+    # que é quem roda de fato) — senão o teste exercita só o fallback.
+    for name in (f"{symbol}-YFin-data-{start}-{end}.csv", f"{symbol}-YFin-5y.csv"):
+        frame.to_csv(tmp_path / name, index=False)
+        os.utime(tmp_path / name, (mtime, mtime))
 
 
-@pytest.mark.unit
-def test_load_ohlcv_refetches_stale_same_day_cache(tmp_path, monkeypatch):
-    """End-to-end: the helper is actually wired into load_ohlcv's cache branch.
-
-    Without this, the unit tests above would still pass if the helper were never
-    called from the real code path.
-    """
-    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
-    monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: TODAY))
-
-    # Pre-seed the cache file load_ohlcv will look for, aged past the TTL.
-    start = (TODAY - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
-    end = (TODAY + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    # semeia os DOIS nomes: o datado (loader original) e o estável por símbolo
-    # (wrapper do ta_datacache, que é quem roda de fato) — senão o teste exercita
-    # o fallback do wrapper em vez do caminho real de cache.
-    old = time.time() - STALE
-    for name in (f"AAPL-YFin-data-{start}-{end}.csv", "AAPL-YFin-5y.csv"):
-        cache_file = tmp_path / name
-        pd.DataFrame({"Date": ["2026-07-17"], "Close": [100.0]}).to_csv(cache_file, index=False)
-        os.utime(cache_file, (old, old))
-
-    calls = []
-
-    def _fake_download(*a, **k):
-        calls.append(1)
-        return pd.DataFrame(
-            {"Date": pd.to_datetime(["2026-07-17", "2026-07-18"]), "Close": [100.0, 222.0]}
-        ).set_index("Date")
-
-    monkeypatch.setattr(su.yf, "download", _fake_download)
-
-    out = su.load_ohlcv("AAPL", TODAY.strftime("%Y-%m-%d"))
-
-    assert calls, "stale same-day cache must trigger a refetch"
-    assert 222.0 in out["Close"].values, "refreshed close must reach the caller"
-
-
-@pytest.mark.unit
-def test_load_ohlcv_reuses_fresh_same_day_cache(tmp_path, monkeypatch):
-    # Mirror image: a fresh cache must NOT trigger a download.
-    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
-    monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: TODAY))
-
-    start = (TODAY - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
-    end = (TODAY + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    for name in (f"AAPL-YFin-data-{start}-{end}.csv", "AAPL-YFin-5y.csv"):
-        pd.DataFrame({"Date": ["2026-07-18"], "Close": [100.0]}).to_csv(
-            tmp_path / name, index=False)
-
-    # conta chamadas em vez de levantar: o loader agora cai pro cache quando a
-    # fonte falha, então uma exceção aqui não provaria mais nada.
-    calls = []
-
-    def _count_download(*a, **k):
-        calls.append(1)
-        return pd.DataFrame({"Date": pd.to_datetime(["2026-07-18"]), "Close": [1.0]}).set_index("Date")
-
-    monkeypatch.setattr(su.yf, "download", _count_download)
-    su.load_ohlcv("AAPL", TODAY.strftime("%Y-%m-%d"))
-    assert not calls, "fresh cache must not refetch"
-
-
-@pytest.mark.unit
-def test_load_ohlcv_refetches_cache_que_nao_cobre_o_dia(tmp_path, monkeypatch):
-    """E2E do bug L2 no caminho REAL (wrapper estável do ta_datacache).
-
-    Reproduz MCD/BE: cache com última barra em 24/08, análise pedida em 27/08 e
-    "hoje" em 28/08 — pedido histórico. Antes o arquivo era servido para sempre e
-    a série chegava ao ``drop_nature`` sem 25, 26 e 27/08. Agora é revalidado e as
-    barras que faltavam aparecem.
-    """
-    hoje = pd.Timestamp("2026-08-28")
-    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
-    monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: hoje))
-
-    start = (hoje - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
-    end = (hoje + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    velho = pd.DataFrame({"Date": ["2026-08-20", "2026-08-21", "2026-08-24"],
-                          "Close": [269.2, 269.2, 272.6]})
-    antigo = time.time() - STALE
-    for name in (f"MCD-YFin-data-{start}-{end}.csv", "MCD-YFin-5y.csv"):
-        velho.to_csv(tmp_path / name, index=False)
-        os.utime(tmp_path / name, (antigo, antigo))
-
-    calls = []
-
-    def _fake_download(*a, **k):
-        calls.append(1)
-        return pd.DataFrame({
-            "Date": pd.to_datetime(["2026-08-20", "2026-08-21", "2026-08-24",
-                                    "2026-08-25", "2026-08-26", "2026-08-27"]),
-            "Close": [269.2, 269.2, 272.6, 268.0, 264.5, 260.1],
-        }).set_index("Date")
-
+def _fonte(monkeypatch, frame, calls):
     import yfinance as yf
-    monkeypatch.setattr(yf, "download", _fake_download)
-    monkeypatch.setattr(su.yf, "download", _fake_download)
 
-    out = su.load_ohlcv("MCD", "2026-08-27")
+    def _dl(*a, **k):
+        calls.append(k.get("start"))
+        return frame.set_index("Date")
+    monkeypatch.setattr(yf, "download", _dl)
+    monkeypatch.setattr(su.yf, "download", _dl)
 
-    assert calls, "cache que não alcança o dia pedido tem de ser revalidado"
-    assert str(out["Date"].max().date()) == "2026-08-27"
-    assert 260.1 in out["Close"].values      # a barra que faltava chegou ao chamador
+
+@pytest.mark.unit
+def test_load_ohlcv_nao_rebaixa_o_que_foi_gravado_depois_do_fechamento(tmp_path, monkeypatch):
+    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    _semeia(tmp_path, "AAPL", pd.DataFrame({"Date": ["2026-09-23"], "Close": [100.0]}),
+            su.ultimo_fechamento().timestamp() + 60)
+    calls = []
+    _fonte(monkeypatch, pd.DataFrame({"Date": pd.to_datetime(["2026-09-23"]), "Close": [1.0]}), calls)
+    su.load_ohlcv("AAPL", "2026-09-23")
+    assert not calls, "série congelada não pode bater na fonte"
+
+
+@pytest.mark.unit
+def test_load_ohlcv_depois_do_fechamento_baixa_INTEIRO_e_cura_o_buraco(tmp_path, monkeypatch):
+    """O caso real: cache sem o pregão de 22/09. A renovação pede a janela inteira
+    (não 'do último dia do cache') e o dia que faltava volta."""
+    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    furado = pd.DataFrame({"Date": ["2026-09-19", "2026-09-23"], "Close": [100.0, 102.0]})
+    _semeia(tmp_path, "AAPL", furado, su.ultimo_fechamento().timestamp() - 60)
+    calls = []
+    fresco = pd.DataFrame({"Date": pd.to_datetime(["2026-09-19", "2026-09-22", "2026-09-23"]),
+                           "Close": [100.0, 101.0, 102.0]})
+    _fonte(monkeypatch, fresco, calls)
+    out = su.load_ohlcv("AAPL", "2026-09-23")
+    assert calls and calls[0] != "2026-09-23", f"pediu incremental: start={calls}"
+    assert "2026-09-22" in set(out["Date"].dt.strftime("%Y-%m-%d"))
+
+
+@pytest.mark.unit
+def test_load_ohlcv_dividendo_troca_a_escala_do_historico_inteiro(tmp_path, monkeypatch):
+    """Ex-dividendo: o Yahoo reescala TODO o histórico (auto_adjust). A série velha
+    não sobrevive a nenhuma linha — nada de emenda com escala misturada."""
+    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    velho = pd.DataFrame({"Date": ["2026-08-06", "2026-08-07"], "Close": [200.0, 201.0]})
+    _semeia(tmp_path, "AAPL", velho, su.ultimo_fechamento().timestamp() - 60)
+    k = 1 - 0.27 / 201.0
+    novo = pd.DataFrame({"Date": pd.to_datetime(["2026-08-06", "2026-08-07", "2026-08-10"]),
+                         "Close": [200.0 * k, 201.0 * k, 199.0]})
+    calls = []
+    _fonte(monkeypatch, novo, calls)
+    out = su.load_ohlcv("AAPL", "2026-08-10")
+    assert calls
+    assert out["Close"].tolist() == pytest.approx([200.0 * k, 201.0 * k, 199.0])

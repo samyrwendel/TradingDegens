@@ -17,10 +17,15 @@ Uso:
     python scripts/purge_cache_semantica.py --todas
 
 RODE ISTO no mesmo commit em que bumpar um ``_SEMANTICA_KEY``.
+
+``--ohlcv`` apaga os CSVs da série DIÁRIA (``*-YFin-5y.csv`` e os datados antigos)
+em ``data_cache_dir`` — o mesmo gesto quando a REGRA do cache diário muda (task
+20260925-038: a emenda incremental tinha eternizado buraco). O intradiário fica.
 """
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import sys
 
@@ -51,7 +56,25 @@ def main(argv=None) -> int:
     ap.add_argument("categorias", nargs="*", help="categorias a purgar")
     ap.add_argument("--listar", action="store_true", help="só lista o que existe")
     ap.add_argument("--todas", action="store_true", help="purga TODAS as categorias")
+    ap.add_argument("--ohlcv", action="store_true",
+                    help="apaga os CSVs da série diária em data_cache_dir")
     args = ap.parse_args(argv)
+
+    if args.ohlcv:
+        from tradingagents.dataflows.config import get_config
+        d = get_config()["data_cache_dir"]
+        arquivos = (glob.glob(os.path.join(d, "*-YFin-5y.csv"))
+                    + glob.glob(os.path.join(d, "*-YFin-data-*.csv")))
+        n = 0
+        for f in arquivos:
+            try:
+                os.remove(f)
+                n += 1
+            except OSError:
+                pass
+        print(f"purgado OHLCV diário em {d}: {n} arquivo(s)")
+        if not args.categorias and not args.todas:
+            return 0
 
     inventario = _categorias()
     if args.listar or (not args.categorias and not args.todas):
