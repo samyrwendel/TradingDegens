@@ -82,3 +82,24 @@ def test_fora_de_candle_declara_indisponivel(monkeypatch):
     d = analista_reading_dict("XYZ", "2026-09-03", "stock")
     assert d["disponivel"] is False, d
     assert "motivo" in d
+
+
+def test_dict_expoe_nucleo_ds_pro_analista_de_posicoes(monkeypatch):
+    """Task 20260924-043: o analisador de posições da QF lê do dict — tese semanal,
+    divergência da tese, dias de balanço, 4h só como atenção e o 123 D/S."""
+    import tradingagents.agents.utils.analista_method as em
+    closes = [100.0 + i * 0.5 for i in range(60)]
+    last = closes[-1]
+    chart = {"candles": [{"o": c - 0.2, "h": c + 0.5, "l": c - 0.5, "c": c} for c in closes],
+             "ema": {"8": [last], "21": [last - 1.0], "50": [last - 2.0]}}
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": chart)
+    monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: {"setup_state": "sem_setup"})
+    monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
+    monkeypatch.setattr(em, "_earnings_read", lambda s, d: {
+        "status": "ok", "ev": None, "dias": 34, "na_janela": False, "ausente": None, "leitura": "34 dias"})
+    d = em.analista_reading_dict("GOOGL", "2026-09-24", "stock")
+    assert d["frame"] == "1d" and d["tese"]["frame"] == "1w"
+    assert d["earnings_dias"] == 34 and d["earnings_na_janela"] is False
+    assert "measured" in d["divergencia_tese"]
+    assert d["atencao_4h"]["trend"] == "alta" and d["fine_timing"] == "" and d["levels_line"] == ""
+    assert set(d["setup123"]) == {"D", "S"}

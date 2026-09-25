@@ -34,9 +34,15 @@ logger = logging.getLogger(__name__)
 # yfinance (15m/1h nativos, 4h reamostrado por pregão). Quando a fonte não tem
 # candle pro símbolo/data (ação fora da janela intradiária do yfinance, ou feed
 # fora do ar) a leitura cai no diário e DECLARA o degradê — nunca inventa barra.
-_SWING_FRAME = "4h"
-_FINE_FRAME = "15m"
-_FALLBACK_FRAME = "1d"
+# DA-326 (24/09/2026, regra do dono): SÓ o diário e o semanal decidem; o 4h entra
+# como PONTO DE ATENÇÃO (citado, nunca muda estado/peso/gatilho) e abaixo do 4h é
+# ruído, fora da decisão e da mensagem. Antes o swing era o 4h e o timing fino o
+# 15m — a leitura do GOOGL de 23/09 saiu com um 1-2-3 de 4h de R:R 0,04 e um veto
+# de 15m: sinal degenerado. Swing = diário; tese = semanal; sem degradê pra baixo.
+_SWING_FRAME = "1d"
+_ATENCAO_FRAME = "4h"
+_FINE_FRAME = "15m"      # mantido só por compat de import — _fine_plan não busca mais
+_FALLBACK_FRAME = None
 
 _FRAME_LABEL = {
     "15m": "15 minutos (intradiário)",
@@ -168,7 +174,7 @@ def _estado(
 #
 # Regra dura de ausência: todo fator é CONSULTADO em toda decisão; faltando dado, a
 # decisão declara AUSENTE e nunca decide como se o fator fosse neutro.
-_TESE_FRAMES = ("1w", "1d")   # o mensal (1mo) não existe no price_structure — D4
+_TESE_FRAMES = ("1w",)   # frame ACIMA do swing diário (DA-326); o mensal (1mo) não existe no price_structure — D4
 
 # Janela de "balanço na janela". PROVISÓRIA e declarada: o corpus do analista é
 # qualitativo ("vai divulgar só em 22 de outubro" × "reduziria agora") e não dá
@@ -687,7 +693,7 @@ def _decide_base(
         if at_media:
             return {
                 "acao": "AGIR",
-                "entrada": f"queda é liquidação de longs — segue comprador no recuo à {ref}; a EMA 4h "
+                "entrada": f"queda é liquidação de longs — segue comprador no recuo à {ref}; a EMA do swing "
                            f"invertida (EMA 21 {_fmt(e21)}) é o sintoma da liquidação, não o eixo da entrada",
                 "peso": "posição inicial",
                 "peso_racional": "recuo comprável numa liquidação saudável: fração inicial na média diária "
@@ -816,12 +822,84 @@ def _render_drop_nature(res: dict | None, estado: str | None) -> str | None:
 
 
 def _fine_plan(symbol: str, curr_date: str) -> dict | None:
-    """Plano 15m computado UMA vez — o seam de dado que alimenta TANTO o veto (o 1-2-3
-    de venda) QUANTO o render do timing fino. Fail-open → None quando não há candle."""
+    """Plano 15m — DESLIGADO pela DA-326 (abaixo do 4h é ruído: não veta, não dá
+    timing, não aparece). O seam fica (testes o monkeypatcham) e devolve None, o que
+    zera o veto (:func:`_fine_sell_triggered`) e o render (:func:`_fine_timing`)."""
+    return None
+
+
+def _atencao_4h(symbol: str, curr_date: str) -> dict | None:
+    """O 4h como PONTO DE ATENÇÃO (DA-326): a pilha de EMAs do 4h é CITADA e nunca
+    entra em ``_decide``/``_estado``. Fail-open → None."""
     try:
-        return build_actionable_plan_dict(symbol, curr_date, _FINE_FRAME)
+        r = _ema_read(build_price_chart(symbol, curr_date, timeframe=_ATENCAO_FRAME))
     except Exception:  # noqa: BLE001
         return None
+    return None if r is None else {"trend": r["trend"], "close": r["close"], "e21": r["e21"]}
+
+
+def _atencao_line(at: dict | None) -> str | None:
+    if not at:
+        return None
+    return (f"**4h (só atenção, não decide — DA-326):** {_TREND_PT.get(at['trend'], at['trend'])}, "
+            f"preço {_fmt(at['close'])} vs EMA 21 {_fmt(at['e21'])}.")
+
+
+# O 1-2-3 que vale é o setup do dono (DA-327/345/347), só D/S, detectado pela MESMA
+# régua do scanner e do painel da Quantfury (``qf_setup123.estado_atual``) — nunca o
+# padrão de pivôs do price_structure (_pattern_123/_storm_123), que misturava frames
+# e gerava gatilho com R:R < 1. Sem alvo (RCC não tem alvo em R) → sem R:R, e
+# portanto nenhum R:R < 1 vira gatilho. Fonte cruzada entre repos: caminho por env
+# ``QF_SCRIPTS_DIR`` (default: a skill quantfury do claude-tg-tmux); fail-open.
+def _qf_setup123():
+    import os
+    import sys
+    base = os.environ.get("QF_SCRIPTS_DIR") or os.path.expanduser(
+        "~/claude-tg-tmux/skills/quantfury/scripts")
+    if base not in sys.path:
+        sys.path.insert(0, base)
+    import qf_setup123  # noqa: PLC0415
+    return qf_setup123
+
+
+def _setup123_ds(symbol: str, curr_date: str) -> dict:
+    """Estado do 123 v2 (DA-345) + stop da posição (DA-347) no diário e no semanal,
+    sobre os candles do price_structure (os mesmos da leitura). Fail-open por frame."""
+    out = {}
+    for tf, letra in (("1d", "D"), ("1w", "S")):
+        try:
+            s123 = _qf_setup123()
+            cs = [c for c in (build_price_chart(symbol, curr_date, timeframe=tf) or {}).get("candles") or []
+                  if None not in (c.get("o"), c.get("h"), c.get("l"), c.get("c"))]
+            o, h, lo, c = ([x[k] for x in cs] for k in ("o", "h", "l", "c"))
+            e = s123.estado_atual(o, h, lo, c, len(c) - 1) if len(c) >= 3 else None
+        except Exception as exc:  # noqa: BLE001 — 123 ausente nunca derruba a leitura
+            logger.info("setup123 %s indisponível para %s: %s", tf, symbol, exc)
+            out[letra] = {"disponivel": False}
+            continue
+        if not e:
+            out[letra] = {"disponivel": True, "estado": None}
+            continue
+        stop = s123.stop_posicao(e, o, h, lo, c, letra)
+        out[letra] = {"disponivel": True, "estado": e["estado"], "gatilho": e["gatilho"],
+                      "invalidacao": e["stop"], "entrada": e["entrada"], "stop_posicao": stop}
+    return out
+
+
+def _setup123_line(s: dict | None) -> str | None:
+    bits = []
+    for letra, nome in (("S", "semanal"), ("D", "diário")):
+        x = (s or {}).get(letra) or {}
+        if not x.get("disponivel"):
+            continue
+        if not x.get("estado"):
+            bits.append(f"{nome}: sem setup")
+            continue
+        b = f"{nome}: {x['estado']} — gatilho {_fmt(x['gatilho'])}, invalida {_fmt(x['invalidacao'])}"
+        if x.get("stop_posicao") is not None:
+            b += f", stop da posição {_fmt(x['stop_posicao'])}"
+        bits.append(b)
+    return ("**Setup 123 (D/S, DA-345/347):** " + " · ".join(bits) + ".") if bits else None
 
 
 def _fine_sell_triggered(plan: dict | None) -> bool:
@@ -1009,12 +1087,12 @@ def build_analista_method_section(
     # Fonte intradiária sem candle pro símbolo/data (ação fora da janela do yfinance,
     # ou feed cripto fora do ar): cai no diário, declarando o degradê.
     degraded_note = ""
-    if read is None:
+    if read is None and _FALLBACK_FRAME:
         frame = _FALLBACK_FRAME
         chart = build_price_chart(symbol, curr_date, timeframe=frame)
         read = _ema_read(chart)
-        degraded_note = ("\n\n> Fonte intradiária indisponível agora — leitura caiu no "
-                         "diário. Nenhuma barra inventada; o método pede o 4h/15m.")
+        degraded_note = ("\n\n> Fonte do frame de swing indisponível agora — leitura caiu no "
+                         f"{_FRAME_LABEL.get(frame, frame)}. Nenhuma barra inventada.")
 
     frame_label = _FRAME_LABEL.get(frame, frame)
     head = "## 🧭 Método do analista — leitura do setup"
@@ -1081,8 +1159,8 @@ def build_analista_method_section(
     lines = [
         head,
         "",
-        f"**Timeframe da leitura:** {frame_label} — o método opera no 15m/4h; "
-        "diário/semanal dão a tendência de fundo.",
+        f"**Timeframe da leitura:** {frame_label} — só o diário e o semanal decidem "
+        "(DA-326); o 4h é ponto de atenção e abaixo dele é ruído.",
         "",
         f"**Regime (médias):** {trend_pt} — preço {_fmt(read['close'])}, "
         f"EMA 8 {_fmt(read['e8'])} · EMA 21 {_fmt(read['e21'])} · EMA 50 {_fmt(read['e50'])}.",
@@ -1120,16 +1198,13 @@ def build_analista_method_section(
     if traco:
         lines.append(traco)
 
-    # Gatilho 1-2-3 do frame de swing (o outro pilar do método além do recuo à EMA
-    # 8/21), agora DENTRO da leitura do método — não só na seção de mercado.
-    swing_pat = _pattern_line(swing_plan, _COMPACT_FRAME.get(frame, frame))
-    if swing_pat:
-        lines.append(swing_pat)
-        # O padrão sem os níveis é meia informação: quem lê precisa saber onde o
-        # setup morre, onde fica o stop e quanto se arrisca para ganhar quanto.
-        lvl = _levels_line(swing_plan)
-        if lvl:
-            lines.append(lvl)
+    # Gatilho 1-2-3: o setup do dono em D/S (DA-345/347), pela régua do qf_setup123.
+    s123 = _setup123_line(_setup123_ds(symbol, curr_date))
+    if s123:
+        lines.append(s123)
+    atencao = _atencao_line(_atencao_4h(symbol, curr_date))
+    if atencao:
+        lines.append(atencao)
 
     fine = _fine_timing(fine_plan)
     if fine:
@@ -1137,8 +1212,8 @@ def build_analista_method_section(
 
     lines += [
         "",
-        "**Tático × estrutural:** esta é uma leitura TÁTICA de curto prazo "
-        "(intradiário); a tese estrutural de longo prazo é outra decisão, separada.",
+        "**Tático × estrutural:** esta é uma leitura TÁTICA (swing no diário); "
+        "a tese estrutural de longo prazo é outra decisão, separada.",
     ]
     if caixa:
         lines.append("**Caixa é posição:** ficar de fora aqui é decisão ativa — "
@@ -1176,7 +1251,7 @@ def analista_reading_dict(
     chart = build_price_chart(symbol, curr_date, timeframe=frame)
     read = _ema_read(chart)
     degraded = False
-    if read is None:
+    if read is None and _FALLBACK_FRAME:
         frame = _FALLBACK_FRAME
         chart = build_price_chart(symbol, curr_date, timeframe=frame)
         read = _ema_read(chart)
@@ -1198,6 +1273,8 @@ def analista_reading_dict(
 
     swing_plan = build_actionable_plan_dict(symbol, curr_date, frame)
     saida = _saida(swing_plan, read)
+    s123 = _setup123_ds(symbol, curr_date)
+    atencao = _atencao_4h(symbol, curr_date)
 
     # EMAs do frame (o card mostra o alinhamento): o que a fonte computou, último
     # valor de cada janela — nunca um número inventado pra uma média ausente.
@@ -1240,13 +1317,20 @@ def analista_reading_dict(
                  "frame_label": _FRAME_LABEL.get(tese.get("frame"), tese.get("frame"))}
                 if tese else {},
         "earnings": (factors.get("earnings") or {}).get("leitura", ""),
+        "earnings_dias": (factors.get("earnings") or {}).get("dias"),
+        "earnings_na_janela": (factors.get("earnings") or {}).get("na_janela"),
+        # divergência de RSI no frame da TESE (semanal) — TIER 3, teto de tamanho
+        "divergencia_tese": _div_tese(factors),
         "ausentes": factors.get("ausentes") or [],
         # RSI (indicador nº2): divergência no frame de swing
         "rsi_divergence": _rsi_divergence(chart),
-        # gatilho 1-2-3 (analista) + níveis do swing, e o timing fino do 15m
-        "pattern_line": _pattern_line(swing_plan, _COMPACT_FRAME.get(frame, frame)) or "",
-        "levels_line": _levels_line(swing_plan) or "",
-        "fine_timing": _fine_timing(fine_plan) or "",
+        # gatilho 1-2-3 = setup do dono em D/S (DA-345/347); 4h só atenção; 15m fora (DA-326)
+        "setup123": s123,
+        "pattern_line": _setup123_line(s123) or "",
+        "levels_line": "",
+        "fine_timing": "",
+        "atencao_4h": atencao,
+        "atencao_line": _atencao_line(atencao) or "",
         "estado_note": _estado_note(drop_cls, decision["estado"], fine_veto, gate,
                                     (factors.get("tese") or {}).get("frame")) or "",
     }
@@ -1270,3 +1354,29 @@ def ensure_analista_method_coverage(
         return report
     base = (report or "").rstrip()
     return f"{base}\n\n{section}\n" if base else section + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Núcleo D/S como JSON pro analista de posições da Quantfury (task 20260924-043):
+    ``python -m tradingagents.agents.utils.analista_method DATA TICKER...`` imprime
+    ``{ticker: analista_reading_dict(...)}``. O analisador (``qf_analista.py``, outro
+    runtime) chama por subprocesso — cada repo fica no seu interpretador."""
+    import json
+    import sys
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) < 2:
+        print("uso: analista_method DATA TICKER [TICKER...]", file=sys.stderr)
+        return 2
+    data, out = args[0], {}
+    for tk in args[1:]:
+        try:
+            out[tk] = analista_reading_dict(tk, data, "stock")
+        except Exception as exc:  # noqa: BLE001 — um ativo quebrado não derruba os outros
+            out[tk] = {"disponivel": False, "motivo": f"{type(exc).__name__}: {exc}"[:200]}
+    print(json.dumps(out, ensure_ascii=False, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

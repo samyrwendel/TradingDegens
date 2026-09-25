@@ -237,8 +237,9 @@ def test_section_crypto_cites_intraday_entry_exit_and_weight(monkeypatch):
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)  # concern testado à parte
     section = build_analista_method_section("BTC-USD", "2026-08-24", "crypto")
     # The four things the acceptance requires, all present:
-    assert "intradiário" in section  # timeframe declared
-    assert "4 horas" in section
+    # DA-326: só D/S decidem — o timeframe declarado é o diário, nunca o intradiário
+    assert "só o diário e o semanal decidem" in section
+    assert "intradiário" not in section
     assert "**Entrada (recuo à média):**" in section
     assert "**Saída (antes da reversão):**" in section
     assert "**Peso relativo do trade:**" in section
@@ -259,22 +260,22 @@ def test_section_emits_single_state_enum(monkeypatch):
     assert "Veredito" not in section
 
 
-def test_section_stock_reads_intraday_like_crypto(monkeypatch):
-    """An equity now has keyless intraday (yfinance), so the analista section reads the
-    4h swing frame for a stock too — no longer a daily-only 'no intraday for stocks'
-    fallback (fork brief 25/08 item 6)."""
+def test_section_stock_reads_daily_swing(monkeypatch):
+    """DA-326 (24/09): o swing do método é o DIÁRIO (tese no semanal) para ação e
+    cripto — o 4h virou ponto de atenção e o 15m saiu da decisão."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
     section = build_analista_method_section("BE", "2026-08-24", "stock")
-    assert "4 horas" in section          # swing frame, same as crypto
+    assert "**Timeframe da leitura:** diário" in section
+    assert "4 horas" not in section
     assert "não existe para ação" not in section  # the stale claim is gone
     assert "**Peso relativo do trade:**" in section
 
 
-def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
-    """When the equity intraday source has no candle (empty 4h/15m chart) the read
-    falls back to the daily and DECLARES the degrade — never fabricates a bar."""
+def test_section_intraday_absent_does_not_change_the_read(monkeypatch):
+    """Sem 4h/15m (fora da janela intradiária) a leitura é a MESMA: o diário decide
+    (DA-326) e o 4h ausente só some da linha de atenção — nada de degradê."""
     def chart(s, d, timeframe="1d"):
         # 4h/15m empty (out of window); daily has a real read.
         if timeframe == "1d":
@@ -285,8 +286,9 @@ def test_section_stock_degrades_to_daily_when_intraday_absent(monkeypatch):
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
     section = build_analista_method_section("BE", "2019-01-15", "stock")
-    assert "diário" in section
-    assert "indisponível" in section.lower()
+    assert "**Timeframe da leitura:** diário" in section
+    assert "indisponível" not in section.lower()
+    assert "4h (só atenção" not in section
     assert "**Peso relativo do trade:**" in section
 
 
@@ -312,15 +314,35 @@ def _fake_plan_with_pattern():
 
 
 def test_section_surfaces_123_trigger_in_method_read(monkeypatch):
-    """GAP1: o gatilho 1-2-3 do 15m/4h aparece DENTRO da leitura do método (self-
-    contained), não só na seção do analista de mercado."""
+    """O 1-2-3 da leitura é o setup do dono em D/S (DA-345/347, régua do qf_setup123)
+    — o padrão de pivôs do price_structure (e o R:R dele) não aparece mais."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_uptrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_pattern())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
+    monkeypatch.setattr(em, "_setup123_ds", lambda s, d: {
+        "D": {"disponivel": True, "estado": "FORMANDO", "gatilho": 98.0, "invalidacao": 94.0,
+              "entrada": None, "stop_posicao": 92.5},
+        "S": {"disponivel": True, "estado": None}})
     section = build_analista_method_section("BTC-USD", "2026-08-24", "crypto")
-    assert "Gatilho 1-2-3 de compra (4h)" in section
-    assert "rompimento de 98.00" in section
-    assert "em formação" in section
+    assert ("**Setup 123 (D/S, DA-345/347):** semanal: sem setup · diário: FORMANDO — gatilho 98.00, "
+            "invalida 94.00, stop da posição 92.50.") in section
+    assert "Gatilho 1-2-3 de compra" not in section and "R:R" not in section
+
+
+def _vela(o, h, lo, c):
+    return {"o": o, "h": h, "l": lo, "c": c}
+
+
+def test_setup123_ds_usa_a_regua_do_qf_setup123(monkeypatch):
+    """Integração real com o qf_setup123 (sem mock do detector): vela 1 de queda, vela 2a
+    de queda com mínima menor → FORMANDO com gatilho = máxima da 2a (DA-345)."""
+    base = [_vela(100 + i, 101 + i, 99 + i, 100.5 + i) for i in range(20)]
+    velas = base + [_vela(121, 121.5, 118, 118.5), _vela(118.4, 119, 116, 116.5)]
+    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": {"candles": velas})
+    s123 = em._setup123_ds("X", "2026-09-24")
+    assert s123["D"]["estado"] == "FORMANDO"
+    assert s123["D"]["gatilho"] == 119 and s123["D"]["invalidacao"] == 116
+    assert s123["D"]["stop_posicao"] < 116          # DA-347: mín. 2a − 1 ATR14
 
 
 def test_pattern_line_venda_uses_perda_wording():
@@ -391,15 +413,15 @@ def _fake_plan_sell_triggered():
             "pattern": {"trigger": 97.0, "state": "acionado", "direction": "venda"}}
 
 
-def test_section_mitigation1_15m_sell_caps_liquidacao_at_aguardar(monkeypatch):
-    """Mitigação 1 provada na seção: liquidação que iria AGIR, com 1-2-3 de venda no
-    15m, é vetada a AGUARDAR (o recuo virou ruptura)."""
+def test_section_15m_sell_no_longer_vetoes(monkeypatch):
+    """DA-326: abaixo do 4h é ruído — o 1-2-3 de venda do 15m NÃO veta mais a
+    liquidação (a mitigação 1 de 26/08 foi aposentada) e nem aparece na leitura."""
     monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": _fake_downtrend_at_media_chart())
     monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_sell_triggered())
     monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: _LIQ_DROP)
     section = build_analista_method_section("AVGO", "2026-08-26", "stock")
-    assert "**Estado (Método do analista):** AGUARDAR" in section
-    assert "**Estado (Método do analista):** AGIR" not in section
+    assert "**Estado (Método do analista):** AGIR" in section
+    assert "15m" not in section
 
 
 def test_section_fail_open_drop_none_matches_mechanical(monkeypatch):
@@ -558,7 +580,7 @@ def test_tese_read_declares_monthly_absent(monkeypatch):
     monkeypatch.setattr(em, "build_price_chart", chart)
     tese = _tese_read("INTC", "2026-08-27")
     assert tese["regime"] == "alta" and tese["frame"] == "1w"
-    assert tese["leituras"] == {"1w": "alta", "1d": "alta"}
+    assert tese["leituras"] == {"1w": "alta"}   # swing é o diário (DA-326): a tese é só o semanal
     assert any("mensal (1mo)" in a for a in tese["ausentes"])
 
 
@@ -722,7 +744,7 @@ def _chart_tesa(s, d, timeframe="1d"):
             "ema": {"8": [last], "21": [last - 1.0], "50": [last - 2.0]}}
 
 
-def _chart_swing_baixa_desacel(s, d, timeframe="4h"):
+def _chart_swing_baixa_desacel(s, d, timeframe="1d"):
     # queda íngreme com a mudança de inclinação DENTRO da janela de 11 barras
     closes = [100.0 - i * 1.0 for i in range(54)] + [47.0 - 0.1 * i for i in range(1, 7)]
     last = closes[-1]
@@ -731,11 +753,11 @@ def _chart_swing_baixa_desacel(s, d, timeframe="4h"):
 
 
 def test_section_intc_gate_full_acceptance(monkeypatch):
-    """Aceitação spec §5.1 na SEÇÃO: downtrend 4h + tese semanal alta + queda
+    """Aceitação spec §5.1 na SEÇÃO: downtrend no swing (diário, DA-326) + tese semanal alta + queda
     desacelerando + sem balanço na janela + âncora NVDA em alta → AGUARDAR /
     posição inicial, com o traço nomeando quem comandou e o que sobrepôs."""
     def chart(s, d, timeframe="1d"):
-        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+        return (_chart_tesa(s, d, timeframe) if timeframe == "1w"
                 else _chart_swing_baixa_desacel(s, d, timeframe))
 
     monkeypatch.setattr(em, "build_price_chart", chart)
@@ -767,7 +789,7 @@ def test_section_names_why_gate_did_not_open(monkeypatch):
     citadas segurou o CAIXA — aqui o balanço caiu DENTRO da janela (o motivo de
     proteção de capital do próprio método), com tese alta e âncora em alta."""
     def chart(s, d, timeframe="1d"):
-        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+        return (_chart_tesa(s, d, timeframe) if timeframe == "1w"
                 else _chart_swing_baixa_desacel(s, d, timeframe))
 
     monkeypatch.setattr(em, "build_price_chart", chart)
@@ -790,7 +812,7 @@ def test_section_swing_divergence_is_named_in_the_trace(monkeypatch):
     MENOR é medida e tem que APARECER no traço — como informação de TIMING, sem
     inverter a direção. Medida no escuro é o mesmo erro do calendário do INTC."""
     def chart(s, d, timeframe="1d"):
-        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+        return (_chart_tesa(s, d, timeframe) if timeframe == "1w"
                 else _chart_swing_baixa_desacel(s, d, timeframe))
 
     monkeypatch.setattr(em, "build_price_chart", chart)
@@ -801,7 +823,7 @@ def test_section_swing_divergence_is_named_in_the_trace(monkeypatch):
     monkeypatch.setattr(em, "_factors", lambda *a, **k: _factors_full(
         divergencia={"measured": True, "kind": "bearish", "detail": "d"}))
     section = build_analista_method_section("INTC", "2026-08-27", "stock")
-    assert "divergência bearish no 4h (timing — consultada, não inverte)" in section
+    assert "divergência bearish no diário (timing — consultada, não inverte)" in section
     # segue sendo TIMING: não vira veto de direção nem fecha a porta
     assert "Porta TIER 2 aberta" in section
     assert "**Estado (Método do analista):** CAIXA" not in section
@@ -811,7 +833,7 @@ def test_swing_divergence_absent_stays_out_of_the_trace(monkeypatch):
     """Não medida = fora do traço (vai pro bloco de AUSENTES) — o traço só carrega
     fator com leitura real, nunca 'sem divergência' inventado."""
     def chart(s, d, timeframe="1d"):
-        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+        return (_chart_tesa(s, d, timeframe) if timeframe == "1w"
                 else _chart_swing_baixa_desacel(s, d, timeframe))
 
     monkeypatch.setattr(em, "build_price_chart", chart)
@@ -829,7 +851,7 @@ def test_section_thesis_divergence_does_not_close_the_gate(monkeypatch):
     existe e a porta abre de todo jeito — ela é TETO DE TAMANHO (TIER 3), não veto.
     O traço tem que dizer isso na cara, pra não parecer que o sinal foi ignorado."""
     def chart(s, d, timeframe="1d"):
-        return (_chart_tesa(s, d, timeframe) if timeframe in ("1w", "1d")
+        return (_chart_tesa(s, d, timeframe) if timeframe == "1w"
                 else _chart_swing_baixa_desacel(s, d, timeframe))
 
     monkeypatch.setattr(em, "build_price_chart", chart)
@@ -843,3 +865,21 @@ def test_section_thesis_divergence_does_not_close_the_gate(monkeypatch):
     assert "**Estado (Método do analista):** CAIXA" not in section
     assert "posição inicial" in section
     assert "teto de tamanho, não veto" in section
+
+
+
+def test_4h_e_so_atencao_nao_muda_estado(monkeypatch):
+    """DA-326: o 4h é CITADO (linha de atenção) e nunca muda Estado/Peso — o mesmo
+    diário com 4h em alta ou em baixa dá a mesma decisão."""
+    def secao(chart_4h):
+        monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d":
+                            chart_4h() if timeframe == "4h" else _fake_uptrend_at_media_chart())
+        monkeypatch.setattr(em, "build_actionable_plan_dict", lambda s, d, tf: _fake_plan_with_realize())
+        monkeypatch.setattr(em, "_drop_nature", lambda *a, **k: None)
+        return build_analista_method_section("BE", "2026-09-24", "stock")
+    alta, baixa = secao(_fake_uptrend_at_media_chart), secao(_fake_downtrend_at_media_chart)
+    assert "**4h (só atenção, não decide — DA-326):** alta" in alta
+    assert "**4h (só atenção, não decide — DA-326):** baixa" in baixa
+    estado = lambda t: [x for x in t.splitlines() if x.startswith("**Estado")][0]  # noqa: E731
+    peso = lambda t: [x for x in t.splitlines() if x.startswith("**Peso")][0]  # noqa: E731
+    assert estado(alta) == estado(baixa) and peso(alta) == peso(baixa)
