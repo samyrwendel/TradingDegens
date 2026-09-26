@@ -176,6 +176,18 @@ if [ -f "$DECISIONS" ] && [ -f scripts/da-index.sh ]; then
   elif ! bash scripts/da-index.sh check . >/dev/null 2>&1; then note "DECISIONS-INDEX.md DIVERGE do $DECISIONS — rode: bash scripts/da-index.sh update"; warn=1; fi
 fi
 
+# 10b) DA que proíbe (nunca/proibido/não pode/jamais/somente/só na Regra) tem **Mecanismo:** com
+# caminho que existe. DA nova (>= DA_MECANISMO_DESDE) sem isso bloqueia; antiga vira fila (aviso).
+if [ -f "$DECISIONS" ] && [ -f "$SELFDIR/check-da-mecanismo.sh" ]; then
+  mec_da_out="$(bash "$SELFDIR/check-da-mecanismo.sh" "$DECISIONS" "$DIR" 2>&1)"; mec_da_rc=$?
+  while IFS= read -r l; do note "$l"; done < <(printf '%s\n' "$mec_da_out" | grep '^FAIL ')
+  [ "$mec_da_rc" -ne 0 ] && { echo "✗ DA nova proíbe sem **Mecanismo:** que exista — não entra"; block=1; }
+  mec_da_warn="$(printf '%s\n' "$mec_da_out" | sed -n 's/.* \([0-9][0-9]*\) WARN .*/\1/p')"
+  if [ "${mec_da_warn:-0}" -gt 0 ]; then
+    note "$mec_da_warn DA(s) antigas proíbem sem **Mecanismo:** existente — fila; liste com: bash $SELFDIR/check-da-mecanismo.sh --list $DECISIONS"; warn=1
+  fi
+fi
+
 # 11) selo: a instalação foi PROVADA neste modo?
 if [ "$SEAL" != "1" ]; then
   if [ ! -f .adas/install-check ]; then note "sem .adas/install-check — a instalação nunca foi PROVADA; rode: bash scripts/adas-init.sh --modo $MODO"; warn=1
