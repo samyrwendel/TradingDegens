@@ -3,6 +3,10 @@
 # commitado/staged e passar num repo limpo. O token falso é montado em runtime para este
 # arquivo não acionar o próprio gate.
 set -uo pipefail
+# Roda dentro do pre-commit, que exporta GIT_DIR/GIT_INDEX_FILE — numa worktree o GIT_DIR aponta pro repo
+# REAL, e sem limpar, o `git init` daqui reinicializa o repo do projeto (core.bare=true, user=t; aconteceu
+# em 25/09/2026, task 20260926-001).
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CS="$HERE/../../scripts/check-secrets.sh"
 [ -f "$CS" ] || { echo "✗ sem scripts/check-secrets.sh"; exit 1; }
