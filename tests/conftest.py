@@ -169,3 +169,26 @@ def mock_llm_client():
         return_value=client,
     ):
         yield client
+
+
+@pytest.fixture(autouse=True)
+def _motor_123_sem_rede(monkeypatch):
+    """O Setup123 é o do motor do Nest Egg (DA-024), que em produção busca as velas BRUTAS
+    dele (``nest_egg.motor.sr.candles``, rede). Na suíte, o motor lê a MESMA série que o
+    teste deu ao ``price_structure._load_frame`` — sintética ou cache — e nunca a rede."""
+    from datetime import timedelta
+
+    import pandas as pd
+
+    from tradingagents.dataflows import price_structure, setup123_motor
+
+    def _fake(symbol, curr_date, frame):
+        df = price_structure._load_frame(symbol, curr_date, frame)
+        datas = pd.to_datetime(df["Date"]).dt.tz_localize(None).dt.normalize()
+        if frame == "1w":
+            datas = datas - timedelta(days=6)   # W-SUN do TD → segunda, o carimbo do motor
+        ts = (datas - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)
+        cols = [df[k].astype(float).tolist() for k in ("Open", "High", "Low", "Close")]
+        return [[int(t), *v, 0.0] for t, *v in zip(ts, *cols, strict=True)]
+
+    monkeypatch.setattr(setup123_motor, "_velas_brutas", _fake)

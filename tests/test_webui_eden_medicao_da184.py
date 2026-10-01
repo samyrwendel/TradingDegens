@@ -15,9 +15,13 @@ import pytest
 
 import tradingagents.webui.scanner as sc
 from tradingagents.dataflows import price_structure as ps
+from tradingagents.dataflows.price_structure import STORM123_ATIVO  # noqa: E402
 from tradingagents.webui.scanner import ScanLog, scan_verdicts
 
-pytestmark = pytest.mark.unit
+# DA-024: Storm123 (+ Éden) desativado — o código fica, os testes dele também, e voltam a
+# rodar sozinhos se um dia a flag religar.
+pytestmark = [pytest.mark.unit,
+              pytest.mark.skipif(not STORM123_ATIVO, reason="Storm123 desativado (DA-024)")]
 
 
 # ------------------------------------------------------------- eden_classe -----

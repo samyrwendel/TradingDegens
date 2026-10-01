@@ -168,12 +168,12 @@ def test_a_run_ESTRUTURAL_ja_nasce_com_a_escada_no_resultado(tmp_path, monkeypat
         sc, "scan_symbol_frames",
         lambda t, d, frames=None, workers=None: {
             "ticker": t, "frames": [{"frame": f, "estado": "formando"} for f in frames]})
-    rid = r.start("BTC-USD", "2026-08-31", method="storm123", timeframe="4h", reuse=False)
+    rid = r.start("BTC-USD", "2026-08-31", method="setup123", timeframe="4h", reuse=False)
     snap = _espera(r, rid)
     mf = snap["result"]["multiframe"]
     assert [f["frame"] for f in mf["frames"]] == ["1w", "1d", "4h", "1h", "15m"]
     assert mf["veredito"] == "4h", "o carimbo é o frame em que a run rodou"
-    assert mf["metodo"] == "storm123"
+    assert mf["metodo"] == "setup123"
 
 
 def test_a_escada_quebrada_deixa_a_run_estrutural_INTEIRA(tmp_path, monkeypatch):

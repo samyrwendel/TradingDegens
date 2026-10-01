@@ -317,10 +317,21 @@ const PAT_DIR = {
 // rótulo pt-BR do estado do gatilho 1-2-3 (task 014) — "rompeu_retracou" é token
 // de máquina; aqui vira texto legível pra nota do gráfico não mostrar o snake_case.
 const PAT_STATE = {
+  // Setup123 = o do MOTOR do Nest Egg (DA-024): estes são os estados dele.
+  FORMANDO: "formando — esperando fechar acima do gatilho",
+  ARMADO: "armado — se fechar acima, confirma",
+  CONFIRMADO: "confirmado",
+  INVALIDADO: "invalidado",
+  DESATIVADO: "desativado — o prazo venceu",
+  SAIR: "sair — 123 de venda semanal confirmou",
+  // runs ANTIGAS (antes da DA-024) — o histórico persistido não se reescreve
   acionado: "acionado",
   formando: "em formação",
   rompeu_retracou: "rompeu e retraçou (não confirmado)",
 };
+
+// "o padrão já entrou": CONFIRMADO no motor (DA-024); "acionado" no scan/run antigo.
+const _PAT_CONFIRMADO = new Set(["CONFIRMADO", "acionado"]);
 
 // "2025-08-14" -> "14/08" sem passar por Date() (evita re-shift de timezone).
 function fmtDate(iso) {
@@ -2938,15 +2949,29 @@ function renderSetupCards(a) {
             "trade já fechado — por isso este setup NÃO está invalidado."
           : ""),
         ganhou ? "sc-ganho" : "sc-morto"));
+    } else if (morto && pat.state === "DESATIVADO") {
+      rows.push(scRow("DESATIVADO", pat.desativado_em ? `em ${fmtDataHora(pat.desativado_em)}` : "",
+        "o prazo das velas 2b venceu sem nenhuma FECHAR acima do gatilho (motor do Nest Egg, DAS-345).",
+        "sc-morto"));
+    } else if (morto && pat.state === "SAIR") {
+      rows.push(scRow("SAIR", pat.invalidado_em ? `em ${fmtDataHora(pat.invalidado_em)}` : "",
+        "o 123 de venda semanal confirmou — é a saída da posição do 123 S (DAS-386).", "sc-morto"));
     } else if (morto) {
       const inv0 = a.invalidation || {};
       const quando = pat.invalidado_em ? ` em ${fmtDataHora(pat.invalidado_em)}` : "";
-      rows.push(scRow("INVALIDADO", `perdeu ${fmtNum(inv0.price != null ? inv0.price : pat.p3.price)}${quando}`,
-        (pat.direction === "venda"
-          ? "o preço FECHOU acima do ponto 3: os topos deixaram de ser descendentes e este 1-2-3 de venda não existe mais."
-          : "o preço FECHOU abaixo do ponto 3: os fundos deixaram de ser ascendentes e este 1-2-3 de compra não existe mais.")
-        + " Quem estava posicionado por ele perdeu a premissa — o gatilho deste padrão não vale mais, e uma nova entrada exige um novo ponto 3.",
-        "sc-morto"));
+      // Setup123 do MOTOR (DA-024, `fonte` no padrão) morre furando a mínima da vela 2a;
+      // run ANTIGA (persistida antes da troca) mantém a explicação do detector de swings.
+      rows.push(pat.fonte
+        ? scRow("INVALIDADO", `furou ${fmtNum(inv0.price != null ? inv0.price : pat.p2.price)}${quando}`,
+          "a mínima furou a da vela 2a: o Setup123 morreu (motor do Nest Egg, DAS-345). " +
+          "O gatilho deste setup não vale mais — uma nova entrada exige um 123 novo.",
+          "sc-morto")
+        : scRow("INVALIDADO", `perdeu ${fmtNum(inv0.price != null ? inv0.price : pat.p3.price)}${quando}`,
+          (pat.direction === "venda"
+            ? "o preço FECHOU acima do ponto 3: os topos deixaram de ser descendentes e este 1-2-3 de venda não existe mais."
+            : "o preço FECHOU abaixo do ponto 3: os fundos deixaram de ser ascendentes e este 1-2-3 de compra não existe mais.")
+          + " Quem estava posicionado por ele perdeu a premissa — o gatilho deste padrão não vale mais, e uma nova entrada exige um novo ponto 3.",
+          "sc-morto"));
     }
     // A LINHA DO TEMPO vem logo depois da morte (ou no topo, num padrão vivo que já
     // tocou níveis): ela é o que responde "pq invalidado se atingiu o alvo?", e a
@@ -2955,8 +2980,9 @@ function renderSetupCards(a) {
     if (a.cronologia) rows.push(cronoLinhaHtml(a.cronologia));
     if (pat.trigger != null) {
       rows.push(scRow("gatilho", fmtNum(pat.trigger),
-        pat.direction === "venda" ? "perda da mínima do ponto 2"
-                                  : "rompimento da máxima do ponto 2"));
+        pat.fonte ? "FECHAMENTO acima da máxima da vela 2a/2b — tocar no pavio não confirma"
+        : pat.direction === "venda" ? "perda da mínima do ponto 2"
+                                    : "rompimento da máxima do ponto 2"));
     }
     // Entrada SÓ vira linha quando difere do gatilho (padrão já acionado entra a
     // preço de mercado). Igual ao gatilho, repeti-la seria o mesmo número duas
@@ -3007,7 +3033,8 @@ function renderSetupCards(a) {
     // INVALIDADO manda no rótulo de estado: "em formação" num padrão morto é a tela
     // descrevendo um setup que não existe mais. O estado nativo continua ao lado —
     // ele é a história, e é ela que explica onde o preço está.
-    const pstate = (pat.encerrado && pat.desfecho)
+    const pstate = pat.fonte ? (PAT_STATE[pat.state] || pat.state || "")
+      : (pat.encerrado && pat.desfecho)
       ? `encerrado no ${pat.desfecho.tipo === "alvo" ? "alvo" : "stop"} · era ` +
         `${PAT_STATE[pat.state] || pat.state || ""}`
       : morto
@@ -3748,7 +3775,8 @@ function patFase(pat) {
     case "concluido_alvo": return "ganho";
     case "concluido_stop": return "perda";
     case "invalidado_sem_acionar":
-    case "invalidado_operando": return "morto";
+    case "invalidado_operando":
+    case "concluido_saida": return "morto";
     case "vivo":
     case "nunca_acionou": return "vivo";
   }
@@ -4179,7 +4207,7 @@ function renderChartCard(chart, ticker, actionable, tf) {
 
   const active = chart.markers && chart.markers.active_region;
   const pat = chart.markers && chart.markers.pattern_123;
-  card.classList.toggle("setup-active", !!active || (pat && pat.state === "acionado"));
+  card.classList.toggle("setup-active", !!active || (pat && _PAT_CONFIRMADO.has(pat.state)));
 
   // As faixas do plano são as mesmas do plano acionável, agora desenhadas na
   // linha do preço em vez de repetidas em texto. buy/pullback coincidem no caso
@@ -5907,7 +5935,7 @@ function drawPriceChart(canvas, chart, a) {
   const pat = chart.markers && chart.markers.pattern_123;
   // a escala vertical cresce pelo que está DESENHADO — incluir os pontos de uma
   // camada escondida achataria o gráfico por causa de níveis que ninguém vê
-  if (pat && camadaVisivel("plano")) [pat.p1.price, pat.p2.price, pat.p3.price, pat.trigger].forEach(grow);
+  if (pat && camadaVisivel("plano")) [pat.p1, pat.p2, pat.p3].forEach((p) => p && grow(p.price)), grow(pat.trigger);
   zones.forEach((z) => { grow(z.price); grow(z.low); grow(z.high); });
   grow(price);
   if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { lo = 0; hi = 1; }
@@ -6245,8 +6273,12 @@ function drawPriceChart(canvas, chart, a) {
   // O QUE FOI ANUNCIADO E NÃO COUBE NO ENQUADRAMENTO — ver `resumoEnquadramento`.
   const _fora = [];
   if (pat && camadaVisivel("plano")) {
-    const kinds = pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
+    // Setup123 do motor (DA-024): vela 1, vela 2a (o fundo) e vela 3 (só existe depois de
+    // confirmar); run antiga: os três swings do detector antigo.
+    const kinds = pat.fonte ? ["L", "L", "H"]
+      : pat.direction === "venda" ? ["H", "L", "H"] : ["L", "H", "L"];
     const brutos = [["1", pat.p1], ["2", pat.p2], ["3", pat.p3]]
+      .filter(([, p]) => p)
       .map(([lab, p], k) => ({ lab, kind: kinds[k], i: idx[p.date], price: p.price, d: p.date }));
     const pts = brutos.filter((p) => p.i != null);
     const _antes = _pontos123.length;
@@ -9920,7 +9952,7 @@ function scanTemStorm(ativos) {
 // coluna. Vira marcador + title + legenda embaixo da tabela: forma curta na célula,
 // texto inteiro a um passo — nunca truncado calado.
 function scanRrDoPrecoAtual(f) {
-  return f.rr != null && !f.rr_residual && f.pattern_state === "acionado";
+  return f.rr != null && !f.rr_residual && _PAT_CONFIRMADO.has(f.pattern_state);
 }
 
 // As quatro células de nível da LISTA (gatilho · SL · TP/motivo · R:R). Célula sem
@@ -10068,7 +10100,7 @@ function scanRrHtml(f) {
   // Acionado sem ser residual: o número vale, mas a base precisa estar dita — e ao
   // lado do que o setup oferecia NO GATILHO, que é o que separa "método ruim" de
   // "perdi a entrada".
-  if (f.pattern_state === "acionado") {
+  if (_PAT_CONFIRMADO.has(f.pattern_state)) {
     const gat = f.rr_gatilho != null
       ? ` <span class="scan-sub">no gatilho ${Number(f.rr_gatilho).toFixed(2)}</span>` : "";
     const andou = f.andado_pct != null

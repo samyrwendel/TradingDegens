@@ -84,11 +84,16 @@ def veredito_entrada(plan: dict[str, Any] | None) -> dict[str, Any]:
 
     compra = pat.get("direction") != "venda"
     rr_agora = rr.get("rr")
-    rr_gat = (rr.get("no_gatilho") or {}).get("rr", rr_agora if pat.get("state") != "acionado" else None)
+    rr_gat = (rr.get("no_gatilho") or {}).get("rr", rr_agora if pat.get("state") != "CONFIRMADO" else None)
     dist = abs(float(preco) / float(gatilho) - 1.0) if gatilho else None
     base = {"rr_agora": rr_agora, "rr_gatilho": rr_gat,
             "andado_pct": rr.get("andado_pct"), "dist_pct": dist,
             "direcao": "compra" if compra else "venda"}
+
+    # 0) O MOTOR já decidiu que o setup acabou (DA-024): furou a 2a, venceu o prazo ou saiu.
+    if pat.get("state") in ("INVALIDADO", "DESATIVADO", "SAIR"):
+        return {**base, "estado": "passar", "rotulo": "passar", "nivel": None,
+                "motivo": f"o Setup123 está {pat['state']} no motor — não há trade a montar aqui."}
 
     # 1) MORREU: o preço passou da invalidação. Nada depois disto importa.
     inval = ((plan or {}).get("invalidation") or {}).get("price")

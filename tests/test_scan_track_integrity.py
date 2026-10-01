@@ -354,7 +354,7 @@ def _plan_msft_1h_acionado():
     passou de 513,67 e o alvo é 513,73 — sobra 0,06 de retorno pra 28,70 de risco."""
     return {
         "price": 513.67, "setup_state": "ativo",
-        "pattern": {"direction": "compra", "state": "acionado", "trigger": 497.14},
+        "pattern": {"direction": "compra", "state": "CONFIRMADO", "trigger": 497.14},
         "stop": {"price": 484.97},
         "target": {"price": 513.73},
         "risk_reward": {"rr": 0.0, "entry": 513.67, "risk": 28.70, "reward": 0.06,

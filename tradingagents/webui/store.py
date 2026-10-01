@@ -427,7 +427,7 @@ class EstrategiaStore:
     _CLASSES = ("stock", "crypto")
     PADRAO = {
         "123": {"stock": True, "crypto": True},
-        "storm": {"stock": True, "crypto": False},
+        "storm": {"stock": False, "crypto": False},   # DA-024: Storm123 desativado
     }
 
     def __init__(self, base_dir: str | os.PathLike):
@@ -455,13 +455,13 @@ class EstrategiaStore:
         (``bool({...})`` é sempre ``True``, a armadilha que a normalização evita)."""
         out = _clona(self.PADRAO)
         for nome, val in data.items():
-            if nome not in out:
+            if nome not in out or nome == "storm":   # DA-024: o arquivo não religa o Storm
                 continue
             if isinstance(val, dict):
                 out[nome].update({c: bool(val[c]) for c in self._CLASSES if c in val})
             elif isinstance(val, bool):
                 # formato antigo: um toggle só valia pras duas classes
-                out[nome] = {c: val for c in self._CLASSES}
+                out[nome] = dict.fromkeys(self._CLASSES, val)
         return out
 
     def set(self, nome: str, ativo: bool, classe: str) -> dict[str, dict[str, bool]]:
@@ -471,6 +471,8 @@ class EstrategiaStore:
             raise ValueError(f"estratégia desconhecida: {nome!r}")
         if classe not in self._CLASSES:
             raise ValueError(f"classe desconhecida: {classe!r}")
+        if nome == "storm" and ativo:
+            raise ValueError("Storm123 desativado (DA-024): o Setup123 é o do motor do Nest Egg")
         atual = self.get()
         atual[nome][classe] = bool(ativo)
         with self._lock:

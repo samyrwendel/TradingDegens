@@ -22,11 +22,15 @@ import urllib.request
 
 import pytest
 
+from tradingagents.dataflows.price_structure import STORM123_ATIVO  # noqa: E402
 from tradingagents.webui.runner import AnalysisRunner
 from tradingagents.webui.server import make_server
 from tradingagents.webui.store import HistoryStore
 
-pytestmark = pytest.mark.integration
+# DA-024: Storm123 (+ Éden) desativado — o código fica, os testes dele também, e voltam a
+# rodar sozinhos se um dia a flag religar.
+pytestmark = [pytest.mark.integration,
+              pytest.mark.skipif(not STORM123_ATIVO, reason="Storm123 desativado (DA-024)")]
 
 try:
     from playwright.sync_api import sync_playwright as _spw

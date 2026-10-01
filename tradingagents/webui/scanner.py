@@ -36,6 +36,7 @@ from typing import Any
 from tradingagents.agents.utils.analista_method import _EARNINGS_WINDOW_DAYS
 from tradingagents.dataflows.earnings_calendar import earnings_window_status
 from tradingagents.dataflows.price_structure import (
+    STORM123_ATIVO,
     build_actionable_plan_dict,
     build_bollinger_plan_dict,
     build_price_chart,
@@ -192,6 +193,7 @@ def _chart_fallback(ticker: str, date: str, frame: str) -> dict:
 _CICLO_ESTADO = {
     "concluido_alvo": "concluido",
     "concluido_stop": "concluido",
+    "concluido_saida": "concluido",   # Setup123 S: saiu no 123 de venda (DAS-386)
     "invalidado_sem_acionar": "invalidou",
     "invalidado_operando": "invalidou",
 }
@@ -236,7 +238,7 @@ def _frame_row(ticker: str, date: str, frame: str,
         # Sem 1-2-3 não quer dizer sem STORM nem sem BOLLINGER: são setups diferentes,
         # e podem estar formados onde este não está (é metade da razão de existirem aqui).
         return {"frame": frame, "estado": "sem_setup", "price": price,
-                "storm": _storm_row(ticker, date, frame, price),
+                **_storm_cols(ticker, date, frame, price),
                 "bollinger": _bollinger_row(ticker, date, frame, price)}
 
     trigger = float(pat["trigger"])
@@ -271,9 +273,9 @@ def _frame_row(ticker: str, date: str, frame: str,
         estado = _do_ciclo
     elif invalidated:
         estado = "invalidou"
-    elif dist is not None and dist <= _GATILHO_TOL:
-        estado = "em_gatilho"
-    elif state == "acionado":
+    elif state == "ARMADO" or (dist is not None and dist <= _GATILHO_TOL):
+        estado = "em_gatilho"      # ARMADO: o pré-aviso do motor — se fechar acima, confirma
+    elif state == "CONFIRMADO":
         estado = "em_movimento"
     else:
         estado = "formando"
@@ -304,7 +306,7 @@ def _frame_row(ticker: str, date: str, frame: str,
     # _GATILHO_TOL — a calibrar com o track record.
     rr_val = rr.get("rr")
     rr_residual = bool(
-        state == "acionado" and rr_val is not None and 0 <= float(rr_val) < _RR_RESIDUAL
+        state == "CONFIRMADO" and rr_val is not None and 0 <= float(rr_val) < _RR_RESIDUAL
     )
     return {
         "frame": frame,
@@ -343,20 +345,27 @@ def _frame_row(ticker: str, date: str, frame: str,
         "sobra_pct": rr.get("sobra_pct"),
         "rr_gatilho": (rr.get("no_gatilho") or {}).get("rr"),
         "rr_motivo": rr.get("motivo"),
-        # O STORM na MESMA linha, em célula própria — o objetivo declarado é comparar
-        # os dois setups no mesmo ativo de relance. Nunca no mesmo campo: misturar os
-        # dois numa coluna só faria a taxa de acerto descrever trade nenhum.
-        "storm": _storm_row(ticker, date, frame, price),
+        # O STORM (célula própria, DA-081) e o ÉDEN (DA-184) só entram com o Storm123
+        # ligado — desativado pela DA-024 (ver :func:`_storm_cols`).
+        **_storm_cols(ticker, date, frame, price, com_eden=True),
         # O BOLLINGER na MESMA linha, célula própria (task 20260904-015): reversão à
         # média em extremo de 3σ — outro detector, comparável de relance ao lado dos
         # outros dois. Nunca no mesmo campo, pela mesma razão do Storm.
         "bollinger": _bollinger_row(ticker, date, frame, price),
-        # O ÉDEN no gatilho do 1-2-3 (DA-184) — MEDIÇÃO, não regra: o único
-        # ingrediente exclusivo do Storm (MME 8 × MME 80) rotulando um gatilho do
-        # 123 que hoje acerta ≤ passeio aleatório, pra medir depois se ele filtra
-        # alguma coisa. Zero influência no estado/gatilho/stop/alvo acima.
-        "eden": eden_classe(ticker, date, frame),
     }
+
+
+def _storm_cols(ticker: str, date: str, frame: str, price: float | None,
+                com_eden: bool = False) -> dict[str, Any]:
+    """As colunas do Storm123 (e do ÉDEN no gatilho do 123, a medição da DA-184) na linha
+    do scan — VAZIO desde a DA-024 (``STORM123_ATIVO=False``): sem a chave, a tela, os
+    sinais, a execução e o ledger não têm Storm o que ler, e o detector nem roda."""
+    if not STORM123_ATIVO:
+        return {}
+    out = {"storm": _storm_row(ticker, date, frame, price)}
+    if com_eden:
+        out["eden"] = eden_classe(ticker, date, frame)
+    return out
 
 
 def _storm_row(ticker: str, date: str, frame: str, price: float | None) -> dict[str, Any]:
@@ -704,6 +713,10 @@ class ScanLog:
                                             "pattern_state", "trigger", "sl", "tp", "rr")}}
         if row.get("entrada"):
             entry["entrada"] = row.get("entrada")
+        if entry["setup"] == "123":
+            # DA-024: daqui pra frente o 123 é o do motor do Nest Egg — outra geometria.
+            # Marcado pra nunca somar com as linhas antigas (DA-184/291) sem querer.
+            entry["regua"] = "motor-nest-egg"
         if row.get("leitura"):
             entry["leitura"] = row.get("leitura")
         # O ÉDEN no gatilho (DA-184) — medição, não decisão: linha antiga sem o
@@ -1143,7 +1156,7 @@ def scan_verdicts(log: ScanLog, date: str, banca: float = _BANCA_PADRAO,
         # não ``bateu_sl``) — MENOS quando o log já era ACIONADO: ali a entrada é o
         # preço, o ``trigger`` gravado é um nível velho, e re-exigir seu toque
         # inventaria um ``nunca_acionou`` sobre um trade que estava aberto.
-        gate = trigger if str(e.get("pattern_state")) != "acionado" else None
+        gate = trigger if str(e.get("pattern_state")) not in ("acionado", "CONFIRMADO") else None
         toque = _primeiro_toque(candles, _desde_do_toque(e.get("ts"), frame), tp, sl,
                                 venda, trigger=gate)
         if toque:
@@ -1330,7 +1343,7 @@ def _entrada_numerica(v: dict[str, Any]) -> float | None:
             except (TypeError, ValueError):
                 return None
     # 1-2-3 sem entrada própria: gatilho SÓ enquanto não acionou; acionado reconstrói.
-    if str(v.get("pattern_state")) != "acionado":
+    if str(v.get("pattern_state")) not in ("acionado", "CONFIRMADO"):
         trigger = v.get("trigger")
         try:
             return float(trigger) if trigger is not None else None

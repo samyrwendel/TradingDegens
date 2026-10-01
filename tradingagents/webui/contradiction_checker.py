@@ -133,7 +133,8 @@ def _section_trigger(market_report: str) -> tuple[float | None, str | None]:
     if not isinstance(market_report, str):
         return None, None
     m = re.search(
-        r"Gatilho\**:\s*(perda|rompimento)\s+de\s+([\d.,]+)", market_report, re.IGNORECASE
+        r"Gatilho\**:\s*(perda|rompimento|fechamento acima)\s+de\s+([\d.,]+)", market_report,
+        re.IGNORECASE
     )
     if not m:
         return None, None

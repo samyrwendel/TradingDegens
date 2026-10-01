@@ -28,6 +28,7 @@ from tradingagents.agents.utils.analista_method import _EARNINGS_WINDOW_DAYS
 from tradingagents.agents.utils.rating import RATING_PT
 from tradingagents.dataflows import data_notices
 from tradingagents.dataflows.earnings_calendar import earnings_window_status
+from tradingagents.dataflows.price_structure import STORM123_ATIVO
 from tradingagents.llm_clients.model_format import id_format_meta, normalize_model_id
 from tradingagents.webui import agenda, ask as ask_module, execucao, sinais, timeutil
 from tradingagents.webui.ciclo_legado import completa_ciclo
@@ -724,7 +725,7 @@ def plano_com_storm(ticker: str, date: str, timeframe: str = _DEFAULT_TIMEFRAME,
     uma segunda checagem espalhada pela tela). O detector em si nem roda.
     """
     p = dict(fetch_actionable_plan(ticker, date, timeframe, method) or {})
-    if incluir_storm:
+    if incluir_storm and STORM123_ATIVO:
         p["storm"] = fetch_storm_plan(ticker, date, timeframe)
     return p
 
@@ -1094,6 +1095,8 @@ class AnalysisRunner:
                 f"timeframe {timeframe!r} indisponível para {asset_type} "
                 f"(disponíveis: {', '.join(allowed)})"
             )
+        if method == "storm123" and not STORM123_ATIVO:
+            raise ValueError("Storm123 desativado (DA-024): o Setup123 é o do motor do Nest Egg")
         # ANÁLISE 1-2-3 (setup123): o atalho estrutural — gatilho/invalidação/SL/TP/
         # R:R do plano determinístico, $0 de LLM, sem agentes. Vive no mesmo fluxo
         # de run (histórico, reúso DA-058, status) pra o resultado abrir como qualquer

@@ -135,10 +135,10 @@ def test_os_DOIS_row_builders_consultam_a_traducao():
 
 
 def test_o_ciclo_viaja_nos_DOIS_planos():
-    """O campo tem de existir nos dois lados: o Storm o monta no dict, o 1-2-3 no
-    ``as_dict`` do padrão."""
+    """O campo tem de existir nos dois lados: o Storm o monta no dict (código mantido,
+    desligado pela DA-024), o Setup123 do motor no ``as_dict`` (traduzido do estado dele)."""
     assert '"ciclo": ciclo_de_vida(' in inspect.getsource(_ps.build_storm_plan)
-    assert '"ciclo": ciclo_de_vida(' in inspect.getsource(_ps.Pattern123.as_dict)
+    assert '"ciclo": ciclo' in inspect.getsource(_ps.Setup123.as_dict)
 
 
 # ------------------------------------------------ ciclo do padrão ≠ saída -----

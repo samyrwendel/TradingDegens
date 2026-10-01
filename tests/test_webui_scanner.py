@@ -75,7 +75,7 @@ def test_estado_em_gatilho_no_ponto_de_entrada(fake_fetch):
 def test_acionado_longe_e_em_movimento_nao_em_gatilho(fake_fetch):
     # padrão ACIONADO e preço 18% além do gatilho → em_movimento (entrada passou),
     # NUNCA em_gatilho (o gatilho já ficou p/ trás).
-    fake_fetch({("B", "1d"): _plan(_pat(state="acionado", trigger=65401.69),
+    fake_fetch({("B", "1d"): _plan(_pat(state="CONFIRMADO", trigger=65401.69),
                                    price=77699.0, invalidation=60000.0)})
     r = scan_symbol("B", "2026-08-28", frames=("1d",))
     assert r["melhor"]["estado"] == "em_movimento"

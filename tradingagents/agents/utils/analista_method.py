@@ -845,44 +845,26 @@ def _atencao_line(at: dict | None) -> str | None:
             f"preço {_fmt(at['close'])} vs EMA 21 {_fmt(at['e21'])}.")
 
 
-# O 1-2-3 que vale é o setup do dono (DA-327/345/347), só D/S, detectado pela MESMA
-# régua do scanner e do painel da Quantfury (``qf_setup123.estado_atual``) — nunca o
-# padrão de pivôs do price_structure (_pattern_123/_storm_123), que misturava frames
-# e gerava gatilho com R:R < 1. Sem alvo (RCC não tem alvo em R) → sem R:R, e
-# portanto nenhum R:R < 1 vira gatilho. Fonte cruzada entre repos: caminho por env
-# ``QF_SCRIPTS_DIR`` (default: a skill quantfury do claude-tg-tmux); fail-open.
-def _qf_setup123():
-    import os
-    import sys
-    base = os.environ.get("QF_SCRIPTS_DIR") or os.path.expanduser(
-        "~/claude-tg-tmux/skills/quantfury/scripts")
-    if base not in sys.path:
-        sys.path.insert(0, base)
-    import qf_setup123  # noqa: PLC0415
-    return qf_setup123
-
-
+# O 1-2-3 que vale é o setup do dono (DA-327/345/347), só D/S — o MOTOR do Nest Egg,
+# importado (DA-024: a única fonte de Setup123 da frota), sobre as velas BRUTAS do motor.
+# Sem alvo (o 123 não tem alvo em R) → sem R:R, e nenhum R:R < 1 vira gatilho. Fail-open.
 def _setup123_ds(symbol: str, curr_date: str) -> dict:
-    """Estado do 123 v2 (DA-345) + stop da posição (DA-347) no diário e no semanal,
-    sobre os candles do price_structure (os mesmos da leitura). Fail-open por frame."""
+    """Estado do 123 v2 (DA-345) + stop da posição (DA-347) no diário e no semanal."""
+    from tradingagents.dataflows import setup123_motor
     out = {}
     for tf, letra in (("1d", "D"), ("1w", "S")):
         try:
-            s123 = _qf_setup123()
-            cs = [c for c in (build_price_chart(symbol, curr_date, timeframe=tf) or {}).get("candles") or []
-                  if None not in (c.get("o"), c.get("h"), c.get("l"), c.get("c"))]
-            o, h, lo, c = ([x[k] for x in cs] for k in ("o", "h", "l", "c"))
-            e = s123.estado_atual(o, h, lo, c, len(c) - 1) if len(c) >= 3 else None
+            x = setup123_motor.leitura(symbol, curr_date, tf)
         except Exception as exc:  # noqa: BLE001 — 123 ausente nunca derruba a leitura
             logger.info("setup123 %s indisponível para %s: %s", tf, symbol, exc)
             out[letra] = {"disponivel": False}
             continue
-        if not e:
+        if not x:
             out[letra] = {"disponivel": True, "estado": None}
             continue
-        stop = s123.stop_posicao(e, o, h, lo, c, letra)
-        out[letra] = {"disponivel": True, "estado": e["estado"], "gatilho": e["gatilho"],
-                      "invalidacao": e["stop"], "entrada": e["entrada"], "stop_posicao": stop}
+        out[letra] = {"disponivel": True, "estado": x["estado"], "gatilho": x["gatilho"],
+                      "invalidacao": x["invalidacao"], "entrada": x["entrada"],
+                      "stop_posicao": x["stop_posicao"]}
     return out
 
 
@@ -911,10 +893,10 @@ def _fine_sell_triggered(plan: dict | None) -> bool:
 
 
 _PAT_DIR_PT = {"compra": "de compra", "venda": "de venda"}
-_PAT_STATE_PT = {
-    "acionado": "acionado",
-    "rompeu_retracou": "rompeu e retraçou (não confirmado)",
-    "formando": "em formação",
+_PAT_STATE_PT = {   # estados do motor (DA-024)
+    "FORMANDO": "formando (esperando fechar acima)", "ARMADO": "armado (pré-aviso)",
+    "CONFIRMADO": "confirmado", "INVALIDADO": "invalidado", "DESATIVADO": "desativado",
+    "SAIR": "sair (123 de venda S)",
 }
 
 
@@ -927,7 +909,7 @@ def _pattern_line(plan: dict | None, frame_label: str) -> str | None:
     direction = _PAT_DIR_PT.get(pat.get("direction"), pat.get("direction") or "")
     state = _PAT_STATE_PT.get(pat.get("state"), pat.get("state") or "")
     trigger = pat.get("trigger")
-    verb = "perda de" if pat.get("direction") == "venda" else "rompimento de"
+    verb = "fechamento acima de"
     trig_txt = f"{verb} {_fmt(trigger)}" if trigger is not None else "gatilho sem nível"
     return f"**Gatilho 1-2-3 {direction} ({frame_label}):** {trig_txt} — {state}."
 

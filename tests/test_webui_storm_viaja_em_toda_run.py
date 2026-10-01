@@ -13,9 +13,13 @@ Quem decide o que é DESENHADO continua sendo a camada, na tela (DA-088).
 
 import pytest
 
+from tradingagents.dataflows.price_structure import STORM123_ATIVO  # noqa: E402
 from tradingagents.webui import runner as R
 
-pytestmark = pytest.mark.unit
+# DA-024: Storm123 (+ Éden) desativado — o código fica, os testes dele também, e voltam a
+# rodar sozinhos se um dia a flag religar.
+pytestmark = [pytest.mark.unit,
+              pytest.mark.skipif(not STORM123_ATIVO, reason="Storm123 desativado (DA-024)")]
 
 TICKER = "MSFT"
 DATE = "2026-08-29"

@@ -76,8 +76,6 @@ def test_o_reuso_de_run_continua_keyado_pelo_metodo(tmp_path, monkeypatch):
     monkeypatch.setattr(AnalysisRunner, "detect_asset_type", lambda self, t: "stock")
     rid = runner.start("AAPL", "2026-08-25", method="setup123", reuse=False)
     assert runner._runs[rid].method == "setup123"
-    rid2 = runner.start("AAPL", "2026-08-25", method="storm123", reuse=False)
-    assert runner._runs[rid2].method == "storm123"
 
 
 def test_ninguem_compara_metodo_por_TEXTO_DE_TELA():
@@ -117,6 +115,7 @@ def base(tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+@pytest.mark.skip(reason="Storm123 desativado (DA-024): o chip dele saiu da barra")
 def test_os_chips_da_barra_dizem_Setup123_e_Storm123(base, tmp_path):
     with sync_playwright() as p:
         browser = p.chromium.launch()

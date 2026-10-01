@@ -55,7 +55,7 @@ def _run_of(runner, run_id):
     return run
 
 
-@pytest.mark.parametrize("metodo", ["setup123", "storm123"])
+@pytest.mark.parametrize("metodo", ["setup123"])   # storm123: desativado (DA-024)
 def test_metodo_estrutural_nao_seleciona_nenhum_analista(runner, metodo):
     """O atalho é estrutural: lista de analistas VAZIA — nenhum agente pra pagar.
     Vale pros DOIS: o Storm entrou como método próprio pela mesma rota (DA-081)."""
@@ -94,9 +94,14 @@ def test_rotas_sao_disjuntas(runner):
     dois estruturais não se confundem entre si — 1-2-3 e Storm são setups
     diferentes com a mesma numeração (DA-081), e a run tem que dizer qual é."""
     ids = {m: runner.start(TICKER, DATE, method=m, reuse=False)
-           for m in ("setup123", "storm123", "padrao", "analista")}
+           for m in ("setup123", "padrao", "analista")}
     metodos = {m: _run_of(runner, rid).method for m, rid in ids.items()}
     assert metodos["setup123"] == "setup123", metodos
-    assert metodos["storm123"] == "storm123", metodos
     assert metodos["padrao"] not in ("setup123", "storm123"), metodos
     assert metodos["analista"] not in ("setup123", "storm123"), metodos
+
+
+def test_storm123_desativado_e_recusado_na_entrada(runner):
+    """DA-024: o Storm123 saiu — pedir a run dele é erro declarado, nunca uma run vazia."""
+    with pytest.raises(ValueError, match="DA-024"):
+        runner.start(TICKER, DATE, method="storm123", reuse=False)

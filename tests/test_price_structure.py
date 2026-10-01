@@ -12,11 +12,11 @@ import json
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows import price_structure as ps
-from tradingagents.dataflows.intraday import IntradayUnavailableError
 from tradingagents.agents.utils.price_structure_coverage import (
     ensure_price_structure_coverage,
 )
+from tradingagents.dataflows import price_structure as ps
+from tradingagents.dataflows.intraday import IntradayUnavailableError
 
 
 def _frame() -> pd.DataFrame:
@@ -83,103 +83,6 @@ def top(monkeypatch):
 
 
 CURR = "2025-12-31"  # after the whole frame; load_ohlcv (mocked) returns it all
-
-
-@pytest.mark.unit
-def test_detects_123_reversal(synth):
-    s = ps.detect_price_structure("SYN", CURR)
-    assert s.pattern is not None
-    p = s.pattern
-    # ascending bottom + trigger is point 2's high, and it broke out -> acionado
-    assert p.direction == "compra"
-    assert p.p3["price"] > p.p1["price"]
-    assert p.trigger == p.p2["price"]
-    assert p.state == "acionado"
-    # points are ordered in time
-    assert p.p1["date"] < p.p2["date"] < p.p3["date"]
-
-
-def _retraced_frame() -> pd.DataFrame:
-    """Um 1-2-3 de compra que ROMPEU o gatilho e depois RETRAÇOU pra baixo dele —
-    o preço atual fica ABAIXO do gatilho (o caso real 313,44 ≤ 334,7 do bug 014)."""
-    closes: list[float] = []
-    closes += [100 + i for i in range(60)]
-    closes += [156, 150, 146, 150, 156]
-    closes += [162 + i for i in range(20)]
-    closes += [175, 168, 160, 150, 145]           # L1 ~145
-    closes += [150, 160, 172, 185, 190]           # P2 ~190 (gatilho na máxima)
-    closes += [182, 175, 168, 162, 166]           # L3 ~162 (> L1)
-    closes += [192, 198, 205, 200, 188, 182, 178, 176]  # rompeu e voltou < gatilho
-    dates = pd.bdate_range("2025-01-01", periods=len(closes))
-    c = pd.Series(closes, dtype=float)
-    return pd.DataFrame({
-        "Date": dates.strftime("%Y-%m-%d"),
-        "Open": c.shift(1).fillna(c).values,
-        "High": (c * 1.01).values,
-        "Low": (c * 0.99).values,
-        "Close": c.values,
-        "Volume": [1000] * len(c),
-    })
-
-
-@pytest.mark.unit
-def test_123_broke_then_retraced_is_not_acionado(monkeypatch):
-    """Bug 014: 'acionado' tem que refletir o preço ATUAL. Um 1-2-3 que rompeu e
-    depois retraçou pra baixo do gatilho NÃO é 'acionado' seco — vira
-    'rompeu_retracou'; e o checker (acionado_incoerente) NÃO flag esse caso (os
-    dois concordam)."""
-    df = _retraced_frame()
-    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
-    s = ps.detect_price_structure("SYN", CURR)
-    p = s.pattern
-    assert p is not None and p.direction == "compra"
-    assert df["Close"].iloc[-1] < p.trigger          # preço atual ABAIXO do gatilho
-    assert p.state == "rompeu_retracou"              # antes marcava 'acionado' (enganoso)
-
-    # markdown honesto: não diz 'acionado' seco pra esse padrão
-    md = ps.build_price_structure_section("SYN", CURR)
-    assert "rompeu e retraçou" in md
-
-    # o checker concorda: sem acionado_incoerente pra o estado retraçado
-    from tradingagents.webui.contradiction_checker import _check_pattern_123
-    result = {
-        "as_of_price": float(df["Close"].iloc[-1]),
-        "price_chart": {"markers": {"pattern_123": {
-            "state": p.state, "trigger": p.trigger, "direction": p.direction}}},
-        "market_report": "",
-    }
-    codes = [f["code"] for f in _check_pattern_123(result)]
-    assert "acionado_incoerente" not in codes
-
-
-@pytest.mark.unit
-def test_detects_123_de_venda(top):
-    """Descending-top 1-2-3: H -> L -> lower H, trigger = break BELOW point 2's low."""
-    s = ps.detect_price_structure("SYN", CURR)
-    assert s.pattern is not None
-    p = s.pattern
-    assert p.direction == "venda"
-    # descending top: point 3's high sits BELOW point 1's high
-    assert p.p3["price"] < p.p1["price"]
-    # trigger is point 2's LOW (break below it), and the series broke down -> acionado
-    assert p.trigger == p.p2["price"]
-    assert p.state == "acionado"
-    assert p.p1["date"] < p.p2["date"] < p.p3["date"]
-    # nothing fabricated: every reported price is a real high/low of the series
-    df = _top_frame()
-    prices = set(round(float(v), 2) for v in df["High"]) | set(round(float(v), 2) for v in df["Low"])
-    for pt in (p.p1, p.p2, p.p3):
-        assert pt["price"] in prices
-    assert p.trigger in prices
-
-
-@pytest.mark.unit
-def test_venda_section_and_plan_carry_direction(top):
-    section = ps.build_price_structure_section("SYN", CURR)
-    assert "Padrão 1-2-3 de venda" in section
-    assert "topo descendente" in section
-    plan = ps.build_actionable_plan("SYN", CURR)
-    assert plan.pattern is not None and plan.pattern["direction"] == "venda"
 
 
 @pytest.mark.unit
@@ -307,47 +210,22 @@ def test_123_pattern_is_method_independent(synth):
 
 
 @pytest.mark.unit
-def test_123_uses_canonical_swings_even_when_method_is_analista(monkeypatch):
-    """Even on a series where the tight (k=3) and canonical (k=5) swing horizons
-    genuinely diverge, an analista detection must feed the 1-2-3 the CANONICAL swings —
-    otherwise the chart's trigger drifts from the canonical report text (the AAOI
-    91,50 vs 160,87 bug)."""
-    df = _jiggle_frame()
-    monkeypatch.setattr(ps, "load_ohlcv", lambda symbol, curr_date: df.copy())
-    seen: dict[str, list[int]] = {}
-    real = ps._pattern_123
-
-    def spy(frame, lows, highs, fmt="%Y-%m-%d"):
-        seen["lows"], seen["highs"] = list(lows), list(highs)
-        return real(frame, lows, highs, fmt)
-
-    monkeypatch.setattr(ps, "_pattern_123", spy)
-    ps.detect_price_structure("SYN", CURR, method="analista")
-
-    prep = ps._prep("SYN", CURR)
-    canon_lows, canon_highs = ps._swings(prep, ps._method_k(ps._DEFAULT_METHOD))
-    tight_lows, tight_highs = ps._swings(prep, 3)
-    # the guard is real only if the two horizons actually differ on this frame
-    assert (list(canon_lows), list(canon_highs)) != (list(tight_lows), list(tight_highs))
-    # ...and the pattern was fed the CANONICAL swings, not analista's tight ones
-    assert seen["lows"] == list(canon_lows)
-    assert seen["highs"] == list(canon_highs)
-
-
-@pytest.mark.unit
 def test_nothing_is_fabricated(synth):
     """Every reported price is a real high/low of the series; every date is real."""
     df = _frame()
     dates = set(df["Date"])
     prices = set(round(float(v), 2) for v in df["High"]) | set(round(float(v), 2) for v in df["Low"])
+    closes = set(round(float(v), 2) for v in df["Close"])
     s = ps.detect_price_structure("SYN", CURR)
     for r in s.buy_regions:
         assert r.date in dates
         assert r.low in prices
-    if s.pattern:
-        for pt in (s.pattern.p1, s.pattern.p2, s.pattern.p3):
+    if s.pattern:   # Setup123 do motor: velas 1/2a pela mínima, vela 3 pelo fechamento
+        for pt in (s.pattern.p1, s.pattern.p2):
             assert pt["date"] in dates
             assert pt["price"] in prices
+        if s.pattern.p3:
+            assert s.pattern.p3["date"] in dates and s.pattern.p3["price"] in closes
         assert s.pattern.trigger in prices
 
 
@@ -366,7 +244,7 @@ def test_date_guard_no_future_point(monkeypatch):
         assert r.date <= cut
     if s.pattern:
         for pt in (s.pattern.p1, s.pattern.p2, s.pattern.p3):
-            assert pt["date"] <= cut
+            assert pt is None or pt["date"] <= cut
 
 
 @pytest.mark.unit
@@ -403,8 +281,8 @@ def test_section_lists_region_and_pattern(synth):
     # logo abaixo é OUTRO setup (ver tests/test_setup_naming_collision.py).
     assert "Regiões de recuo à média" in section
     assert "Regiões de compra na média" not in section
-    assert "Padrão 1-2-3 de compra" in section
-    assert "Ponto 1" in section and "Gatilho" in section
+    assert "Setup123 (motor do Nest Egg" in section
+    assert "Vela 1" in section and "Gatilho" in section
 
 
 @pytest.mark.unit
@@ -466,9 +344,9 @@ def test_intraday_crypto_structure_runs(monkeypatch):
     df = _intraday_frame()
     monkeypatch.setattr(ps, "load_intraday_ohlcv", lambda symbol, curr_date, tf: df.copy())
     s = ps.detect_price_structure("BTC-USD", "2026-08-20", "15m")
-    assert s.pattern is not None
-    # intraday points are stamped with HH:MM, not a bare date
-    assert ":" in s.pattern.p1["date"]
+    # o Setup123 é o do motor, que só decide em D/S (DAS-326, DA-024)
+    assert s.pattern is None and s.buy_regions
+    assert all(":" in r.date for r in s.buy_regions)
     chart = ps.build_price_chart("BTC-USD", "2026-08-20", timeframe="15m")
     assert chart["timeframe"] == "15m"
     assert ":" in chart["candles"][-1]["d"]
@@ -488,8 +366,7 @@ def test_4h_timeframe_runs_and_is_labelled(monkeypatch):
     monkeypatch.setattr(ps, "load_intraday_ohlcv", lambda symbol, curr_date, tf: df.copy())
 
     s = ps.detect_price_structure("BTC-USD", "2026-08-20", "4h")
-    assert s.pattern is not None
-    assert ":" in s.pattern.p1["date"]           # intraday stamp, not a bare date
+    assert s.pattern is None                     # Setup123 do motor: só D/S (DA-024)
 
     chart = ps.build_price_chart("BTC-USD", "2026-08-20", timeframe="4h")
     assert chart["timeframe"] == "4h"
@@ -512,7 +389,7 @@ def test_intraday_date_guard_no_future_bar(monkeypatch):
         assert r.date <= cut
     if s.pattern:
         for pt in (s.pattern.p1, s.pattern.p2, s.pattern.p3):
-            assert pt["date"] <= cut
+            assert pt is None or pt["date"] <= cut
 
 
 @pytest.mark.unit

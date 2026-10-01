@@ -133,8 +133,9 @@ def test_a_visao_de_SINAIS_e_a_entrada_padrao_e_organiza_em_secoes(base):
         # scan. Antes eram um vocabulário próprio da visão de sinais, que é como a
         # terceira taxonomia nasceu.
         titulos = [s["titulo"] for s in m["secoes"]]
-        assert titulos == ["Na entrada", "Aguardando", "Já andou",
-                           "Conflito entre frames"], titulos
+        # DA-024: sem o Storm123, a fixture real de 31/08 não tem mais ninguém "Na
+        # entrada" (era o INTC Storm) — a ordem do eixo continua a mesma.
+        assert titulos == ["Aguardando", "Já andou", "Conflito entre frames"], titulos
         # cada seção diz o que ela SIGNIFICA — título sozinho não organiza
         assert all(s["nota"] for s in m["secoes"]), m["secoes"]
         # os chips de estado (vocabulário do DADO) não competem com as seções
@@ -142,7 +143,7 @@ def test_a_visao_de_SINAIS_e_a_entrada_padrao_e_organiza_em_secoes(base):
         browser.close()
 
 
-@pytest.mark.skipif(sync_playwright is None, reason="Playwright/Chromium ausente")
+@pytest.mark.skip(reason="o único caso do dataset real era um Storm123 — desativado (DA-024)")
 def test_a_ENTRADA_traz_janela_com_os_dois_precos_e_o_limite_em_palavras(base):
     """INTC Storm123 venda, 1d+1h: a única janela aberta do dataset real."""
     url, _ = base
@@ -204,9 +205,8 @@ def test_confluencia_conflito_padrao_morto_e_ausencia_na_MESMA_tela(base):
         _abre(page, url)
         m = page.evaluate(_LEITURA)
 
-        # CRWD: dois frames de compra num card só
-        crwd = _card(m, "CRWD", "Storm123")
-        assert crwd["frames"] == ["4h", "1h"] and "2 frames" in crwd["conf"]
+        # DA-024: nenhum card do Storm123 sobrevive na tela
+        assert not [c for c in m["cards"] if c["metodo"] == "Storm123"]
 
         # MSFT: três concordam e ainda assim não há janela — confluência não é permissão
         msft = _card(m, "MSFT", "Setup123")
@@ -221,13 +221,10 @@ def test_confluencia_conflito_padrao_morto_e_ausencia_na_MESMA_tela(base):
         # MRVL no 1-2-3: os três frames invalidados, nenhuma oportunidade
         assert _card(m, "MRVL", "Setup123") is None
 
-        # O OUTRO MÉTODO é mencionado quando DISCORDA — nunca fundido (DA-077).
-        # AVGO é o caso real: o 1-2-3 lê compra e o Storm lê venda, cada um no seu
-        # card, e o card do 1-2-3 avisa. Em GOOGL os dois leem venda: nada a
-        # avisar, e a menção não aparece — aviso que sempre aparece não avisa nada.
+        # O OUTRO MÉTODO (Storm) era mencionado quando discordava — sem Storm (DA-024),
+        # nenhum card do Setup123 fala dele.
         avgo = _card(m, "AVGO", "Setup123")
-        assert avgo["outro"] and "Storm123" in avgo["outro"] and "VENDA" in avgo["outro"], avgo
-        assert googl["outro"] is None, ("os dois métodos concordam em GOOGL", googl)
+        assert avgo["outro"] is None and googl["outro"] is None, (avgo, googl)
         browser.close()
 
 
@@ -312,7 +309,7 @@ def test_no_celular_o_card_cabe_e_a_pagina_nao_rola_na_horizontal(base):
                   doc: document.documentElement.scrollWidth,
                   secoes: document.querySelectorAll('.sn-secao').length};
         }""")
-        assert est["n"] > 0 and est["secoes"] == 4, est
+        assert est["n"] > 0 and est["secoes"] == 3, est   # sem a seção do Storm (DA-024)
         assert est["maxDir"] <= 390.5, ("card vazou do viewport", est)
         assert est["doc"] <= 390, ("a página passou a rolar na horizontal", est)
         browser.close()

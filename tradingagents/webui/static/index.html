@@ -53,23 +53,8 @@
       </div>
     </div>
 
-    <!-- Estratégia na TELA (DA-184/187): SÓ o dono logado vê e edita — hoje só o
-         Storm123 tem toggle (Setup123 fica sempre ligado), um POR CLASSE de
-         ativo (ação/cripto). Não é uma tela nova, é duas linhas a mais no
-         painel de config que já é owner-gated. -->
-    <div class="estrat-box hidden" id="estrategiaBox">
-      <label class="estrat-toggle">
-        <input type="checkbox" id="estStormToggleStock" />
-        <span>Storm123 em ações</span>
-      </label>
-      <label class="estrat-toggle">
-        <input type="checkbox" id="estStormToggleCrypto" />
-        <span>Storm123 em cripto</span>
-      </label>
-      <span class="config-note">Padrão por classe (DA-187) — ligado em ações,
-        desligado em cripto. O motor continua detectando e gravando no ledger nos
-        dois casos; isto só esconde chip, card, coluna e camada do gráfico.</span>
-    </div>
+    <!-- Estratégia na TELA (DA-184/187): o único toggle era o do Storm123, desativado
+         pela DA-024 (o Setup123 é o do motor do Nest Egg) — a caixa saiu junto. -->
 
     <!-- Conectar assinatura (task 017; multi-provedor 020): SÓ o dono logado vê e usa.
          Três provedores (ChatGPT/Claude/Gemini), cada linha com botão OAuth no estilo
@@ -192,7 +177,7 @@
           <button type="button" class="wl-scan-icon hidden" id="analystOpenBtn"
                   title="Carteira real do analista — composição, movimentações e relatórios (só o dono vê)">analista</button>
           <button type="button" class="wl-scan-icon" id="scanOpenBtn"
-                  title="Varrer a watchlist: quem está em gatilho de compra/venda do Setup123 e do Storm123 (1d + 4h + 1h, sem LLM)">scan</button>
+                  title="Varrer a watchlist: quem está em gatilho do Setup123 (motor do Nest Egg, D/S) — sem LLM">scan</button>
         </div>
         <div class="h-tabs" id="historyTabs" role="tablist">
           <button type="button" class="h-tab is-active" data-filter="all">Todos</button>
@@ -584,7 +569,7 @@
            estiver EM GATILHO abre a análise completa (Padrão/analista) a um clique. -->
       <section class="panel scan-panel hidden" id="scanPanel">
         <div class="scan-head">
-          <h2>Scan do portfólio — gatilhos Setup123 e Storm123 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>
+          <h2>Scan do portfólio — gatilhos Setup123 <span class="orig">(1d + 4h + 1h · $0 de LLM)</span></h2>
           <div class="scan-actions">
             <button type="button" id="scanRunBtn" title="Varrer a watchlist nos frames 1d, 4h e 1h">Escanear</button>
             <button type="button" id="scanTrackBtn" class="ghost-btn" title="Taxa de acerto dos gatilhos já flagrados">Track record</button>

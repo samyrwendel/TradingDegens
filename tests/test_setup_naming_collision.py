@@ -57,12 +57,8 @@ def test_o_caso_do_print_continua_sendo_o_caso_do_print(plano):
     bz = plano["buy_zone"]
     assert plano["price"] > bz["high"], (
         "o caso é o preço FORA da faixa por cima", plano["price"], bz)
-    assert plano["pattern"]["direction"] == "compra"
-    # Na série congelada o último fechamento (833,88) ficou logo ABAIXO do gatilho
-    # (834,82): o 1-2-3 está em "rompeu e retraçou". Isso deixa o caso ainda mais
-    # afiado — os dois setups convivem E DISCORDAM (a média diz "ativo", o 1-2-3
-    # diz "não confirmado"), que é exatamente por que cada um precisa de nome.
-    assert plano["pattern"]["state"] == "rompeu_retracou"
+    # DA-024: o Setup123 é o do motor do Nest Egg, que só decide em D/S — no 4h não há 123.
+    assert plano["pattern"] is None
     assert plano["setup_state"] == "ativo"
 
 
@@ -102,8 +98,6 @@ def test_o_veredito_declara_de_qual_setup_veio(plano):
     """"Setup ativo agora" sozinho não dizia de quem falava — e aqui os DOIS
     setups existem ao mesmo tempo (média ativa + 1-2-3 acionado)."""
     assert plano["setup_source"] == "recuo_media", plano["setup_source"]
-    # e o outro setup está vivo e DISCORDANDO no mesmo instante
-    assert plano["pattern"]["state"] == "rompeu_retracou"
 
 
 @pytest.mark.unit

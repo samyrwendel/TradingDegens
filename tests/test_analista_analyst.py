@@ -329,28 +329,31 @@ def test_section_surfaces_123_trigger_in_method_read(monkeypatch):
     assert "Gatilho 1-2-3 de compra" not in section and "R:R" not in section
 
 
-def _vela(o, h, lo, c):
-    return {"o": o, "h": h, "l": lo, "c": c}
-
-
-def test_setup123_ds_usa_a_regua_do_qf_setup123(monkeypatch):
-    """Integração real com o qf_setup123 (sem mock do detector): vela 1 de queda, vela 2a
+def test_setup123_ds_usa_o_motor_do_nest_egg(monkeypatch):
+    """Integração real com o MOTOR (DA-024, sem mock do detector): vela 1 de queda, vela 2a
     de queda com mínima menor → FORMANDO com gatilho = máxima da 2a (DA-345)."""
-    base = [_vela(100 + i, 101 + i, 99 + i, 100.5 + i) for i in range(20)]
-    velas = base + [_vela(121, 121.5, 118, 118.5), _vela(118.4, 119, 116, 116.5)]
-    monkeypatch.setattr(em, "build_price_chart", lambda s, d, timeframe="1d": {"candles": velas})
+    import calendar
+
+    from tradingagents.dataflows import setup123_motor
+
+    base = [[100 + i, 101 + i, 99 + i, 100.5 + i] for i in range(20)]
+    ohlc = base + [[121, 121.5, 118, 118.5], [118.4, 119, 116, 116.5]]
+    t0 = calendar.timegm((2026, 8, 1, 0, 0, 0))
+    velas = [[t0 + i * 86400, *v, 0.0] for i, v in enumerate(ohlc)]
+    monkeypatch.setattr(setup123_motor, "_velas_brutas",
+                        lambda s, d, f: velas if f == "1d" else [])
     s123 = em._setup123_ds("X", "2026-09-24")
     assert s123["D"]["estado"] == "FORMANDO"
     assert s123["D"]["gatilho"] == 119 and s123["D"]["invalidacao"] == 116
     assert s123["D"]["stop_posicao"] < 116          # DA-347: mín. 2a − 1 ATR14
+    assert s123["S"] == {"disponivel": True, "estado": None}
 
 
-def test_pattern_line_venda_uses_perda_wording():
-    plan = {"pattern": {"trigger": 100.0, "state": "acionado", "direction": "venda"}}
-    line = em._pattern_line(plan, "15m")
-    assert "de venda (15m)" in line
-    assert "perda de 100.00" in line
-    assert "acionado" in line
+def test_pattern_line_usa_o_estado_do_motor():
+    plan = {"pattern": {"trigger": 100.0, "state": "CONFIRMADO", "direction": "compra"}}
+    line = em._pattern_line(plan, "1d")
+    assert "fechamento acima de 100.00" in line
+    assert "confirmado" in line
     # sem padrão → sem linha
     assert em._pattern_line({"pattern": None}, "4h") is None
 

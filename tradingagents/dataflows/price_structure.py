@@ -7,15 +7,11 @@ actually trades:
 * **Região de recuo à média** — the price pulls back to a rising moving
   average, touches it, and reacts up from there. Buy at the touch and hold; over
   days-to-months it tends to pay.
-* **Padrão 1-2-3, both directions** — the classic reversal in either sense:
-  * *de compra* (bottom): point 1 a swing low, point 2 the next swing high
-    (repique), point 3 a HIGHER swing low (ascending bottom); trigger = break
-    ABOVE point 2's high.
-  * *de venda* (top): point 1 a swing high, point 2 the next swing low, point 3 a
-    LOWER swing high (descending top); trigger = break BELOW point 2's low. The
-    product owner trades short, so a top-reversal read is half the job.
+* **Setup123** — NOT computed here: it is the Nest Egg MOTOR's
+  (``nest_egg.motor.setup123`` via :mod:`setup123_motor`, DA-024), the fleet's
+  single source of Setup123 — D/S only, buy only, on the motor's raw candles.
 
-Both are detected here from the SAME cached daily series the rest of the engine
+The regions are detected here from the SAME cached daily series the rest of the engine
 uses (:func:`load_ohlcv`, already cut to ``<= curr_date``), so nothing can see a
 future candle — a detection run on a past date only sees bars up to that date.
 Every reported point carries a real date and price from the series; no number is
@@ -39,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from . import setup123_motor
 from .intraday import (
     INTRADAY_INTERVALS,
     IntradayUnavailableError,
@@ -245,50 +242,71 @@ class BuyRegion:
         }
 
 
+# CICLO a partir do estado do MOTOR (DA-024): o motor já decide vida e morte do 123 —
+# aqui só se traduz pro vocabulário de ciclo que a lista e o ledger leem.
+_CICLO_DO_MOTOR = {
+    "FORMANDO": "nunca_acionou", "ARMADO": "nunca_acionou", "CONFIRMADO": "vivo",
+    "DESATIVADO": "invalidado_sem_acionar", "SAIR": "concluido_saida",
+}
+
+
+_ESTADO_123 = {
+    "FORMANDO": "vela 1 + 2a fechadas, esperando uma vela FECHAR acima do gatilho",
+    "ARMADO": "pré-aviso: preço ao vivo acima do gatilho na janela antes do fechamento — se fechar acima, confirma",
+    "CONFIRMADO": "a vela 3 fechou acima do gatilho e a mínima da 2a não foi furada",
+    "INVALIDADO": "furou a mínima da vela 2a — o setup morreu",
+    "DESATIVADO": "o prazo das velas 2b venceu sem confirmar",
+    "SAIR": "o 123 de venda semanal confirmou — saída da posição (DAS-386)",
+}
+
+
 @dataclass
-class Pattern123:
-    p1: dict[str, Any]  # {"date", "price"}
-    p2: dict[str, Any]
-    p3: dict[str, Any]
-    trigger: float
-    state: str  # "acionado" | "rompeu_retracou" | "formando"
-    direction: str  # "compra" (bottom) | "venda" (top)
-    # MORTE do padrão, MEDIDA e datada. O nível de invalidação já era calculado e
-    # desenhado, mas ninguém comparava o preço contra ele: um 1-2-3 que morreu
-    # continuava na tela com a mesma cor e o mesmo peso de um vivo. `state` não
-    # servia pra isso — ele descreve a relação com o GATILHO, e um padrão pode ter
-    # acionado e depois perdido o ponto 3, que são fatos independentes.
-    invalidado: bool = False
-    invalidado_em: str | None = None   # a data da barra que fechou além do ponto 3
-    # DESFECHO do trade (DA-125): ``{tipo: alvo|stop, em, price, entrada_em, ...}``
-    # quando o gatilho rompeu e o preço chegou a um dos dois. A partir dele o setup
-    # está ENCERRADO — e um setup encerrado não se invalida: não há o que invalidar
-    # num trade que já terminou. Sem isto, o LINK-USD do dia 30/08 saía "INVALIDADO"
-    # oito horas depois de ter ATINGIDO O ALVO.
-    desfecho: dict[str, Any] | None = None
-    # O PRIMEIRO toque no gatilho (DA-129). Separa "vivo" de "nunca acionou" e, na
-    # morte, "alguém estava posicionado" de "ninguém entrou".
-    acionado_em: str | None = None
+class Setup123:
+    """O Setup123 do MOTOR do Nest Egg (DA-024) — ``setup123_motor.leitura``, sem conta própria.
+
+    ``p1``/``p2``/``p3`` = vela 1 / vela 2a / vela 3 (``p3`` None até confirmar);
+    ``state`` = o estado do motor (FORMANDO/ARMADO/CONFIRMADO/INVALIDADO/DESATIVADO/SAIR).
+    Só compra (o 123 do dono não tem venda)."""
+    leitura: dict[str, Any]
+    direction: str = "compra"
+
+    @property
+    def state(self) -> str:
+        return self.leitura["estado"]
+
+    @property
+    def trigger(self) -> float:
+        return self.leitura["gatilho"]
+
+    @property
+    def p1(self) -> dict[str, Any]:
+        return self.leitura["vela1"]
+
+    @property
+    def p2(self) -> dict[str, Any]:
+        return self.leitura["vela2"]
+
+    @property
+    def p3(self) -> dict[str, Any] | None:
+        return self.leitura["vela3"]
 
     def as_dict(self) -> dict[str, Any]:
+        L = self.leitura
+        morto = L["estado"] == "INVALIDADO"
+        ciclo = (("invalidado_operando" if L["confirmou"] else "invalidado_sem_acionar")
+                 if morto else _CICLO_DO_MOTOR[L["estado"]])
         return {
-            "p1": self.p1, "p2": self.p2, "p3": self.p3,
-            "trigger": self.trigger, "state": self.state,
+            "p1": L["vela1"], "p2": L["vela2"], "p3": L["vela3"], "vela2b": L["vela2b"],
+            "trigger": L["gatilho"], "state": L["estado"], "fase": L["fase"],
             "direction": self.direction,
-            # `invalidado` é o estado EFETIVO: falso quando o trade encerrou antes.
-            # O fato estrutural cru (o fechamento além do ponto 3) continua em
-            # `invalidado_em` — ele aconteceu, só não decide mais o veredito.
-            "invalidado": self.invalidado and self.desfecho is None,
-            "invalidado_em": self.invalidado_em,
-            "desfecho": self.desfecho,
-            "encerrado": self.desfecho is not None,
-            "acionado_em": self.acionado_em,
-            # O CICLO é a leitura ÚNICA do estado (DA-129), a mesma que o Storm
-            # publica: seis valores, um só lugar que os decide. Quem quiser saber
-            # "isto ainda é um trade?" lê este campo, não recombina três outros.
-            "ciclo": ciclo_de_vida(acionado_em=self.acionado_em,
-                                   invalidado_em=self.invalidado_em,
-                                   desfecho=self.desfecho),
+            "invalidado": morto, "invalidado_em": L["fim_em"] if morto else None,
+            "desativado_em": L["fim_em"] if L["estado"] == "DESATIVADO" else None,
+            "desfecho": None,
+            "encerrado": L["estado"] == "SAIR",
+            "acionado_em": (L["vela3"] or {}).get("date"),
+            "entrada": L["entrada"], "invalidacao": L["invalidacao"],
+            "stop_posicao": L["stop_posicao"],
+            "ciclo": ciclo, "fonte": L["fonte"],
         }
 
 
@@ -298,7 +316,7 @@ class PriceStructure:
     as_of: str
     buy_regions: list[BuyRegion] = field(default_factory=list)
     active_region: BuyRegion | None = None
-    pattern: Pattern123 | None = None
+    pattern: Setup123 | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -523,97 +541,6 @@ def _active_region(
     )
 
 
-def _alternating(df: pd.DataFrame, lows: list[int], highs: list[int]) -> list[tuple[int, str]]:
-    """Collapse swings into a strictly alternating low/high sequence, keeping the
-    more extreme point when two of the same kind are adjacent."""
-    ev = sorted([(i, "L") for i in lows] + [(i, "H") for i in highs])
-    seq: list[tuple[int, str]] = []
-    for i, t in ev:
-        if seq and seq[-1][1] == t:
-            pi = seq[-1][0]
-            if t == "L" and float(df["Low"].iloc[i]) < float(df["Low"].iloc[pi]):
-                seq[-1] = (i, t)
-            elif t == "H" and float(df["High"].iloc[i]) > float(df["High"].iloc[pi]):
-                seq[-1] = (i, t)
-        else:
-            seq.append((i, t))
-    return seq
-
-
-def _pattern_123(
-    df: pd.DataFrame, lows: list[int], highs: list[int], fmt: str = "%Y-%m-%d"
-) -> Pattern123 | None:
-    """Detect the most recent 1-2-3 reversal in EITHER direction.
-
-    * compra (bottom): ``L → H → L`` with point 3's low ABOVE point 1's low
-      (ascending bottom); trigger = break above point 2's high.
-    * venda (top): ``H → L → H`` with point 3's high BELOW point 1's high
-      (descending top); trigger = break below point 2's low.
-
-    Scans left-to-right and keeps overwriting, so the most recent valid triple of
-    either direction wins.
-    """
-    seq = _alternating(df, lows, highs)
-    lo = df["Low"].astype(float)
-    hi = df["High"].astype(float)
-    best: tuple[int, int, int, str] | None = None
-    for a in range(len(seq) - 2):
-        kinds = (seq[a][1], seq[a + 1][1], seq[a + 2][1])
-        p1, p2, p3 = seq[a][0], seq[a + 1][0], seq[a + 2][0]
-        if kinds == ("L", "H", "L") and lo.iloc[p3] > lo.iloc[p1]:
-            best = (p1, p2, p3, "compra")   # ascending bottom
-        elif kinds == ("H", "L", "H") and hi.iloc[p3] < hi.iloc[p1]:
-            best = (p1, p2, p3, "venda")     # descending top
-    if not best:
-        return None
-    p1, p2, p3, direction = best
-
-    # "acionado" tem que refletir o preço ATUAL, não só a história (bug 014): antes
-    # bastava QUALQUER barra pós-ponto-3 romper o gatilho pra marcar 'acionado' — um
-    # 1-2-3 que rompeu lá atrás e retraçou (preço 313,44 ≤ gatilho 334,7) ficava
-    # "acionado" enganoso. Agora: rompeu E o preço segue do lado rompido = acionado;
-    # rompeu mas voltou = "rompeu_retracou"; nunca rompeu = "formando".
-    last_close = round(float(df["Close"].astype(float).iloc[-1]), 2)
-    if direction == "compra":
-        trigger = round(float(hi.iloc[p2]), 2)                 # rompe a máxima do ponto 2
-        broke = bool((hi.iloc[p3 + 1:] > trigger).any())
-        if not broke:
-            state = "formando"
-        elif last_close > trigger:
-            state = "acionado"                                 # rompeu e o preço segue acima
-        else:
-            state = "rompeu_retracou"                          # rompeu mas voltou abaixo do gatilho
-        pt_kinds = ("L", "H", "L")
-    else:
-        trigger = round(float(lo.iloc[p2]), 2)                 # perde a mínima do ponto 2
-        broke = bool((lo.iloc[p3 + 1:] < trigger).any())
-        if not broke:
-            state = "formando"
-        elif last_close < trigger:
-            state = "acionado"                                 # perdeu e o preço segue abaixo
-        else:
-            state = "rompeu_retracou"                          # perdeu mas voltou acima do gatilho
-        pt_kinds = ("H", "L", "H")
-
-    def pt(idx: int, kind: str) -> dict[str, Any]:
-        price = df["Low"].iloc[idx] if kind == "L" else df["High"].iloc[idx]
-        return {"date": df["Date"].iloc[idx].strftime(fmt), "price": round(float(price), 2)}
-
-    # INVALIDAÇÃO MEDIDA: a primeira barra APÓS o ponto 3 que FECHA além dele. Por
-    # fechamento e não por pavio — é a mesma régua que o stop usa ao levar folga de
-    # ATR pra não ser tirado por sombra, e a estrutura se julga no fechamento.
-    # Uma vez perdido, o ponto 3 não "desperde": o padrão morreu naquela barra,
-    # mesmo que o preço volte depois. Quem volta forma OUTRO padrão.
-    p3_price = round(float(lo.iloc[p3] if pt_kinds[2] == "L" else hi.iloc[p3]), 2)
-    invalidado_em = _primeira_barra_alem(df, p3, p3_price, direction == "compra", fmt)
-
-    return Pattern123(
-        pt(p1, pt_kinds[0]), pt(p2, pt_kinds[1]), pt(p3, pt_kinds[2]),
-        trigger, state, direction,
-        invalidado=invalidado_em is not None, invalidado_em=invalidado_em,
-    )
-
-
 # ── A RÉGUA COMPARTILHADA: morte E desfecho, para os DOIS detectores (DA-126) ──
 #
 # A DA-125 corrigiu o veredito invertido ("invalidado" num trade que atingiu o
@@ -832,165 +759,6 @@ def _primeiro_toque_na_serie(df: pd.DataFrame, nivel: float, fmt: str) -> str | 
 # perde o ponto 3 sem nunca ter acionado morreu mesmo, e não houve trade nenhum.
 
 
-def _desfecho_do_padrao(cronologia: dict[str, Any] | None) -> dict[str, Any] | None:
-    # NOTA (DA-126): esta função lê a CRONOLOGIA já medida e é a forma conveniente
-    # de olhar o desfecho a partir dela — quem decide o estado do padrão é a régua
-    # compartilhada :func:`_morte_e_desfecho`, chamada pelos DOIS detectores. As
-    # duas concordam por construção: leem os mesmos toques, com a mesma ordem e o
-    # mesmo empate pessimista. Mantida porque a cronologia é publicada na tela e
-    # alguém vai querer derivar o desfecho dela sem repetir a varredura.
-    """O primeiro desfecho do trade — ``None`` quando não houve.
-
-    Derivado da CRONOLOGIA (uma medição só, DA-124): exige o gatilho rompido e,
-    depois dele, o primeiro toque em alvo ou stop. Sem entrada não há trade a
-    encerrar, e um alvo roçado por um preço que nunca acionou o setup não é
-    desfecho de coisa nenhuma.
-
-    Empate na mesma barra resolve pelo STOP — a leitura pessimista, a mesma do
-    ledger: sem tick não dá pra saber a ordem dentro da barra, e acerto inflado é
-    o pior erro possível num painel que existe pra dizer a taxa real.
-    """
-    if not cronologia:
-        return None
-    ev = {e["nome"]: e for e in (cronologia.get("eventos") or [])}
-    gat = ev.get("gatilho")
-    if not gat:
-        return None
-    alvo, stop = ev.get("alvo (TP)"), ev.get("stop (SL)")
-    cands = [(e["quando"], tipo, e) for tipo, e in (("alvo", alvo), ("stop", stop))
-             if e and e["quando"] > gat["quando"]]
-    if not cands:
-        return None
-    # ordena por data e, no empate, o stop vem primeiro (pessimista)
-    cands.sort(key=lambda c: (c[0], 0 if c[1] == "stop" else 1))
-    quando, tipo, e = cands[0]
-    empate = any(c[0] == quando and c[1] != tipo for c in cands)
-    return {"tipo": tipo, "em": quando, "price": e["price"],
-            "entrada_em": gat["quando"], "entrada": gat["price"],
-            "empate_na_barra": empate}
-
-
-def _cronologia_do_padrao(df, pattern, target, stop, fmt) -> dict[str, Any] | None:
-    """A linha do tempo do padrão — ``None`` quando não há padrão.
-
-    Devolve ``{desde, invalidado_em, eventos: [{nome, price, quando, ordem}]}``,
-    com ``ordem`` em ``antes`` / ``junto`` / ``depois`` **relativa à invalidação**
-    (e ``None`` quando o padrão está vivo — aí não há morte a que se referir).
-
-    Só os três níveis que decidem o resultado entram: gatilho, alvo e stop. A
-    invalidação não é evento da lista — ela É o marco contra o qual os outros se
-    ordenam."""
-    if pattern is None or df is None or df.empty:
-        return None
-    p3 = (getattr(pattern, "p3", None) or {}).get("date")
-    if not p3:
-        return None
-    vivos = df[df["Date"] >= pd.to_datetime(p3)]
-    if vivos.empty:
-        return None
-    em = getattr(pattern, "invalidado_em", None) if getattr(pattern, "invalidado", False) else None
-    niveis = [("gatilho", getattr(pattern, "trigger", None)),
-              ("alvo (TP)", (target or {}).get("price")),
-              ("stop (SL)", (stop or {}).get("price"))]
-    eventos = []
-    for nome, preco in niveis:
-        if preco is None:
-            continue
-        quando = _primeiro_toque_na_serie(vivos, float(preco), fmt)
-        if quando is None:
-            continue
-        ordem = None
-        if em:
-            ordem = "antes" if quando < em else ("junto" if quando == em else "depois")
-        eventos.append({"nome": nome, "price": round(float(preco), 2),
-                        "quando": quando, "ordem": ordem})
-    eventos.sort(key=lambda e: e["quando"])
-    return {"desde": p3, "invalidado_em": em, "eventos": eventos}
-
-
-# ── PROJEÇÃO DO PONTO 3: onde ele precisa nascer pra o padrão validar ─────────
-#
-# "Se tiver em formação de 123, marcar onde deve ser a nova formação do 3, tipo uma
-# preparação para acompanhar a hora de entrar."
-#
-# A faixa NÃO é chutada: ela sai da própria definição do padrão, que já está escrita
-# no detector. Num 1-2-3 de compra deste módulo o ponto 3 é um fundo ASCENDENTE —
-# acima da mínima do ponto 1 (perdê-la mata a formação) e abaixo da máxima do ponto 2
-# (acima dela o preço já rompeu o gatilho e não há mais recuo a esperar). Na venda é
-# o espelho: um topo DESCENDENTE, abaixo da máxima do ponto 1 e acima da mínima do 2.
-#
-# E a regra é do MÉTODO ABERTO, nunca a do outro: no Storm a semântica dos pontos é
-# invertida (o ponto 2 é o extremo, não o swing intermediário) e o ponto 3 é o
-# PRÓXIMO candle, não um swing futuro qualquer. Misturar as duas projeções poria na
-# tela uma faixa que a regra daquele método não sustenta — ver :func:`_projecao_storm`.
-def _projecao_p3(
-    df: pd.DataFrame, lows: list[int], highs: list[int], price: float,
-    pattern: Pattern123 | None, fmt: str = "%Y-%m-%d",
-) -> dict[str, Any] | None:
-    """A faixa do ponto 3 do 1-2-3 de SWINGS, quando ela existe.
-
-    Dois casos, e só dois:
-
-    * **gestação** — há um par de swings (fundo→topo, ou topo→fundo) e nenhum triplo
-      válido ainda: o próximo swing pode ser o ponto 3;
-    * **novo após invalidação** — o padrão morreu, e o par 1-2 que sobrou ainda pode
-      parir OUTRO ponto 3.
-
-    Devolve ``None`` com padrão VIVO (ali o ponto 3 já existe — o que falta é o
-    gatilho, que a tela já marca) e quando a regra não delimita a faixa. Declarar
-    ausente é o certo: desenhar uma faixa de espera que a regra não sustenta seria
-    inventar o nível mais perigoso da tela, o que diz "compre aqui".
-    """
-    if pattern is not None and not pattern.invalidado:
-        return None
-    if pattern is not None:
-        # o par que sobrou do padrão morto
-        compra = pattern.direction == "compra"
-        piso = float(pattern.p1["price"]) if compra else float(pattern.p2["price"])
-        teto = float(pattern.p2["price"]) if compra else float(pattern.p1["price"])
-        caso = "novo_apos_invalidacao"
-    else:
-        seq = _alternating(df, lows, highs)
-        if len(seq) < 2:
-            return None
-        (i1, k1), (i2, k2) = seq[-2], seq[-1]
-        lo, hi = df["Low"].astype(float), df["High"].astype(float)
-        if (k1, k2) == ("L", "H"):
-            compra, caso = True, "gestacao"
-            piso, teto = round(float(lo.iloc[i1]), 2), round(float(hi.iloc[i2]), 2)
-        elif (k1, k2) == ("H", "L"):
-            compra, caso = False, "gestacao"
-            piso, teto = round(float(lo.iloc[i2]), 2), round(float(hi.iloc[i1]), 2)
-        else:
-            return None
-    if teto <= piso:
-        return None
-    # O PISO já foi perdido: não há 1-2-3 em gestação, há outra estrutura. Dizer
-    # isso é informação; desenhar a faixa mesmo assim seria afirmar o contrário.
-    p = float(price)
-    if (p < piso) if compra else (p > teto):
-        return {"direcao": "compra" if compra else "venda", "caso": caso,
-                "low": None, "high": None,
-                "motivo": (f"o ponto 1 ({piso:,.2f}) foi perdido — não há 1-2-3 de "
-                           f"{'compra' if compra else 'venda'} em gestação nesta série."
-                           if compra else
-                           f"o ponto 1 ({teto:,.2f}) foi rompido — não há 1-2-3 de "
-                           f"venda em gestação nesta série.")}
-    return {
-        "direcao": "compra" if compra else "venda",
-        "caso": caso,
-        "low": round(piso, 2), "high": round(teto, 2),
-        "price": round((piso + teto) / 2, 2),
-        "condicao": (
-            f"vira um 1-2-3 de compra se fizer um FUNDO acima de {piso:,.2f} "
-            f"(perder esse nível mata a formação) e depois romper {teto:,.2f}"
-            if compra else
-            f"vira um 1-2-3 de venda se fizer um TOPO abaixo de {teto:,.2f} "
-            f"(romper esse nível mata a formação) e depois perder {piso:,.2f}"),
-        "gatilho_futuro": round(teto if compra else piso, 2),
-    }
-
-
 def _projecao_storm(df: pd.DataFrame, fmt: str = "%Y-%m-%d") -> dict[str, Any] | None:
     """A faixa do ponto 3 do STORM — e ela é de OUTRA natureza.
 
@@ -1066,21 +834,20 @@ def detect_price_structure(
     lows, highs = _swings(df, _method_k(method))
     struct.buy_regions = _buy_regions(df, lows, mas, fmt)
     struct.active_region = _active_region(df, mas, fmt)
-    # The 1-2-3 reversal is a pure price-SWING structure — it is not "on the EMA" or
-    # "on the MMS"; the MA family the method picks only governs the buy REGIONS above.
-    # Detect the pattern on the CANONICAL swing horizon (the default method's k)
-    # regardless of `method`, so the report text (always canonical), the chart
-    # annotation and the actionable plan can never disagree on the trigger. Before
-    # this, an analista run (k=3) drew the tighter-swing 1-2-3 on the chart (e.g. AAOI
-    # gatilho 91,50) while the report text — built canonical (k=5) — read 160,87; the
-    # reader saw two triggers for "the" pattern and a stale "acionado".
-    canonical_k = _method_k(_DEFAULT_METHOD)
-    if _method_k(method) == canonical_k:
-        p_lows, p_highs = lows, highs
-    else:
-        p_lows, p_highs = _swings(df, canonical_k)
-    struct.pattern = _pattern_123(df, p_lows, p_highs, fmt)
+    # O Setup123 é o do MOTOR do Nest Egg (DA-024), o mesmo pra qualquer método/família
+    # de média: só D/S, sobre as velas brutas do motor. Falha de fonte não derruba a
+    # estrutura — o 123 fica ausente e o motivo vai pro log.
+    struct.pattern = _setup123_do_motor(symbol, curr_date, timeframe)
     return struct
+
+
+def _setup123_do_motor(symbol: str, curr_date: str, timeframe: str) -> Setup123 | None:
+    try:
+        L = setup123_motor.leitura(symbol, curr_date, timeframe)
+    except Exception as exc:  # noqa: BLE001 — fonte do motor fora: sem 123, nunca 123 inventado
+        logger.warning("setup123 do motor indisponível para %s %s: %s", symbol, timeframe, exc)
+        return None
+    return Setup123(L) if L else None
 
 
 # --------------------------------------------------------------- markdown ------
@@ -1109,8 +876,8 @@ def _levels_lines(
     como "sem nível definido" — o mesmo contrato das zonas."""
     plan = build_actionable_plan_dict(symbol, curr_date, timeframe, method)
     inval, stop = plan.get("invalidation"), plan.get("stop")
-    target, rr = plan.get("target"), plan.get("risk_reward")
-    lines = ["", "**Níveis operáveis do padrão** (derivados da estrutura, nada arbitrado):"]
+    rr = plan.get("risk_reward")
+    lines = ["", "**Níveis do Setup123** (do motor do Nest Egg, nada recalculado aqui):"]
 
     if inval and inval.get("price") is not None:
         lines.append(f"- **Invalidação**: {inval['price']:,.2f} — {inval['meaning']}")
@@ -1118,30 +885,15 @@ def _levels_lines(
         lines.append("- **Invalidação**: sem nível definido.")
 
     if stop and stop.get("price") is not None:
-        lines.append(f"- **Stop (SL)**: {stop['price']:,.2f} ({stop['basis']}).")
+        lines.append(f"- **Stop da posição**: {stop['price']:,.2f} ({stop['basis']}).")
     else:
-        lines.append("- **Stop (SL)**: sem nível definido.")
+        lines.append("- **Stop da posição**: sem nível definido.")
 
-    if target and target.get("price") is not None:
-        band = ""
-        if target.get("low") is not None and target.get("high") is not None:
-            band = f" — faixa {target['low']:,.2f}–{target['high']:,.2f}"
-        same = " — **é o mesmo nível da região de realização**" if target.get("same_as_realize") else ""
-        lines.append(
-            f"- **Alvo (TP)**: {target['price']:,.2f} ({target['label']}){band}{same}."
-        )
-    else:
-        lines.append("- **Alvo (TP)**: sem nível definido (nenhum swing anterior à frente da entrada).")
-
-    if rr and rr.get("rr") is not None:
-        lines.append(
-            f"- **Risco/retorno**: **{rr['rr']:.2f}:1** — entrada {rr['entry']:,.2f} "
-            f"({rr['entry_basis']}), risco {rr['risk']:,.2f}, retorno {rr['reward']:,.2f}."
-        )
-    elif rr:
-        lines.append(f"- **Risco/retorno**: não calculável — {rr.get('note') or 'sem base'}.")
-    else:
-        lines.append("- **Risco/retorno**: sem base (stop ou alvo indefinido).")
+    if rr and rr.get("entry") is not None:
+        risco = f", risco {rr['risk']:,.2f}" if rr.get("risk") is not None else ""
+        lines.append(f"- **Entrada**: {rr['entry']:,.2f} ({rr['entry_basis']}){risco}.")
+    lines.append("- **Alvo**: o Setup123 não tem alvo — a saída é o stop da posição"
+                 " (no semanal, também o 123 de venda, DAS-386).")
     return lines
 
 
@@ -1218,40 +970,25 @@ def build_price_structure_section(
 
     if s.pattern is not None:
         p = s.pattern
-        if p.direction == "venda":
-            lines.append("### Padrão 1-2-3 de venda")
-            if p.state == "acionado":
-                gatilho = "**acionado** (perdeu a mínima do ponto 2 e o preço segue abaixo)"
-            elif p.state == "rompeu_retracou":
-                gatilho = "**perdeu e voltou** (perdeu a mínima do ponto 2 mas o preço voltou acima do gatilho — sinal não confirmado)"
-            else:
-                gatilho = "**em formação** (ainda não perdeu a mínima do ponto 2)"
-            lines += [
-                f"- **Ponto 1** (topo): {p.p1['date']} — {p.p1['price']:,.2f}",
-                f"- **Ponto 2** (repique / mínima): {p.p2['date']} — {p.p2['price']:,.2f}",
-                f"- **Ponto 3** (topo descendente, abaixo do ponto 1): "
-                f"{p.p3['date']} — {p.p3['price']:,.2f}",
-                f"- **Gatilho**: perda de {p.trigger:,.2f} — {gatilho}.",
-            ]
-        else:
-            lines.append("### Padrão 1-2-3 de compra")
-            if p.state == "acionado":
-                gatilho = "**acionado** (rompeu a máxima do ponto 2 e o preço segue acima)"
-            elif p.state == "rompeu_retracou":
-                gatilho = "**rompeu e retraçou** (rompeu a máxima do ponto 2 mas o preço voltou abaixo do gatilho — sinal não confirmado)"
-            else:
-                gatilho = "**em formação** (ainda não rompeu a máxima do ponto 2)"
-            lines += [
-                f"- **Ponto 1** (fundo): {p.p1['date']} — {p.p1['price']:,.2f}",
-                f"- **Ponto 2** (repique / máxima): {p.p2['date']} — {p.p2['price']:,.2f}",
-                f"- **Ponto 3** (fundo ascendente, acima do ponto 1): "
-                f"{p.p3['date']} — {p.p3['price']:,.2f}",
-                f"- **Gatilho**: rompimento de {p.trigger:,.2f} — {gatilho}.",
-            ]
+        L = p.leitura
+        lines.append("### Setup123 (motor do Nest Egg — DAS-345)")
+        lines += [
+            f"- **Estado**: **{L['estado']}** — {_ESTADO_123[L['estado']]}",
+            f"- **Vela 1** (queda): {p.p1['date']} — mínima {p.p1['price']:,.2f}",
+            f"- **Vela 2a** (queda que perde a mínima da 1 — o fundo): {p.p2['date']} — "
+            f"mínima {p.p2['price']:,.2f}",
+        ]
+        if L["vela2b"]:
+            lines.append(f"- **Velas 2b**: {', '.join(L['vela2b'])} (cada uma sobe o gatilho pra máxima dela)")
+        if p.p3:
+            lines.append(f"- **Vela 3** (fechou acima do gatilho = entrada): {p.p3['date']} — "
+                         f"fechamento {p.p3['price']:,.2f}")
+        lines.append(f"- **Gatilho**: fechamento acima de {p.trigger:,.2f} (tocar no pavio não confirma).")
         lines += _levels_lines(symbol, curr_date, timeframe, method)
     else:
-        lines.append("### Padrão 1-2-3")
-        lines.append("_Nenhum padrão 1-2-3 identificado no histórico disponível._")
+        lines.append("### Setup123 (motor do Nest Egg)")
+        lines.append("_Nenhum Setup123 vivo ou recente." + ("" if timeframe in setup123_motor.FRAMES
+                     else " O motor só decide o 123 no diário e no semanal (DAS-326).") + "_")
 
     if not s.buy_regions and s.pattern is None and s.active_region is None:
         lines += ["", "**Nenhum setup identificado.**"]
@@ -1317,7 +1054,7 @@ def build_price_chart(
     regions = [r.as_dict() for r in struct.buy_regions if r.date in window_dates]
     pattern = None
     if struct.pattern is not None:
-        pts = [struct.pattern.p1, struct.pattern.p2, struct.pattern.p3]
+        pts = [p for p in (struct.pattern.p1, struct.pattern.p2, struct.pattern.p3) if p]
         if all(p["date"] in window_dates for p in pts):
             pattern = struct.pattern.as_dict()
 
@@ -1490,107 +1227,42 @@ _ENTRY_BASIS_GATILHO = {
 }
 
 
-def _entry_ref(pattern: Pattern123, price: float, compra: bool) -> tuple[float, str]:
-    """Entrada de referência do setup e o motivo dela, escrito.
-
-    Enquanto o padrão não acionou, a entrada é o GATILHO (é onde se entra). Depois
-    de acionado o gatilho já ficou para trás, então a referência honesta é o PREÇO
-    ATUAL — é o que ainda resta de trade para quem lê a tela agora."""
-    if pattern.state == "acionado":
-        return float(price), "preço atual (padrão já acionado)"
-    return float(pattern.trigger), _ENTRY_BASIS_GATILHO[compra]
-
-
 def _pattern_levels(
-    pattern: Pattern123 | None,
-    df: pd.DataFrame,
-    lows: list[int],
-    highs: list[int],
-    price: float,
-    atr: float | None,
-    realize_zone: dict[str, Any] | None,
-    fmt: str = "%Y-%m-%d",
+    pattern: Setup123 | None,
 ) -> tuple[dict | None, dict | None, dict | None, dict | None]:
-    """``(invalidação, stop, alvo, risco_retorno)`` derivados do 1-2-3 detectado.
+    """``(invalidação, stop, alvo, risco_retorno)`` do Setup123 — TODOS do motor (DA-024).
 
-    Tudo sai de ESTRUTURA real da série — nenhum nível é inventado nem arredondado
-    "pra ficar bonito":
-
-    * **invalidação** — o ponto 3, que é o que sustenta o padrão. Num 1-2-3 de
-      compra o ponto 3 é o fundo ascendente: perdê-lo mata a premissa de fundos
-      subindo. Num 1-2-3 de venda o ponto 3 é o topo descendente: voltar acima
-      dele mata a premissa de topos caindo. É o preço de uma barra real.
-    * **stop** — a invalidação com folga de ``_STOP_ATR_SLACK·ATR`` (abaixo na
-      compra, acima na venda). Sem ATR, o stop É a invalidação e o motivo fica
-      declarado — jamais um percentual chutado.
-    * **alvo** — o swing anterior à frente da ENTRADA (topo acima na compra, fundo
-      abaixo na venda). Medir a partir da entrada, e não do preço, é o que impede o
-      absurdo de um 1-2-3 ainda não acionado ter como "alvo" o próprio gatilho (o
-      topo do ponto 2 é justamente o nível que se rompe para entrar). A venda usa o
-      seu próprio lado da estrutura — não herda o esqueleto do long.
-    * **risco/retorno** — só quando stop E alvo existem e estão do lado certo da
-      entrada; caso contrário ``rr=None`` com o motivo escrito.
-
-    Sem padrão detectado devolve ``(None, None, None, None)`` — a tela mostra
-    "sem nível definido" em vez de fabricar um esqueleto de trade.
+    * **invalidação** — a mínima da vela 2a (DAS-345): furar mata o setup;
+    * **stop** — o stop da POSIÇÃO (DAS-347): D = mín. 2a − 1×ATR14 da 2a; S = entrada − 8%;
+    * **alvo** — não existe: o 123 do dono não tem alvo (sai no stop; no S, também no
+      123 de venda — DAS-386). ``None``, com o motivo no R:R;
+    * **entrada** — o fechamento da vela 3; antes de confirmar, o gatilho.
     """
     if pattern is None:
         return None, None, None, None
-
-    compra = pattern.direction != "venda"
-    inval_price = float(pattern.p3["price"])
-    if compra:
-        invalidation = {
-            "label": f"perda do ponto 3 ({pattern.p3['date']})",
-            "price": round(inval_price, 2),
-            "meaning": (
-                f"o setup morre se perder {inval_price:,.2f} — abaixo do ponto 3 "
-                "o fundo ascendente deixa de ser ascendente e o 1-2-3 de compra "
-                "não existe mais."
-            ),
-        }
-    else:
-        invalidation = {
-            "label": f"retomada do ponto 3 ({pattern.p3['date']})",
-            "price": round(inval_price, 2),
-            "meaning": (
-                f"o setup morre se voltar acima de {inval_price:,.2f} — acima do "
-                "ponto 3 o topo descendente deixa de ser descendente e o 1-2-3 de "
-                "venda não existe mais."
-            ),
-        }
-
-    if atr is not None and atr > 0:
-        slack = _STOP_ATR_SLACK * atr
-        stop_price = inval_price - slack if compra else inval_price + slack
-        stop_basis = _STOP_BASIS
-    else:
-        stop_price = inval_price
-        stop_basis = _STOP_BASIS_NO_ATR
-    stop = {
-        "label": "stop (SL)",
-        "price": round(stop_price, 2),
-        "anchor": round(inval_price, 2),
-        "atr": atr,
-        "basis": stop_basis,
+    L = pattern.leitura
+    inval = L["invalidacao"]
+    invalidation = {
+        "label": f"mínima da vela 2a ({pattern.p2['date']})",
+        "price": inval,
+        "meaning": f"o setup morre se a mínima furar {inval:,.2f} — a mínima da vela 2a (DAS-345).",
     }
-
-    entry, entry_basis = _entry_ref(pattern, price, compra)
-    raw_target = (
-        _nearest_overhead_high(df, highs, entry, fmt) if compra
-        else _nearest_support_low(df, lows, entry, fmt)
-    )
-    target = _banded(raw_target, atr)
-    if target is not None:
-        # Reconciliação com a região de realização: quando o alvo do padrão É o
-        # mesmo nível, a tela desenha UM só e diz que são o mesmo (nunca dois).
-        rz_price = (realize_zone or {}).get("price")
-        target["same_as_realize"] = rz_price is not None and rz_price == target["price"]
-
-    risk_reward = _risk_reward(entry, entry_basis, stop, target, compra)
-    risk_reward = _com_percurso(risk_reward, pattern.trigger, pattern.state, price,
-                                stop, target, compra, _ENTRY_BASIS_GATILHO[compra])
-    return invalidation, stop, target, risk_reward
+    base = ("entrada − 8% (DAS-347, semanal)" if L["frame"] == "1w"
+            else "mínima da vela 2a − 1×ATR14 da 2a (DAS-347, diário)")
+    stop = None
+    if L["stop_posicao"] is not None:
+        stop = {"label": "stop da posição", "price": L["stop_posicao"], "anchor": inval,
+                "atr": None, "basis": base}
+    entry = L["entrada"]
+    entry_basis = ("fechamento da vela 3 (entrada confirmada)" if L["confirmou"]
+                   else "gatilho — fechamento acima da máxima da 2a/2b")
+    risk = round(entry - stop["price"], 2) if stop else None
+    risk_reward = {
+        "entry": entry, "entry_basis": entry_basis, "risk": risk, "reward": None, "rr": None,
+        "note": "o Setup123 não tem alvo — a saída é o stop da posição"
+                " (no semanal, também o 123 de venda, DAS-386); sem alvo, sem R:R.",
+    }
+    return invalidation, stop, None, risk_reward
 
 
 def _percurso(trigger: float | None, price: float,
@@ -1638,7 +1310,7 @@ def _com_percurso(rr: dict | None, trigger: float | None, state: str | None,
     Padrão não acionado devolve o R:R intacto: ali a entrada É o gatilho, não há
     dois números a comparar, e inventar um segundo seria repetir o mesmo.
 
-    Recebe primitivos e não um ``Pattern123`` porque o Storm decai exatamente
+    Recebe primitivos e não um padrão porque o Storm decai exatamente
     igual — mesma regra de entrada, mesmo stop parado — e uma segunda cópia da
     conta seria a mesma verdade escrita duas vezes, livre pra divergir.
     """
@@ -1760,7 +1432,7 @@ _REALIZE_ROLE = {
 
 def _reconcile_realize(
     realize_zone: dict[str, Any] | None,
-    pattern: Pattern123 | None,
+    pattern: Setup123 | None,
     target: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """Carimba ``role``/``role_label`` na região de realização (ver :data:`_REALIZE_ROLE`).
@@ -1869,17 +1541,13 @@ def build_actionable_plan(
             "label": f"recuo até {buy_zone['label'].split(' —')[0]} (média subindo)",
             "price": buy_zone["price"],
         }
-    elif struct.pattern is not None and struct.pattern.state in ("formando", "rompeu_retracou"):
-        # "formando" (nunca rompeu) e "rompeu_retracou" (rompeu e voltou) têm o preço
-        # do lado NÃO rompido do gatilho → em ambos o que se espera é o rompimento.
+    elif struct.pattern is not None and struct.pattern.state in ("FORMANDO", "ARMADO"):
+        # Setup123 do motor esperando a vela 3: o que se espera é o FECHAMENTO acima.
         setup_state = "aguardar_rompimento"
         setup_source = "123"
         pullback_is_trigger = True  # a trigger is a line, not a zone → stays a point
-        if struct.pattern.direction == "venda":
-            trig_label = "perda da mínima do ponto 2 (gatilho 1-2-3 de venda)"
-        else:
-            trig_label = "rompimento da máxima do ponto 2 (gatilho 1-2-3 de compra)"
-        pullback_zone = {"label": trig_label, "price": struct.pattern.trigger}
+        pullback_zone = {"label": "fechamento acima do gatilho (vela 3 do Setup123)",
+                         "price": struct.pattern.trigger}
     else:
         setup_state = "sem_setup"
 
@@ -1927,36 +1595,10 @@ def build_actionable_plan(
         buy_zone["overlap_note"] = note
         realize_zone["overlap_note"] = note
 
-    # Onde INVALIDA, onde é o STOP e onde é o ALVO — mais o R:R que transforma
-    # "tem 1-2-3" em trade operável. Ancorados no ponto 3 e no swing anterior da
-    # série; sem padrão, os quatro ficam None (a tela diz "sem nível definido").
-    invalidation, stop, target, risk_reward = _pattern_levels(
-        struct.pattern, df, lows, highs, price, atr, realize_zone, fmt
-    )
+    # Invalidação, stop da posição e entrada do Setup123 — todos do MOTOR (DA-024): a
+    # vida e a morte do setup já vêm decididas por ele, nada é reapurado aqui.
+    invalidation, stop, target, risk_reward = _pattern_levels(struct.pattern)
     realize_zone = _reconcile_realize(realize_zone, struct.pattern, target)
-
-    # MORTE E DESFECHO pela RÉGUA COMPARTILHADA (DA-126) — a MESMA função que o
-    # Storm chama. Só aqui os dois lados existem juntos: o detector não conhece alvo
-    # nem stop, e por isso não podia decidir sozinho; o `invalidado` que ele calculou
-    # é o fallback de quem não tem níveis (o `build_price_chart`), e aqui é
-    # RECALCULADO com a fronteira do desfecho.
-    #
-    # Uma régua só para os dois métodos não é elegância: sem ela, o 1-2-3 e o Storm
-    # passariam a discordar sobre a MESMA sequência de preço — pior que o bug que a
-    # DA-125 veio matar.
-    cronologia = _cronologia_do_padrao(df, struct.pattern, target, stop, fmt)
-    if struct.pattern is not None:
-        _p3 = df.index[df["Date"].dt.strftime(fmt) == struct.pattern.p3["date"]]
-        if len(_p3):
-            _em, _desf, _ac = _morte_e_desfecho(
-                df, int(_p3[-1]), (invalidation or {}).get("price"),
-                struct.pattern.direction == "compra", fmt,
-                struct.pattern.trigger, (target or {}).get("price"),
-                (stop or {}).get("price"))
-            struct.pattern.invalidado_em = _em
-            struct.pattern.invalidado = _em is not None
-            struct.pattern.desfecho = _desf
-            struct.pattern.acionado_em = _ac
 
     return ActionablePlan(
         symbol=symbol, as_of=as_of, price=price, timeframe=tf_ref,
@@ -1965,8 +1607,6 @@ def build_actionable_plan(
         pattern=struct.pattern.as_dict() if struct.pattern is not None else None,
         invalidation=invalidation, stop=stop, target=target, risk_reward=risk_reward,
         setup_source=setup_source,
-        projecao_p3=_projecao_p3(df, lows, highs, price, struct.pattern, fmt),
-        cronologia=cronologia,
     )
 
 
@@ -1988,6 +1628,11 @@ def build_actionable_plan_dict(
 
 
 # ============================================================== SETUP 1-2-3 STORM ==
+# DESATIVADO (DA-024, Samyr 01/10): o Setup123 da frota é só o do motor do Nest Egg.
+# O código e o ledger do Storm ficam (histórico das DA-184/291), mas nenhum caminho
+# vivo o chama: scan, plano da tela, sinais, execução e métodos leem esta flag.
+STORM123_ATIVO = False
+
 # O 1-2-3 do Alexandre Wolwacz ("Stormer") com o filtro ÉDEN DOS TRADERS.
 #
 # NÃO é variação do 1-2-3 que já vive neste módulo (:func:`_pattern_123`). É OUTRO
@@ -2766,7 +2411,7 @@ def _bollinger_bands(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]
 
 
 def _bollinger_extremo(df: pd.DataFrame, fmt: str,
-                       ultima_em_formacao: bool = False) -> "BollingerPattern | None":
+                       ultima_em_formacao: bool = False) -> BollingerPattern | None:
     """O EXTREMO de Bollinger mais recente numa barra FECHADA (regra 2).
 
     Fechamento ABAIXO da banda inferior → candidato a COMPRA; ACIMA da superior →
