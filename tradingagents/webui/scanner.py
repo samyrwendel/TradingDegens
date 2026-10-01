@@ -345,7 +345,7 @@ def _frame_row(ticker: str, date: str, frame: str,
         "sobra_pct": rr.get("sobra_pct"),
         "rr_gatilho": (rr.get("no_gatilho") or {}).get("rr"),
         "rr_motivo": rr.get("motivo"),
-        # O STORM (célula própria, DA-081) e o ÉDEN (DA-184) só entram com o Storm123
+        # O STORM (célula própria, caderno 081) e o ÉDEN (caderno 184) só entram com o Storm123
         # ligado — desativado pela DA-024 (ver :func:`_storm_cols`).
         **_storm_cols(ticker, date, frame, price, com_eden=True),
         # O BOLLINGER na MESMA linha, célula própria (task 20260904-015): reversão à
@@ -357,7 +357,7 @@ def _frame_row(ticker: str, date: str, frame: str,
 
 def _storm_cols(ticker: str, date: str, frame: str, price: float | None,
                 com_eden: bool = False) -> dict[str, Any]:
-    """As colunas do Storm123 (e do ÉDEN no gatilho do 123, a medição da DA-184) na linha
+    """As colunas do Storm123 (e do ÉDEN no gatilho do 123, a medição do caderno 184) na linha
     do scan — VAZIO desde a DA-024 (``STORM123_ATIVO=False``): sem a chave, a tela, os
     sinais, a execução e o ledger não têm Storm o que ler, e o detector nem roda."""
     if not STORM123_ATIVO:
@@ -715,7 +715,7 @@ class ScanLog:
             entry["entrada"] = row.get("entrada")
         if entry["setup"] == "123":
             # DA-024: daqui pra frente o 123 é o do motor do Nest Egg — outra geometria.
-            # Marcado pra nunca somar com as linhas antigas (DA-184/291) sem querer.
+            # Marcado pra nunca somar com as linhas antigas (caderno 184/291) sem querer.
             entry["regua"] = "motor-nest-egg"
         if row.get("leitura"):
             entry["leitura"] = row.get("leitura")

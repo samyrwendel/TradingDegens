@@ -845,11 +845,11 @@ def _atencao_line(at: dict | None) -> str | None:
             f"preço {_fmt(at['close'])} vs EMA 21 {_fmt(at['e21'])}.")
 
 
-# O 1-2-3 que vale é o setup do dono (DA-327/345/347), só D/S — o MOTOR do Nest Egg,
+# O 1-2-3 que vale é o setup do dono (caderno 327/345/347), só D/S — o MOTOR do Nest Egg,
 # importado (DA-024: a única fonte de Setup123 da frota), sobre as velas BRUTAS do motor.
 # Sem alvo (o 123 não tem alvo em R) → sem R:R, e nenhum R:R < 1 vira gatilho. Fail-open.
 def _setup123_ds(symbol: str, curr_date: str) -> dict:
-    """Estado do 123 v2 (DA-345) + stop da posição (DA-347) no diário e no semanal."""
+    """Estado do 123 v2 (caderno 345) + stop da posição (caderno 347) no diário e no semanal."""
     from tradingagents.dataflows import setup123_motor
     out = {}
     for tf, letra in (("1d", "D"), ("1w", "S")):

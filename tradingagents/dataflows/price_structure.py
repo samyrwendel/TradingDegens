@@ -1629,7 +1629,7 @@ def build_actionable_plan_dict(
 
 # ============================================================== SETUP 1-2-3 STORM ==
 # DESATIVADO (DA-024, Samyr 01/10): o Setup123 da frota é só o do motor do Nest Egg.
-# O código e o ledger do Storm ficam (histórico das DA-184/291), mas nenhum caminho
+# O código e o ledger do Storm ficam (histórico do caderno 184/291), mas nenhum caminho
 # vivo o chama: scan, plano da tela, sinais, execução e métodos leem esta flag.
 STORM123_ATIVO = False
 

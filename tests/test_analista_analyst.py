@@ -331,7 +331,7 @@ def test_section_surfaces_123_trigger_in_method_read(monkeypatch):
 
 def test_setup123_ds_usa_o_motor_do_nest_egg(monkeypatch):
     """Integração real com o MOTOR (DA-024, sem mock do detector): vela 1 de queda, vela 2a
-    de queda com mínima menor → FORMANDO com gatilho = máxima da 2a (DA-345)."""
+    de queda com mínima menor → FORMANDO com gatilho = máxima da 2a (caderno 345)."""
     import calendar
 
     from tradingagents.dataflows import setup123_motor
