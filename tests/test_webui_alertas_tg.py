@@ -97,8 +97,8 @@ def test_nada_mudou_e_SILENCIO_nao_e_mensagem_vazia_enviada():
 
 def test_a_mensagem_traz_ATIVO_o_QUE_mudou_e_o_PCT_e_o_racional_dele():
     txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
-    assert "IREN" in txt and "SAIU" in txt and "🔴⬇" in txt
-    assert "% do capital" in txt
+    assert "VENDEU TUDO de IREN" in txt and "🔴⬇" in txt
+    assert "da carteira" in txt
     # o racional é o que dá sentido: "saiu de IREN" sem o porquê é um número
     assert "timing, não tese" in txt
     assert "27/08/2026" in txt
@@ -144,6 +144,78 @@ def test_a_mensagem_fecha_com_a_ACAO_em_linha_propria():
 def test_o_cabecalho_traz_total_e_caixa():
     txt = A.formata_carteira(A.mudancas(_ANTES, _DEPOIS), _DEPOIS)
     assert "Total:" in txt and "caixa" in txt
+
+
+# ── task 20260902-054: a REDAÇÃO fala a língua de quem opera ───────────────────
+# "comprou mais BTC", "vendeu 5% de btc" — não "% do capital". O % embutido no
+# verbo é da POSIÇÃO ANTERIOR (qtd_antes → qtd_agora), nunca de cotação.
+def test_vendeu_PARTE_o_pct_e_da_posicao_e_nao_do_capital():
+    antes = _cart([
+        {"ticker": "BTC", "nome": "Bitcoin", "classe": "Cripto", "qtd": 0.02, "precoMedio": 50000},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9000.0, "precoMedio": 1},
+    ])
+    depois = _cart([
+        {"ticker": "BTC", "nome": "Bitcoin", "classe": "Cripto", "qtd": 0.019, "precoMedio": 50000},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9050.0, "precoMedio": 1},
+    ])
+    txt = A.formata_carteira(A.mudancas(antes, depois), depois, antes)
+    assert "🔴⬇ VENDEU 5% do BTC · 0,02 → 0,019 · agora 9,5% da carteira" in txt
+    assert "CASH" not in txt          # o caixa não vira uma linha de "comprou/vendeu"
+
+
+def test_comprou_MAIS_o_pct_e_da_posicao_com_sinal_de_mais():
+    antes = _cart([
+        {"ticker": "BTC", "nome": "Bitcoin", "classe": "Cripto", "qtd": 0.02, "precoMedio": 50000},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9000.0, "precoMedio": 1},
+    ])
+    depois = _cart([
+        {"ticker": "BTC", "nome": "Bitcoin", "classe": "Cripto", "qtd": 0.0236, "precoMedio": 50000},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 8820.0, "precoMedio": 1},
+    ])
+    txt = A.formata_carteira(A.mudancas(antes, depois), depois, antes)
+    # a linha passa de 60 chars e quebra (DA-033) — desfaz só pra comparar o texto
+    txt_plano = txt.replace("\n   ", " ")
+    assert "🟢⬆ COMPROU MAIS BTC (+18%) · 0,02 → 0,0236 · agora 11,8% da carteira" in txt_plano
+
+
+def test_posicao_NOVA_mostra_quantidade_e_peso_sem_percentual_no_verbo():
+    antes = _cart([{"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 10000.0, "precoMedio": 1}])
+    depois = _cart([
+        {"ticker": "ASTS", "nome": "AST SpaceMobile", "classe": "Acao", "qtd": 10.0, "precoMedio": 76.0},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9240.0, "precoMedio": 1},
+    ])
+    txt = A.formata_carteira(A.mudancas(antes, depois), depois, antes)
+    assert "🟢⬆ COMPROU ASTS (posição nova) · 10 ações · 7,6% da carteira" in txt
+
+
+def test_zerou_mostra_qtd_ate_ZERO_e_o_caixa_antes_e_depois_no_lugar_do_peso():
+    antes = _cart([
+        {"ticker": "IREN", "nome": "IREN", "classe": "Acao", "qtd": 12.0, "precoMedio": 50.0},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9400.0, "precoMedio": 1},
+    ])
+    depois = _cart([
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 10000.0, "precoMedio": 1},
+    ])
+    txt = A.formata_carteira(A.mudancas(antes, depois), depois, antes)
+    assert "🔴⬇ VENDEU TUDO de IREN · 12 → 0 · caixa 94,0% → 100,0%" in txt
+    assert "da carteira" not in txt.split("VENDEU TUDO de IREN")[1].split("\n")[0]
+
+
+def test_DENTE_o_percentual_do_verbo_vem_da_QUANTIDADE_nao_do_preco():
+    """Mesma queda de 5% na QUANTIDADE — só que o preço médio DOBROU entre as duas
+    leituras. Se o % fosse calculado em cima do VALOR (qtd×preço), isto leria como
+    um aumento de ~90%, não uma venda de 5%. task 20260902-053/054 são explícitas:
+    o gatilho e o texto são de QUANTIDADE, cotação nunca entra na conta."""
+    antes = _cart([
+        {"ticker": "BTC", "nome": "Bitcoin", "classe": "Cripto", "qtd": 0.02, "precoMedio": 50000},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9000.0, "precoMedio": 1},
+    ])
+    depois = _cart([
+        {"ticker": "BTC", "nome": "Bitcoin", "classe": "Cripto", "qtd": 0.019, "precoMedio": 100000},
+        {"ticker": "CASH", "nome": "Caixa", "classe": "Caixa", "qtd": 9000.0, "precoMedio": 1},
+    ])
+    txt = A.formata_carteira(A.mudancas(antes, depois), depois, antes)
+    assert "VENDEU 5% do BTC" in txt
 
 
 # ── (B) sinais ────────────────────────────────────────────────────────────────

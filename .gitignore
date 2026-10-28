@@ -224,3 +224,9 @@ reports/
 .gstack/
 .adas/snapshots/
 .adas/da.lock
+
+# repo PÚBLICO: carteira real do dono e estudos sobre ela ficam locais (varredura 27/10)
+run_portfolio.py
+ESTUDO-EARNINGS-CATALISADOR.md
+PIPELINE_QA_SPEC.md
+*.bak-*

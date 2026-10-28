@@ -154,15 +154,17 @@ def _caixa(payload: dict[str, Any] | None) -> tuple[float, float, float | None]:
     return caixa, total, (caixa / total if total else None)
 
 
-_BARRA_BLOCOS = 5
+def _pct_pos(delta_ratio: float) -> str:
+    """% INTEIRO da posição ANTERIOR que a mudança representa — "5%", não "5,0% do
+    capital". É a língua que o Samyr fala ("vendeu 5% do BTC", task 20260902-054),
+    calculado de qtd_antes → qtd_agora, nunca de variação de preço."""
+    return f"{round(abs(delta_ratio) * 100)}%"
 
 
-def _barra(valor: float, maximo: float, blocos: int = _BARRA_BLOCOS) -> str:
-    """Barra de magnitude relativa ao MAIOR movimento do lote — o tamanho salta aos
-    olhos sem precisar ler o número (DA-034)."""
-    cheios = round(blocos * abs(valor) / maximo) if maximo > 0 else 0
-    cheios = max(0, min(blocos, cheios))
-    return "█" * cheios + "░" * (blocos - cheios)
+def _unidade(classe: str | None, ticker: str) -> str:
+    """O substantivo pra contar uma posição NOVA: "147,4 AÇÕES" faz sentido, "147,4
+    BTC" não — cripto se conta pelo próprio ticker ("0,0084 BTC")."""
+    return "ações" if str(classe or "").strip().lower() == "acao" else ticker
 
 
 def _quebra(texto: str, prefixo: str = "  ↳ ", largura: int = 60) -> list[str]:
@@ -179,16 +181,63 @@ def _quebra(texto: str, prefixo: str = "  ↳ ", largura: int = 60) -> list[str]
     return out
 
 
-_VERBO = {"entrou": "ENTROU", "saiu": "SAIU", "aumentou": "AUMENTOU", "reduziu": "REDUZIU"}
+def _quebra_livre(texto: str, continuacao: str = "   ", largura: int = 60) -> list[str]:
+    """Quebra a linha PRINCIPAL (emoji + verbo + corpo) quando passa de
+    ``largura`` — mesmo dente do ``_quebra``, mas sem rótulo "↳": a primeira
+    linha JÁ é o conteúdo, só a continuação ganha recuo."""
+    linhas = textwrap.wrap(texto, width=largura, subsequent_indent=continuacao,
+                           break_long_words=False, break_on_hyphens=False)
+    return linhas or [texto]
+
+
 _EMOJI_MUDANCA = {"entrou": "🟢⬆", "aumentou": "🟢⬆", "reduziu": "🔴⬇", "saiu": "🔴⬇"}
+_RESUMO_TIPO = {"entrou": "comprou (posição nova)", "aumentou": "comprou mais",
+               "reduziu": "vendeu parte", "saiu": "vendeu tudo"}
+
+
+def _verbo_e_corpo(m: dict[str, Any], caixa_antes: float | None,
+                   caixa_depois: float | None) -> tuple[str, str]:
+    """O verbo (CAIXA ALTA, com o % da POSIÇÃO anterior embutido quando faz
+    sentido) e o corpo da linha — task 20260902-054: "comprou mais BTC", "vendeu 5%
+    de BTC", não "% do capital". É a língua de quem opera, não de planilha."""
+    ticker, tipo = m["ticker"], m["tipo"]
+    qa, qb = m["qtd_antes"], m["qtd_agora"]
+    if tipo == "entrou":
+        verbo = f"COMPROU {ticker} (posição nova)"
+        corpo = f"{_qtd(qb)} {_unidade(m.get('classe'), ticker)} · {_pct(m['peso_agora'])} da carteira"
+    elif tipo == "aumentou":
+        pct = _pct_pos((qb - qa) / qa) if qa else "—"
+        verbo = f"COMPROU MAIS {ticker} (+{pct})"
+        corpo = f"{_qtd(qa)} → {_qtd(qb)} · agora {_pct(m['peso_agora'])} da carteira"
+    elif tipo == "reduziu":
+        pct = _pct_pos((qa - qb) / qa) if qa else "—"
+        verbo = f"VENDEU {pct} do {ticker}"
+        corpo = f"{_qtd(qa)} → {_qtd(qb)} · agora {_pct(m['peso_agora'])} da carteira"
+    else:  # saiu — não há "peso agora" (a posição some); o que sobra é ONDE o
+           # dinheiro foi parar, e é isso que o caixa antes→depois responde.
+        verbo = f"VENDEU TUDO de {ticker}"
+        corpo = f"{_qtd(qa)} → 0"
+        if caixa_antes is not None and caixa_depois is not None:
+            corpo += f" · caixa {_pct(caixa_antes)} → {_pct(caixa_depois)}"
+    return verbo, corpo
 
 
 def formata_carteira(mudou: list[dict[str, Any]], atual: dict[str, Any] | None,
                      anterior: dict[str, Any] | None = None) -> str:
     """A mensagem de DM, no formato lúdico que o Samyr aprovou (DA-034): emoji como
-    MARCADOR DE DADO — não decoração — (🟢⬆ ganhou exposição, 🔴⬇ perdeu), barra de
-    magnitude proporcional ao maior movimento do lote, ZERO markdown (Telegram
-    mostra asterisco cru), respiro entre blocos e fecho com a AÇÃO em linha própria.
+    MARCADOR DE DADO — não decoração — (🟢⬆ ganhou exposição, 🔴⬇ perdeu), ZERO
+    markdown (Telegram mostra asterisco cru), respiro entre blocos e fecho com a
+    AÇÃO em linha própria. Cada linha fala a língua de quem opera (task
+    20260902-054): "comprou mais X (+18%)", "vendeu 5% do Y" — o % é da POSIÇÃO
+    anterior (qtd_antes → qtd_agora), nunca de variação de preço.
+
+    O CAIXA nunca aparece como "comprou/vendeu caixa" — não é posição, é o
+    residual de toda operação. Some da lista de linhas e some, e o antes→depois
+    dele só aparece colado na linha do ativo que o moveu, quando esse ativo foi
+    zerado (é ali que "peso agora" deixa de fazer sentido e o caixa responde
+    "pra onde foi o dinheiro"). Se só o caixa mudou (sem nenhum ativo junto — ex.:
+    aporte/saque avulso), cai no fallback de tratá-lo como qualquer outro ticker,
+    pra não perder a informação.
 
     ``anterior`` é opcional só por compatibilidade — sem ele o caixa mostra o valor
     de agora sem o "antes → depois" (task 20260902-053 pediu esse contraste, mas
@@ -216,15 +265,12 @@ def formata_carteira(mudou: list[dict[str, Any]], atual: dict[str, Any] | None,
         linhas.append(f"  ↳ publicado por ele em {atualizado}")
     linhas.append("")
 
-    maior_pct = max(m["pct_capital"] for m in mudou) or 1.0
-    for m in mudou:
+    reais = [m for m in mudou if str(m.get("classe") or "").strip().lower() != "caixa"]
+    itens = reais or mudou  # só o caixa mudou (aporte/saque) — não perde a linha
+    for m in itens:
         emoji = _EMOJI_MUDANCA.get(m["tipo"], "⚪")
-        cab = (f"{emoji} {m['ticker']} {_VERBO.get(m['tipo'], m['tipo'])} "
-               f"· {_pct(m['pct_capital'])} do capital {_barra(m['pct_capital'], maior_pct)}")
-        if m["tipo"] != "saiu":
-            cab += f" · peso {_pct(m['peso_agora'])}"
-        linhas.append(cab)
-        linhas.extend(_quebra(f"qtd {_qtd(m['qtd_antes'])} → {_qtd(m['qtd_agora'])}"))
+        verbo, corpo = _verbo_e_corpo(m, caixa_pct_antes, caixa_pct)
+        linhas.extend(_quebra_livre(f"{emoji} {verbo} · {corpo}"))
         if m.get("nome"):
             linhas.extend(_quebra(m["nome"]))
         r = _racional(atual, m["ticker"])
@@ -232,10 +278,12 @@ def formata_carteira(mudou: list[dict[str, Any]], atual: dict[str, Any] | None,
             linhas.extend(_quebra(r[:400]))
     linhas.append("")
 
-    maior = max(mudou, key=lambda m: m["pct_capital"])
+    # o "olhar primeiro" só pode apontar pra algo que TEM linha própria acima — o
+    # CAIXA sozinho não é uma (ele não compra/vende), então a escolha vem do MESMO
+    # conjunto `itens`, não do `mudou` bruto.
+    maior = max(itens, key=lambda m: m["pct_capital"])
     linhas.append(f"👉 Olhar primeiro: {maior['ticker']} "
-                  f"({_VERBO.get(maior['tipo'], maior['tipo']).lower()}, "
-                  f"{_pct(maior['pct_capital'])} do capital)")
+                  f"({_RESUMO_TIPO.get(maior['tipo'], maior['tipo'])})")
     return "\n".join(linhas).strip()
 
 

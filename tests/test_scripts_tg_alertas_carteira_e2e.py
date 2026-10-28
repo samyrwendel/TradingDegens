@@ -77,9 +77,9 @@ def test_a_mudanca_sintetica_gera_UM_alerta_na_DM_com_todos_os_campos(tg, monkey
     chat, texto = enviados[0]
     assert chat == "30289486"
     assert "*" not in texto                                   # DA-034: zero markdown
-    assert "ASTS" in texto and "AUMENTOU" in texto              # o ativo e a ação
+    assert "COMPROU MAIS ASTS" in texto                         # o ativo e a ação
     assert "147" in texto and "200" in texto                    # qtd antes → depois
-    assert "% do capital" in texto                              # % do capital
+    assert "da carteira" in texto                               # peso na carteira
     assert "caixa" in texto.lower() and "→" in texto            # caixa antes → depois
     assert "pivô de alta" in texto                              # racional dele (feed ASTS)
     for linha in texto.split("\n"):
